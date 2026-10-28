@@ -1,0 +1,966 @@
+/* ─────────────────────────────────────────────────────────────
+ * Signed-out public pages (sign-in, registration, activation, forgot / reset password, invitation acceptance, no team access)
+ *
+ * Spec: Claude Design "Public Pages Spec"; implementation notes in the "公开页面" (public pages) section of docs/design/组件统一-技术设计.md.
+ * Imported by components/public-shell.tsx; usable from both the public layout and the authenticated layout (post-invitation profile page).
+ *
+ * - Public pages use the released appearance directly; they do not load the styles/ui-refresh*.css interface styles.
+ * - All colors come from tokens (the team brand injected by the gateway at first paint, or the product default), never literal values;
+ *   the only exception is the four colors of the Feishu logo (a third-party mark).
+ * - Everything is solid; no translucent materials.
+ * ───────────────────────────────────────────────────────────── */
+
+/* The global body is overflow: hidden (the app shell scrolls itself); public pages scroll the whole page so fields can scroll into view when the soft keyboard opens. */
+body:has(.pub-page) {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+.pub-page {
+  /* Controls use the system font (as in the app), not the team font setting */
+  --pub-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+  --pub-r1: 6px;
+  --pub-r2: 8px;
+  --pub-r3: 10px;
+  --pub-r4: 14px;
+  --pub-control-h: 32px;
+  --pub-control-fs: 0.8125rem;
+  --pub-button-fs: 0.8125rem;
+  --pub-eye: 28px;
+  --pub-lang-h: 28px;
+  --pub-menu-row: 32px;
+  /* Link and ghost-button text: accent mixed toward the text color so small text reaches 4.5:1 (same method as --c-accent-text in the UI refresh) */
+  --pub-accent-text: color-mix(in srgb, var(--c-accent) 65%, var(--c-ink));
+
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: max(24px, 12vh) 16px 24px;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: var(--pub-font);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+:root[data-theme-radius="sharp"] .pub-page {
+  --pub-r1: 4px;
+  --pub-r2: 6px;
+  --pub-r3: 8px;
+  --pub-r4: 10px;
+}
+:root[data-theme-radius="soft"] .pub-page {
+  --pub-r1: 8px;
+  --pub-r2: 10px;
+  --pub-r3: 14px;
+  --pub-r4: 20px;
+}
+/* Touch: 44px controls and 16px input text (keeps iOS from zooming on focus) */
+@media (pointer: coarse) {
+  .pub-page {
+    --pub-control-h: 44px;
+    --pub-control-fs: max(1rem, 16px);
+    --pub-button-fs: 0.9375rem;
+    --pub-eye: 40px;
+    --pub-lang-h: 44px;
+    --pub-menu-row: 44px;
+  }
+}
+
+.pub-column {
+  width: 100%;
+  max-width: 400px;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.pub-column--wide {
+  max-width: 440px;
+}
+
+/* ── Brand row: logo + application name, shown once ─────────────────────── */
+.pub-brand {
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--c-ink);
+}
+.pub-brand__logo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+.pub-brand__logo img {
+  display: block;
+  max-height: 32px;
+  max-width: 160px;
+}
+.pub-brand__logo .brand-graphic__dark {
+  display: none;
+}
+:root[data-theme="dark"] .pub-brand__logo .brand-graphic__light {
+  display: none;
+}
+:root[data-theme="dark"] .pub-brand__logo .brand-graphic__dark {
+  display: block;
+}
+.pub-brand__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Card: solid card on desktop, directly on the background on phones ─────────────────── */
+.pub-card {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+  padding: 28px 28px 24px;
+  border-radius: var(--pub-r4);
+  background: var(--c-surface);
+  box-shadow:
+    0 0 0 0.5px var(--c-separator),
+    0 1px 2px color-mix(in srgb, var(--c-ink) 4%, transparent);
+}
+@media (max-width: 639px) {
+  .pub-page {
+    padding-top: 24px;
+  }
+  .pub-card {
+    padding: 4px 0 0;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+.pub-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.pub-title:focus {
+  outline: none;
+}
+.pub-title:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 4px;
+  border-radius: var(--pub-r1);
+}
+.pub-lead {
+  margin: -8px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  text-align: center;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.pub-inviter {
+  margin: -8px 0 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.pub-note {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
+}
+.pub-card-foot {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  text-align: center;
+}
+.pub-page-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* ── Result card: 44px icon circle + title + one sentence + one primary button ─────── */
+.pub-status-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border-radius: 50%;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+.pub-status-icon--success {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+}
+.pub-status-icon--warning {
+  background: var(--c-warn-soft);
+  color: var(--c-warn);
+}
+.pub-status-icon--danger {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+.pub-result-head {
+  display: grid;
+  gap: 16px;
+}
+.pub-actions {
+  display: grid;
+  gap: 8px;
+}
+.pub-delayed {
+  animation: pub-appear 1ms linear 300ms both;
+}
+@keyframes pub-appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
+/* ── Invitation: one-line steps + grouped list ──────────────────────────────── */
+.pub-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.pub-steps__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c-fill-3);
+}
+.pub-steps__dot--done {
+  background: var(--c-ink-3);
+}
+.pub-steps__dot--current {
+  background: var(--c-accent);
+}
+.pub-steps__text {
+  margin-left: 2px;
+}
+.pub-steps__text b {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+.pub-summary {
+  margin: 0;
+  display: grid;
+  padding: 2px 14px;
+  border-radius: var(--pub-r3);
+  background: var(--c-surface-2);
+}
+.pub-summary > div {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(72px, 32%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  font-size: 0.8125rem;
+}
+.pub-summary > div + div {
+  box-shadow: inset 0 1px 0 var(--c-separator);
+}
+.pub-summary dt {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.pub-summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pub-summary dd small {
+  display: block;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.pub-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: grid;
+  gap: 4px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* ── Fields ───────────────────────────────────────────────────── */
+.pub-form {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.pub-fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.pub-field {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 5px;
+  align-items: baseline;
+}
+.pub-field > * {
+  grid-column: 1 / -1;
+}
+.pub-field > .pub-field__label {
+  grid-column: 1;
+  grid-row: 1;
+}
+/* "Forgot password?" / "Optional": after the input in the DOM (so after it in Tab order), visually moved to the right of the label row */
+.pub-field > .pub-field__aside {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+.pub-field__label {
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.pub-field__aside {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.pub-help {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.pub-field-error {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--c-err);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.pub-field-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+.pub-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--pub-control-h);
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--pub-r2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 0.5px var(--c-control-line),
+    0 0.5px 1px color-mix(in srgb, var(--c-ink) 5%, transparent);
+  color: var(--c-ink);
+  font-family: var(--pub-font);
+  font-size: var(--pub-control-fs);
+  line-height: 1.3;
+  outline: none;
+  /* Leave room for the primary button below the field when the soft keyboard is open */
+  scroll-margin: 24px 0 96px;
+}
+/* A 0.5px inset stroke may vanish on 1x screens: use a 1px line for legibility */
+@media (max-resolution: 1dppx) {
+  .pub-input {
+    box-shadow:
+      inset 0 0 0 1px var(--c-control-line),
+      0 0.5px 1px color-mix(in srgb, var(--c-ink) 5%, transparent);
+  }
+}
+.pub-input::placeholder {
+  color: var(--c-ink-4);
+  opacity: 1;
+}
+.pub-input:focus {
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+.pub-input[aria-invalid="true"] {
+  box-shadow:
+    inset 0 0 0 1px var(--c-err),
+    0 0 0 3px var(--c-err-soft);
+}
+.pub-input:read-only {
+  background: var(--c-fill-1);
+  box-shadow: none;
+  color: var(--c-ink-2);
+}
+textarea.pub-input {
+  height: auto;
+  min-height: 96px;
+  padding: 7px 10px;
+  font-family: var(--font-v2-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+@media (pointer: coarse) {
+  .pub-input {
+    padding-left: 12px;
+    border-radius: var(--pub-r3);
+  }
+  textarea.pub-input {
+    font-size: max(1rem, 16px);
+  }
+}
+.pub-input-wrap {
+  position: relative;
+  min-width: 0;
+}
+.pub-input-wrap .pub-input {
+  padding-right: calc(var(--pub-eye) + 8px);
+}
+.pub-input-wrap__icon {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--c-ink-3);
+  pointer-events: none;
+}
+.pub-eye {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: var(--pub-eye);
+  height: var(--pub-eye);
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pub-r2);
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+}
+.pub-eye:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+.pub-eye:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+.pub-rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.pub-rules li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pub-rules__mark {
+  width: 12px;
+  height: 12px;
+  display: inline-grid;
+  place-items: center;
+}
+.pub-rules__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--c-ink-4);
+}
+.pub-rules li[data-met="true"] {
+  color: var(--c-pos);
+}
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.pub-button {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--pub-control-h);
+  margin: 0;
+  padding: 4px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--pub-r2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--pub-font);
+  font-size: var(--pub-button-fs);
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 100ms linear,
+    box-shadow 100ms linear;
+}
+.pub-button:hover {
+  background: var(--c-fill-3);
+}
+.pub-button:active {
+  background: var(--c-fill-3);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--c-ink) 14%, transparent);
+}
+.pub-button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+.pub-button--primary {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+.pub-button--primary:hover {
+  background: var(--c-accent-hover);
+}
+.pub-button--primary:active {
+  background: var(--c-accent-press);
+  box-shadow: none;
+}
+.pub-button--ghost {
+  background: transparent;
+  color: var(--pub-accent-text);
+}
+.pub-button--ghost:hover {
+  background: var(--c-fill-1);
+}
+.pub-button--ghost:active {
+  background: var(--c-fill-2);
+  box-shadow: none;
+}
+.pub-button:disabled,
+.pub-button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+.pub-button:disabled:hover,
+.pub-button[aria-disabled="true"]:hover {
+  background: var(--c-fill-2);
+}
+.pub-button--primary:disabled:hover,
+.pub-button--primary[aria-disabled="true"]:hover {
+  background: var(--c-accent);
+}
+.pub-button--ghost:disabled:hover {
+  background: transparent;
+}
+/* Submitting: inline spinner, "...ing" label, same width, not clickable, but not faded */
+.pub-button[aria-busy="true"],
+.pub-button[aria-busy="true"]:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+.pub-button[aria-busy="true"]:hover {
+  background: var(--c-fill-2);
+}
+.pub-button--primary[aria-busy="true"]:hover {
+  background: var(--c-accent);
+}
+@media (pointer: coarse) {
+  .pub-button {
+    border-radius: var(--pub-r3);
+  }
+}
+.pub-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: pub-spin 0.8s linear infinite;
+}
+.pub-spinner--lg {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+@keyframes pub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Reduced motion: the spinner becomes a static dot */
+@media (prefers-reduced-motion: reduce) {
+  .pub-spinner {
+    width: 6px;
+    height: 6px;
+    border: 0;
+    background: currentColor;
+    animation: none;
+  }
+}
+:root[data-theme-motion="reduced"] .pub-spinner {
+  width: 6px;
+  height: 6px;
+  border: 0;
+  background: currentColor;
+  animation: none;
+}
+
+/* SSO: secondary buttons + provider icon; Feishu keeps its own four-color logo */
+.pub-sso-mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5px;
+  padding: 1.5px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 0.5px var(--c-control-line);
+}
+.pub-sso-mark > span {
+  display: block;
+  border-radius: 1.5px;
+}
+.pub-sso-mark > span:nth-child(1) {
+  background: #3370ff;
+}
+.pub-sso-mark > span:nth-child(2) {
+  background: #00d6b9;
+}
+.pub-sso-mark > span:nth-child(3) {
+  background: #34c724;
+}
+.pub-sso-mark > span:nth-child(4) {
+  background: #ff4050;
+}
+.pub-sso {
+  display: grid;
+  gap: 8px;
+}
+.pub-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.pub-divider::before,
+.pub-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--c-separator);
+}
+
+/* ── Links ───────────────────────────────────────────────────── */
+.pub-link,
+.pub-link-button {
+  color: var(--pub-accent-text);
+  font-size: inherit;
+  text-decoration: none;
+  border-radius: 3px;
+}
+.pub-link-button {
+  appearance: none;
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.pub-link:hover,
+.pub-link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.pub-link:focus-visible,
+.pub-link-button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Banners are role="status"/"alert": the global narrow-screen rule `[role="status"] button` adds height and padding to buttons; reset them to text links here */
+.pub-page .pub-link-button {
+  min-height: 0;
+  padding: 0;
+}
+.pub-link-button:disabled {
+  color: var(--c-ink-3);
+  cursor: default;
+}
+.pub-field__aside .pub-link {
+  font-size: 0.75rem;
+}
+
+/* ── Form-level banner: icon + text, no color bar ─────────────────────── */
+.pub-banner {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--pub-r3);
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.pub-banner:focus {
+  outline: none;
+}
+.pub-banner:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+.pub-banner__icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--c-err);
+}
+.pub-banner__body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.pub-banner__title {
+  font-weight: 600;
+}
+.pub-banner__body .pub-link,
+.pub-banner__body .pub-link-button {
+  font-size: 0.78125rem;
+  justify-self: start;
+}
+.pub-banner--info {
+  background: var(--c-fill-1);
+}
+.pub-banner--info .pub-banner__icon {
+  color: var(--c-ink-2);
+}
+.pub-banner--warning {
+  background: var(--c-warn-soft);
+}
+.pub-banner--warning .pub-banner__icon {
+  color: var(--c-warn);
+}
+.pub-banner--success {
+  background: var(--c-pos-soft);
+}
+.pub-banner--success .pub-banner__icon {
+  color: var(--c-pos);
+}
+/* Technical details when diagnostics are on (collapsed) */
+.pub-diagnostics {
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+}
+.pub-diagnostics summary {
+  width: fit-content;
+  color: var(--pub-accent-text);
+  cursor: pointer;
+}
+.pub-diagnostics dl {
+  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 8px;
+}
+.pub-diagnostics dt {
+  color: var(--c-ink-3);
+}
+.pub-diagnostics dd {
+  margin: 0;
+  min-width: 0;
+}
+.pub-diagnostics code {
+  font-family: var(--font-v2-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Language button and menu (selection menu: leading check, full-row accent keyboard highlight) ─ */
+.pub-lang {
+  appearance: none;
+  min-height: var(--pub-lang-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--pub-r2);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-family: var(--pub-font);
+  font-size: 0.78125rem;
+  cursor: pointer;
+}
+.pub-lang:hover,
+.pub-lang[aria-expanded="true"] {
+  background: var(--c-fill-1);
+}
+.pub-lang:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* The menu lives in a portal under body, outside .pub-page: size tokens carry fallbacks */
+.pub-menu {
+  box-sizing: border-box;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--c-surface);
+  box-shadow:
+    0 0 0 0.5px var(--c-separator),
+    0 10px 30px -8px color-mix(in srgb, var(--c-ink) 28%, transparent);
+  color: var(--c-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 0.8125rem;
+  outline: none;
+}
+.pub-menu-item {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 10px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .pub-menu-item {
+    min-height: 44px;
+  }
+}
+.pub-menu-item:hover,
+.pub-menu-item:focus {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  outline: none;
+}
+.pub-menu-item__check {
+  width: 16px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+
+.pub-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Multi-select options (usage goals on the post-invitation profile page): real toggle buttons, pressed state uses a light accent fill ── */
+.pub-choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 8px;
+}
+.pub-choices > legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+.pub-choices__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pub-choice {
+  appearance: none;
+  min-height: var(--pub-control-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: var(--pub-r2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--pub-font);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.pub-choice:hover {
+  background: var(--c-fill-3);
+}
+.pub-choice[aria-pressed="true"] {
+  background: var(--c-accent-soft);
+  color: var(--pub-accent-text);
+  font-weight: 600;
+}
+.pub-choice:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}

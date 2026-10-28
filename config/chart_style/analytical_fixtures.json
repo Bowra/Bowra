@@ -1,0 +1,3676 @@
+{
+  "scenario_rows": {
+    "section": {
+      "id": "sec_analytical_scenario",
+      "kind": "chart",
+      "rev": 1,
+      "order_index": 0,
+      "spec": {
+        "kind": "table",
+        "title": "Scenario ranges and prepared outcomes",
+        "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+        "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "rows": [
+          {
+            "city": "City 01",
+            "tier": "Tier 1",
+            "low": -40,
+            "high": -24,
+            "baseline": -32,
+            "current": -20,
+            "official": -14,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 02",
+            "tier": "Tier 1",
+            "low": -41,
+            "high": -25,
+            "baseline": -33,
+            "current": -21,
+            "official": -15,
+            "price": 34950,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 03",
+            "tier": "Tier 1",
+            "low": -42,
+            "high": null,
+            "baseline": -34,
+            "current": -22,
+            "official": -16,
+            "price": 34100,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 04",
+            "tier": "Tier 1",
+            "low": -43,
+            "high": -27,
+            "baseline": -35,
+            "current": null,
+            "official": -17,
+            "price": 33250,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 05",
+            "tier": "Tier 2",
+            "low": -44,
+            "high": -28,
+            "baseline": -36,
+            "current": -24,
+            "official": -18,
+            "price": 32400,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 06",
+            "tier": "Tier 2",
+            "low": -45,
+            "high": -29,
+            "baseline": -37,
+            "current": -25,
+            "official": -19,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 07",
+            "tier": "Tier 2",
+            "low": -46,
+            "high": -46,
+            "baseline": -38,
+            "current": -26,
+            "official": -20,
+            "price": 30700,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 08",
+            "tier": "Tier 2",
+            "low": -47,
+            "high": -31,
+            "baseline": -39,
+            "current": -27,
+            "official": -21,
+            "price": 29850,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 09",
+            "tier": "Tier 2",
+            "low": -48,
+            "high": -32,
+            "baseline": -40,
+            "current": -28,
+            "official": -22,
+            "price": 29000,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 10",
+            "tier": "Tier 2",
+            "low": -49,
+            "high": -33,
+            "baseline": -41,
+            "current": -29,
+            "official": -23,
+            "price": 28150,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 11",
+            "tier": "Tier 2",
+            "low": -50,
+            "high": -34,
+            "baseline": -42,
+            "current": -30,
+            "official": -24,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 12",
+            "tier": "Tier 2",
+            "low": -51,
+            "high": -35,
+            "baseline": -43,
+            "current": -31,
+            "official": -25,
+            "price": 26450,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 13",
+            "tier": "Tier 2",
+            "low": -52,
+            "high": -36,
+            "baseline": -44,
+            "current": -32,
+            "official": -26,
+            "price": 25600,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 14",
+            "tier": "Tier 2",
+            "low": -53,
+            "high": -37,
+            "baseline": -45,
+            "current": -33,
+            "official": -27,
+            "price": 24750,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 15",
+            "tier": "Tier 2",
+            "low": -54,
+            "high": -38,
+            "baseline": -46,
+            "current": -34,
+            "official": -28,
+            "price": 23900,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 16",
+            "tier": "Tier 2",
+            "low": -55,
+            "high": -39,
+            "baseline": -47,
+            "current": -35,
+            "official": -29,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 17",
+            "tier": "Tier 2",
+            "low": -56,
+            "high": -40,
+            "baseline": -48,
+            "current": -36,
+            "official": -30,
+            "price": 22200,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 18",
+            "tier": "Tier 2",
+            "low": -57,
+            "high": -41,
+            "baseline": -49,
+            "current": -37,
+            "official": -31,
+            "price": 21350,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 19",
+            "tier": "Tier 2",
+            "low": -58,
+            "high": -42,
+            "baseline": -50,
+            "current": -38,
+            "official": -32,
+            "price": 20500,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 20",
+            "tier": "Tier 3",
+            "low": -59,
+            "high": -43,
+            "baseline": -51,
+            "current": -39,
+            "official": -33,
+            "price": 19650,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 21",
+            "tier": "Tier 3",
+            "low": -60,
+            "high": -44,
+            "baseline": -52,
+            "current": -40,
+            "official": -34,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 22",
+            "tier": "Tier 3",
+            "low": -61,
+            "high": -45,
+            "baseline": -53,
+            "current": -41,
+            "official": -35,
+            "price": 17950,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 23",
+            "tier": "Tier 3",
+            "low": -62,
+            "high": -46,
+            "baseline": -54,
+            "current": -42,
+            "official": -36,
+            "price": 17100,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 24",
+            "tier": "Tier 3",
+            "low": -63,
+            "high": -47,
+            "baseline": -55,
+            "current": -43,
+            "official": -37,
+            "price": 16250,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 25",
+            "tier": "Tier 3",
+            "low": -64,
+            "high": -48,
+            "baseline": -56,
+            "current": -44,
+            "official": -38,
+            "price": 15400,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 26",
+            "tier": "Tier 3",
+            "low": -65,
+            "high": -49,
+            "baseline": -57,
+            "current": -45,
+            "official": -39,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 27",
+            "tier": "Tier 3",
+            "low": -66,
+            "high": -50,
+            "baseline": -58,
+            "current": -46,
+            "official": -40,
+            "price": 13700,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 28",
+            "tier": "Tier 3",
+            "low": -67,
+            "high": -51,
+            "baseline": -59,
+            "current": -47,
+            "official": -41,
+            "price": 12850,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 29",
+            "tier": "Tier 3",
+            "low": -68,
+            "high": -52,
+            "baseline": -60,
+            "current": -48,
+            "official": -42,
+            "price": 12000,
+            "period": "2029Q4",
+            "origin": "reported"
+          }
+        ],
+        "row_count": 29,
+        "columns": [
+          {
+            "key": "city",
+            "header": "City",
+            "type": "categorical"
+          },
+          {
+            "key": "tier",
+            "header": "Tier",
+            "type": "categorical"
+          },
+          {
+            "key": "low",
+            "header": "Low",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "high",
+            "header": "High",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "baseline",
+            "header": "Baseline",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "current",
+            "header": "Current",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "official",
+            "header": "Official",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "price",
+            "header": "Price",
+            "type": "numeric",
+            "unit": "CNY"
+          },
+          {
+            "key": "period",
+            "header": "Period",
+            "type": "categorical"
+          },
+          {
+            "key": "origin",
+            "header": "Origin",
+            "type": "categorical"
+          }
+        ],
+        "views": [
+          {
+            "id": "comparison",
+            "kind": "chart",
+            "spec": {
+              "kind": "table",
+              "title": "Scenario ranges and prepared outcomes",
+              "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+              "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rows": [
+                {
+                  "city": "City 01",
+                  "tier": "Tier 1",
+                  "low": -40,
+                  "high": -24,
+                  "baseline": -32,
+                  "current": -20,
+                  "official": -14,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 02",
+                  "tier": "Tier 1",
+                  "low": -41,
+                  "high": -25,
+                  "baseline": -33,
+                  "current": -21,
+                  "official": -15,
+                  "price": 34950,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 03",
+                  "tier": "Tier 1",
+                  "low": -42,
+                  "high": null,
+                  "baseline": -34,
+                  "current": -22,
+                  "official": -16,
+                  "price": 34100,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 04",
+                  "tier": "Tier 1",
+                  "low": -43,
+                  "high": -27,
+                  "baseline": -35,
+                  "current": null,
+                  "official": -17,
+                  "price": 33250,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 05",
+                  "tier": "Tier 2",
+                  "low": -44,
+                  "high": -28,
+                  "baseline": -36,
+                  "current": -24,
+                  "official": -18,
+                  "price": 32400,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 06",
+                  "tier": "Tier 2",
+                  "low": -45,
+                  "high": -29,
+                  "baseline": -37,
+                  "current": -25,
+                  "official": -19,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 07",
+                  "tier": "Tier 2",
+                  "low": -46,
+                  "high": -46,
+                  "baseline": -38,
+                  "current": -26,
+                  "official": -20,
+                  "price": 30700,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 08",
+                  "tier": "Tier 2",
+                  "low": -47,
+                  "high": -31,
+                  "baseline": -39,
+                  "current": -27,
+                  "official": -21,
+                  "price": 29850,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 09",
+                  "tier": "Tier 2",
+                  "low": -48,
+                  "high": -32,
+                  "baseline": -40,
+                  "current": -28,
+                  "official": -22,
+                  "price": 29000,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 10",
+                  "tier": "Tier 2",
+                  "low": -49,
+                  "high": -33,
+                  "baseline": -41,
+                  "current": -29,
+                  "official": -23,
+                  "price": 28150,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 11",
+                  "tier": "Tier 2",
+                  "low": -50,
+                  "high": -34,
+                  "baseline": -42,
+                  "current": -30,
+                  "official": -24,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 12",
+                  "tier": "Tier 2",
+                  "low": -51,
+                  "high": -35,
+                  "baseline": -43,
+                  "current": -31,
+                  "official": -25,
+                  "price": 26450,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 13",
+                  "tier": "Tier 2",
+                  "low": -52,
+                  "high": -36,
+                  "baseline": -44,
+                  "current": -32,
+                  "official": -26,
+                  "price": 25600,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 14",
+                  "tier": "Tier 2",
+                  "low": -53,
+                  "high": -37,
+                  "baseline": -45,
+                  "current": -33,
+                  "official": -27,
+                  "price": 24750,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 15",
+                  "tier": "Tier 2",
+                  "low": -54,
+                  "high": -38,
+                  "baseline": -46,
+                  "current": -34,
+                  "official": -28,
+                  "price": 23900,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 16",
+                  "tier": "Tier 2",
+                  "low": -55,
+                  "high": -39,
+                  "baseline": -47,
+                  "current": -35,
+                  "official": -29,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 17",
+                  "tier": "Tier 2",
+                  "low": -56,
+                  "high": -40,
+                  "baseline": -48,
+                  "current": -36,
+                  "official": -30,
+                  "price": 22200,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 18",
+                  "tier": "Tier 2",
+                  "low": -57,
+                  "high": -41,
+                  "baseline": -49,
+                  "current": -37,
+                  "official": -31,
+                  "price": 21350,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 19",
+                  "tier": "Tier 2",
+                  "low": -58,
+                  "high": -42,
+                  "baseline": -50,
+                  "current": -38,
+                  "official": -32,
+                  "price": 20500,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 20",
+                  "tier": "Tier 3",
+                  "low": -59,
+                  "high": -43,
+                  "baseline": -51,
+                  "current": -39,
+                  "official": -33,
+                  "price": 19650,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 21",
+                  "tier": "Tier 3",
+                  "low": -60,
+                  "high": -44,
+                  "baseline": -52,
+                  "current": -40,
+                  "official": -34,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 22",
+                  "tier": "Tier 3",
+                  "low": -61,
+                  "high": -45,
+                  "baseline": -53,
+                  "current": -41,
+                  "official": -35,
+                  "price": 17950,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 23",
+                  "tier": "Tier 3",
+                  "low": -62,
+                  "high": -46,
+                  "baseline": -54,
+                  "current": -42,
+                  "official": -36,
+                  "price": 17100,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 24",
+                  "tier": "Tier 3",
+                  "low": -63,
+                  "high": -47,
+                  "baseline": -55,
+                  "current": -43,
+                  "official": -37,
+                  "price": 16250,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 25",
+                  "tier": "Tier 3",
+                  "low": -64,
+                  "high": -48,
+                  "baseline": -56,
+                  "current": -44,
+                  "official": -38,
+                  "price": 15400,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 26",
+                  "tier": "Tier 3",
+                  "low": -65,
+                  "high": -49,
+                  "baseline": -57,
+                  "current": -45,
+                  "official": -39,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 27",
+                  "tier": "Tier 3",
+                  "low": -66,
+                  "high": -50,
+                  "baseline": -58,
+                  "current": -46,
+                  "official": -40,
+                  "price": 13700,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 28",
+                  "tier": "Tier 3",
+                  "low": -67,
+                  "high": -51,
+                  "baseline": -59,
+                  "current": -47,
+                  "official": -41,
+                  "price": 12850,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 29",
+                  "tier": "Tier 3",
+                  "low": -68,
+                  "high": -52,
+                  "baseline": -60,
+                  "current": -48,
+                  "official": -42,
+                  "price": 12000,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                }
+              ],
+              "row_count": 29,
+              "columns": [
+                {
+                  "key": "city",
+                  "header": "City",
+                  "type": "categorical"
+                },
+                {
+                  "key": "tier",
+                  "header": "Tier",
+                  "type": "categorical"
+                },
+                {
+                  "key": "low",
+                  "header": "Low",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "high",
+                  "header": "High",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "baseline",
+                  "header": "Baseline",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "current",
+                  "header": "Current",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "official",
+                  "header": "Official",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "price",
+                  "header": "Price",
+                  "type": "numeric",
+                  "unit": "CNY"
+                },
+                {
+                  "key": "period",
+                  "header": "Period",
+                  "type": "categorical"
+                },
+                {
+                  "key": "origin",
+                  "header": "Origin",
+                  "type": "categorical"
+                }
+              ]
+            }
+          }
+        ],
+        "layout": {
+          "view": "comparison"
+        },
+        "presentation_plan": {
+          "version": 3,
+          "dataset": {
+            "artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "availability": "available"
+          },
+          "evidence_notes": [
+            {
+              "id": "basis",
+              "measure_keys": [
+                "baseline",
+                "current",
+                "high",
+                "low"
+              ],
+              "excerpt": "{\"role\":\"metric_basis\",\"measure_keys\":[\"baseline\",\"current\",\"high\",\"low\"],\"value_kind\":\"rate\",\"adjustment\":\"not_applicable\"}",
+              "verified_content_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "availability": "available",
+              "source_ref": {
+                "id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "source_alias": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "access_state": "linked_accessible",
+                "safe_label": "Synthetic prepared comparison basis",
+                "safe_preview_url": "/api/v1/report-artifacts/note/preview",
+                "safe_url": "/api/v1/report-artifacts/note/download"
+              }
+            }
+          ],
+          "text_dependencies": {
+            "/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            }
+          },
+          "analytical_views": [
+            {
+              "view_id": "comparison",
+              "preset": "interval_rows",
+              "row_keys": [
+                "city"
+              ],
+              "group_key": "tier",
+              "range": {
+                "lower_key": "low",
+                "upper_key": "high",
+                "kind": "scenario",
+                "note_ids": [
+                  "basis"
+                ],
+                "origin_key": "origin"
+              },
+              "points": [
+                {
+                  "key": "baseline",
+                  "role": "primary"
+                },
+                {
+                  "key": "current",
+                  "role": "current"
+                }
+              ],
+              "detail_keys": [
+                "price",
+                "period"
+              ],
+              "binding_id": "analytical_339177e3f054",
+              "binding": {
+                "observation_keys": [
+                  "city"
+                ],
+                "measure_keys": [
+                  "baseline",
+                  "current",
+                  "high",
+                  "low"
+                ],
+                "value_domain": [
+                  -70.4,
+                  -17.6
+                ],
+                "group_values": [
+                  "Tier 1",
+                  "Tier 2",
+                  "Tier 3"
+                ]
+              },
+              "availability": "available"
+            }
+          ]
+        }
+      }
+    },
+    "shape": {
+      "version": "chart-shape/1",
+      "kind": "table",
+      "family": "table",
+      "rowCount": 29,
+      "categoryCount": 29,
+      "seriesCount": 6,
+      "longestLabelGraphemes": 9,
+      "series": [
+        {
+          "key": "bar:0",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:1",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:2",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:3",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:4",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:5",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        }
+      ],
+      "flags": {
+        "stacked": false,
+        "crossesZero": true,
+        "hasMissingValues": true
+      }
+    }
+  },
+  "benchmark_rows": {
+    "section": {
+      "id": "sec_analytical_benchmark",
+      "kind": "chart",
+      "rev": 1,
+      "order_index": 0,
+      "spec": {
+        "kind": "table",
+        "title": "Benchmark estimates and supplied reference points",
+        "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+        "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "rows": [
+          {
+            "city": "City 01",
+            "tier": "Tier 1",
+            "low": -40,
+            "high": -24,
+            "baseline": -32,
+            "current": -20,
+            "official": -14,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 02",
+            "tier": "Tier 1",
+            "low": -41,
+            "high": -25,
+            "baseline": -33,
+            "current": -21,
+            "official": -15,
+            "price": 34950,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 03",
+            "tier": "Tier 1",
+            "low": -42,
+            "high": null,
+            "baseline": -34,
+            "current": -22,
+            "official": -16,
+            "price": 34100,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 04",
+            "tier": "Tier 1",
+            "low": -43,
+            "high": -27,
+            "baseline": -35,
+            "current": null,
+            "official": -17,
+            "price": 33250,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 05",
+            "tier": "Tier 2",
+            "low": -44,
+            "high": -28,
+            "baseline": -36,
+            "current": -24,
+            "official": -18,
+            "price": 32400,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 06",
+            "tier": "Tier 2",
+            "low": -45,
+            "high": -29,
+            "baseline": -37,
+            "current": -25,
+            "official": -19,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 07",
+            "tier": "Tier 2",
+            "low": -46,
+            "high": -46,
+            "baseline": -38,
+            "current": -26,
+            "official": -20,
+            "price": 30700,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 08",
+            "tier": "Tier 2",
+            "low": -47,
+            "high": -31,
+            "baseline": -39,
+            "current": -27,
+            "official": -21,
+            "price": 29850,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 09",
+            "tier": "Tier 2",
+            "low": -48,
+            "high": -32,
+            "baseline": -40,
+            "current": -28,
+            "official": -22,
+            "price": 29000,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 10",
+            "tier": "Tier 2",
+            "low": -49,
+            "high": -33,
+            "baseline": -41,
+            "current": -29,
+            "official": -23,
+            "price": 28150,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 11",
+            "tier": "Tier 2",
+            "low": -50,
+            "high": -34,
+            "baseline": -42,
+            "current": -30,
+            "official": -24,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 12",
+            "tier": "Tier 2",
+            "low": -51,
+            "high": -35,
+            "baseline": -43,
+            "current": -31,
+            "official": -25,
+            "price": 26450,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 13",
+            "tier": "Tier 2",
+            "low": -52,
+            "high": -36,
+            "baseline": -44,
+            "current": -32,
+            "official": -26,
+            "price": 25600,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 14",
+            "tier": "Tier 2",
+            "low": -53,
+            "high": -37,
+            "baseline": -45,
+            "current": -33,
+            "official": -27,
+            "price": 24750,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 15",
+            "tier": "Tier 2",
+            "low": -54,
+            "high": -38,
+            "baseline": -46,
+            "current": -34,
+            "official": -28,
+            "price": 23900,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 16",
+            "tier": "Tier 2",
+            "low": -55,
+            "high": -39,
+            "baseline": -47,
+            "current": -35,
+            "official": -29,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 17",
+            "tier": "Tier 2",
+            "low": -56,
+            "high": -40,
+            "baseline": -48,
+            "current": -36,
+            "official": -30,
+            "price": 22200,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 18",
+            "tier": "Tier 2",
+            "low": -57,
+            "high": -41,
+            "baseline": -49,
+            "current": -37,
+            "official": -31,
+            "price": 21350,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 19",
+            "tier": "Tier 2",
+            "low": -58,
+            "high": -42,
+            "baseline": -50,
+            "current": -38,
+            "official": -32,
+            "price": 20500,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 20",
+            "tier": "Tier 3",
+            "low": -59,
+            "high": -43,
+            "baseline": -51,
+            "current": -39,
+            "official": -33,
+            "price": 19650,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 21",
+            "tier": "Tier 3",
+            "low": -60,
+            "high": -44,
+            "baseline": -52,
+            "current": -40,
+            "official": -34,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 22",
+            "tier": "Tier 3",
+            "low": -61,
+            "high": -45,
+            "baseline": -53,
+            "current": -41,
+            "official": -35,
+            "price": 17950,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 23",
+            "tier": "Tier 3",
+            "low": -62,
+            "high": -46,
+            "baseline": -54,
+            "current": -42,
+            "official": -36,
+            "price": 17100,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 24",
+            "tier": "Tier 3",
+            "low": -63,
+            "high": -47,
+            "baseline": -55,
+            "current": -43,
+            "official": -37,
+            "price": 16250,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 25",
+            "tier": "Tier 3",
+            "low": -64,
+            "high": -48,
+            "baseline": -56,
+            "current": -44,
+            "official": -38,
+            "price": 15400,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 26",
+            "tier": "Tier 3",
+            "low": -65,
+            "high": -49,
+            "baseline": -57,
+            "current": -45,
+            "official": -39,
+            "price": null,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 27",
+            "tier": "Tier 3",
+            "low": -66,
+            "high": -50,
+            "baseline": -58,
+            "current": -46,
+            "official": -40,
+            "price": 13700,
+            "period": "2029Q4",
+            "origin": "reported"
+          },
+          {
+            "city": "City 28",
+            "tier": "Tier 3",
+            "low": -67,
+            "high": -51,
+            "baseline": -59,
+            "current": -47,
+            "official": -41,
+            "price": 12850,
+            "period": "2029Q4",
+            "origin": "estimated"
+          },
+          {
+            "city": "City 29",
+            "tier": "Tier 3",
+            "low": -68,
+            "high": -52,
+            "baseline": -60,
+            "current": -48,
+            "official": -42,
+            "price": 12000,
+            "period": "2029Q4",
+            "origin": "reported"
+          }
+        ],
+        "row_count": 29,
+        "columns": [
+          {
+            "key": "city",
+            "header": "City",
+            "type": "categorical"
+          },
+          {
+            "key": "tier",
+            "header": "Tier",
+            "type": "categorical"
+          },
+          {
+            "key": "low",
+            "header": "Low",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "high",
+            "header": "High",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "baseline",
+            "header": "Baseline",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "current",
+            "header": "Current",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "official",
+            "header": "Official",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "price",
+            "header": "Price",
+            "type": "numeric",
+            "unit": "CNY"
+          },
+          {
+            "key": "period",
+            "header": "Period",
+            "type": "categorical"
+          },
+          {
+            "key": "origin",
+            "header": "Origin",
+            "type": "categorical"
+          }
+        ],
+        "views": [
+          {
+            "id": "comparison",
+            "kind": "chart",
+            "spec": {
+              "kind": "table",
+              "title": "Benchmark estimates and supplied reference points",
+              "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+              "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rows": [
+                {
+                  "city": "City 01",
+                  "tier": "Tier 1",
+                  "low": -40,
+                  "high": -24,
+                  "baseline": -32,
+                  "current": -20,
+                  "official": -14,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 02",
+                  "tier": "Tier 1",
+                  "low": -41,
+                  "high": -25,
+                  "baseline": -33,
+                  "current": -21,
+                  "official": -15,
+                  "price": 34950,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 03",
+                  "tier": "Tier 1",
+                  "low": -42,
+                  "high": null,
+                  "baseline": -34,
+                  "current": -22,
+                  "official": -16,
+                  "price": 34100,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 04",
+                  "tier": "Tier 1",
+                  "low": -43,
+                  "high": -27,
+                  "baseline": -35,
+                  "current": null,
+                  "official": -17,
+                  "price": 33250,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 05",
+                  "tier": "Tier 2",
+                  "low": -44,
+                  "high": -28,
+                  "baseline": -36,
+                  "current": -24,
+                  "official": -18,
+                  "price": 32400,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 06",
+                  "tier": "Tier 2",
+                  "low": -45,
+                  "high": -29,
+                  "baseline": -37,
+                  "current": -25,
+                  "official": -19,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 07",
+                  "tier": "Tier 2",
+                  "low": -46,
+                  "high": -46,
+                  "baseline": -38,
+                  "current": -26,
+                  "official": -20,
+                  "price": 30700,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 08",
+                  "tier": "Tier 2",
+                  "low": -47,
+                  "high": -31,
+                  "baseline": -39,
+                  "current": -27,
+                  "official": -21,
+                  "price": 29850,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 09",
+                  "tier": "Tier 2",
+                  "low": -48,
+                  "high": -32,
+                  "baseline": -40,
+                  "current": -28,
+                  "official": -22,
+                  "price": 29000,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 10",
+                  "tier": "Tier 2",
+                  "low": -49,
+                  "high": -33,
+                  "baseline": -41,
+                  "current": -29,
+                  "official": -23,
+                  "price": 28150,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 11",
+                  "tier": "Tier 2",
+                  "low": -50,
+                  "high": -34,
+                  "baseline": -42,
+                  "current": -30,
+                  "official": -24,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 12",
+                  "tier": "Tier 2",
+                  "low": -51,
+                  "high": -35,
+                  "baseline": -43,
+                  "current": -31,
+                  "official": -25,
+                  "price": 26450,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 13",
+                  "tier": "Tier 2",
+                  "low": -52,
+                  "high": -36,
+                  "baseline": -44,
+                  "current": -32,
+                  "official": -26,
+                  "price": 25600,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 14",
+                  "tier": "Tier 2",
+                  "low": -53,
+                  "high": -37,
+                  "baseline": -45,
+                  "current": -33,
+                  "official": -27,
+                  "price": 24750,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 15",
+                  "tier": "Tier 2",
+                  "low": -54,
+                  "high": -38,
+                  "baseline": -46,
+                  "current": -34,
+                  "official": -28,
+                  "price": 23900,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 16",
+                  "tier": "Tier 2",
+                  "low": -55,
+                  "high": -39,
+                  "baseline": -47,
+                  "current": -35,
+                  "official": -29,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 17",
+                  "tier": "Tier 2",
+                  "low": -56,
+                  "high": -40,
+                  "baseline": -48,
+                  "current": -36,
+                  "official": -30,
+                  "price": 22200,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 18",
+                  "tier": "Tier 2",
+                  "low": -57,
+                  "high": -41,
+                  "baseline": -49,
+                  "current": -37,
+                  "official": -31,
+                  "price": 21350,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 19",
+                  "tier": "Tier 2",
+                  "low": -58,
+                  "high": -42,
+                  "baseline": -50,
+                  "current": -38,
+                  "official": -32,
+                  "price": 20500,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 20",
+                  "tier": "Tier 3",
+                  "low": -59,
+                  "high": -43,
+                  "baseline": -51,
+                  "current": -39,
+                  "official": -33,
+                  "price": 19650,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 21",
+                  "tier": "Tier 3",
+                  "low": -60,
+                  "high": -44,
+                  "baseline": -52,
+                  "current": -40,
+                  "official": -34,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 22",
+                  "tier": "Tier 3",
+                  "low": -61,
+                  "high": -45,
+                  "baseline": -53,
+                  "current": -41,
+                  "official": -35,
+                  "price": 17950,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 23",
+                  "tier": "Tier 3",
+                  "low": -62,
+                  "high": -46,
+                  "baseline": -54,
+                  "current": -42,
+                  "official": -36,
+                  "price": 17100,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 24",
+                  "tier": "Tier 3",
+                  "low": -63,
+                  "high": -47,
+                  "baseline": -55,
+                  "current": -43,
+                  "official": -37,
+                  "price": 16250,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 25",
+                  "tier": "Tier 3",
+                  "low": -64,
+                  "high": -48,
+                  "baseline": -56,
+                  "current": -44,
+                  "official": -38,
+                  "price": 15400,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 26",
+                  "tier": "Tier 3",
+                  "low": -65,
+                  "high": -49,
+                  "baseline": -57,
+                  "current": -45,
+                  "official": -39,
+                  "price": null,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 27",
+                  "tier": "Tier 3",
+                  "low": -66,
+                  "high": -50,
+                  "baseline": -58,
+                  "current": -46,
+                  "official": -40,
+                  "price": 13700,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                },
+                {
+                  "city": "City 28",
+                  "tier": "Tier 3",
+                  "low": -67,
+                  "high": -51,
+                  "baseline": -59,
+                  "current": -47,
+                  "official": -41,
+                  "price": 12850,
+                  "period": "2029Q4",
+                  "origin": "estimated"
+                },
+                {
+                  "city": "City 29",
+                  "tier": "Tier 3",
+                  "low": -68,
+                  "high": -52,
+                  "baseline": -60,
+                  "current": -48,
+                  "official": -42,
+                  "price": 12000,
+                  "period": "2029Q4",
+                  "origin": "reported"
+                }
+              ],
+              "row_count": 29,
+              "columns": [
+                {
+                  "key": "city",
+                  "header": "City",
+                  "type": "categorical"
+                },
+                {
+                  "key": "tier",
+                  "header": "Tier",
+                  "type": "categorical"
+                },
+                {
+                  "key": "low",
+                  "header": "Low",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "high",
+                  "header": "High",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "baseline",
+                  "header": "Baseline",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "current",
+                  "header": "Current",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "official",
+                  "header": "Official",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "price",
+                  "header": "Price",
+                  "type": "numeric",
+                  "unit": "CNY"
+                },
+                {
+                  "key": "period",
+                  "header": "Period",
+                  "type": "categorical"
+                },
+                {
+                  "key": "origin",
+                  "header": "Origin",
+                  "type": "categorical"
+                }
+              ]
+            }
+          }
+        ],
+        "layout": {
+          "view": "comparison"
+        },
+        "presentation_plan": {
+          "version": 3,
+          "dataset": {
+            "artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "availability": "available"
+          },
+          "evidence_notes": [
+            {
+              "id": "basis",
+              "measure_keys": [
+                "baseline",
+                "high",
+                "low",
+                "official"
+              ],
+              "excerpt": "{\"role\":\"metric_basis\",\"measure_keys\":[\"baseline\",\"high\",\"low\",\"official\"],\"value_kind\":\"rate\",\"adjustment\":\"not_applicable\"}",
+              "verified_content_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "availability": "available",
+              "source_ref": {
+                "id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "source_alias": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "access_state": "linked_accessible",
+                "safe_label": "Synthetic prepared comparison basis",
+                "safe_preview_url": "/api/v1/report-artifacts/note/preview",
+                "safe_url": "/api/v1/report-artifacts/note/download"
+              }
+            }
+          ],
+          "text_dependencies": {
+            "/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            }
+          },
+          "analytical_views": [
+            {
+              "view_id": "comparison",
+              "preset": "interval_rows",
+              "row_keys": [
+                "city"
+              ],
+              "group_key": "tier",
+              "range": {
+                "lower_key": "low",
+                "upper_key": "high",
+                "kind": "estimate",
+                "note_ids": [
+                  "basis"
+                ],
+                "origin_key": "origin"
+              },
+              "points": [
+                {
+                  "key": "baseline",
+                  "role": "primary"
+                },
+                {
+                  "key": "official",
+                  "role": "reference"
+                }
+              ],
+              "detail_keys": [
+                "price",
+                "origin"
+              ],
+              "binding_id": "analytical_339177e3f054",
+              "binding": {
+                "observation_keys": [
+                  "city"
+                ],
+                "measure_keys": [
+                  "baseline",
+                  "high",
+                  "low",
+                  "official"
+                ],
+                "value_domain": [
+                  -70.7,
+                  -11.3
+                ],
+                "group_values": [
+                  "Tier 1",
+                  "Tier 2",
+                  "Tier 3"
+                ]
+              },
+              "availability": "available"
+            }
+          ]
+        }
+      }
+    },
+    "shape": {
+      "version": "chart-shape/1",
+      "kind": "table",
+      "family": "table",
+      "rowCount": 29,
+      "categoryCount": 29,
+      "seriesCount": 6,
+      "longestLabelGraphemes": 9,
+      "series": [
+        {
+          "key": "bar:0",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:1",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:2",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:3",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:4",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": false,
+          "hasNegative": true
+        },
+        {
+          "key": "bar:5",
+          "role": "bar",
+          "pointCount": 29,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        }
+      ],
+      "flags": {
+        "stacked": false,
+        "crossesZero": true,
+        "hasMissingValues": true
+      }
+    }
+  },
+  "scenario_facets": {
+    "section": {
+      "id": "sec_analytical_faceted",
+      "kind": "chart",
+      "rev": 1,
+      "order_index": 0,
+      "spec": {
+        "kind": "line",
+        "title": "Faceted supplied scenarios with common scales",
+        "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+        "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "rows": [
+          {
+            "tier": "Tier 1",
+            "series": "Observed",
+            "elapsed_years": -3,
+            "value": 80,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Observed",
+            "elapsed_years": 0,
+            "value": 100,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Observed",
+            "elapsed_years": 2,
+            "value": 95,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Observed",
+            "elapsed_years": 5,
+            "value": 78,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Current",
+            "elapsed_years": 5,
+            "value": 70,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Optimistic",
+            "elapsed_years": 5,
+            "value": 70,
+            "trough_change": -30,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Optimistic",
+            "elapsed_years": 7.5,
+            "value": 75,
+            "trough_change": -30,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Optimistic",
+            "elapsed_years": 10,
+            "value": 80,
+            "trough_change": -30,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Baseline",
+            "elapsed_years": 5,
+            "value": 70,
+            "trough_change": -38,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Baseline",
+            "elapsed_years": 7.5,
+            "value": 62,
+            "trough_change": -38,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Baseline",
+            "elapsed_years": 10,
+            "value": 64,
+            "trough_change": -38,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Pessimistic",
+            "elapsed_years": 5,
+            "value": 70,
+            "trough_change": -52,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Pessimistic",
+            "elapsed_years": 7.5,
+            "value": 55,
+            "trough_change": -52,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 1",
+            "series": "Pessimistic",
+            "elapsed_years": 10,
+            "value": 48,
+            "trough_change": -52,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Observed",
+            "elapsed_years": -3,
+            "value": 80,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Observed",
+            "elapsed_years": 0,
+            "value": 100,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Observed",
+            "elapsed_years": 2,
+            "value": 95,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Observed",
+            "elapsed_years": 5,
+            "value": 70,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Current",
+            "elapsed_years": 5,
+            "value": 62,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Optimistic",
+            "elapsed_years": 5,
+            "value": 62,
+            "trough_change": -38,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Optimistic",
+            "elapsed_years": 7.5,
+            "value": 67,
+            "trough_change": -38,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Optimistic",
+            "elapsed_years": 10,
+            "value": 72,
+            "trough_change": -38,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Baseline",
+            "elapsed_years": 5,
+            "value": 62,
+            "trough_change": -46,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Baseline",
+            "elapsed_years": 7.5,
+            "value": 54,
+            "trough_change": -46,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Baseline",
+            "elapsed_years": 10,
+            "value": 56,
+            "trough_change": -46,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Pessimistic",
+            "elapsed_years": 5,
+            "value": 62,
+            "trough_change": -60,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Pessimistic",
+            "elapsed_years": 7.5,
+            "value": 47,
+            "trough_change": -60,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 2",
+            "series": "Pessimistic",
+            "elapsed_years": 10,
+            "value": 40,
+            "trough_change": -60,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Observed",
+            "elapsed_years": -3,
+            "value": 80,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Observed",
+            "elapsed_years": 0,
+            "value": 100,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Observed",
+            "elapsed_years": 2,
+            "value": 95,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Observed",
+            "elapsed_years": 5,
+            "value": 62,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Current",
+            "elapsed_years": 5,
+            "value": 54,
+            "trough_change": null,
+            "trough_period": null
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Optimistic",
+            "elapsed_years": 5,
+            "value": 54,
+            "trough_change": -46,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Optimistic",
+            "elapsed_years": 7.5,
+            "value": 59,
+            "trough_change": -46,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Optimistic",
+            "elapsed_years": 10,
+            "value": 64,
+            "trough_change": -46,
+            "trough_period": "2027Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Baseline",
+            "elapsed_years": 5,
+            "value": 54,
+            "trough_change": -54,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Baseline",
+            "elapsed_years": 7.5,
+            "value": 46,
+            "trough_change": -54,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Baseline",
+            "elapsed_years": 10,
+            "value": 48,
+            "trough_change": -54,
+            "trough_period": "2029Q4"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Pessimistic",
+            "elapsed_years": 5,
+            "value": 54,
+            "trough_change": -68,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Pessimistic",
+            "elapsed_years": 7.5,
+            "value": 39,
+            "trough_change": -68,
+            "trough_period": "2034Q3"
+          },
+          {
+            "tier": "Tier 3",
+            "series": "Pessimistic",
+            "elapsed_years": 10,
+            "value": 32,
+            "trough_change": -68,
+            "trough_period": "2034Q3"
+          }
+        ],
+        "row_count": 42,
+        "columns": [
+          {
+            "key": "tier",
+            "header": "Tier",
+            "type": "categorical"
+          },
+          {
+            "key": "series",
+            "header": "Series",
+            "type": "categorical"
+          },
+          {
+            "key": "elapsed_years",
+            "header": "Elapsed Years",
+            "type": "numeric"
+          },
+          {
+            "key": "value",
+            "header": "Value",
+            "type": "numeric"
+          },
+          {
+            "key": "trough_change",
+            "header": "Trough Change",
+            "type": "numeric",
+            "format": "percent",
+            "percent_scale": "points",
+            "unit": "%"
+          },
+          {
+            "key": "trough_period",
+            "header": "Trough Period",
+            "type": "categorical"
+          }
+        ],
+        "views": [
+          {
+            "id": "comparison",
+            "kind": "chart",
+            "spec": {
+              "kind": "line",
+              "title": "Faceted supplied scenarios with common scales",
+              "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+              "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rows": [
+                {
+                  "tier": "Tier 1",
+                  "series": "Observed",
+                  "elapsed_years": -3,
+                  "value": 80,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Observed",
+                  "elapsed_years": 0,
+                  "value": 100,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Observed",
+                  "elapsed_years": 2,
+                  "value": 95,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Observed",
+                  "elapsed_years": 5,
+                  "value": 78,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Current",
+                  "elapsed_years": 5,
+                  "value": 70,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Optimistic",
+                  "elapsed_years": 5,
+                  "value": 70,
+                  "trough_change": -30,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Optimistic",
+                  "elapsed_years": 7.5,
+                  "value": 75,
+                  "trough_change": -30,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Optimistic",
+                  "elapsed_years": 10,
+                  "value": 80,
+                  "trough_change": -30,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Baseline",
+                  "elapsed_years": 5,
+                  "value": 70,
+                  "trough_change": -38,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Baseline",
+                  "elapsed_years": 7.5,
+                  "value": 62,
+                  "trough_change": -38,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Baseline",
+                  "elapsed_years": 10,
+                  "value": 64,
+                  "trough_change": -38,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Pessimistic",
+                  "elapsed_years": 5,
+                  "value": 70,
+                  "trough_change": -52,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Pessimistic",
+                  "elapsed_years": 7.5,
+                  "value": 55,
+                  "trough_change": -52,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 1",
+                  "series": "Pessimistic",
+                  "elapsed_years": 10,
+                  "value": 48,
+                  "trough_change": -52,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Observed",
+                  "elapsed_years": -3,
+                  "value": 80,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Observed",
+                  "elapsed_years": 0,
+                  "value": 100,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Observed",
+                  "elapsed_years": 2,
+                  "value": 95,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Observed",
+                  "elapsed_years": 5,
+                  "value": 70,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Current",
+                  "elapsed_years": 5,
+                  "value": 62,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Optimistic",
+                  "elapsed_years": 5,
+                  "value": 62,
+                  "trough_change": -38,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Optimistic",
+                  "elapsed_years": 7.5,
+                  "value": 67,
+                  "trough_change": -38,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Optimistic",
+                  "elapsed_years": 10,
+                  "value": 72,
+                  "trough_change": -38,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Baseline",
+                  "elapsed_years": 5,
+                  "value": 62,
+                  "trough_change": -46,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Baseline",
+                  "elapsed_years": 7.5,
+                  "value": 54,
+                  "trough_change": -46,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Baseline",
+                  "elapsed_years": 10,
+                  "value": 56,
+                  "trough_change": -46,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Pessimistic",
+                  "elapsed_years": 5,
+                  "value": 62,
+                  "trough_change": -60,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Pessimistic",
+                  "elapsed_years": 7.5,
+                  "value": 47,
+                  "trough_change": -60,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 2",
+                  "series": "Pessimistic",
+                  "elapsed_years": 10,
+                  "value": 40,
+                  "trough_change": -60,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Observed",
+                  "elapsed_years": -3,
+                  "value": 80,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Observed",
+                  "elapsed_years": 0,
+                  "value": 100,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Observed",
+                  "elapsed_years": 2,
+                  "value": 95,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Observed",
+                  "elapsed_years": 5,
+                  "value": 62,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Current",
+                  "elapsed_years": 5,
+                  "value": 54,
+                  "trough_change": null,
+                  "trough_period": null
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Optimistic",
+                  "elapsed_years": 5,
+                  "value": 54,
+                  "trough_change": -46,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Optimistic",
+                  "elapsed_years": 7.5,
+                  "value": 59,
+                  "trough_change": -46,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Optimistic",
+                  "elapsed_years": 10,
+                  "value": 64,
+                  "trough_change": -46,
+                  "trough_period": "2027Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Baseline",
+                  "elapsed_years": 5,
+                  "value": 54,
+                  "trough_change": -54,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Baseline",
+                  "elapsed_years": 7.5,
+                  "value": 46,
+                  "trough_change": -54,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Baseline",
+                  "elapsed_years": 10,
+                  "value": 48,
+                  "trough_change": -54,
+                  "trough_period": "2029Q4"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Pessimistic",
+                  "elapsed_years": 5,
+                  "value": 54,
+                  "trough_change": -68,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Pessimistic",
+                  "elapsed_years": 7.5,
+                  "value": 39,
+                  "trough_change": -68,
+                  "trough_period": "2034Q3"
+                },
+                {
+                  "tier": "Tier 3",
+                  "series": "Pessimistic",
+                  "elapsed_years": 10,
+                  "value": 32,
+                  "trough_change": -68,
+                  "trough_period": "2034Q3"
+                }
+              ],
+              "row_count": 42,
+              "columns": [
+                {
+                  "key": "tier",
+                  "header": "Tier",
+                  "type": "categorical"
+                },
+                {
+                  "key": "series",
+                  "header": "Series",
+                  "type": "categorical"
+                },
+                {
+                  "key": "elapsed_years",
+                  "header": "Elapsed Years",
+                  "type": "numeric"
+                },
+                {
+                  "key": "value",
+                  "header": "Value",
+                  "type": "numeric"
+                },
+                {
+                  "key": "trough_change",
+                  "header": "Trough Change",
+                  "type": "numeric",
+                  "format": "percent",
+                  "percent_scale": "points",
+                  "unit": "%"
+                },
+                {
+                  "key": "trough_period",
+                  "header": "Trough Period",
+                  "type": "categorical"
+                }
+              ]
+            }
+          }
+        ],
+        "layout": {
+          "view": "comparison"
+        },
+        "presentation_plan": {
+          "version": 3,
+          "dataset": {
+            "artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "availability": "available"
+          },
+          "evidence_notes": [
+            {
+              "id": "basis",
+              "measure_keys": [
+                "value"
+              ],
+              "excerpt": "{\"role\":\"metric_basis\",\"measure_keys\":[\"value\"],\"value_kind\":\"index\",\"adjustment\":\"real\",\"index_base\":100}",
+              "verified_content_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "availability": "available",
+              "source_ref": {
+                "id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "source_alias": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "access_state": "linked_accessible",
+                "safe_label": "Synthetic prepared comparison basis",
+                "safe_preview_url": "/api/v1/report-artifacts/note/preview",
+                "safe_url": "/api/v1/report-artifacts/note/download"
+              }
+            }
+          ],
+          "text_dependencies": {
+            "/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            }
+          },
+          "analytical_views": [
+            {
+              "view_id": "comparison",
+              "preset": "series_plot",
+              "x_key": "elapsed_years",
+              "x_kind": "numeric",
+              "value_key": "value",
+              "series_key": "series",
+              "facet": {
+                "key": "tier"
+              },
+              "series_roles": [
+                {
+                  "series_value": "Observed",
+                  "role": "observed"
+                },
+                {
+                  "series_value": "Current",
+                  "role": "current"
+                },
+                {
+                  "series_value": "Optimistic",
+                  "role": "optimistic",
+                  "note_ids": [
+                    "basis"
+                  ]
+                },
+                {
+                  "series_value": "Baseline",
+                  "role": "baseline",
+                  "note_ids": [
+                    "basis"
+                  ]
+                },
+                {
+                  "series_value": "Pessimistic",
+                  "role": "pessimistic",
+                  "note_ids": [
+                    "basis"
+                  ]
+                }
+              ],
+              "summary_keys": [
+                "trough_change",
+                "trough_period"
+              ],
+              "binding_id": "analytical_ecbd5d89f7ad",
+              "binding": {
+                "observation_keys": [
+                  "tier",
+                  "series",
+                  "elapsed_years"
+                ],
+                "measure_keys": [
+                  "value"
+                ],
+                "value_domain": [
+                  28.6,
+                  103.4
+                ],
+                "x_domain": [
+                  -3.65,
+                  10.65
+                ],
+                "series_values": [
+                  "Observed",
+                  "Current",
+                  "Optimistic",
+                  "Baseline",
+                  "Pessimistic"
+                ],
+                "group_values": [
+                  "Tier 1",
+                  "Tier 2",
+                  "Tier 3"
+                ]
+              },
+              "availability": "available"
+            }
+          ]
+        }
+      }
+    },
+    "shape": {
+      "version": "chart-shape/1",
+      "kind": "line",
+      "family": "trend",
+      "rowCount": 42,
+      "categoryCount": 6,
+      "seriesCount": 5,
+      "longestLabelGraphemes": 11,
+      "series": [
+        {
+          "key": "analytical:\"Observed\"",
+          "role": "line",
+          "pointCount": 12,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Current\"",
+          "role": "line",
+          "pointCount": 3,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Optimistic\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Baseline\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Pessimistic\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        }
+      ],
+      "flags": {
+        "stacked": false,
+        "crossesZero": false,
+        "hasMissingValues": true
+      }
+    }
+  },
+  "aligned_cycles": {
+    "section": {
+      "id": "sec_analytical_aligned",
+      "kind": "chart",
+      "rev": 1,
+      "order_index": 0,
+      "spec": {
+        "kind": "line",
+        "title": "Aligned historical cycles with supplied estimate",
+        "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+        "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "rows": [
+          {
+            "series": "Primary",
+            "elapsed_years": -3,
+            "value": 74,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": -1,
+            "value": 92,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 0,
+            "value": 100,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 1.25,
+            "value": 90,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 4,
+            "value": 68,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 5,
+            "value": 63,
+            "low": 58,
+            "high": 70
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 8,
+            "value": 59,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 12,
+            "value": 85,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Primary",
+            "elapsed_years": 16,
+            "value": 105,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": -3,
+            "value": 82,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": -1,
+            "value": 100,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 0,
+            "value": 108,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 1.25,
+            "value": 98,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 4,
+            "value": 76,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 5,
+            "value": 71,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 8,
+            "value": 67,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 12,
+            "value": 93,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference A",
+            "elapsed_years": 16,
+            "value": 113,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": -3,
+            "value": 64,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": -1,
+            "value": 82,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 0,
+            "value": 90,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 1.25,
+            "value": 80,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 4,
+            "value": null,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 5,
+            "value": 53,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 8,
+            "value": 49,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 12,
+            "value": 75,
+            "low": null,
+            "high": null
+          },
+          {
+            "series": "Reference B",
+            "elapsed_years": 16,
+            "value": 95,
+            "low": null,
+            "high": null
+          }
+        ],
+        "row_count": 27,
+        "columns": [
+          {
+            "key": "series",
+            "header": "Series",
+            "type": "categorical"
+          },
+          {
+            "key": "elapsed_years",
+            "header": "Elapsed Years",
+            "type": "numeric"
+          },
+          {
+            "key": "value",
+            "header": "Value",
+            "type": "numeric"
+          },
+          {
+            "key": "low",
+            "header": "Low",
+            "type": "numeric"
+          },
+          {
+            "key": "high",
+            "header": "High",
+            "type": "numeric"
+          }
+        ],
+        "views": [
+          {
+            "id": "comparison",
+            "kind": "chart",
+            "spec": {
+              "kind": "line",
+              "title": "Aligned historical cycles with supplied estimate",
+              "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+              "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rows": [
+                {
+                  "series": "Primary",
+                  "elapsed_years": -3,
+                  "value": 74,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": -1,
+                  "value": 92,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 0,
+                  "value": 100,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 1.25,
+                  "value": 90,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 4,
+                  "value": 68,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 5,
+                  "value": 63,
+                  "low": 58,
+                  "high": 70
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 8,
+                  "value": 59,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 12,
+                  "value": 85,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Primary",
+                  "elapsed_years": 16,
+                  "value": 105,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": -3,
+                  "value": 82,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": -1,
+                  "value": 100,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 0,
+                  "value": 108,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 1.25,
+                  "value": 98,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 4,
+                  "value": 76,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 5,
+                  "value": 71,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 8,
+                  "value": 67,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 12,
+                  "value": 93,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference A",
+                  "elapsed_years": 16,
+                  "value": 113,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": -3,
+                  "value": 64,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": -1,
+                  "value": 82,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 0,
+                  "value": 90,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 1.25,
+                  "value": 80,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 4,
+                  "value": null,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 5,
+                  "value": 53,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 8,
+                  "value": 49,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 12,
+                  "value": 75,
+                  "low": null,
+                  "high": null
+                },
+                {
+                  "series": "Reference B",
+                  "elapsed_years": 16,
+                  "value": 95,
+                  "low": null,
+                  "high": null
+                }
+              ],
+              "row_count": 27,
+              "columns": [
+                {
+                  "key": "series",
+                  "header": "Series",
+                  "type": "categorical"
+                },
+                {
+                  "key": "elapsed_years",
+                  "header": "Elapsed Years",
+                  "type": "numeric"
+                },
+                {
+                  "key": "value",
+                  "header": "Value",
+                  "type": "numeric"
+                },
+                {
+                  "key": "low",
+                  "header": "Low",
+                  "type": "numeric"
+                },
+                {
+                  "key": "high",
+                  "header": "High",
+                  "type": "numeric"
+                }
+              ]
+            }
+          }
+        ],
+        "layout": {
+          "view": "comparison"
+        },
+        "presentation_plan": {
+          "version": 3,
+          "dataset": {
+            "artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "availability": "available"
+          },
+          "evidence_notes": [
+            {
+              "id": "basis",
+              "measure_keys": [
+                "high",
+                "low",
+                "value"
+              ],
+              "excerpt": "{\"role\":\"metric_basis\",\"measure_keys\":[\"high\",\"low\",\"value\"],\"value_kind\":\"index\",\"adjustment\":\"real\",\"index_base\":100}",
+              "verified_content_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "availability": "available",
+              "source_ref": {
+                "id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "source_alias": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "access_state": "linked_accessible",
+                "safe_label": "Synthetic prepared comparison basis",
+                "safe_preview_url": "/api/v1/report-artifacts/note/preview",
+                "safe_url": "/api/v1/report-artifacts/note/download"
+              }
+            }
+          ],
+          "text_dependencies": {
+            "/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/title": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            },
+            "/views/0/spec/subtitle": {
+              "dataset": true,
+              "note_ids": [
+                "basis"
+              ]
+            }
+          },
+          "analytical_views": [
+            {
+              "view_id": "comparison",
+              "preset": "series_plot",
+              "x_key": "elapsed_years",
+              "x_kind": "numeric",
+              "value_key": "value",
+              "series_key": "series",
+              "range": {
+                "lower_key": "low",
+                "upper_key": "high",
+                "kind": "estimate",
+                "note_ids": [
+                  "basis"
+                ]
+              },
+              "series_roles": [
+                {
+                  "series_value": "Primary",
+                  "role": "primary"
+                },
+                {
+                  "series_value": "Reference A",
+                  "role": "reference"
+                },
+                {
+                  "series_value": "Reference B",
+                  "role": "observed"
+                }
+              ],
+              "binding_id": "analytical_fcf481259b33",
+              "binding": {
+                "observation_keys": [
+                  "series",
+                  "elapsed_years"
+                ],
+                "measure_keys": [
+                  "high",
+                  "low",
+                  "value"
+                ],
+                "value_domain": [
+                  45.8,
+                  116.2
+                ],
+                "x_domain": [
+                  -3.95,
+                  16.95
+                ],
+                "series_values": [
+                  "Primary",
+                  "Reference A",
+                  "Reference B"
+                ]
+              },
+              "availability": "available"
+            }
+          ]
+        }
+      }
+    },
+    "shape": {
+      "version": "chart-shape/1",
+      "kind": "line",
+      "family": "trend",
+      "rowCount": 27,
+      "categoryCount": 9,
+      "seriesCount": 3,
+      "longestLabelGraphemes": 11,
+      "series": [
+        {
+          "key": "analytical:\"Primary\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Reference A\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        },
+        {
+          "key": "analytical:\"Reference B\"",
+          "role": "line",
+          "pointCount": 9,
+          "stackKey": null,
+          "hasPositive": true,
+          "hasNegative": false
+        }
+      ],
+      "flags": {
+        "stacked": false,
+        "crossesZero": false,
+        "hasMissingValues": true
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+.page { display: grid; gap: 1rem; }
+.page p { margin: 0; color: var(--c-ink-2); }
+.page h2 { margin: 1rem 0 0; font-size: 1rem; }
+.controls, .ranges, .trendHead { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.ranges [aria-pressed="true"] { background: var(--c-accent-soft); color: var(--c-accent); }
+.timezone { display: flex; align-items: center; gap: .5rem; }
+.timezone input, .trendHead select { min-height: 2.5rem; border: 1px solid var(--c-line-2); border-radius: .5rem; background: var(--c-surface); color: var(--c-ink); padding: 0 .5rem; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
+.summaryItem { display: grid; gap: .35rem; padding: 1rem; border: 1px solid var(--c-line-2); border-radius: .75rem; }
+.summaryItem strong { font-size: 1.25rem; }
+.trendHead { justify-content: space-between; }
+.chart { display: flex; gap: .3rem; align-items: end; height: 12rem; overflow-x: auto; padding: .5rem; border: 1px solid var(--c-line-2); border-radius: .75rem; }
+.barGroup { display: flex; flex: 1 0 1.2rem; height: 100%; flex-direction: column; align-items: center; justify-content: end; gap: .25rem; }
+.bar { width: 100%; background: var(--c-accent); border-radius: .25rem .25rem 0 0; }
+.barGroup small { font-size: .6rem; white-space: nowrap; }
+.tableScroll { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.table th, .table td { padding: .7rem; border-bottom: 1px solid var(--c-line-2); text-align: right; }
+.table th:first-child { text-align: left; }

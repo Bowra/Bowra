@@ -1,0 +1,89 @@
+name: agent-coach
+version: 50
+model: analyst
+trust_class: read-mostly
+max_iterations: 30
+max_output_tokens: null # Automatic; resolved for each model request
+description: >-
+  Discover scoped resources, establish Agent drafts and propose versioned Agent changes.
+  Author personal Skill packages with focused edits and durable save recovery.
+  Retain Tool gaps and reconcile supported onboarding with original targets.
+  Run bounded internal evaluation only under explicit Owner consent.
+  Agent acceptance, private creation and release remain separate actions.
+system:
+  file: agent-coach.md
+tools:
+  default_enabled: false
+  allow:
+    - skill_read
+    - agent_resource_open
+    - agent_operation_open
+    - agent_operation_get
+    - agent_change_validate
+    - agent_working_copy_open
+    - agent_change_propose
+    - agent_change_get
+    - agent_ci_request
+    - agent_ci_get
+    - agent_ci_prepare
+    - agent_ci_start
+    - agent_ci_cancel
+    - agent_eval_evidence_get
+    - agent_eval_suite_list
+    - agent_eval_suite_get
+    - agent_eval_case_propose
+    - agent_eval_case_proposal_get
+    - agent_eval_turns_list
+    - agent_eval_alignment_start
+    - agent_eval_alignment_ask
+    - agent_eval_alignment_get
+    - agent_eval_alignment_report
+    - agent_plugin_inspect
+    - agent_plugin_validate
+    - agent_plugin_save
+    - agent_plugin_operation_get
+    - agent_skill_inspect
+    - agent_tool_requirement_create
+    - agent_tool_requirement_get
+    - agent_tool_requirement_open
+    - agent_tool_requirement_reconcile
+    - agent_skill_read
+    - agent_skill_validate
+    - agent_skill_save
+    - agent_skill_cancel
+    - agent_skill_operation_get
+    - agent_draft_start
+    - agent_resource_search
+    - agent_resource_get
+    - agent_authoring_inspect
+    - agent_authoring_tools
+    - agent_authoring_validate
+    - agent_authoring_propose
+    - agent_authoring_proposal_get
+skill_grants:
+  - skill_ref:
+      kind: builtin
+      id: builtin:agent-authoring
+      name: agent-authoring
+    permissions: [read]
+    revision: sha256:b03e7dc2ef43f718531e809d5d06cc83de363e38cd0e3c28f6157d9844c11b91
+    distribution: reference
+callable_peers: []
+produces: []
+# WP M3-12 contract: this Agent holds no Lead routing role (data/compute/deck/knowledge/image).
+# Like the domain specialists it declares the non-role analysis contract, so the roster
+# never drafts it as a fallback holder for another role.
+primary_capability: cap_analysis
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 20
+  display_name: "Coach"
+  summary: "Create and improve Agents, Skills and Plugins, and run checks before release."
+  capabilities: [cap_analysis, cap_report]
+  # Its Tools write drafts, packages or settings; model, Skills and prompt stay platform policy.
+  # Teams may set its per-Turn step limit (long Skill edits read many files before writing).
+  team_overrides: [enabled, display_name, description, max_iterations]

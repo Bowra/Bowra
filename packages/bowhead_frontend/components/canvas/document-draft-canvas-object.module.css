@@ -1,0 +1,8 @@
+/* Document draft object: chrome comes from the shared canvas object components (C1–C11). */
+.request {
+  margin: 0;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+  color: var(--c-ink-2);
+  white-space: pre-wrap;
+}

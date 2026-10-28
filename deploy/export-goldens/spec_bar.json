@@ -1,0 +1,53 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_bar",
+  "payload": {
+    "spec": {
+      "kind": "bar",
+      "title": "各省客流同比变化率 %（1-7 月）",
+      "rows": [
+        {
+          "省份": "上海",
+          "客流同比": -1.53
+        },
+        {
+          "省份": "北京",
+          "客流同比": -1.67
+        },
+        {
+          "省份": "江苏",
+          "客流同比": -1.55
+        },
+        {
+          "省份": "天津",
+          "客流同比": -1.62
+        },
+        {
+          "省份": "河南",
+          "客流同比": -1.74
+        }
+      ],
+      "row_count": 5,
+      "columns": [
+        {
+          "key": "省份",
+          "header": "省份",
+          "type": "categorical",
+          "y_axis_id": 0
+        },
+        {
+          "key": "客流同比",
+          "header": "客流同比",
+          "type": "numeric",
+          "y_axis_id": 0
+        }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "show_data_labels": false,
+      "percent_stack": false,
+      "fallback_kind": "table"
+    }
+  }
+}

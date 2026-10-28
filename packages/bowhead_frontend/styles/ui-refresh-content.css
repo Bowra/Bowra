@@ -1,0 +1,477 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · P2 batch 6: content type scale and "brand appears once".
+ *
+ * Spec: Claude Design "P2 Icons & Type Spec" (content font roles table), decided trade-offs in
+ * docs/design/界面改版-Apple设计方向.md "P2 视觉改版" (user 2026-09-26: serif display only for report and chapter
+ * titles; model output gets text-autospace, hand-written copy keeps manual spaces). Results and deviations:
+ * docs/design/组件统一-技术设计.md "P2 第 6 批结果".
+ *
+ * Two layers: controls and navigation keep --font-control (earlier batches); content (chat answers, report body,
+ * Help articles) takes its family from --font-v2-sans / --font-v2-serif / --font-v2-mono, so the personal
+ * "Font" setting only changes content. Sizes derive from the --fs-* scale so the personal "Text size" setting
+ * still applies (14 → body, 13 → table, 16 → subsection, 20 → chapter, 28 → report title at the default scale).
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles. Imported last by the
+ * authenticated layout only; the export renderer (/internal/canvas-export/*) uses the (public) layout, which
+ * does not import this file, so PDF / image / PPT exports keep their own styles.
+ * No literal colours (contract: styles/ui-refresh-content.test.ts).
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ 1 · Content tokens ═══ */
+:root:root {
+  --fs-content-body: var(--fs-base);
+  --fs-content-title: calc(var(--fs-base) * 2);
+  --fs-content-chapter: var(--fs-xl);
+  --fs-content-subsection: var(--fs-lg);
+  --fs-content-caption: calc(var(--fs-base) - 0.09375rem);
+  --fs-content-table: var(--fs-md);
+  --fs-content-table-head: calc(var(--fs-md) - 0.09375rem);
+  --fs-content-code: calc(var(--fs-md) - 0.03125rem);
+  --fs-content-kpi: calc(var(--fs-base) * 15 / 7);
+  --lh-content-body: 1.7;
+  /* Line length per script (user decision 2026-10-01): CJK text 40 characters per line (body size × 40, 560px at
+     the default size), Latin text (en / de / fr) body size × 35, about 75 characters. Expressed from the body size,
+     not em, so headings and body share one measure. See the :lang() rules below for which one applies. */
+  --content-measure-cjk: calc(var(--fs-content-body) * 40);
+  --content-measure-latin: calc(var(--fs-content-body) * 35);
+  --content-measure: var(--content-measure-cjk);
+  /* Report and chapter titles: sans 700 / 650 by default; "Serif display" switches only these to serif 600. */
+  --font-content-display: var(--font-v2-sans);
+  --fw-content-title: 700;
+  --fw-content-chapter: 650;
+}
+/* Which measure applies: the document language is the UI language (ClientLocaleProvider keeps <html lang>
+   current), so a non-Chinese UI uses the Latin measure. Chat answers and reports detected as CJK carry their own
+   `lang` (lib/content-lang.ts), so a Chinese answer in an English UI still gets the CJK measure. Latin content
+   cannot be told apart reliably and is not marked, so in a Chinese UI it follows the UI language. */
+:root:root:not(:lang(zh)) {
+  --content-measure: var(--content-measure-latin);
+}
+:root:root [lang]:is(:lang(zh), :lang(ja), :lang(ko)) {
+  --content-measure: var(--content-measure-cjk);
+}
+:root:root[data-typography-profile="readable"] {
+  --lh-content-body: 1.75;
+}
+:root:root[data-typography-profile="serif-display"] {
+  --font-content-display: var(--font-v2-serif);
+  --fw-content-title: 600;
+  --fw-content-chapter: 600;
+}
+
+/* ═══ 2 · Brand appears once: the sidebar header is the only brand mark ═══
+ * The version row and the home watermark / wordmark are no longer rendered (components). The agent pages' own
+ * top bar keeps only its two links (as on phones), not the brand. */
+:root:root .am-topbar {
+  justify-content: flex-end;
+}
+:root:root .am-topbar > .am-brand {
+  display: none;
+}
+/* Home: only the "Updated …" time remains in the former brand row, right-aligned and without the row's minimum height */
+:root:root .home-work-brand--time-only {
+  min-height: 0;
+  margin-bottom: 12px;
+}
+/* Answer byline without logo and name: the turn time alone, secondary 12px */
+:root:root .bh-bot-byline--time {
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  margin-bottom: 10px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .bh-bot-byline--time:empty {
+  margin-bottom: 4px;
+}
+
+/* ═══ 3 · Account menu version line (last line): small secondary text; click copies the version details ═══ */
+:root:root .ui-menu .v2-user-menu-item.v2-user-menu-version {
+  position: relative;
+  min-height: 28px;
+  margin-top: 9px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-menu .v2-user-menu-item.v2-user-menu-version::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 8px;
+  right: 8px;
+  height: var(--hairline);
+  background: var(--c-separator);
+  pointer-events: none;
+}
+:root:root .ui-menu.is-sheet .v2-user-menu-item.v2-user-menu-version {
+  min-height: 44px;
+  margin-top: 8px;
+}
+@media (pointer: coarse) {
+  :root:root .ui-menu .v2-user-menu-item.v2-user-menu-version {
+    min-height: 44px;
+  }
+}
+:root:root .ui-menu.is-sheet .v2-user-menu-item.v2-user-menu-version::before {
+  display: none;
+}
+
+/* ═══ 4 · Chat answers (LeadNarrative → .v2-md): body 14 / 1.7, answer headings 16 / 600, code 12.5 mono, tables 13 ═══ */
+:root:root .lead-narrative-md > .v2-md {
+  font-family: var(--font-v2-sans);
+  text-autospace: normal;
+}
+:root:root .lead-narrative-md > .v2-md :is(p, ul, ol) {
+  max-width: var(--content-measure);
+  color: var(--c-ink);
+  font-size: var(--fs-content-body);
+  line-height: var(--lh-content-body);
+}
+:root:root .lead-narrative-md > .v2-md li {
+  color: var(--c-ink);
+}
+:root:root .lead-narrative-md > .v2-md :is(h1, h2) {
+  max-width: var(--content-measure);
+  font-size: var(--fs-content-subsection);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+:root:root .lead-narrative-md > .v2-md :is(h3, h4, h5, h6) {
+  max-width: var(--content-measure);
+  font-size: var(--fs-content-body);
+  font-weight: 600;
+  line-height: 1.5;
+}
+:root:root .lead-narrative-md > .v2-md blockquote {
+  max-width: var(--content-measure);
+  font-size: var(--fs-content-body);
+  line-height: var(--lh-content-body);
+}
+:root:root .lead-narrative-md > .v2-md pre {
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-v2-mono);
+  font-size: var(--fs-content-code);
+  line-height: 1.6;
+}
+:root:root .lead-narrative-md > .v2-md table {
+  font-size: var(--fs-content-table);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .lead-narrative-md > .v2-md th {
+  color: var(--c-ink-3);
+  font-size: var(--fs-content-table-head);
+  font-weight: 600;
+}
+:root:root .lead-narrative-md > .v2-md :is(th, td) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+
+/* ═══ 5 · Report body (.canvas-report-article) ═══ */
+/* Report title 28 / 1.3 / 700 sans (Serif display: serif 600); was serif 38 / 600 in every font setting */
+:root:root .canvas-report-article .v2-report-h1 {
+  max-width: var(--content-measure);
+  font-family: var(--font-content-display);
+  font-size: var(--fs-content-title);
+  font-weight: var(--fw-content-title);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+/* Chapter titles 20 / 1.4 / 650 (Serif display: serif 600); was serif 23 / 600 */
+:root:root .canvas-report-article .v2-report-section h2,
+:root:root .canvas-report-article h2,
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  h1 {
+  max-width: var(--content-measure);
+  font-family: var(--font-content-display);
+  font-size: var(--fs-content-chapter);
+  font-weight: var(--fw-content-chapter);
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+/* Subsections 16 / 1.5 / 600 sans; h4–h6 at body size 600 */
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  h3 {
+  max-width: var(--content-measure);
+  font-family: var(--font-v2-sans);
+  font-size: var(--fs-content-subsection);
+  font-weight: 600;
+  line-height: 1.5;
+}
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  :is(h4, h5, h6) {
+  max-width: var(--content-measure);
+  font-size: var(--fs-content-body);
+  line-height: 1.5;
+}
+/* Body 14 / 1.7 body colour (was 14.5 / 1.72 --c-ink-2); model output gets text-autospace */
+:root:root .canvas-report-article p:not(.v2-report-deck) {
+  color: var(--c-ink);
+  font-size: var(--fs-content-body);
+  line-height: var(--lh-content-body);
+  text-autospace: normal;
+}
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  :is(p, ol, ul, blockquote) {
+  max-width: var(--content-measure);
+}
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  li {
+  color: var(--c-ink);
+  font-size: var(--fs-content-body);
+  line-height: var(--lh-content-body);
+  text-autospace: normal;
+}
+/* Native charts and Table have the same heading rank at every pane width.
+ * This authenticated report scope leaves chat and fixed export typography unchanged. */
+:root:root .canvas-report-article .v2-chart-title {
+  font-family: var(--font-v2-sans);
+  font-size: var(--fs-content-subsection);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+:root:root .canvas-report-article .v2-chart-subtitle {
+  font-size: var(--fs-content-body);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+/* Caption under charts / figures: 12.5 / 1.55 --c-ink-3 */
+:root:root .canvas-report-article p.rc-fig-caption:not(.v2-report-deck) {
+  max-width: var(--content-measure);
+  color: var(--c-ink-3);
+  font-size: var(--fs-content-caption);
+  line-height: 1.55;
+}
+/* Tables (prose Markdown tables and data tables): 13 / 1.45 tabular figures; header 11.5 / 600 --c-ink-3, no letter-spacing */
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  table {
+  font-size: var(--fs-content-table);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  th {
+  color: var(--c-ink-3);
+  font-size: var(--fs-content-table-head);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  :is(th, td) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+/* Code: 12.5 / 1.6 mono on surface-2 */
+:root:root
+  .canvas-report-article
+  :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"])
+  pre {
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-v2-mono);
+  font-size: var(--fs-content-code);
+  line-height: 1.6;
+}
+/* KPI values 30 / 1.1 / 600 sans with tabular lining figures (was serif italic 32 / 400). The length tiers keep
+   their sizes; they are restated because this rule's base size would otherwise outrank them. */
+:root:root .canvas-report-article .v2-kpi-cell .val {
+  font-family: var(--font-v2-sans);
+  font-size: var(--fs-content-kpi);
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+:root:root .canvas-report-article .v2-kpi-cell .val[data-len="m"] {
+  font-size: 1.5rem;
+}
+:root:root .canvas-report-article .v2-kpi-cell .val[data-len="l"] {
+  font-size: 1.125rem;
+}
+:root:root .canvas-report-article .v2-kpi-cell .val[data-len="xl"] {
+  font-size: 0.9375rem;
+  line-height: 1.15;
+}
+/* KPI unit, report and chat KPI cards (kpi-row.tsx / atomic.tsx split "12.84亿元" into number + unit): 13 / 500 --c-ink-3, a small gap
+   after the number; percent signs stay tight; a currency sign before the number takes the gap on its right. */
+:root:root .v2-kpi-cell .val .v2-kpi-unit {
+  margin-left: 3px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+:root:root .v2-kpi-cell .val .v2-kpi-unit.is-tight {
+  margin-left: 0;
+}
+:root:root .v2-kpi-cell .val .v2-kpi-unit.is-prefix {
+  margin-right: 2px;
+  margin-left: 0;
+}
+@media (max-width: 640px) {
+  :root:root .canvas-report-article .v2-report-h1 {
+    font-size: calc(var(--fs-content-title) - 0.25rem);
+  }
+  :root:root .canvas-report-article .v2-report-section h2,
+  :root:root .canvas-report-article h2 {
+    font-size: calc(var(--fs-content-chapter) - 0.125rem);
+  }
+  :root:root .canvas-report-article .v2-kpi-cell .val {
+    font-size: 1.25rem;
+  }
+  :root:root .canvas-report-article .v2-kpi-cell .val[data-len="m"] {
+    font-size: 1rem;
+  }
+  :root:root .canvas-report-article .v2-kpi-cell .val[data-len="l"] {
+    font-size: 0.8125rem;
+  }
+  :root:root .canvas-report-article .v2-kpi-cell .val[data-len="xl"] {
+    font-size: 0.6875rem;
+  }
+}
+
+/* ═══ 6 · Help articles (.ui-help-article): body 14 / 1.7 body colour, chapters 20 / 650 sans (was serif 25),
+ * subsections 16 / 600, code 12.5 mono, tables 13 / 1.45. Hand-written copy: no text-autospace.
+ * Wide blocks (tables, diagrams, code) keep the 880 column; text is held to the content measure from the same
+ * left edge by right padding, so headings, paragraphs and tables still line up. ═══ */
+:root:root .ui-help-article {
+  color: var(--c-ink);
+  font-size: var(--fs-content-body);
+  line-height: var(--lh-content-body);
+}
+:root:root .ui-help-article > :is(p, ul, ol, blockquote, h2, h3, h4) {
+  padding-right: max(0px, calc(min(100%, 880px) - var(--content-measure)));
+}
+:root:root .ui-help-article h2 {
+  margin-top: 40px;
+  margin-bottom: 12px;
+  padding-top: 16px;
+  border-top: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-v2-sans);
+  font-size: var(--fs-content-chapter);
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+:root:root .ui-help-article h3 {
+  margin-top: 24px;
+  margin-bottom: 8px;
+  font-size: var(--fs-content-subsection);
+  font-weight: 600;
+  line-height: 1.5;
+}
+/* Lists keep their markers (the base reset removes them, so steps read like loose paragraphs) */
+:root:root .ui-help-article ul {
+  list-style: disc;
+}
+:root:root .ui-help-article ol {
+  list-style: decimal;
+}
+:root:root .ui-help-article li::marker {
+  color: var(--c-ink-3);
+}
+:root:root .ui-help-article strong {
+  font-weight: 600;
+}
+:root:root .ui-help-article code {
+  border: 0;
+  background: var(--c-fill-1);
+  font-size: 0.92em;
+}
+:root:root .ui-help-article pre {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+  font-size: var(--fs-content-code);
+  line-height: 1.6;
+}
+:root:root .ui-help-article pre code {
+  background: transparent;
+  font-size: inherit;
+}
+:root:root .ui-help-article table {
+  font-size: var(--fs-content-table);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-help-article th {
+  color: var(--c-ink-3);
+  font-size: var(--fs-content-table-head);
+  font-weight: 600;
+}
+
+/* ═══ 7 · Help › About: version card ═══ */
+:root:root .ui-help-about {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .ui-help-about dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+}
+:root:root .ui-help-about dt {
+  color: var(--c-ink-3);
+}
+:root:root .ui-help-about dd {
+  margin: 0;
+  color: var(--c-ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+:root:root .ui-help-about-note {
+  margin: 0;
+  color: var(--c-warn-ink);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .ui-help-about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: var(--fs-md);
+}
+:root:root .ui-help-about-actions a {
+  color: var(--c-accent-text);
+}

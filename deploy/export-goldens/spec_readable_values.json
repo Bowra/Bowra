@@ -1,0 +1,147 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_readable_values",
+  "payload": {
+    "spec": {
+      "kind": "hbar",
+      "title": "Readable magnitudes and independent axes",
+      "show_data_labels": true,
+      "show_legend": false,
+      "row_count": 3,
+      "columns": [
+        {
+          "key": "period",
+          "header": "Period",
+          "type": "categorical"
+        },
+        {
+          "key": "amount",
+          "header": "Amount",
+          "type": "numeric",
+          "unit": "亿元"
+        }
+      ],
+      "rows": [
+        {
+          "period": "A",
+          "amount": 0.0009,
+          "growth": 0.123456
+        },
+        {
+          "period": "B",
+          "amount": 7.8e-06,
+          "growth": -0.012345
+        },
+        {
+          "period": "C",
+          "amount": -2.5e-07,
+          "growth": null
+        }
+      ],
+      "views": [
+        {
+          "id": "amounts",
+          "kind": "chart",
+          "spec": {
+            "kind": "hbar",
+            "title": "Small prepared amounts",
+            "show_data_labels": true,
+            "show_legend": false,
+            "row_count": 3,
+            "columns": [
+              {
+                "key": "period",
+                "header": "Period",
+                "type": "categorical"
+              },
+              {
+                "key": "amount",
+                "header": "Amount",
+                "type": "numeric",
+                "unit": "亿元"
+              }
+            ],
+            "rows": [
+              {
+                "period": "A",
+                "amount": 0.0009,
+                "growth": 0.123456
+              },
+              {
+                "period": "B",
+                "amount": 7.8e-06,
+                "growth": -0.012345
+              },
+              {
+                "period": "C",
+                "amount": -2.5e-07,
+                "growth": null
+              }
+            ]
+          }
+        },
+        {
+          "id": "dual",
+          "kind": "chart",
+          "spec": {
+            "kind": "dual_axis",
+            "title": "Amounts and growth",
+            "show_data_labels": true,
+            "show_legend": false,
+            "row_count": 3,
+            "columns": [
+              {
+                "key": "period",
+                "header": "Period",
+                "type": "categorical"
+              },
+              {
+                "key": "amount",
+                "header": "Amount",
+                "type": "numeric",
+                "unit": "亿元"
+              },
+              {
+                "key": "growth",
+                "header": "Growth",
+                "type": "numeric",
+                "format": "percent",
+                "percent_scale": "fraction",
+                "unit": "%",
+                "y_axis_id": 1
+              }
+            ],
+            "rows": [
+              {
+                "period": "A",
+                "amount": 0.0009,
+                "growth": 0.123456
+              },
+              {
+                "period": "B",
+                "amount": 7.8e-06,
+                "growth": -0.012345
+              },
+              {
+                "period": "C",
+                "amount": -2.5e-07,
+                "growth": null
+              }
+            ]
+          }
+        }
+      ],
+      "layout": {
+        "type": "grid2",
+        "children": [
+          {
+            "view": "amounts"
+          },
+          {
+            "view": "dual"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,127 @@
+/* C5 · section heading and C6 · field row / suggested field (Canvas Objects Spec part 1). */
+.section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--c-ink);
+}
+.count {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--c-accent-text);
+}
+.toggle {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.toggle:hover {
+  background: var(--c-fill-1);
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 0;
+}
+.chevron {
+  flex: none;
+  color: var(--c-ink-3);
+}
+@media (pointer: coarse) {
+  .toggle {
+    min-height: 44px;
+  }
+}
+
+/* C6 · field row: settings that apply immediately (switches, segments) */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 0;
+  box-shadow: inset 0 -0.5px 0 var(--c-separator);
+  min-width: 0;
+}
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.rowTitle {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--c-ink);
+}
+.rowDescription {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--c-ink-3);
+}
+.rowControl {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  max-width: 60%;
+}
+
+/* C6 · field with an AI suggestion: accent 45% outline + “Suggested” badge. The tripled class outranks the
+   shared field rule (:root:root :is(… .mset .fld .inp …), specificity 0,5,0). */
+:global(:root:root) .suggested.suggested.suggested :is(input, textarea, select) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-accent) 45%, transparent);
+}
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.suggestionBadge {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.suggestionBadge:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 1px;
+  border-radius: 999px;
+}

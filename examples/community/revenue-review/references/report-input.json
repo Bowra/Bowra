@@ -1,0 +1,117 @@
+{
+  "operation": "create",
+  "title": "Revenue review | Q2 2026",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "text": "Synthetic data. Independent CLI reference; not an application or LLM result."
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Revenue grew; margin softened"
+    },
+    {
+      "type": "paragraph",
+      "text": "Net revenue rose 8.66% and contribution increased $3,600. Contribution margin fell 0.54 percentage points. Contribution excludes fixed costs, financing and taxes."
+    },
+    {
+      "type": "table",
+      "columns": [
+        "Metric",
+        "Q1 2026",
+        "Q2 2026",
+        "Change"
+      ],
+      "rows": [
+        [
+          "Orders",
+          "1,100",
+          "1,200",
+          "+100"
+        ],
+        [
+          "Net revenue",
+          "$127,000",
+          "$138,000",
+          "+8.66%"
+        ],
+        [
+          "Contribution",
+          "$50,100",
+          "$53,700",
+          "+$3,600"
+        ],
+        [
+          "Contribution margin",
+          "39.45%",
+          "38.91%",
+          "-0.54 pp"
+        ],
+        [
+          "Refund dollar ratio",
+          "3.79%",
+          "4.17%",
+          "+0.38 pp"
+        ]
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "North / Partner led the gain"
+    },
+    {
+      "type": "table",
+      "columns": [
+        "Segment",
+        "Q1 net revenue",
+        "Q2 net revenue",
+        "Change"
+      ],
+      "rows": [
+        [
+          "North / Direct",
+          "$46,000",
+          "$52,200",
+          "+$6,200"
+        ],
+        [
+          "North / Partner",
+          "$35,000",
+          "$42,000",
+          "+$7,000"
+        ],
+        [
+          "South / Direct",
+          "$29,000",
+          "$24,000",
+          "-$5,000"
+        ],
+        [
+          "South / Partner",
+          "$17,000",
+          "$19,800",
+          "+$2,800"
+        ]
+      ]
+    },
+    {
+      "type": "paragraph",
+      "text": "The four segment changes reconcile to +$11,000. South / Direct is the only decline: -17.24% net revenue, with orders down from 250 to 220 and its refund-dollar ratio rising from 3.33% to 9.09%."
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Investigate before assigning a cause"
+    },
+    {
+      "type": "paragraph",
+      "text": "Request South / Direct refund reasons and order-level sales detail. These aggregates do not establish churn, seasonality or why orders fell. No target or prior-year comparison is supplied."
+    },
+    {
+      "type": "paragraph",
+      "text": "Sources: synthetic revenue.csv and metric-definitions.md in examples/community/revenue-review/. Calculations: calculate.py; expected-results.md. Values rounded only for display."
+    }
+  ]
+}

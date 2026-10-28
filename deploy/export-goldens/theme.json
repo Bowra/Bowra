@@ -1,0 +1,85 @@
+{
+  "accessibility": {
+    "colorVision": "standard",
+    "contrast": "standard"
+  },
+  "contextRecipeVersion": "1",
+  "kind": "chart-style",
+  "mode": "light",
+  "preset": {
+    "capabilities": {
+      "coveredFamilies": [
+        "comparison",
+        "trend",
+        "composition",
+        "distribution",
+        "relationship",
+        "flow",
+        "matrix"
+      ],
+      "requiredRendererFeatures": [],
+      "verifiedAccessibilityClaims": [
+        "minimum-contrast"
+      ]
+    },
+    "descriptionKey": "bowheadEditorialDesc",
+    "extends": "product-base",
+    "fallbackPresetId": "product-base",
+    "id": "bowhead-editorial",
+    "labelKey": "bowheadEditorial",
+    "presetRevision": "2026.10.1",
+    "schemaVersion": 1,
+    "status": "active",
+    "tokens": {
+      "dark": {
+        "diverging": {
+          "mid": "#3A3630",
+          "neg": "#E88A98",
+          "pos": "#7BC28F"
+        },
+        "palette": [
+          "#D4714E",
+          "#7E9DAB",
+          "#C9A045",
+          "#967B64",
+          "#B5A584",
+          "#C9C2B8"
+        ],
+        "sequential": {
+          "from": "#3B241C",
+          "to": "#D4714E"
+        }
+      },
+      "geometry": {
+        "barRadius": 3,
+        "gridDensity": "quiet",
+        "lineWidth": 2,
+        "pointRadius": 2.5
+      },
+      "light": {
+        "diverging": {
+          "mid": "#E8E2D4",
+          "neg": "#9F2438",
+          "pos": "#3A724A"
+        },
+        "palette": [
+          "#B04A2A",
+          "#5E7D8A",
+          "#A98028",
+          "#775B45",
+          "#9A8A6A",
+          "#3A342C"
+        ],
+        "sequential": {
+          "from": "#FAF0E8",
+          "to": "#B04A2A"
+        }
+      }
+    }
+  },
+  "presetChecksum": "sha256:c3c14a924bfed7aea2cd5b468f76ad03d7bf09e2b7d9eaa5d0a3c9a286b6f5b5",
+  "resolverPolicyVersion": "1",
+  "schemaVersion": 1,
+  "selectionSource": "product",
+  "teamPolicyEtag": "W/\"chart-style-policy:6aae04528ae1664912d603f2950e09577bf266b3a47e94a8f2c86854edcc1600\""
+}

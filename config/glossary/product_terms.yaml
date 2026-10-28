@@ -1,0 +1,226 @@
+# Bowhead product glossary shared by the frontend catalog and agent prompts.
+# agents: agents receiving the term; an empty array is for frontend use only.
+
+version: 1
+
+terms:
+  # Core entities
+  workspace:
+    en: Workspace
+    zh: 工作区
+    agents: [all]
+  agent:
+    en: Agent
+    zh: 智能体
+    agents: [all]
+    note: 候选 "代理"；选 "智能体" 因 datarc 已用此译法
+  skill:
+    en: Skill
+    zh: 技能
+    agents: [all]
+  session:
+    en: Session
+    zh: 会话
+    agents: [all]
+  turn:
+    en: Turn
+    zh: 轮次
+    agents: [all]
+  message:
+    en: Message
+    zh: 消息
+    agents: [all]
+  task:
+    en: Task
+    zh: 任务
+    agents: [all]
+  plan:
+    en: Plan
+    zh: 计划
+    agents: [lead]
+
+  # Bowhead-specific terms
+  canvas:
+    en: Canvas
+    zh: 画布
+    agents: [lead, analyst]
+  dreaming:
+    en: Dreaming
+    zh: 梦境模式
+    agents: [lead]
+    note: 候选 "离线推演 / 后台思考"；产品定 "梦境模式" 保留 dream 隐喻
+  hook:
+    en: Hook
+    zh: 钩子
+    agents: [lead]
+  lead:
+    en: Lead
+    zh: 主控
+    agents: [all]
+    note: Lead Agent 别名
+  analyst:
+    en: Analyst
+    zh: 分析师
+    agents: [all]
+  compute:
+    en: Compute
+    zh: 计算
+    agents: [all]
+  insight:
+    en: Insight
+    zh: 洞察
+    agents: [analyst]
+  report:
+    en: Report
+    zh: 报告
+    agents: [analyst]
+
+  # BI domain
+  chart:
+    en: Chart
+    zh: 图表
+    agents: [analyst, lead]
+  dashboard:
+    en: Dashboard
+    zh: 仪表板
+    agents: [lead]
+    note: 候选 "看板"；选 "仪表板" 更准确
+  dimension:
+    en: Dimension
+    zh: 维度
+    agents: [analyst, compute]
+  measure:
+    en: Measure
+    zh: 度量
+    agents: [analyst, compute]
+    note: 与 metric 区分，避免中文都译"指标"
+  metric:
+    en: Metric
+    zh: 指标
+    agents: [analyst, compute]
+    note: 通用业务指标（销售额、毛利率等）
+  slot:
+    en: Slot
+    zh: 槽位
+    agents: [lead]
+  filter:
+    en: Filter
+    zh: 筛选
+    agents: [analyst, compute]
+  sort:
+    en: Sort
+    zh: 排序
+    agents: [analyst]
+  aggregation:
+    en: Aggregation
+    zh: 聚合
+    agents: [compute]
+  drill_down:
+    en: Drill Down
+    zh: 下钻
+    agents: [analyst]
+  drill_up:
+    en: Drill Up
+    zh: 上卷
+    agents: [analyst]
+  time_series:
+    en: Time Series
+    zh: 时间序列
+    agents: [analyst, compute]
+  trend:
+    en: Trend
+    zh: 趋势
+    agents: [analyst]
+  distribution:
+    en: Distribution
+    zh: 分布
+    agents: [analyst]
+  comparison:
+    en: Comparison
+    zh: 对比
+    agents: [analyst]
+  threshold:
+    en: Threshold
+    zh: 阈值
+    agents: [analyst]
+
+  # UI elements
+  composer:
+    en: Composer
+    zh: 输入框
+    agents: []
+    note: 仅前端用
+  attachment:
+    en: Attachment
+    zh: 附件
+    agents: [lead]
+  preview:
+    en: Preview
+    zh: 预览
+    agents: []
+  chat:
+    en: Chat
+    zh: 对话
+    agents: []
+  history:
+    en: History
+    zh: 历史
+    agents: []
+
+  # Actions
+  send:
+    en: Send
+    zh: 发送
+    agents: []
+  retry:
+    en: Retry
+    zh: 重试
+    agents: []
+  clear:
+    en: Clear
+    zh: 清空
+    agents: []
+  export:
+    en: Export
+    zh: 导出
+    agents: [lead]
+
+  # HITL / status
+  clarification:
+    en: Clarification
+    zh: 澄清
+    agents: [lead]
+  approval:
+    en: Approval
+    zh: 审批
+    agents: [lead]
+  pending:
+    en: Pending
+    zh: 待处理
+    agents: []
+  completed:
+    en: Completed
+    zh: 已完成
+    agents: []
+  failed:
+    en: Failed
+    zh: 失败
+    agents: []
+  skip:
+    en: Skip
+    zh: 跳过
+    agents: []
+
+  # Memory domain
+  memory:
+    en: Memory
+    zh: 记忆
+    agents: [lead]
+  preference:
+    en: Preference
+    zh: 偏好
+    agents: [lead]
+  context:
+    en: Context
+    zh: 上下文
+    agents: [all]

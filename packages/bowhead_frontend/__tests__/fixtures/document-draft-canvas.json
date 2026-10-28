@@ -1,0 +1,149 @@
+{
+  "context": {
+    "userId": "u_doc",
+    "teamId": "team_doc",
+    "workspaceId": "ws_doc",
+    "authSessionGeneration": "auth_fixture_1",
+    "sessionId": "s_doc",
+    "jobId": "djob_canvas_fixture",
+    "instanceId": "canvas_fixture_1"
+  },
+  "review": {
+    "id": "djob_canvas_fixture",
+    "state": "review",
+    "origin_turn_id": "t_doc",
+    "request_text": "这是模板，保持格式替换本季度文字，并给我源文档和PDF。",
+    "can_confirm": true,
+    "can_revise": false,
+    "draft_version": 1,
+    "usage": {
+      "settled_credits": 0,
+      "pending": false,
+      "settlement_pending": false
+    },
+    "error_code": null,
+    "question": null,
+    "draft_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "draft": {
+      "kind": "draft",
+      "manifest": {
+        "semantic_status": "unapproved",
+        "changes": [
+          {
+            "slide": 1,
+            "before": "Quarter one",
+            "after": "Quarter two",
+            "evidence": [
+              {
+                "source_name": null,
+                "pointer": null,
+                "value": "Quarter two"
+              }
+            ]
+          }
+        ],
+        "retained_unsupported_text": []
+      },
+      "preview": {
+        "native_powerpoint_certified": false,
+        "pages": [
+          {
+            "name": "page-1.png"
+          }
+        ],
+        "declared_font_fallbacks": [
+          {
+            "declared_font": "Calibri",
+            "environment_fallback": "Carlito"
+          }
+        ]
+      },
+      "output_stem": "fixture - Updated",
+      "image_id": "sha256:test",
+      "files": {
+        "candidate.pptx": {
+          "artifact_id": "art_canvas_source",
+          "sha256": "434ef1d8c848d90ef73138b01ddad65482eba5a805e88c8ef53223f713c7cff0"
+        },
+        "candidate.pdf": {
+          "artifact_id": "art_canvas_pdf",
+          "sha256": "2a16423dfc47382567c803329534b3f81786c70aa4e8a6aac574a080fec045b3"
+        },
+        "page-1.png": {
+          "artifact_id": "art_canvas_page_1",
+          "sha256": "a68c185235f81c8b9548b7921608b0634047d59f73fe96675f115a60efb5cb5b"
+        }
+      }
+    },
+    "updated_at": "2026-10-05T06:20:00+00:00"
+  },
+  "published": {
+    "id": "djob_canvas_fixture",
+    "state": "published",
+    "origin_turn_id": "t_doc",
+    "request_text": "这是模板，保持格式替换本季度文字，并给我源文档和PDF。",
+    "can_confirm": true,
+    "can_revise": false,
+    "draft_version": 1,
+    "usage": {
+      "settled_credits": 0,
+      "pending": false,
+      "settlement_pending": false
+    },
+    "error_code": null,
+    "question": null,
+    "draft_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "draft": {
+      "kind": "draft",
+      "manifest": {
+        "semantic_status": "unapproved",
+        "changes": [
+          {
+            "slide": 1,
+            "before": "Quarter one",
+            "after": "Quarter two",
+            "evidence": [
+              {
+                "source_name": null,
+                "pointer": null,
+                "value": "Quarter two"
+              }
+            ]
+          }
+        ],
+        "retained_unsupported_text": []
+      },
+      "preview": {
+        "native_powerpoint_certified": false,
+        "pages": [
+          {
+            "name": "page-1.png"
+          }
+        ],
+        "declared_font_fallbacks": [
+          {
+            "declared_font": "Calibri",
+            "environment_fallback": "Carlito"
+          }
+        ]
+      },
+      "output_stem": "fixture - Updated",
+      "image_id": "sha256:test",
+      "files": {
+        "candidate.pptx": {
+          "artifact_id": "art_canvas_source",
+          "sha256": "434ef1d8c848d90ef73138b01ddad65482eba5a805e88c8ef53223f713c7cff0"
+        },
+        "candidate.pdf": {
+          "artifact_id": "art_canvas_pdf",
+          "sha256": "2a16423dfc47382567c803329534b3f81786c70aa4e8a6aac574a080fec045b3"
+        },
+        "page-1.png": {
+          "artifact_id": "art_canvas_page_1",
+          "sha256": "a68c185235f81c8b9548b7921608b0634047d59f73fe96675f115a60efb5cb5b"
+        }
+      }
+    },
+    "updated_at": "2026-10-05T06:20:00+00:00"
+  }
+}

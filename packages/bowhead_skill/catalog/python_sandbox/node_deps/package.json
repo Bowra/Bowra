@@ -1,0 +1,13 @@
+{
+  "name": "bowhead-sandbox-node-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "skill-multiruntime S2 — curated node 预置集（SSOT 副本见 catalog/script_langs.json guaranteed_node_packages；契约=仅顶层包，传递依赖不承诺）。版本精确 pin；lockfile 必须对 registry.npmjs.org 生成（npm ci 按 resolved URL 拉，CN 镜像靠 replace-registry-host 换源——见 s2-tech-design.md §3.2）。",
+  "dependencies": {
+    "pptxgenjs": "4.0.1",
+    "jszip": "3.10.1",
+    "lodash": "4.18.1",
+    "papaparse": "5.5.4",
+    "dayjs": "1.11.21"
+  }
+}

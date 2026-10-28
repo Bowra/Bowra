@@ -1,0 +1,34 @@
+[project]
+name = "bowhead-skill"
+version = "0.4.5"
+description = "Bowhead Skill 子系统 — 注册/匹配/蒸馏"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyyaml>=6.0.2",
+    "jsonschema>=4.25,<5",
+    "pydantic>=2.14.1",
+    "jinja2>=3.1.4",
+    "structlog>=24.4.0",
+    "bowhead-memory",
+    # Canvas export skill runtime dependencies (for render_from_canvas.py).
+    "reportlab>=5.1.0",
+    "python-pptx>=1.0.0",
+    "openpyxl>=3.1.0",
+    # Used by canvas-pdf's `_render_chart_png`. **Previously omitted**: non-python_sandbox
+    # skill subprocesses run in the **app container** (`bowhead_skill/runtime.py`), whose dependencies lacked
+    # matplotlib ⇒ `import matplotlib` always failed ⇒ every chart took the None branch and fell back to a data table.
+    # Verified in the 116 v1.1.38 image: matplotlib raised ModuleNotFoundError (reportlab/openpyxl were present),
+    # so files were generated but charts were missing. Fonts need no action: the app image already includes `Noto Sans CJK SC`
+    # (fc-list verified 10 Noto Sans CJK faces), the script's first rcParams choice.
+    "matplotlib>=3.9.0",
+    # Independent document Skill creation and inspection dependencies.
+    "python-docx>=1.2.0",
+    "pypdf>=6.21.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bowhead_skill"]

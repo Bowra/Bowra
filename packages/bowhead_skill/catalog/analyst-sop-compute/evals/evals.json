@@ -1,0 +1,35 @@
+{
+  "skill_name": "analyst-sop-compute",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "预测 Q4 GMV",
+      "files": [],
+      "expected_behavior": [
+        "Uses bi_query with '每月' granularity to pull time series.",
+        "python_sandbox runs ARIMA or LinearRegression forecast.",
+        "Output: point estimate + confidence interval."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "哪些医院月销量最大值和最小值差距超过 10 倍",
+      "files": [],
+      "expected_behavior": [
+        "bi_query for raw per-hospital data.",
+        "python_sandbox computes max/min ratio + filters > 10x.",
+        "canvas.add_chart(hint=rank) shows filtered hospitals."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "买了示例药品乙没买示例药品甲的医院里采购量超过中位数的",
+      "files": [],
+      "expected_behavior": [
+        "Two separate bi_query (示例药品乙 and 示例药品甲).",
+        "python_sandbox does set difference + median threshold.",
+        "data_table section with qualifying hospitals."
+      ]
+    }
+  ]
+}

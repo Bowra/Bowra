@@ -1,0 +1,33 @@
+{
+  "skill_name": "canvas-pdf",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把当前 canvas 导出 PDF",
+      "files": [],
+      "expected_behavior": [
+        "Gateway triggers canvas-pdf with current canvas sections JSON.",
+        "Output file output.pdf created.",
+        "Fonts render without replacement glyphs.",
+        "Charts render as embedded images."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "导出 PDF — 空 canvas",
+      "files": [],
+      "expected_behavior": [
+        "Returns error 'no sections to render' or creates stub PDF with placeholder."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "导出 PDF — 含中文 narrative + KPI 表格",
+      "files": [],
+      "expected_behavior": [
+        "Chinese text renders with CJK font (not □ placeholders).",
+        "Table alignment preserved."
+      ]
+    }
+  ]
+}

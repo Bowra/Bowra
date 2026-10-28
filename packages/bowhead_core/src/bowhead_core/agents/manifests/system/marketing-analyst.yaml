@@ -1,0 +1,122 @@
+# Marketing-analyst — marketing specialist agent (multimodal-v1 rework, 2026-06-05).
+#
+# Design basis: docs/sprints/multimodal-v1-2026-06-05/marketing-agent-discovery.md.
+# JTBD: marketing manager routines = campaign reviews / media buying / audience operations / competitor tracking / materials / reporting.
+# User decision (rework Q1-Q5): form B, a new specialist for **general marketing**; build marketing method-skills
+# after real marketing data arrives (the demo workspace has no media-buying/campaign data, leaving detailed methods unsupported).
+# Materials are lightweight self-service for urgent needs, not a replacement for the design department.
+#
+# Routing is entirely configuration: this manifest's Chinese query-shaped description (its first 200 characters below
+# are injected verbatim by render_peer_block into Lead's dynamic peer block) plus one callable_peers line in lead.yaml.
+# **No Lead prompt changes** (SUBAGENT_SPEC_ROUTING already defaults to ON).
+
+name: marketing-analyst
+version: 3
+model: analyst
+trust_class: report-writer # M-C: read-mostly data discipline; writes its own report body with guarded write_report (M-B bake+owner+CAS).
+max_iterations: 40
+max_output_tokens: null # Automatic; resolved for each model request
+description: |
+  Bowhead 图像生成+营销 agent. 触发: 画/生成图片·插画·海报·卡通·配图(文生图, 非数据图表); 推广图/banner/营销物料; 改已有海报文字、下载/导出已有海报(走 design 编辑不重生图); 活动复盘/投放/营销方案/竞品调研. 通用客群/漏斗数据分析不归我. 营销物料默认走可编辑设计稿(文案进 design text layers); 已生成海报后续改字(标题/副标题/价格/日期/CTA)/换价/导出由我确定性处理.
+
+system:
+  file: marketing-analyst.md
+  append: |
+    You are running as a parallel TaskAgent under Orchestrator.
+    DO NOT call subagent.spawn (you are already a leaf).
+    Return via subagent_return with the task-appropriate Chat answer and actual design/file receipts; analytical presentation fields are optional for material operations.
+
+tools:
+  default_enabled: false
+  allow:
+    # Market/competitor research (hidden without configured team search / Tavily -> skip external research).
+    - web_search
+    - web_extract
+    - web_map
+    - web_crawl
+    - web_deep_research
+    # Internal data (ground conclusions when marketing/sales data is available).
+    - bi_schema
+    - bi_query
+    - bi_concept_resolve
+    # Material generation (multimodal-v1 platform tools; same environment gate as above).
+    - image_generate
+    # Materials on canvas (additive evidence / editable design) + analysis illustrations.
+    - add_image
+    - canvas_create_design
+    - canvas_update_design_text
+    - canvas_flatten_design
+    - add_chart
+    # General analysis framework (no marketing-only methods until real marketing data arrives).
+    - skill_list
+    - skill_read
+    # The prompt's calculate-first discipline uses skill_invoke(python_sandbox); without it the discipline cannot execute (audit #7).
+    - skill_invoke
+    # Finalization.
+    # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
+    # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
+    # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
+    - write_report
+    - read_report
+    - subagent_return
+
+# deliverable-capable schema (same shape as consultant): deliverables are populated by the authoritative backend
+# (subagent.py marketing-analyst block), not self-reported by the LLM.
+output_schema:
+  type: object
+  additionalProperties: false
+  required: [title]
+  properties:
+    title:
+      type: string
+      maxLength: 200
+    exec_summary:
+      type: string
+    insights:
+      type: array
+      maxItems: 20
+    recommendations:
+      type: array
+      maxItems: 10
+    deliverables:
+      type: array
+      maxItems: 8
+      items:
+        type: object
+        required: [kind]
+        properties:
+          kind: { type: string }
+          artifact_id: { type: string }
+          filename: { type: string }
+
+examples:
+  - event: "给我们的新茶饮做一张夏季促销海报，文案'夏日冰爽 第二杯半价'，竖版"
+    description: 物料型 — 文案给定 → 背景图 + 可编辑 design text layers + 可下载
+  - event: "上个月的促销活动效果怎么样？"
+    description: 分析型 — 有数据走 bi_*，无营销数据则明示边界给方法建议
+  - event: "调研一下竞品最近的营销打法，给我们的定位建议"
+    description: 调研型 — web_search 综合 + 定位/卖点输出
+
+# I2 1-hop invariant
+callable_peers: []
+
+# WP M3-12: this agent's **contract** (its responsibility), not an incidental capability.
+# Text-to-image and marketing materials are its contract.
+# Lead routing prose renders assignee names by role, resolving assignees from this declaration;
+# an agent with a declared contract is not used as a fallback assignee for another role.
+primary_capability: cap_visualize
+
+# Append the capability protocol blocks matching this Agent's tools (Datarc query
+# protocol, query_explain rules, ...) to its system prompt. Keep compute off: the
+# batch-2 A/B evaluation concluded it must not receive them.
+capability_protocol_block: true
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 90
+  display_name: "Marketing Analyst"
+  summary: "Develop marketing insights, campaign reviews, competitor research, and visual creative briefs."
+  capabilities: [cap_web_research, cap_visualize, cap_analysis]

@@ -1,0 +1,3752 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · page-by-page acceptance A: personal, team and space settings.
+ * Spec: Page Layout Spec (group cards, left labels/right controls, save bar, page-level empty / loading / error),
+ * Misc Spec filter bar (selected chip row), Component Spec empty / loading / error; decisions 15, 16, 17, 20.
+ * Mapping and per-page results: docs/design/组件统一-技术设计.md section 逐页验收 A.
+ *
+ * Conventions (anchored by styles/ui-refresh-pages-settings.test.ts):
+ *   - Every selector of every rule starts with :root:root (including @media), which keeps (0,2,0) over the base styles;
+ *   - No literal colors except tokens on the :root:root token block; separators use --c-separator + --hairline, not --c-line;
+ *   - Imported last by authenticated (app) layout after ui-refresh-surfaces.css;
+ *   - Base classes ported from inline styles are in styles/ui-controls-legacy.css section 逐页验收 A; declarations these rules override are deleted there.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── token ── */
+:root:root {
+  /* Group cards: label column 260 (≥768), controls fill the remaining column, rows min 44, padding 18 / 24 */
+  --group-label-w: 260px;
+  --group-control-max: 100%;
+  --group-row-min-h: 44px;
+  /* Groups gap 32, header → first group 24 (from header), group title → card 8 (description 2 below title) */
+  --group-gap: 32px;
+}
+
+/* ═══ Group cards (decision 15): 16/650 group title + one-line description outside; one item per row within, hairline separators ═══ */
+:root:root .ui-group {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .ui-group + .ui-group,
+:root:root .ui-group ~ .ui-group {
+  margin-top: var(--group-gap);
+}
+:root:root .ui-group-title {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  font-style: normal;
+  letter-spacing: normal;
+  line-height: 1.35;
+  text-transform: none;
+}
+:root:root .ui-group-desc {
+  max-width: 560px;
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.5;
+  text-transform: none;
+}
+/* Group title (and description) to card 8 */
+:root:root .ui-group-head {
+  margin: 0 0 8px;
+}
+:root:root .ui-group-card {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Additional notes below cards (consequences, scope): 12px --c-ink-3, gap 8 from card */
+:root:root .ui-group-footnote {
+  max-width: 640px;
+  margin: 8px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.5;
+}
+/* Group title directly followed by card (no .ui-group-head wrapper) also has gap 8 */
+:root:root :is(.ui-group-title, .ui-group-desc) + .ui-group-card {
+  margin-top: 8px;
+}
+
+/* ── Rows: left label/right control (decision 16, ≥768); vertically stacked when narrow ──
+ * Two forms: custom .ui-group-row > .ui-group-label (+ .ui-group-hint) / .ui-group-control;
+ * or Field (.settings-field) directly in card (label left, hint below label, control right). */
+:root:root .ui-group-row,
+:root:root .ui-group-card > .settings-field {
+  display: grid;
+  grid-template-columns: var(--group-label-w) minmax(0, 1fr);
+  column-gap: 32px;
+  row-gap: 2px;
+  align-items: center;
+  min-height: var(--group-row-min-h);
+  margin: 0;
+  padding: 18px 24px;
+  border: 0;
+  background: transparent;
+}
+:root:root .ui-group-row + .ui-group-row,
+:root:root .ui-group-card > .settings-field + .settings-field,
+:root:root .ui-group-card > .ui-group-row + .settings-field,
+:root:root .ui-group-card > .settings-field + .ui-group-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ui-group-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+:root:root .ui-group-hint {
+  margin: 0;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.45;
+  text-transform: none;
+}
+:root:root .ui-group-control {
+  min-width: 0;
+  max-width: var(--group-control-max);
+}
+/* Explicit wide controls may use the full available column. */
+:root:root .ui-group-control.is-wide {
+  max-width: none;
+}
+/* Field in card: label in left column first row, hint below, control spans two rows at right, error beneath control */
+:root:root .ui-group-card > .settings-field > .settings-field__label {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+/* Hint-free labels span the same two grid rows as their controls on every grouped form. */
+:root:root .ui-group-card > .settings-field > .settings-field__label:not(:has(~ .settings-field__hint)) {
+  grid-row: 1 / span 2;
+}
+:root:root .ui-group-card > .settings-field > .settings-field__hint {
+  grid-column: 1;
+  grid-row: 2;
+  margin: 0;
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__hint, .settings-field__error) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 100%;
+  max-width: var(--group-control-max);
+}
+:root:root .ui-group-card > .settings-field > .settings-field__error {
+  grid-column: 2;
+  grid-row: 3;
+  margin: 2px 0 0;
+}
+@media (max-width: 767.98px) {
+  :root:root .ui-group-row,
+  :root:root .ui-group-card > .settings-field {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+    row-gap: 8px;
+    align-items: stretch;
+  }
+  :root:root .ui-group-card > .settings-field > .settings-field__label:not(:has(~ .settings-field__hint)) {
+    grid-row: auto;
+  }
+  :root:root .ui-group-control {
+    max-width: none;
+  }
+  :root:root .ui-group-card > .settings-field > .settings-field__label,
+  :root:root .ui-group-card > .settings-field > .settings-field__hint,
+  :root:root .ui-group-card > .settings-field > .settings-field__error {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  :root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__hint, .settings-field__error) {
+    grid-column: 1;
+    grid-row: auto;
+    max-width: none;
+  }
+}
+
+/* ── Entry forms (connection settings, invitations, dialog forms): stacked, labels 12/600 --c-ink-2, hints beneath controls 11.5 --c-ink-4 ── */
+:root:root .ui-form-stack {
+  display: grid;
+  gap: 12px;
+}
+:root:root .ui-form-stack > .settings-field {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+/* ═══ Save bar (decision 17): appears only after text changes, sticks to bottom; unsaved changes · discard · save ═══
+ * Settings shell leaves a slot at content end, SaveBar portals into it: short pages stick to content bottom,
+ * long pages to scroll-area bottom. Control material (88% / 95%, solid for reduced transparency). */
+:root:root .settings-shell.is-settings-surface > .settings-content {
+  display: flex;
+  flex-direction: column;
+}
+:root:root .settings-shell.is-settings-surface > .settings-content > .settings-content-inner {
+  flex: 0 0 auto;
+}
+:root:root .ui-savebar-slot {
+  position: sticky;
+  /* Sticky bottom uses scroll-area content box (less shell bottom padding 48); -48 reaches scroll-area bottom */
+  bottom: -48px;
+  z-index: var(--z-sticky);
+  flex: 0 0 auto;
+  /* Top auto pushes to content bottom on short pages; bottom -48 consumes shell bottom padding 48 */
+  margin: auto calc(-1 * var(--page-gutter)) -48px;
+}
+:root:root .ui-savebar-slot:empty {
+  display: none;
+}
+/* Slot spacer as tall as bar (measured by SaveBar): occupies space only when bar is viewport-fixed (< 1024 since P2 batch 4) */
+:root:root .ui-savebar-spacer {
+  display: none;
+}
+/* < 1024 (P2 batch 4; < 1200 before) settings shell is single-column and entire document scrolls (.settings-content follows content height; sticky finds a non-scrolling container):
+ * slot stays at content-flow end, spacer provides bar height; bar fixed to viewport bottom, raised above soft keyboard
+ * (--savebar-keyboard-inset computed by SaveBar from visualViewport). No :has() — WebKit does not recompute after portal mounts in slot. */
+@media (max-width: 1023.98px) {
+  :root:root .ui-savebar-slot {
+    position: static;
+    /* No longer consume shell bottom space 48: retain page-bottom space between last item and bar */
+    margin-bottom: 0;
+  }
+  :root:root .ui-savebar-spacer {
+    display: block;
+  }
+  :root:root .ui-savebar-slot > .ui-savebar {
+    position: fixed;
+    right: 0;
+    bottom: var(--savebar-keyboard-inset, 0px);
+    left: 0;
+    z-index: var(--z-sticky);
+  }
+}
+:root:root .ui-savebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 10px var(--page-gutter) calc(10px + env(safe-area-inset-bottom, 0px));
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.4;
+  background: var(--ui-material-bar);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow: 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+}
+/* Outside settings shell (personal capabilities etc.), stick to bottom in place */
+:root:root .ui-savebar.is-inline {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  margin: 24px calc(-1 * var(--page-gutter)) 0;
+}
+:root:root .ui-savebar-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-warn);
+}
+:root:root .ui-savebar-text {
+  flex: 1;
+  min-width: 0;
+}
+:root:root .ui-savebar-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+/* ═══ Selected filter chip row (decision 20): appears at 2 conditions, individually clearable, clear-all at end ═══ */
+:root:root .ui-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+:root:root .ui-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  max-width: 100%;
+  padding: 0 4px 0 9px;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+:root:root .ui-filter-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root:root .ui-filter-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--c-ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+:root:root .ui-filter-chip-remove:hover {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .ui-filter-chip-remove:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 1px;
+}
+:root:root .ui-filter-chips-clear {
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+:root:root .ui-filter-chips-clear:hover {
+  text-decoration: underline;
+}
+:root:root .ui-filter-chips-clear:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
+/* ═══ Page loading skeleton (Page Layout Spec section 4): replaces only content, retains header; rows match actual height, shown only after 300ms ═══ */
+:root:root .ui-skeleton {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-skeleton.is-pending {
+  visibility: hidden;
+}
+:root:root .ui-skeleton-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 80px;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--table-row-h);
+  padding: 0 12px;
+}
+:root:root .ui-skeleton--form .ui-skeleton-row {
+  grid-template-columns: var(--group-label-w) minmax(0, 1fr);
+  gap: 32px;
+  min-height: var(--group-row-min-h);
+  padding: 18px 24px;
+}
+:root:root .ui-skeleton--form .ui-skeleton-row > .ui-skeleton-bar:last-child {
+  height: var(--control-h-md);
+  border-radius: var(--r-2);
+}
+:root:root .ui-skeleton-row + .ui-skeleton-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ui-skeleton-circle {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--c-fill-2);
+}
+:root:root .ui-skeleton-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--c-fill-2);
+}
+:root:root .ui-skeleton-row:nth-child(3n + 2) > .ui-skeleton-bar:first-of-type {
+  width: 70%;
+}
+:root:root .ui-skeleton-row:nth-child(3n) > .ui-skeleton-bar:first-of-type {
+  width: 85%;
+}
+@media (max-width: 767.98px) {
+  :root:root .ui-skeleton--form .ui-skeleton-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 16px;
+  }
+}
+
+/* @section accept-a:personal —— page-by-page acceptance A · personal settings: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═══ Personal settings · memory (memory-v2-content.tsx): selected chip row and loading skeleton align with filter-row left
+ * (filter row indented 50 on wide screens, no indent at ≤720; see globals.css memory page) ═══ */
+:root:root .memory-v2-filters + .ui-filter-chips {
+  margin-left: 50px;
+}
+:root:root .memory-v2-filters + .ui-filter-chips + .ui-skeleton,
+:root:root .memory-v2-filters + .ui-skeleton {
+  margin: 12px 0 0 50px;
+}
+@media (max-width: 720px) {
+  :root:root .memory-v2-filters + .ui-filter-chips,
+  :root:root .memory-v2-filters + .ui-filter-chips + .ui-skeleton,
+  :root:root .memory-v2-filters + .ui-skeleton {
+    margin-left: 0;
+  }
+}
+
+/* Keep the retention form separate from its scope notice; .ui-group resets legacy margins. */
+:root:root .legacy-retention-form.ui-group {
+  margin-top: 24px;
+}
+/* Numeric duration controls remain compact within the shared form layout. */
+:root:root .legacy-retention-form .ui-group-card > .settings-field > input {
+  max-width: 180px;
+}
+
+/* ═══ Personal settings · account (profile.tsx): three group cards, left label/right control; save bar after display-name/answer-style changes ═══ */
+:root:root .legacy-profile-page {
+  max-width: none;
+}
+:root:root .ui-page-desc.legacy-profile-desc {
+  margin-bottom: 24px;
+}
+:root:root .legacy-profile-row > .legacy-profile-label {
+  width: auto;
+}
+:root:root .legacy-profile-row > .legacy-profile-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .legacy-profile-control > .legacy-input-profile {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+/* Email is not code: system font; credits are numeric: tabular digits */
+:root:root .legacy-profile-mono {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-profile-hint {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+/* ═══ Personal settings · security (security.tsx, profile/sessions-list.tsx): CSS-only mapping, structure unchanged ═══
+ * Each .personal-security-card becomes external group title + description with card content: one password row (description left, button right),
+ * one session-list card (hairline row separators), force-all-logouts in a separate row card. */
+:root:root .personal-security-page {
+  width: 100%;
+}
+:root:root .personal-security-card {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root .personal-security-card + .personal-security-card {
+  margin-top: var(--group-gap);
+}
+:root:root .personal-security-card__heading h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .personal-security-card__heading p {
+  max-width: 560px;
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+/* Card surfaces: password row, change-password panel, session list, force-all-logouts */
+:root:root .personal-security-card__action,
+:root:root .personal-security-password-panel.profile-security-page,
+:root:root .personal-security-sessions__list,
+:root:root .personal-security-card__danger {
+  margin: 8px 0 0;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .personal-security-card__action,
+:root:root .personal-security-card__danger {
+  min-height: var(--group-row-min-h);
+  padding: 10px 16px;
+  gap: 16px;
+}
+:root:root .personal-security-card__action > a {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+:root:root .personal-security-password-panel.profile-security-page {
+  padding: 16px;
+}
+:root:root .personal-security-card .personal-security-card__danger {
+  margin-top: var(--group-gap);
+}
+:root:root .personal-security-card__danger h3 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+}
+:root:root .personal-security-card__danger p {
+  margin: 2px 0 0;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+/* Session list: one card, hairline row separators; current device marked only by badge, no full-row color */
+:root:root .personal-security-sessions {
+  margin-top: 8px;
+}
+:root:root .personal-security-sessions .personal-security-sessions__list {
+  gap: 0;
+  margin-top: 0;
+  overflow: hidden;
+}
+:root:root .personal-security-session,
+:root:root .personal-security-session.is-current {
+  min-height: var(--table-row-h);
+  padding: 10px 16px;
+  gap: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root .personal-security-session + .personal-security-session {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .personal-security-session__device-mark {
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-fill-2);
+}
+:root:root .personal-security-session__title {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .personal-security-session__current {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .personal-security-session__meta {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .personal-security-sessions__notice,
+:root:root .personal-security-sessions__empty {
+  border: 0;
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+}
+:root:root .personal-security-sessions__empty {
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+@media (max-width: 767.98px) {
+  :root:root .personal-security-card__danger {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+:root:root .personal-security-card > .ui-skeleton,
+:root:root .personal-security-page > .ui-skeleton {
+  margin-top: 8px;
+}
+
+/* ═══ Personal settings · appearance (personal-appearance-settings.tsx, pa-* hook classes outside CSS Module) ═══
+ * Header loses scope icon, retains title / description / secondary link; section titles 16/650 system font, no eyebrows or inter-section separators;
+ * settings rows within sections share one group card (hairline separators); side-by-side labels top-aligned;
+ * current-source text becomes regular-text badge. */
+:root:root .pa-page {
+  width: 100%;
+}
+:root:root .pa-heading {
+  display: block;
+  margin: 0 0 24px;
+}
+:root:root .pa-heading .pa-scope-icon {
+  display: none;
+}
+:root:root .pa-heading .ui-page-desc {
+  margin-bottom: 0;
+}
+:root:root .pa-team-link {
+  margin-top: 6px;
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .pa-section,
+:root:root .pa-section + .pa-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+:root:root .pa-section + .pa-section {
+  margin-top: var(--group-gap);
+}
+:root:root .pa-section-heading > span {
+  display: none;
+}
+:root:root .pa-section-heading h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root .pa-section-heading p {
+  max-width: 560px;
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .pa-section-body {
+  margin: 8px 0 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .pa-section-body > .pa-setting-row,
+:root:root .pa-section-body > .pa-palette-library {
+  padding: 14px 16px;
+  border: 0;
+}
+:root:root .pa-section-body > * + .pa-setting-row,
+:root:root .pa-section-body > * + .pa-palette-library {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+/* Current-effect preview: last block in card, 16 around it */
+:root:root .pa-section-body > .pa-current-effect {
+  margin: 0 16px 16px;
+}
+:root:root .pa-setting-row[data-compact="true"] {
+  grid-template-columns: var(--group-label-w) minmax(0, 1fr);
+  align-items: start;
+}
+:root:root .pa-setting-head h3 {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+}
+:root:root .pa-setting-head p {
+  margin-top: 2px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .pa-inheritance > span {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root .pa-inheritance button {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+/* Charts section: personal chart-style panel already within group card, remove its own border; remove eyebrow, reduce title to row label */
+:root:root .pa-section-body > .cs-member {
+  margin: 0;
+  padding: 14px 16px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .pa-section-body > .cs-member .cs-member__header .cs-kicker {
+  display: none;
+}
+:root:root .pa-section-body > .cs-member .cs-member__header h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+:root:root .pa-section-body > .cs-member .cs-member__header p {
+  margin-top: 2px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Restore-defaults row: separate group card, description left/button right */
+:root:root .pa-danger-zone {
+  min-height: var(--group-row-min-h);
+  margin-top: var(--group-gap);
+  padding: 10px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .pa-danger-zone strong {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .pa-danger-zone p {
+  margin-top: 2px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+@media (max-width: 767.98px) {
+  :root:root .pa-setting-row[data-compact="true"] {
+    display: block;
+  }
+  :root:root .pa-setting-row[data-compact="true"] .pa-setting-head {
+    margin-bottom: 11px;
+  }
+}
+
+
+/* ═══ Personal settings · access requests (access-requests-content.tsx): list page 1120;
+ * requests in one card (hairline row separators); centered content-surface empty card (no dashed border) ═══ */
+:root:root .legacy-acr-page {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+:root:root .legacy-acr-empty {
+  padding: 32px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-acr-list {
+  gap: 0;
+  overflow: hidden;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-acr-item {
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root .legacy-acr-item + .legacy-acr-item {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .legacy-acr-label {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .legacy-acr-denied {
+  color: var(--c-warn-ink);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-acr-status {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-acr-meta {
+  margin-top: 4px;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-acr-email {
+  color: var(--c-ink-3);
+}
+:root:root .legacy-acr-message {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font-family: var(--font-control);
+}
+:root:root .legacy-acr-message.is-empty {
+  color: var(--c-ink-3);
+}
+:root:root .legacy-acr-actions {
+  gap: 8px;
+  margin-top: 10px;
+}
+:root:root .legacy-profile-badge {
+  border: 0;
+}
+
+/* ═══ My connections (/connections: personal-capability-page.tsx shell + personal-mcp-settings.tsx) ═══
+ * List page 1120, side gutters by breakpoint; header 22/700; saved-connections group title; centered content-surface
+ * empty card with one next step. */
+/* The 1120 column and gutters come from PageFrame (styles/ui-refresh-page-frame.css). */
+:root:root .personal-mcp-page-header {
+  gap: 0;
+  padding: 0 0 8px;
+}
+/* Personal MCP is a section of My Connections (/connections): section title below the 22/700 page H1. */
+:root:root .personal-mcp-page-header h2.personal-mcp-section-title {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+:root:root .personal-mcp-list-heading {
+  padding: 0;
+}
+:root:root .personal-mcp-list-heading h3 {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .personal-mcp-list-heading p {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .personal-mcp-connections-list {
+  gap: 8px;
+}
+:root:root .personal-mcp-connections-empty {
+  justify-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  text-align: center;
+}
+:root:root .personal-mcp-connections-empty > .personal-mcp-add-connection {
+  width: auto;
+}
+
+/* ═══ Bind Feishu account (/me/integrations/feishu/bind: fb-* hook classes outside bind.module.css) ═══
+ * Standalone confirmation flow (outside settings shell): remove decorative gradient background; content-surface hairline
+ * card, --r-4, no large shadow;
+ * eyebrow and Feishu / LARK become regular 12px auxiliary text; title 22/700, state title 17/650 system font; buttons
+ * use unified primary / secondary sizes. */
+:root:root .fb-page {
+  background: none;
+}
+:root:root .fb-context {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .fb-eyebrow,
+:root:root .fb-provider {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .fb-card {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .fb-provider-mark {
+  border: 0;
+  border-radius: var(--r-3);
+}
+:root:root .fb-title {
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+:root:root .fb-divider {
+  height: var(--hairline);
+  background: var(--c-separator);
+}
+:root:root .fb-state-copy h2 {
+  font-family: var(--font-control);
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root .fb-state-copy p {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root .fb-identity {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .fb-identity dt {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .fb-expiry {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+}
+:root:root .fb-boundary-note,
+:root:root .fb-privacy-callout {
+  border-left: 0;
+  border-radius: var(--r-3);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .fb-primary,
+:root:root .fb-secondary {
+  min-height: var(--control-h-lg, 36px);
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow: none;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1;
+  transform: none;
+}
+:root:root .fb-primary:hover:not(:disabled) {
+  transform: none;
+}
+:root:root .fb-secondary {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .fb-secondary:hover:not(:disabled) {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .fb-primary:focus-visible,
+:root:root .fb-secondary:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root .fb-footer-note {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+
+/* @section accept-a:people —— page-by-page acceptance A · team/members and space settings: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═══ Team settings · members (people.tsx): header only one primary action (your-role text becomes plain explanation, not badge);
+ * toolbar search/role filters hide field names (placeholders explain, names screen-reader only), controls/buttons centered on same row ═══ */
+:root:root .settings-people-hero__actions > .people-role-pill.people-role-pill {
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .settings-people-hero__actions > .people-role-pill.people-role-pill strong {
+  color: var(--c-ink-2);
+  font-weight: 600;
+}
+:root:root .settings-people-hero__actions > .people-role-pill.people-role-pill svg {
+  display: none;
+}
+:root:root .people-list-toolbar {
+  align-items: center;
+}
+:root:root .people-list-toolbar > .settings-field > .settings-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+:root:root .people-list-toolbar__actions {
+  align-items: center;
+}
+/* Page size: field name/dropdown on same line */
+:root:root .people-list-toolbar .people-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+:root:root .people-view-panel > .ui-filter-chips {
+  margin-top: -6px;
+}
+
+/* ═══ Space settings · space access (members.tsx): two sections become groups — title/description outside cards,
+ * add-member row and member table each a card; create-or-invite-new-user note below card.
+ * Mobile member table → list rows (decision 12) outside this batch, frame still scrolls horizontally. ═══ */
+:root:root .ui-members-group.ui-section-card {
+  margin-top: var(--group-gap);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .ui-members-group > .ui-section-title {
+  margin: 0;
+}
+:root:root .ui-members-group > .ui-section-title + .ui-section-desc {
+  margin: 2px 0 0;
+}
+:root:root .ui-members-group > .ui-section-title + :not(.ui-section-desc) {
+  margin-top: 8px;
+}
+:root:root .ui-members-add-row {
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-members-add-row > .settings-field {
+  margin: 0;
+}
+:root:root .ui-members-group > .ui-section-desc:last-child {
+  max-width: 640px;
+  margin: 8px 0 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-members-list > .ui-table-frame {
+  margin-top: 8px;
+}
+
+/* ═══ Team settings · spaces (team-spaces-admin.tsx): create/list groups; toolbar only search, status and search button, field names screen-reader only ═══ */
+:root:root .ui-tsa-create-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .ui-tsa-create-control > .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: var(--group-control-max);
+}
+:root:root .ui-tsa-create-control > .settings-button {
+  flex: none;
+}
+:root:root .ui-tsa-list .team-spaces-filters {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 200px) auto;
+  align-items: center;
+  margin-bottom: 0;
+}
+:root:root .ui-tsa-list .team-spaces-filters .settings-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+:root:root .ui-tsa-list .team-spaces-filters > .legacy-tsa-aligned {
+  height: auto;
+  min-height: var(--control-h-md);
+}
+:root:root .ui-tsa-list-card {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-tsa-list > .ui-skeleton {
+  margin-top: 12px;
+}
+:root:root .ui-tsa-row {
+  min-height: var(--table-row-h);
+  padding: 8px 12px 8px 16px;
+  border-bottom: 0;
+}
+:root:root .ui-tsa-row + .ui-tsa-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ui-tsa-row:hover {
+  background: var(--row-hover-bg);
+}
+:root:root .ui-tsa-row-name {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-tsa-row-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .ui-tsa-row-meta {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+@media (max-width: 640px) {
+  :root:root .ui-tsa-list .team-spaces-filters {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* ═══ Team settings · licensing (local-license.tsx): information table becomes read-only group-card rows, feature/update groups without numbering/separators ═══ */
+:root:root .ui-license-update > .settings-button {
+  margin-top: 12px;
+}
+
+/* ═══ Space settings · general (space-general.tsx, workspace-i18n.tsx): name/description and localization both group cards ═══ */
+/* Localization: current-space row joins below group description, 8 before card */
+:root:root .ui-ws-i18n-current {
+  margin: 2px 0 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ui-ws-i18n-current-name {
+  margin-left: 4px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: inherit;
+}
+/* Rows: label (+description) left, control right spans two rows, vertically centered, controls fill the remaining column */
+:root:root .ui-ws-i18n-row > :nth-child(2) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-self: start;
+}
+:root:root .ui-ws-i18n-row > select {
+  justify-self: stretch;
+  width: 100%;
+  max-width: var(--group-control-max);
+}
+:root:root .ui-ws-i18n-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .ui-ws-i18n-switch-state {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-ws-i18n-saved {
+  margin: 0;
+  padding: 0 16px 10px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+@media (max-width: 767.98px) {
+  :root:root .ui-ws-i18n-row > :nth-child(2) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  :root:root .ui-ws-i18n-row > select {
+    max-width: none;
+  }
+}
+
+/* @section accept-a:integ —— page-by-page acceptance A · integration and security: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═════════════════════════════════════════════════════════════
+ * Team settings · integration/security: messaging (overview, Feishu, Slack, Teams), email, public entries, login/identity (OIDC).
+ * Integration, email and public-entry styles live in CSS Modules (build-hashed names); components use
+ * components/settings/ui-hook-classes.ts to append stable global hook classes to each class:
+ *   integration-pages.module.css → .ui-integ-*, email-service.module.css → .ui-email-*, public-entries.module.css → .ui-pe-*.
+ * All font sizes use --fs-* tiers (original 9.5–11px small text raised to 12 / 12.5),
+ * cards become content surface + hairline border + --r-4, no shadows/accent borders; eyebrows regular 12px auxiliary text (no uppercase/accent).
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Feishu details use main/sidebar columns: content uses table tier 1120 (settings shell gives tabs 880; widen here per page structure) ── */
+:root:root .settings-shell .settings-content-inner:has(.ui-integ-detail-layout) {
+  width: min(var(--content-w-table), 100%);
+}
+
+/* ── Integration: headers ── */
+:root:root .ui-integ-page {
+  gap: 20px;
+}
+:root:root .ui-integ-eyebrow {
+  margin: 0;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+:root:root :is(.ui-integ-page-header, .ui-integ-detail-header) {
+  align-items: flex-end;
+  gap: 16px;
+}
+:root:root .ui-integ-detail-header {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+:root:root .ui-integ-detail-identity {
+  align-items: center;
+  gap: 12px;
+}
+:root:root .ui-integ-provider-icon {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .ui-integ-detail-identity .ui-integ-provider-icon {
+  width: 40px;
+  height: 40px;
+}
+:root:root .ui-integ-provider-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ── Integration: buttons (custom module buttons align with shared: control height, --r-2, filled secondary, accent primary, ghost back) ── */
+:root:root
+  :is(
+    .ui-integ-refresh-button,
+    .ui-integ-back-button,
+    .ui-integ-primary-button,
+    .ui-integ-secondary-button,
+    .ui-integ-copy-button,
+    .ui-integ-stage-action
+  ) {
+  box-sizing: border-box;
+  width: auto;
+  height: auto;
+  min-height: var(--control-h-md);
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: normal;
+  box-shadow: none;
+}
+:root:root
+  :is(
+    .ui-integ-refresh-button,
+    .ui-integ-back-button,
+    .ui-integ-secondary-button,
+    .ui-integ-copy-button,
+    .ui-integ-stage-action
+  ):hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .ui-integ-primary-button {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+:root:root .ui-integ-primary-button:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+/* Back: accent-text ghost button, left-aligned, not full width */
+:root:root .ui-integ-back-button {
+  justify-self: start;
+  margin-left: -8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--c-accent-text);
+}
+:root:root .ui-integ-back-button:hover:not(:disabled) {
+  background: var(--c-fill-1);
+  color: var(--c-accent-text);
+}
+:root:root .ui-integ-copy-button {
+  min-height: calc(var(--control-h-md) - 4px);
+  padding: 0 10px;
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-provider-action {
+  min-width: 0;
+}
+:root:root
+  :is(
+    .ui-integ-refresh-button,
+    .ui-integ-back-button,
+    .ui-integ-primary-button,
+    .ui-integ-secondary-button,
+    .ui-integ-copy-button,
+    .ui-integ-stage-action
+  ):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* ── Integration: group titles (connected / planned / coming soon): 16/650 regular text, no uppercase or right horizontal line ── */
+:root:root .ui-integ-section-label {
+  margin: 12px 0 -8px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+  text-transform: none;
+}
+:root:root .ui-integ-section-label::after {
+  display: none;
+}
+
+/* ── Integration: cards (content surface + hairline border + --r-4, no shadow/accent border) ── */
+:root:root
+  :is(
+    .ui-integ-provider-card,
+    .ui-integ-callback-card,
+    .ui-integ-teams-config-card,
+    .ui-integ-teams-help,
+    .ui-integ-stage,
+    .ui-integ-stage-nav,
+    .ui-integ-side-card,
+    .ui-integ-action-bar
+  ) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-integ-stage[open] {
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root :is(.ui-integ-provider-card, .ui-integ-callback-card) {
+  gap: 12px;
+  padding: 16px;
+}
+:root:root :is(.ui-integ-teams-config-card, .ui-integ-teams-help) {
+  gap: 16px;
+  padding: 16px;
+}
+:root:root :is(.ui-integ-callback-card strong, .ui-integ-slack-app-intro strong) {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+:root:root .ui-integ-provider-title {
+  margin: 0 0 2px;
+  font-family: var(--font-control);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+:root:root :is(.ui-integ-provider-description, .ui-integ-callback-card p) {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root :is(.ui-integ-teams-card-header h2, .ui-integ-teams-help h2) {
+  margin: 0;
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root .ui-integ-teams-card-header p:not(.ui-integ-eyebrow),
+:root:root :is(.ui-integ-teams-form-footer p, .ui-integ-teams-help-note) {
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ui-integ-teams-card-header .ui-integ-eyebrow {
+  margin: 0 0 2px;
+}
+/* Teams personal-only: neutral badge */
+:root:root .ui-integ-teams-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .ui-integ-teams-help-grid article {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+}
+:root:root .ui-integ-teams-help-grid h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+:root:root .ui-integ-teams-help-grid :is(ul, ol) {
+  color: var(--c-ink-2);
+  font-size: 0.78125rem;
+}
+:root:root .ui-integ-teams-help-grid a {
+  color: var(--c-accent-text);
+}
+
+/* Status cells (integration overview cards, Feishu header status bar) */
+:root:root .ui-integ-status-grid {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+}
+:root:root .ui-integ-status-cell + .ui-integ-status-cell {
+  border-left: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-status-cell span {
+  margin-bottom: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-status-cell strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* Coming soon: retain dashed cards at hairline tier, text raised to 12 / 13 */
+:root:root .ui-integ-planned-card {
+  border: var(--hairline) dashed var(--c-separator);
+  border-radius: var(--r-4);
+  background: transparent;
+}
+:root:root .ui-integ-planned-card strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-integ-planned-card span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-planned-mark {
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+
+/* In-page notices (partial/save failure): light semantic background, no border */
+:root:root .ui-integ-status-banner {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-pos-soft);
+  color: var(--c-ink);
+}
+:root:root .ui-integ-status-banner-warn {
+  background: var(--c-warn-soft);
+}
+:root:root .ui-integ-status-banner strong {
+  margin-bottom: 2px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-integ-status-banner p {
+  color: var(--c-ink-2);
+  font-size: 0.78125rem;
+}
+
+/* ── Feishu details: sidebar cards, stage navigation/cards ── */
+:root:root :is(.ui-integ-side-card, .ui-integ-stage-nav) {
+  padding: 14px;
+}
+:root:root .ui-integ-next-steps-card {
+  background: var(--c-surface);
+}
+:root:root :is(.ui-integ-side-card, .ui-integ-stage-nav) h2 {
+  margin: 0 0 8px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .ui-integ-side-card li {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root .ui-integ-next-step-list button {
+  min-height: 0;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .ui-integ-next-step-list button:hover {
+  border-color: transparent;
+  background: var(--c-fill-2);
+}
+:root:root .ui-integ-next-step-list button > span:first-child {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-size: 0.6875rem;
+}
+:root:root .ui-integ-next-step-list strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-integ-next-step-list small {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-stage-nav button {
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+}
+:root:root .ui-integ-stage-nav button:is(:hover, [aria-current="step"]) {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .ui-integ-stage-nav button[aria-current="step"] .ui-integ-stage-nav-label {
+  font-weight: 600;
+}
+:root:root .ui-integ-stage-number {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+:root:root .ui-integ-stage-nav-label {
+  font-size: var(--fs-md);
+}
+:root:root .ui-integ-stage-nav-label small {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .ui-integ-stage-summary {
+  min-height: 60px;
+  padding: 0 16px;
+}
+:root:root .ui-integ-stage-summary-number {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+:root:root .ui-integ-stage-summary-copy strong {
+  font-family: var(--font-control);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .ui-integ-stage-summary-copy small {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-stage-body {
+  gap: 20px;
+  padding: 16px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-subsection + .ui-integ-subsection {
+  padding-top: 20px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-subsection-heading h3 {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+:root:root .ui-integ-subsection-heading p {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+
+/* Entry forms (credentials, Teams connection): stacked, labels 12/600 --c-ink-2, hints beneath controls 11.5 --c-ink-4 */
+:root:root :is(.ui-integ-field-grid, .ui-integ-teams-form-grid) {
+  gap: 12px 16px;
+}
+:root:root :is(.ui-integ-field, .ui-integ-teams-field) {
+  align-content: start;
+  gap: 5px;
+}
+:root:root :is(.ui-integ-field label, .ui-integ-teams-field > span) {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .ui-integ-teams-field {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root :is(.ui-integ-field small, .ui-integ-teams-field small) {
+  color: var(--c-ink-4);
+  font-size: 0.71875rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+:root:root :is(.ui-integ-input, .ui-integ-select, .ui-integ-teams-field input, .ui-integ-teams-field select) {
+  box-sizing: border-box;
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: var(--lh-tight);
+  outline: none;
+}
+:root:root :is(.ui-integ-input, .ui-integ-select, .ui-integ-teams-field input, .ui-integ-teams-field select):focus {
+  border-color: transparent;
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+/* Teams allowed-scopes checkbox rows */
+:root:root .ui-integ-checkbox-label {
+  min-height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font-size: var(--fs-md);
+}
+:root:root .ui-integ-checkbox-label:has(input:checked) {
+  background: var(--c-accent-tint);
+}
+
+/* Radio cards (event entry) */
+:root:root .ui-integ-choice-card {
+  min-height: 0;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+}
+:root:root .ui-integ-choice-card[aria-checked="true"] {
+  background: var(--c-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+}
+:root:root .ui-integ-choice-card strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-integ-choice-card span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* Main switch and integration-method rules: table (≥640) / list rows (<640, decision 12) */
+:root:root .ui-integ-linkage-table-frame {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-integ-linkage-table caption {
+  padding: 12px 12px 8px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+:root:root .ui-integ-linkage-table :is(th, td) {
+  padding: 8px 12px;
+  border-top: var(--hairline) solid var(--c-separator);
+  color: var(--c-ink-2);
+  font-size: 0.78125rem;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+:root:root .ui-integ-linkage-table th {
+  height: var(--table-head-h);
+  padding-block: 0;
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .ui-integ-linkage-table-frame > p {
+  padding: 10px 12px;
+  border-top: var(--hairline) solid var(--c-separator);
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-linkage-rows-caption {
+  display: none;
+  margin: 0;
+  padding: 12px 12px 8px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+:root:root .ui-integ-linkage-rows {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-linkage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 8px 12px;
+}
+:root:root .ui-integ-linkage-row + .ui-integ-linkage-row {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-linkage-row__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+:root:root .ui-integ-linkage-row__title {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.4;
+}
+:root:root .ui-integ-linkage-row__meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+:root:root .ui-integ-linkage-row__trail {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+:root:root .ui-integ-linkage-row__trail.is-good {
+  background: var(--c-pos-soft);
+  color: var(--c-pos-ink);
+}
+:root:root .ui-integ-linkage-row__trail.is-warn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}
+@media (max-width: 639.98px) {
+  :root:root .ui-integ-linkage-table {
+    display: none;
+  }
+  :root:root :is(.ui-integ-linkage-rows, .ui-integ-linkage-rows-caption) {
+    display: block;
+  }
+  :root:root .ui-integ-linkage-table-frame {
+    overflow: hidden;
+  }
+}
+
+/* Switch/address/check/issue rows and collapse headings: hairline border, --r-3, text raised to 12 / 13 */
+:root:root .ui-integ-switch-row {
+  min-height: var(--group-row-min-h);
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-integ-switch-row strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .ui-integ-switch-row p {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root :is(.ui-integ-url-row, .ui-integ-check-row, .ui-integ-problem-row, .ui-integ-collapsible-heading) {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-integ-collapsible-heading:hover {
+  border-color: transparent;
+  background: var(--c-fill-1);
+}
+:root:root :is(.ui-integ-url-row span, .ui-integ-check-row span) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.ui-integ-url-row code, .ui-integ-check-row code, .ui-integ-callback-row code, .ui-integ-setup-details code) {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.ui-integ-check-copy strong, .ui-integ-collapsible-heading strong, .ui-integ-problem-row strong) {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.ui-integ-check-copy p, .ui-integ-collapsible-heading small, .ui-integ-problem-row p) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-collapsible-heading > span:last-child {
+  color: var(--c-ink-3);
+}
+/* Manual-step instructions: remove left stripe (decision 4), use light semantic background */
+:root:root :is(.ui-integ-manual-note, .ui-integ-binding-note, .ui-integ-inherited-note) {
+  padding: 10px 12px;
+  border-left: 0;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+  color: var(--c-ink-2);
+  font-size: 0.78125rem;
+  line-height: 1.55;
+}
+:root:root .ui-integ-binding-note {
+  background: var(--c-fill-1);
+}
+:root:root .ui-integ-inherited-note {
+  background: var(--c-surface-2);
+}
+/* Stage action bar: save delegated to page-bottom save bar, leaving only feedback and next-stage; no narrow-screen sticky bottom (save bar sticks) */
+:root:root .ui-integ-action-bar {
+  padding: 10px 14px;
+  border-radius: var(--r-3);
+}
+:root:root .ui-integ-action-bar-success {
+  background: var(--c-pos-soft);
+}
+:root:root .ui-integ-action-feedback {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .ui-integ-action-bar-success .ui-integ-action-feedback strong {
+  color: var(--c-pos-ink);
+}
+:root:root .ui-integ-dialog-copy {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root :is(.ui-integ-setup-details strong, .ui-integ-setup-details p, .ui-integ-binding-steps p) {
+  font-size: var(--fs-sm);
+}
+:root:root .ui-integ-launch-record {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+  font-size: 0.71875rem;
+}
+@media (max-width: 720px) {
+  :root:root .ui-integ-stage-body > .ui-integ-action-bar {
+    position: static;
+    box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  }
+  :root:root :is(.ui-integ-page-header, .ui-integ-detail-header) {
+    align-items: stretch;
+  }
+  :root:root :is(.ui-integ-page-header, .ui-integ-detail-header) > :is(.ui-integ-refresh-button, .ui-integ-back-button, .ui-integ-secondary-button) {
+    align-self: flex-start;
+    width: auto;
+  }
+  /* Narrow-screen header text only: hide provider icon cramped beside three description lines */
+  :root:root .ui-integ-detail-identity > .ui-integ-provider-icon {
+    display: none;
+  }
+  :root:root .ui-integ-status-cell + .ui-integ-status-cell {
+    border-top: var(--hairline) solid var(--c-separator);
+    border-left: 0;
+  }
+}
+
+/* ── Slack: app introduction and creation steps ── */
+:root:root .ui-integ-slack-app-intro {
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+}
+:root:root .ui-integ-slack-app-intro p {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .ui-integ-slack-app-creation-steps li {
+  border-color: var(--c-separator);
+  border-width: var(--hairline);
+  background: var(--c-surface);
+}
+:root:root .ui-integ-slack-app-creation-steps strong {
+  font-size: var(--fs-md);
+}
+:root:root .ui-integ-slack-app-creation-steps p {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Button names within steps (Create an App etc.) are inline emphasis; original standalone strong step-title rule also split them onto separate lines */
+:root:root .ui-integ-slack-app-creation-steps p strong {
+  display: inline;
+  color: var(--c-ink-2);
+  font-size: inherit;
+  font-weight: 600;
+}
+:root:root :is(.ui-integ-slack-scope-list, .ui-integ-callback-list) {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-integ-callback-row + .ui-integ-callback-row {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-integ-callback-row span {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root :is(.ui-integ-slack-scope-list code, .ui-integ-slack-steps, .ui-integ-slack-personal-mcp > p, .ui-integ-slack-setup-card p) {
+  font-size: var(--fs-sm);
+}
+
+/* ═══ Email service (entry form: stacked, max form width 560) ═══ */
+:root:root .ui-email-form-card {
+  padding: 16px 16px 20px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-email-status-row {
+  padding-bottom: 16px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+/* Narrow-screen stacked status rows: badge must not stretch to full row width */
+:root:root .ui-email-badge {
+  justify-self: start;
+}
+:root:root .ui-email-status-description {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ui-email-form {
+  gap: 32px;
+  max-width: 560px;
+}
+:root:root .ui-email-section {
+  gap: 12px;
+}
+:root:root .ui-email-section-header {
+  gap: 2px;
+}
+:root:root .ui-email-section-header h2 {
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .ui-email-section-header p {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .ui-email-two-column {
+  gap: 12px 16px;
+}
+:root:root .ui-email-preset button {
+  min-height: calc(var(--control-h-md) - 4px);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .ui-email-preset button:hover {
+  background: var(--c-fill-3);
+}
+:root:root .ui-email-actions {
+  gap: 8px;
+  margin-top: 0;
+  padding-top: 16px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-email-action-hint {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-email-load-failed {
+  padding: 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+
+/* ═══ Login/identity (OIDC): stacked entry forms (.ui-form-stack), max form width 560, buttons not full width ═══ */
+
+/* ═══ Public entries ═══ */
+:root:root .ui-pe-page {
+  max-width: none;
+  gap: 20px;
+}
+:root:root :is(.ui-pe-verification, .ui-pe-card) {
+  padding: 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Current request entry: remove left accent stripe, distinguish with current-request-entry badge */
+:root:root .ui-pe-current-card {
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-pe-verification p {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .ui-pe-verification a {
+  color: var(--c-accent-text);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-pe-current-summary {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .ui-pe-current-summary span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .ui-pe-current-summary small {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-pe-entry-identity > div {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-pe-entry-id code {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .ui-pe-badges {
+  align-items: center;
+  gap: 6px;
+}
+:root:root .ui-pe-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  line-height: 1;
+}
+:root:root .ui-pe-current-badge {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .ui-pe-http-warning {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+  color: var(--c-ink-2);
+}
+:root:root .ui-pe-http-warning strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-pe-http-warning span {
+  font-size: 0.78125rem;
+}
+:root:root .ui-pe-section-heading strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-pe-section-heading span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-pe-provider-name {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* @section accept-a:models —— page-by-page acceptance A · models: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═══ Team settings · models (/team/settings/models and assignments, connections/new|edit, external, external/image|search) ═══
+ * Structure entirely in components/settings/models.tsx (.mset) and models/*.tsx; base styles styles/models-settings.css.
+ * Header: remove underline (header → first group 24); group titles remove 01/02/03 and ①②③ numbering (not steps), 16/650;
+ * connection/assignment/external-capability row lists become group cards (content surface + hairline border/separators, row padding 10 / 16);
+ * edit-page cards (connection card/form, primary model, knowledge base, external service models) share card appearance, no left stripe;
+ * mono uppercase small text (field names, steps, source marks) becomes regular system font; draft dock replaced by SaveBar. */
+
+/* ── Page rhythm: header → first group 24, group gap 32 ── */
+:root:root .mset {
+  gap: 24px;
+}
+:root:root .mset.v4 {
+  /* Original 96 reserved for sticky draft dock; save bar mounts in shell slot, no longer occupies content */
+  padding-bottom: 0;
+}
+:root:root .mset :is(.model-overview, .model-editor) {
+  gap: var(--group-gap);
+}
+
+/* ── Header: no separator, draft-state chip uses system font ── */
+:root:root .mset .ph {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+:root:root .mset .ph .ph-sub.ui-page-desc {
+  /* Header description loses its own bottom margin 24 (.mset gap supplies header → first group 24) */
+  margin-bottom: 0;
+}
+/* Overview header without actions: empty action area takes no space (would add gap 13 in narrow stacked header) */
+:root:root .mset .ph-actions:empty {
+  display: none;
+}
+/* One-line readiness hint beneath header: no independent bottom margin 18 */
+:root:root .mset .overview-quiet {
+  margin: 0;
+}
+:root:root .mset .draft-model-note {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+:root:root .mset .draft-model-note:not(.is-dirty) {
+  border-color: transparent;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+
+/* ── Group titles: no numbering, 16/650 + description 12.5 ink3 (2 below title), title → card 8 ── */
+:root:root .mset :is(.overview-section-index, .overview-kicker, .block-n) {
+  display: none;
+}
+:root:root .mset .overview-section {
+  gap: 8px;
+}
+:root:root .mset :is(.overview-section-head h2, .overview-readiness h2, .runtime-head h2, .block-title) {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  font-style: normal;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root .mset :is(.overview-section-head p, .overview-readiness p) {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .mset .block {
+  gap: 12px;
+}
+:root:root .mset .block-head {
+  gap: 8px;
+}
+:root:root .mset .block-sub {
+  color: var(--c-ink-3);
+}
+:root:root .mset .block-desc {
+  /* gap 12 − 10 = 2 below title */
+  margin: -10px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+/* Standalone block button (add service model) must not stretch full row */
+:root:root .mset .block > .btn {
+  align-self: flex-start;
+}
+
+/* ── Group cards: row lists (connections, production assignments, external capabilities) share edit-card appearance ── */
+:root:root .mset :is(
+    .overview-provider-rows,
+    .overview-ledger,
+    .overview-external-rows,
+    .overview-empty,
+    .overview-ledger-empty,
+    .overview-ledger-loading,
+    .overview-readiness,
+    .runtime-overview,
+    .pcard,
+    .connect,
+    .default-sel,
+    .kb-sel,
+    .verification-plan,
+    .external-capability-model
+  ) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .mset :is(.overview-provider-rows, .overview-ledger, .overview-external-rows) {
+  /* Row backgrounds (blocking / risk) stay within card radii */
+  overflow: hidden;
+}
+:root:root .mset :is(.overview-empty, .overview-ledger-empty, .overview-ledger-loading) {
+  padding: 14px 16px;
+}
+:root:root .mset .external-capability-model {
+  margin: 0;
+}
+/* Remove connection card left stripe 3px (group cards have no stripe) */
+:root:root .mset .pcard::before {
+  display: none;
+}
+
+/* Rows: padding 10 / 16, minimum 44, hairline separators */
+:root:root .mset :is(.overview-provider-row, .overview-external-rows > div, .overview-ledger-row) {
+  min-height: var(--group-row-min-h);
+  padding: 10px 16px;
+  border-bottom: 0;
+}
+:root:root .mset :is(
+    .overview-provider-row + .overview-provider-row,
+    .overview-external-rows > div + div,
+    .overview-ledger-row,
+    .overview-ledger-more
+  ) {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+/* Production-assignment table header: 32 high, --c-surface-2, 11.5/600 ink3 */
+:root:root .mset .overview-ledger-header {
+  align-items: center;
+  min-height: 32px;
+  padding: 0 16px;
+  border-bottom: 0;
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+/* Blocking/risk rows previously extended background with side shadows 12; card rows have padding 16, so background fills directly */
+:root:root .mset :is(.overview-ledger-row.is-blocked, .overview-ledger-row.is-warning) {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .mset .overview-ledger-more {
+  border-bottom: 0;
+  color: var(--c-accent-text);
+}
+:root:root .mset .overview-provider-icon {
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+}
+/* Protocol name is a label, not code: system font 12 ink3 (URL/fingerprint remain mono) */
+:root:root .mset .overview-provider-main span {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .mset .overview-external-rows b:not(.is-configured, .is-running, .is-failed) {
+  color: var(--c-ink-3);
+}
+
+/* Narrow (≤640, same base breakpoint): stacked secondary-info separators also hairline; runtime overview stacked, no left divider */
+@media (max-width: 640px) {
+  :root:root .mset :is(.overview-provider-secret, .overview-ledger-capability, .overview-ledger-fact, .overview-ledger-attempt) {
+    border-top: var(--hairline) solid var(--c-separator);
+  }
+}
+
+/* ── Edit-card interiors: hairlines, system font ── */
+:root:root .mset .pcard-name {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .mset .pcard-body {
+  border-top: 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .mset .pcard-ico {
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+}
+:root:root .mset :is(.pcard-field .fl, .connect-head .step) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .mset .catalog {
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .mset .cat-row {
+  border-top: 0;
+}
+:root:root .mset .cat-row + .cat-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .mset :is(.cat-src, .kb-row .kbl .req, .kb-row .kbl .opt) {
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .mset .tier-adv {
+  border-top: 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .mset .add-card,
+:root:root .mset .empty {
+  border-color: var(--c-separator);
+  border-radius: var(--r-4);
+}
+
+/* ── Connection form (stacked entry: labels 12/600 ink2, hints beneath controls 11.5 ink4) ── */
+:root:root .mset .connect-head {
+  border-bottom: 0;
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+}
+:root:root .mset .connect-foot {
+  border-top: 0;
+  background: transparent;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .mset .fld {
+  gap: 5px;
+}
+:root:root .mset .fld label {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .mset .fld .hint {
+  font-size: 0.71875rem;
+  line-height: 1.45;
+}
+:root:root .mset .unver-note.legacy-mset-unver-neutral {
+  border-color: var(--c-separator);
+}
+
+/* Give the connection editor a readable hierarchy without changing other model settings pages. */
+:root:root .mset .model-editor-connection .block-title {
+  font-size: 1.125rem;
+}
+:root:root .mset .model-editor-connection .block-sub {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+:root:root .mset .model-editor-connection .connect-head {
+  padding: 18px 22px;
+  background: var(--c-surface-2);
+}
+:root:root .mset .model-editor-connection .connect-head .t {
+  font-size: 1.0625rem;
+}
+:root:root .mset .model-editor-connection .connect-head .step {
+  font-size: 0.75rem;
+}
+:root:root .mset .model-editor-connection .connect-body {
+  gap: 22px;
+  padding: 22px;
+}
+:root:root .mset .model-editor-connection .fld {
+  gap: 8px;
+}
+:root:root .mset .model-editor-connection .fld label {
+  font-size: 0.875rem;
+}
+:root:root .mset .model-editor-connection .fld .hint,
+:root:root .mset .model-editor-connection .proto-hint {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--c-ink-3);
+}
+:root:root .mset .model-editor-connection .proto-opt {
+  padding: 14px 16px;
+  gap: 5px;
+}
+:root:root .mset .model-editor-connection .proto-opt .pn {
+  font-size: 0.875rem;
+}
+:root:root .mset .model-editor-connection .proto-opt .ps {
+  font-size: 0.75rem;
+}
+:root:root .mset .model-editor-connection .catalog-tools .lab {
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root:root .mset .model-editor-connection .mini-btn {
+  font-size: 0.8125rem;
+  padding: 7px 11px;
+}
+:root:root .mset .model-editor-connection .medit {
+  display: grid;
+  gap: 12px;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+:root:root .mset .model-editor-connection .medit-row {
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--c-separator);
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+}
+:root:root .mset .model-editor-connection .medit-id input.mid {
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 0.875rem;
+  color: var(--c-ink);
+  background: var(--c-surface);
+}
+:root:root .mset .model-editor-connection .cat-src {
+  font-size: 0.6875rem;
+  padding: 3px 7px;
+}
+:root:root .mset .model-editor-connection .captoggle {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+:root:root .mset .model-editor-connection .medit-proto {
+  gap: 10px 14px;
+  margin-top: 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-separator);
+}
+:root:root .mset .model-editor-connection .medit-proto .mp-lab {
+  min-width: 112px;
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--c-ink-2);
+}
+:root:root .mset .model-editor-connection .medit-proto > .inp,
+:root:root .mset .model-editor-connection .medit-proto .selbox {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 0;
+  max-width: 320px;
+}
+:root:root .mset .model-editor-connection .medit-proto > .inp,
+:root:root .mset .model-editor-connection .medit-proto .selbox select {
+  min-height: 38px;
+  font-size: 0.875rem;
+}
+:root:root .mset .model-editor-connection .medit-proto .mp-hint {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--c-ink-3);
+}
+:root:root .mset .model-editor-connection .medit-row {
+  --model-setting-label-width: 172px;
+}
+:root:root .mset .model-editor-connection .medit-setting-row,
+:root:root .mset .model-editor-connection .mp-rate-row {
+  display: grid;
+  grid-template-columns: var(--model-setting-label-width) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 16px;
+}
+:root:root .mset .model-editor-connection .medit-setting-row .mp-lab,
+:root:root .mset .model-editor-connection .mp-rate-row .mp-lab {
+  min-width: 0;
+  line-height: 1.4;
+}
+:root:root .mset .model-editor-connection .medit-setting-row .selbox,
+:root:root .mset .model-editor-connection .medit-setting-row > .inp,
+:root:root .mset .model-editor-connection .mp-rate-row > .inp {
+  width: 100%;
+  min-width: 0;
+  max-width: 320px;
+  min-height: 38px;
+}
+:root:root .mset .model-editor-connection .medit-setting-row .mp-hint {
+  grid-column: 2;
+  margin-top: -2px;
+}
+:root:root .mset .model-editor-connection .medit-rates {
+  display: block;
+  min-width: 0;
+  margin-right: 0;
+  margin-left: 0;
+  padding-right: 0;
+  padding-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+}
+:root:root .mset .model-editor-connection .medit-rates > legend {
+  padding: 0;
+  margin-bottom: 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+:root:root .mset .model-editor-connection .mp-rate-fields {
+  display: grid;
+  gap: 10px;
+}
+:root:root .mset .model-editor-connection .mp-rate-row {
+  min-height: 38px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+:root:root .mset .model-editor-connection .mp-rate-row > .inp {
+  box-sizing: border-box;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--c-ink);
+  background: var(--c-surface);
+}
+:root:root .mset .model-editor-connection .medit-rates .field-error {
+  display: block;
+  margin-top: 10px;
+}
+:root:root .mset .model-editor-connection .medit-advanced summary,
+:root:root .mset .model-editor-connection .mset-outbound__title {
+  font-size: 0.8125rem;
+}
+:root:root .mset .model-editor-connection .connect-foot {
+  padding: 16px 22px;
+}
+
+@media (max-width: 640px) {
+  :root:root .mset .model-editor-connection .connect-body {
+    padding: 18px;
+  }
+  :root:root .mset .model-editor-connection .medit-proto > .inp,
+  :root:root .mset .model-editor-connection .medit-proto .selbox {
+    width: 100%;
+    max-width: none;
+  }
+  :root:root .mset .model-editor-connection .medit-setting-row,
+  :root:root .mset .model-editor-connection .mp-rate-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 7px;
+  }
+  :root:root .mset .model-editor-connection .medit-setting-row .mp-hint {
+    grid-column: 1;
+    margin-top: 0;
+  }
+  :root:root .mset .model-editor-connection .medit-setting-row .selbox,
+  :root:root .mset .model-editor-connection .medit-setting-row > .inp,
+  :root:root .mset .model-editor-connection .mp-rate-row > .inp {
+    max-width: none;
+  }
+}
+
+/* ── Secondary save-bar note (number of modified configuration areas) ── */
+:root:root .ui-savebar-meta {
+  color: var(--c-ink-3);
+}
+
+/* @section accept-a:ai —— page-by-page acceptance A · AI/data: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═══ Shared ai group: header (title/description left, sole primary action right), toolbar, section titles ═══ */
+:root:root .ai-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin: 0 0 24px;
+}
+:root:root .ai-page-head-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+:root:root .ai-page-head-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+:root:root .ai-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 16px;
+}
+:root:root .ai-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .ai-section-title {
+  margin: 0 0 8px;
+}
+:root:root .ai-section-title + .ui-section-desc {
+  margin: -6px 0 8px;
+}
+:root:root .ai-card-list {
+  gap: 8px;
+}
+
+/* ═══ Data sources (datarc-connections.tsx) ═══ */
+:root:root .ai-ds {
+  max-width: none;
+}
+/* Connection cards: content surface + hairline border, row retains only content, actions under ⋯ */
+:root:root .ai-source-card {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-source-card > :first-child {
+  display: grid;
+  margin: 0;
+  padding: 0;
+}
+:root:root .ai-source-name {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+}
+:root:root .ai-source-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .ai-source-status.is-active {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .ai-source-meta {
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .ai-source-url {
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  line-height: 1.45;
+}
+/* ═══ Tools (tools/tools-manager.tsx) ═══ */
+:root:root .ai-tools {
+  max-width: none;
+  font-family: var(--font-control);
+}
+/* Built-in tools (Tavily, Datarc) and tool-source cards: content surface + hairline border + --r-4, row retains only content/enable switch */
+:root:root .ai-tools-builtin {
+  margin-bottom: 8px;
+  padding: 12px 12px 12px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-tools-builtin strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ai-tools-builtin-desc {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .ai-tools-card {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-tools-card.is-failed {
+  box-shadow: 0 0 0 1px var(--c-err);
+}
+:root:root .ai-tools-card .tool-source-card-top {
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+}
+:root:root .ai-tools-card .tool-source-card-main {
+  gap: 4px;
+}
+:root:root .ai-tools-card-name {
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+:root:root .ai-tools-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  font-size: 0.71875rem;
+}
+:root:root .ai-tools-pill.is-accent {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .ai-tools-auth {
+  font-size: var(--fs-sm);
+}
+:root:root .ai-tools-card-meta {
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+:root:root .ai-tools-avail {
+  gap: 4px;
+  border-left: var(--hairline) solid var(--c-separator);
+}
+:root:root .ai-tools-avail-label {
+  font-size: 0.6875rem;
+}
+:root:root .ai-tools-expand {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border-color: transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+}
+:root:root .ai-tools-expand:hover {
+  background: var(--c-fill-1);
+}
+/* Expanded operations: hairline separators, secondary background; subtitles regular 12px (no mono uppercase) */
+:root:root .ai-tools-ops {
+  padding: 10px 16px 12px;
+  border-top: 0;
+  background: var(--c-surface-2);
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ai-tools-ops-label {
+  margin-bottom: 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .ai-tools-op {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  font-size: 0.71875rem;
+}
+:root:root .ai-tools-op.is-match {
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+}
+/* Toolbar: search box no longer fills row */
+:root:root .ai-tools-search {
+  max-width: 360px;
+  margin: 16px 0 12px;
+}
+:root:root .ai-tools-search-icon {
+  display: inline-flex;
+  left: 10px;
+}
+:root:root .ai-tools-search > input.ai-tools-search-input.ai-tools-search-input {
+  width: 100%;
+  padding-left: 32px;
+}
+:root:root .ai-tools-nomatch {
+  padding: 8px 0;
+  font-size: 0.78125rem;
+}
+/* Built-in capabilities: section title 16/650, category title regular 12px, capability cards hairline border */
+:root:root .ai-tools-caps {
+  margin-top: 32px;
+}
+:root:root .ai-tools-cap-cat {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .ai-tools-cap-grid {
+  gap: 8px;
+}
+:root:root .ai-tools-cap {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-tools-cap-name {
+  font-size: var(--fs-md);
+}
+:root:root .ai-tools-cap-blurb {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Empty state: one title, one explanation, one next step */
+:root:root .ai-tools-empty {
+  gap: 6px;
+  padding: 40px 24px;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-tools-empty-title {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+}
+:root:root .ai-tools-empty-sub {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+/* ═══ System built-in agents (subagents/page.tsx, builtin-subagents-section.tsx) ═══ */
+:root:root .ai-sa {
+  font-family: var(--font-control);
+}
+/* Count row: right count regular 12px (no mono) */
+:root:root .ai-count-row {
+  margin: 0 0 12px;
+}
+:root:root .ai-count {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .ai-sa-card {
+  padding: 14px 16px 12px;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-sa-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .ai-sa-chip.is-changed {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .ai-sa-chip.is-muted {
+  color: var(--c-ink-3);
+}
+:root:root .ai-sa-title-row {
+  gap: 8px;
+  margin-top: 8px;
+}
+:root:root .ai-sa-name {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+:root:root .ai-sa-id {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .ai-sa-desc {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+:root:root .ai-sa-foot {
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ai-sa-meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.ai-sa-empty, .ai-wf-empty) {
+  padding: 40px 24px;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root :is(.ai-sa-empty-title, .ai-wf-empty-title) {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root :is(.ai-sa-empty-body, .ai-wf-empty-body) {
+  margin-top: 4px;
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+
+/* ═══ Team processes (workflows/page.tsx; cards same shape as built-in agents, reuse ai-sa-*) ═══ */
+:root:root .ai-wf-approvals {
+  margin-bottom: 32px;
+}
+/* Pending-approval cards: hairline border becomes light warning border, no full solid yellow frame */
+:root:root .ai-wf-card.is-approval {
+  padding: 14px 16px 12px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-warn) 45%, transparent);
+}
+:root:root .ai-wf-by {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .ai-wf-link {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+}
+:root:root button.ai-wf-link {
+  font-size: var(--fs-sm);
+}
+:root:root button.ai-wf-link:hover {
+  text-decoration: underline;
+}
+:root:root .ai-wf-pre {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-wf-decide {
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+
+/* ═══ Scheduled tasks (scheduled.tsx) ═══ */
+:root:root .ai-page-head .ui-page-desc {
+  margin-bottom: 0;
+}
+/* Root was vertical flex gap 22: header bottom margin supplies first-block gap 24, other blocks gap 12 */
+:root:root .ai-sched {
+  gap: 12px;
+  max-width: none;
+}
+:root:root .ai-sched > .ai-page-head {
+  margin-bottom: 12px;
+}
+:root:root .ai-sched .ai-page-head-text {
+  gap: 2px;
+}
+/* Breadcrumb: mono uppercase small text → regular auxiliary 12px */
+:root:root .ai-sched-eyebrow {
+  gap: 6px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+:root:root .ai-sched-title-row {
+  gap: 10px;
+}
+/* 3 / 10 beside title: neutral badge, tabular digits */
+:root:root .ai-sched-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
+}
+:root:root .ai-sched-routine {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-sched-rrow {
+  gap: 16px;
+  padding: 12px 12px 12px 16px;
+}
+:root:root .ai-sched-sep {
+  background: var(--c-separator);
+}
+:root:root .ai-sched-expand {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .ai-sched-expand:hover {
+  background: var(--c-fill-1);
+}
+:root:root .ai-sched-history {
+  border-top: 0;
+  background: var(--c-surface-2);
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ai-sched-history-head {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* Empty state: one icon, explain what will appear here, one next step */
+:root:root .ai-sched-empty {
+  gap: 6px;
+  padding: 40px 24px;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ai-sched-empty-ico {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+:root:root .ai-sched-empty-ico svg {
+  width: 18px;
+  height: 18px;
+}
+:root:root .ai-sched-empty-title {
+  font-size: var(--fs-md);
+}
+:root:root .ai-sched-empty-body {
+  margin-bottom: 6px;
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ai-sched-btnpri {
+  gap: 6px;
+  height: var(--control-h-md);
+  padding: 0 12px;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+}
+
+/* @section accept-a:look —— page-by-page acceptance A · appearance/everyday: page mappings.
+ * Every selector starts with :root:root; no literal colors or --c-line. */
+
+/* ═══ Team settings · feedback inbox (feedback-inbox-content.tsx): list page 1120; toolbar (this month's draft count + background auto-draft switch);
+ * each suggestion is a card (hairline border, --r-4); type light accent badge, recurrence/case states light tone badges;
+ * detail subtitles lose uppercase letter-spacing ═══ */
+:root:root .legacy-fbi-page {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+:root:root .legacy-fbi-coach {
+  gap: 12px;
+  min-height: var(--control-h-md);
+  margin: 0 0 12px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .legacy-fbi-coach-label {
+  color: var(--c-ink-2);
+}
+:root:root .legacy-fbi-empty {
+  padding: 22px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .look-fbi-retry {
+  margin: 12px 0 0;
+}
+:root:root .legacy-fbi-list {
+  gap: 12px;
+}
+:root:root .legacy-fbi-row {
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .legacy-fbi-row.is-open {
+  box-shadow: 0 0 0 1px var(--c-accent);
+}
+:root:root .legacy-fbi-row-head {
+  gap: 6px 8px;
+}
+/* Badges: 20 high, pill, 11.5/600; type light accent, others by tone */
+:root:root :is(.legacy-fbi-kind, .legacy-fbi-chip) {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 1;
+}
+:root:root .legacy-fbi-kind {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .legacy-fbi-chip {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .legacy-fbi-chip.is-warn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn);
+}
+:root:root .legacy-fbi-chip.is-info {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .legacy-fbi-target {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .legacy-fbi-flag {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-fbi-expires {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-fbi-text {
+  margin-top: 6px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root .legacy-fbi-meta {
+  margin-top: 6px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+/* Inbox views: waiting / processed / all (inbox design frame A filter chips). */
+:root:root .legacy-fbi-views {
+  align-self: flex-start;
+  margin-bottom: 14px;
+}
+:root:root .legacy-fbi-progress {
+  color: var(--c-pos);
+}
+:root:root .legacy-fbi-toggle {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+}
+:root:root .legacy-fbi-toggle:hover {
+  text-decoration: underline;
+}
+:root:root .legacy-fbi-toggle:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+:root:root .legacy-fbi-actions {
+  margin-top: 12px;
+}
+:root:root .legacy-fbi-btnrow {
+  gap: 8px;
+}
+/* Details: subtitle regular 12/600 --c-ink-3 (previously 11px uppercase letter-spacing); criteria/prefill body light blocks, hairline border */
+:root:root .legacy-fbi-detail {
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .legacy-fbi-label {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .legacy-fbi-rubric {
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+}
+:root:root :is(.legacy-fbi-evidence-more, .legacy-fbi-sources, .legacy-fbi-detail-loading) {
+  color: var(--c-ink-3);
+}
+:root:root .legacy-fbi-pre {
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-fbi-reroute {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-fbi-reroute-hint {
+  color: var(--c-ink-3);
+}
+@media (max-width: 767.98px) {
+  :root:root .legacy-fbi-row {
+    padding: 12px 14px;
+  }
+  /* Mobile: due time below title, no competition for title width */
+  :root:root .legacy-fbi-row-head > .legacy-fbi-spacer {
+    flex-basis: 100%;
+    height: 0;
+  }
+  :root:root .legacy-fbi-btnrow > .settings-button {
+    min-height: var(--control-h-md);
+  }
+}
+
+/* ═══ Team settings · brand/appearance (team-theme.tsx, styles/team-branding.css): unify only page skeleton/settings;
+ * brand preview stage (.tb-stage), palettes, Logo thumbnails and other content retain original visuals.
+ * Header eyebrow becomes breadcrumb; two overview sections become external group title/description with facts in card;
+ * published preview separate card;
+ * editing sections lose 01–04 numbers/serif, external titles 16/650, card form body; draft command bar uses bar material ═══ */
+/* Group titles: regular eyebrow 12 --c-ink-3, title 16/650 (previously serif 22–25px), description 12.5 --c-ink-3 */
+:root:root :is(.cs-kicker) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+:root:root :is(.cs-library__header h2) {
+  margin: 2px 0 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root :is(.cs-library__header p) {
+  max-width: 560px;
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+/* Fact cells: content card + hairline border, vertical cell hairlines (horizontal on mobile) */
+/* Scope note: additional text below card (12 --c-ink-3), no light-blue frame */
+/* Published preview: one expandable card */
+
+/* Editing: draft command bar uses bar material (P2 decided spec 1; --ui-material-bar in ui-refresh-materials.css, reduced transparency falls back to solid background) */
+/* Editor: independent section groups (title outside card, form body inside), remove 01–04 numbers (not steps) */
+/* Stacked entry fields: labels 12/600 --c-ink-2, hints 11.5 --c-ink-3; text inputs match shared inputs (dropdowns native: WebKit does not draw inset-shadow borders on native selects) */
+:root:root :is(.cs-editor-section) textarea:not([type]) {
+  min-height: 76px;
+  padding: 7px 9px;
+  line-height: 1.5;
+}
+
+/* ═══ Team settings · lower brand/appearance team chart styles (team-chart-style-library.tsx, styles/chart-style-settings.css):
+ * remove frame, become page group (external title); product templates cards, team styles/defaults and member choice hairline rows in one card;
+ * changed choice scope saved by SaveBar (decision 17) ═══ */
+:root:root .cs-library {
+  margin-top: var(--group-gap);
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root :is(.cs-library__header, .cs-library__section) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+:root:root .cs-library__header {
+  margin: 0 0 16px;
+}
+:root:root .cs-library__section + .cs-library__section {
+  margin-top: 24px;
+  border-top: 0;
+}
+:root:root .cs-library__section-heading {
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+:root:root .cs-library__section-heading h3 {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+:root:root .cs-library__section-heading p {
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Count/state badges: regular 11.5/600, 20 high (previously mono 10px) */
+:root:root :is(.cs-count, .cs-status, .cs-save-state) {
+  min-height: 20px;
+  padding: 0 8px;
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .cs-count {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .cs-built-in-grid {
+  gap: 12px;
+}
+:root:root .cs-built-in-card {
+  gap: 10px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root :is(.cs-built-in-card strong, .cs-style-row strong, .cs-policy-row strong, .cs-control-row strong) {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.cs-built-in-card p, .cs-style-row__body > span, .cs-policy-row > div > span) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Team styles/choice scope: hairline rows in one card */
+:root:root :is(.cs-style-list, .cs-policy-list) {
+  gap: 0;
+  overflow: hidden;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root :is(.cs-style-row, .cs-policy-row) {
+  gap: 16px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root :is(.cs-style-row, .cs-policy-row) + :is(.cs-style-row, .cs-policy-row) {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .cs-policy-row[data-disabled="true"] {
+  background: transparent;
+  opacity: 1;
+}
+:root:root .cs-policy-row[data-disabled="true"] :is(strong, .cs-palette-strip) {
+  opacity: 0.6;
+}
+:root:root .cs-policy-row label {
+  gap: 6px;
+  min-height: var(--control-h-md);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .cs-policy-note {
+  margin: 8px 0 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.cs-empty-state, .cs-empty-row) {
+  min-height: 0;
+  padding: 22px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .cs-empty-state strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .cs-empty-state > svg {
+  color: var(--c-ink-3);
+}
+@media (max-width: 767.98px) {
+  :root:root :is(.cs-style-row, .cs-policy-row) {
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  :root:root .cs-library__section-heading {
+    align-items: flex-start;
+  }
+  /* Mobile: choice-scope rows no longer stack every item — color/name on one row, allow-member-choice/team-default side-by-side below */
+  :root:root .cs-policy-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+  }
+  :root:root .cs-policy-row > div {
+    flex: 1 1 50%;
+  }
+  :root:root .cs-policy-row > .cs-palette-strip {
+    flex: none;
+  }
+  /* Mobile: vertical editor control rows get top/bottom space so hairlines do not touch text */
+  :root:root .cs-control-row {
+    gap: 8px;
+    padding: 12px 0;
+  }
+}
+
+/* ═══ Team settings · chart-style editor (chart-style-editor.tsx): header eyebrow becomes breadcrumb, sections lose 01–06 numbers, external titles 16/650,
+ * card bodies, hairline control-row separators; right real preview retains original content visuals, only border changes ═══ */
+:root:root .cs-page {
+  width: 100%;
+}
+:root:root .cs-page__header {
+  margin-bottom: 24px;
+}
+:root:root .cs-back {
+  min-height: var(--control-h-md);
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .cs-back:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+:root:root .cs-editor-layout {
+  gap: 24px;
+}
+:root:root .cs-editor-form {
+  gap: var(--group-gap);
+}
+:root:root .cs-editor-section {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root:root .cs-editor-section > header {
+  display: block;
+  padding: 0;
+  border-bottom: 0;
+}
+:root:root .cs-editor-section > header > span {
+  display: none;
+}
+:root:root .cs-editor-section h2 {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .cs-editor-section header p {
+  margin: 2px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .cs-editor-section__body {
+  padding: 12px 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .cs-control-row {
+  min-height: 52px;
+}
+/* Long descriptions must not wrap segmented controls */
+:root:root .cs-control-row > :is(.cs-choice-group, .cs-segment) {
+  flex: none;
+}
+:root:root .cs-control-row + .cs-control-row {
+  border-top: 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root :is(.cs-switch-row div > span, .cs-control-row > div > span) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .cs-readonly-field {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .cs-preview {
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .cs-preview__heading h2 {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+
+
+/* @section style-tail:tools-mobile —— style finish · mobile tools cards (<640).
+ * Legacy mobile section in styles/skills-settings.css uses !important to arrange actions in two rows (manage alone,
+ * enable + expand below); management now has only ⋯, taking a whole row. The legacy rules stay as the base layer;
+ * higher-specificity rules here, also using !important to override properties (gap) already marked !important:
+ * actions become one row — enable left, ⋯/expand right, hairline above, touch row height 44. */
+@media (max-width: 640px) {
+  :root:root .ai-tools-card .tool-source-card-actions {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "availability manage expand";
+    gap: 4px !important;
+    min-height: var(--control-h-touch);
+    padding-top: 8px;
+    border-top: var(--hairline) solid var(--c-separator);
+  }
+  :root:root .ai-tools-card .tool-source-card-management-actions {
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  :root:root .ai-tools-card .tool-source-card-availability {
+    gap: 8px !important;
+  }
+}

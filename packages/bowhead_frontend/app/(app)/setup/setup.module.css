@@ -1,0 +1,303 @@
+.page {
+  min-width: 0;
+}
+
+.content {
+  display: grid;
+  gap: 24px;
+}
+
+.nextAction {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress progress {
+  width: 120px;
+  height: 6px;
+  margin-inline-start: auto;
+  overflow: hidden;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  accent-color: var(--c-accent);
+}
+
+.progress progress::-webkit-progress-bar {
+  background: var(--c-fill-2);
+}
+
+.progress progress::-webkit-progress-value {
+  border-radius: var(--r-2);
+  background: var(--c-accent);
+}
+
+.progress progress::-moz-progress-bar {
+  border-radius: var(--r-2);
+  background: var(--c-accent);
+}
+
+.nextActionCopy h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.nextActionCopy p {
+  max-width: 65ch;
+  margin: 8px 0 0;
+  color: var(--c-ink-2);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.successIcon {
+  margin-bottom: 8px;
+  color: var(--c-accent-text);
+}
+
+.actions,
+.itemHeader,
+.itemFooter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.actions {
+  flex-wrap: wrap;
+}
+
+.section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sectionDescription {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.expanded:not([hidden]) {
+  display: grid;
+  gap: 24px;
+}
+
+.items,
+.capabilities {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item,
+.capabilities > li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.itemHeader {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.itemHeader h3,
+.itemHeader > span:first-child {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.itemHeader > :last-child {
+  flex-shrink: 0;
+}
+
+.item > p {
+  margin: 6px 0 12px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.itemFooter {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.itemFooter > button {
+  flex-shrink: 0;
+}
+
+.details {
+  min-width: 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.details summary {
+  width: fit-content;
+  min-height: 28px;
+  padding-block: 4px;
+  cursor: pointer;
+}
+
+.details summary:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 3px;
+}
+
+.facts {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.facts dt,
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.facts dt {
+  color: var(--c-ink-3);
+}
+
+.checks {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.required {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+
+.capabilityConsequence {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.capabilityConsequence p {
+  margin: 0;
+}
+
+.capabilityConsequence a {
+  flex-shrink: 0;
+}
+
+.footer {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--c-line);
+  padding-top: 20px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.footer p {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  max-width: 75ch;
+}
+
+.footer svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.errorExit {
+  margin-top: 16px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .nextAction {
+    padding: 16px;
+  }
+
+  .progress progress {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+
+  .itemFooter,
+  .capabilityConsequence {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .itemFooter > button,
+  .capabilityConsequence a {
+    align-self: flex-start;
+  }
+
+  .facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+@media (pointer: coarse) {
+  .details summary {
+    min-height: 44px;
+  }
+}

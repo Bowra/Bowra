@@ -1,0 +1,7 @@
+# Links zu Unterhaltungen und Browsernavigation
+
+Die Adresszeile entspricht immer der angezeigten Seite: Wenn Sie eine Unterhaltung öffnen, enthält die Adresse diese Unterhaltung. Kehren Sie zur Startseite zurück, um eine neue Aufgabe zu beginnen, zeigt die Adresszeile wieder die Startseite. Wenn Sie die Adresse an eine zugriffsberechtigte Kollegin oder einen zugriffsberechtigten Kollegen weitergeben, die Seite aktualisieren oder einer Benachrichtigung folgen, wird dieselbe Unterhaltung geöffnet.
+
+Mit den Zurück- und Vorwärts-Schaltflächen des Browsers folgen Sie der Adresse: Zurück öffnet eine Unterhaltung, Vorwärts führt zur Startseite und damit zu **Neue Aufgabe**, wie bei der Auswahl von **Neue Aufgabe** links. Wenn Sie die geöffnete Unterhaltung auf der Startseite löschen oder oben links das Markenlogo auswählen, gelangen Sie ebenfalls zu **Neue Aufgabe** zurück. Nicht gesendete Eingaben im Composer der Startseite bleiben erhalten.
+
+Wenn der aktuelle Bericht ungespeicherte Änderungen enthält, werden Sie vor dem Verlassen gefragt. **Speichern und wechseln** speichert die Änderungen und führt zur Startseite. **Im Bericht bleiben** lässt Sie in der Unterhaltung und setzt die Adresse dorthin zurück; Ihre Änderungen bleiben erhalten. In diesem Fall enthält der Browserverlauf zwei direkt aufeinanderfolgende Einträge für diese Unterhaltung. Beim nächsten Zurückgehen wirkt die Seite daher unverändert. Gehen Sie erneut zurück, um die vorherige Seite aufzurufen.

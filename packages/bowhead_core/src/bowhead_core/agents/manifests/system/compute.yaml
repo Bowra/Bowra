@@ -1,0 +1,164 @@
+# Compute agent — primary analysis path (ported from SubagentProfile.compute).
+# Sprint multi-agent-v1 PR-#1.
+#
+# Porting notes:
+# - llm_agent_type "analyst" → model "analyst" (router alias)
+# - tool_whitelist (9 tools) → tools.allow
+# - Preserve max_iterations 100; resolve output capacity for each model request.
+# - Split skills into framework (always-on) and sop_lazy (read on demand).
+# - output_schema placeholder (fill in the complete M137 schema when wiring canvas-writer in PR-#7).
+# - trust_class is now report-writer: reads BI/skills, computes analyses, charts on canvas, writes report-turn bodies (M-C), returns AnalysisPayload.
+
+name: compute
+version: 1
+model: analyst
+trust_class: report-writer # M-C: read-mostly data discipline; writes its own report body with guarded write_report (M-B bake+owner+CAS).
+max_iterations: 100
+max_output_tokens: null # Automatic; resolved for each model request
+description: |
+  Bowhead 主分析 agent. 负责数据查询 (bi.*) + skill SOP + python compute,
+  自己把图表上画布 (add_chart) / 报告轮亲笔正文 (write_report), 返回结构化 AnalysisPayload.
+
+system:
+  file: compute.md
+  append: |
+    You are running as a parallel TaskAgent under Orchestrator.
+    DO NOT call subagent.spawn (you are already a leaf).
+    Return via subagent.return with the M137 payload schema.
+
+    可下载文件 (说了没做 sprint WP-0b): 用户要 **PDF / Excel(xlsx) / Word(docx)** 时, 先把分析落成
+    画布报告, 再调 `skill_invoke(name="canvas-pdf"|"canvas-xlsx"|"canvas-docx",
+    script="render_from_canvas.py")` 导出 (用户点名哪种就出哪种, 别拿 PDF 兜底 Word)。sections 由服务端权威灌入, **不要**把 canvas
+    JSON 抄进参数 (会被流式截断, 那正是"文件从没生成"的老故障)。
+    **只有 skill 返回 ok 才说"已导出"**; 失败就如实说失败, 不要说成已经给了。
+    (PPT/演示稿/deck 不归你 —— 那走 consultant。)
+
+tools:
+  default_enabled: false
+  allow:
+    - bi_query
+    - bi_schema
+    # bi-hitl-cleanup B1 (2026-05-21): LLM-callable concept resolver
+    # (atomic disambiguation tool, per Python source subagent.py:447).
+    - bi_concept_resolve
+    # bi_fetch_rows is absent from allow: visible_to_llm=False (omicron sunset), and bi_query calls the function directly
+    # without checking allow (tool_registry._query -> _fetch_rows); the original deck note has no current by-name execution point.
+    # The language directive's tool-call constraints now check bi_query (subagent.py include_tool), rather than this tool.
+    - skill_read
+    - skill_invoke
+    - skill_list
+    # Editing an existing skill through chat requires both skill_read and skill_save_generated; previously
+    # **no role had both** (lead had list+save; compute had read/invoke/list),
+    # structurally breaking this path (reported by a user on 2026-08-27: "未保存成功…缺少 skill_save_generated").
+    # The role gate already permits it (compute dispatch uses analyst; this tool has allowed_roles=[lead, analyst]);
+    # only this allowlist entry was missing.
+    # ⚠ Enabling this line requires the save-path fix: `validate_and_save_generated(overwrite=True)` previously
+    # removed the entire bundle with rmtree before moving it, deleting references/ on body edits; the tool's failure hint directly told
+    # the model "重调本工具并传 overwrite=true". Fixed in the same batch (skill_upload._adopt_unmanaged_files).
+    - skill_save_generated
+    # Batch 5ⓑ (compute-agent-optimize): **flat** python_sandbox entry (code/inputs/timeout_sec
+    # as top-level arguments, internally restored to the old shape for the same _invoke), targeting 72 code-in-JSON cases over 30 days on 116.
+    # skill_invoke(name="python_sandbox") was never removed.
+    # ⚠ **Do not name it python_sandbox**: that name is an authoring pseudo-tool in the manifest allow list
+    # (`_materialize_authoring_pseudo_tools` rewrites it to skill_invoke and prefixes the system prompt with
+    # "它不是可直接调用的工具"); testing confirmed that this hid the new tool from the model.
+    - python_exec
+    # planning-mode-audit WP-7 (P3-a): online retrieval of public external information (industry news / official statistics).
+    # Execution surface for the planner's third routing bucket: public external information -> compute + needs_web.
+    # Web tools are hidden when team search / Tavily is unconfigured (capability_resolver); these entries are then inert.
+    # web_extract / web_map / web_crawl also require FEATURE_TAVILY_TOOLS and are unregistered when it is disabled.
+    # Web numbers do not enter the authorized set (number_verifier only trusts tool results); the existing principle is unchanged.
+    # Prefer compute over a new research-analyst: JTBD gate (feedback_skill_taxonomy_agent_jtbd_gate);
+    # kb-analyst is the worst host ([ref:N]/KB citation semantics conflict with web, product review F4).
+    - web_search
+    - web_fetch
+    - web_extract
+    - web_map
+    - web_crawl
+    - add_chart
+    - add_image # dogfood-0708 F9: put python_sandbox matplotlib PNGs on canvas (previously no peer tool: PNGs were lost despite payload chart claims).
+    # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
+    # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
+    # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
+    - write_report
+    - read_report
+    # canvas-update-turn batch B2-2: soft-hide prior-turn figures superseded by new ones or removed at the user's request during revisions.
+    # Registered only when FEATURE_CANVAS_SECTION_REVISE is enabled; this line is inert when disabled.
+    - remove_chart
+    - subagent_return
+
+# Fill in the complete M137 schema (including insights/recommendations subfields) when wiring canvas-writer in PR-#7.
+#
+# pptx-from-template M3 (RD-4): a deck-render leaf returns a deliverable payload
+# (no `insights`), so `required` is relaxed to `[title]` and a `deliverables`
+# array is added. NOTE: this manifest `output_schema` is validated for
+# well-formedness at manifest LOAD time (registry.py `_validate_jsonschema`) but
+# is NOT the runtime gate for `subagent_return` payloads — that gate is the
+# hand-rolled `validate_payload` (analysis_payload.py) + `auto_fix_payload`
+# (soft gate). Both grew a `deliverables`-mode branch in M3 so a deck-only
+# payload validates; this schema is kept consistent for documentation + any
+# future code that applies it.
+# ⚠️ FOOT-GUN: editing this schema alone has ZERO runtime effect. If you add a
+#    new required field / constraint, you MUST also update `validate_payload`
+#    (and/or `auto_fix_payload`) or it will NOT be enforced at runtime.
+output_schema:
+  type: object
+  additionalProperties: false
+  required:
+    - title
+  properties:
+    title:
+      type: string
+      maxLength: 200
+    insights:
+      type: array
+      maxItems: 20
+    recommendations:
+      type: array
+      maxItems: 10
+    deliverables:
+      type: array
+      maxItems: 10
+      items:
+        type: object
+        properties:
+          kind:
+            type: string
+          artifact_id:
+            type: string
+          manifest_artifact_id:
+            type: string
+          slide_count:
+            type: integer
+
+examples:
+  - event: "看下今年华东和华北客户产品销量差异"
+    description: 多 dimension 对比 query (典型 MED complexity)
+  - event: "做一个完整尽调：财务+业务+合规"
+    description: 复合领域 (HIGH complexity, 需 H2 approval)
+  - event: "近 30 天华东客户 top 10 SKU 销量"
+    description: 单 metric lookup (LOW complexity)
+
+# agent-capability-routing 2a: **declare** deliverable capability (replacing the name-based check
+# `deck_inputs=(name in {"compute","consultant"})` in agent_runner_adapter).
+# Declare only what **actually works today**: this agent's deck hook (render_deck.py -> output.pptx
+# registered as an artifact at finalization) was already enabled; move that fact from the name set into a declaration without behavior changes.
+produces:
+  - pptx
+
+# WP M3-12: this agent's **contract** (its responsibility), not an incidental capability.
+# Data retrieval and analysis are its contract; its incidental deck hook (produces: pptx) does not make it the deck owner.
+# Lead routing prose renders assignee names by role, resolving assignees from this declaration;
+# an agent with a declared contract is not used as a fallback assignee for another role.
+primary_capability: cap_data_query
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 50
+  display_name: "Data & Compute Analyst"
+  summary: "Query data, run calculations, create charts, and turn the evidence into a clear analysis."
+  # Write reports is in the first three: marketplace cards show only three tags.
+  capabilities: [cap_data_query, cap_report, cap_visualize, cap_compute]

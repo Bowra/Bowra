@@ -1,0 +1,89 @@
+{
+  "team_onboarding": {
+    "items": {
+      "license_active": {
+        "title": "Installation is ready",
+        "action": "Review setup",
+        "impact": "Complete first-owner setup before using the team."
+      }
+    },
+    "reasons": {
+      "license_active": "This Community installation is initialized. No commercial license or seat allowance is required.",
+      "suspended": "This team is suspended.",
+      "license_state_unavailable": "Installation health could not be determined.",
+      "kb_not_licensed": "Knowledge base is unavailable for this team."
+    }
+  },
+  "settings": {
+    "appearance": {
+      "viewTeamAppearance": "Manage Team Chart Styles"
+    },
+    "members": {
+      "err_seat_full": "This action is unavailable. Check your team permissions or contact an administrator.",
+      "err_over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "err_needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+      "err_license_invalid": "The installation state could not be verified. Contact your system administrator.",
+      "err_entitlement_unavailable": "This service is unavailable. Try again later, or contact your system administrator."
+    },
+    "people": {
+      "err_seat_full": "This action is unavailable. Check your team permissions or contact an administrator.",
+      "err_over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "err_needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+      "err_license_invalid": "The installation state could not be verified. Contact your system administrator."
+    },
+    "datarc": {
+      "errors": {
+        "entitlement_unavailable": "This service is unavailable. Try again later, or contact your system administrator.",
+        "over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+        "needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+        "tamper": "The installation state could not be verified. Contact your system administrator."
+      }
+    },
+    "scheduled": {
+      "errors": {
+        "feature_unlicensed": "This feature is unavailable for this team. Contact your system administrator.",
+        "over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+        "needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+        "tamper": "The installation state could not be verified. Contact your system administrator."
+      }
+    },
+    "integrations": {
+      "email_err_readonly": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "email_err_entitlement_unavailable": "This service is unavailable. Try again later, or contact your system administrator."
+    },
+    "models": {
+      "errors": {
+        "err_readonly": "This team is suspended or read-only. Contact your system administrator before making changes."
+      }
+    },
+    "subagents": {
+      "draft_locked_mcp": "This feature is unavailable for this team. Contact your system administrator."
+    },
+    "tabs": {
+      "team-appearance": "Chart Styles"
+    }
+  },
+  "auth": {
+    "error": {
+      "oauth_over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "oauth_needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+      "oauth_tamper": "The installation state could not be verified. Contact your system administrator."
+    }
+  },
+  "admin": {
+    "credits": {
+      "err_over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "err_needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+      "err_license_invalid": "The installation state could not be verified. Contact your system administrator.",
+      "err_entitlement_unavailable": "This service is unavailable. Try again later, or contact your system administrator.",
+      "err_feature_unlicensed": "This feature is unavailable for this team. Contact your system administrator.",
+      "err_managed_by_license": "This action is unavailable. Check your team permissions or contact an administrator."
+    },
+    "members_promote": {
+      "err_over_grace": "This team is suspended or read-only. Contact your system administrator before making changes.",
+      "err_needs_license": "Complete installation setup before continuing. Contact your system administrator.",
+      "err_license_invalid": "The installation state could not be verified. Contact your system administrator.",
+      "err_entitlement_unavailable": "This service is unavailable. Try again later, or contact your system administrator."
+    }
+  }
+}

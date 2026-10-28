@@ -1,0 +1,262 @@
+{
+  "pages": {
+    "/settings/": {
+      "status": "redirect",
+      "reason": "Navigation entry or legacy alias; configuration belongs to the canonical destination."
+    },
+    "/settings/access-requests/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/appearance/": {
+      "status": "partial",
+      "forms": [
+        "personal_appearance"
+      ],
+      "reason": "Scalar choices and scalar resets are supported; colors, chart styles and whole-theme reset remain manual."
+    },
+    "/settings/export/": {
+      "status": "informational",
+      "reason": "Explains export behavior; this page has no editable settings."
+    },
+    "/settings/memory/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/personal-connections/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/profile/": {
+      "status": "partial",
+      "forms": [
+        "user_language"
+      ],
+      "reason": "Answer language is supported; account name, interface language, style and Coach preferences remain manual."
+    },
+    "/settings/security/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/skills/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+    },
+    "/settings/subagents/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/tools/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/settings/workflows/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+    },
+    "/space/settings/": {
+      "status": "redirect",
+      "reason": "Navigation entry or legacy alias; configuration belongs to the canonical destination."
+    },
+    "/space/settings/general/": {
+      "status": "partial",
+      "forms": [
+        "workspace_i18n",
+        "workspace_metadata"
+      ],
+      "reason": "Name, description, week start and data language are supported; interface defaults and the internationalization switch remain manual."
+    },
+    "/space/settings/instructions/": {
+      "status": "partial",
+      "forms": [
+        "space_instructions"
+      ],
+      "reason": "Current instructions are supported; version history and restoration use the original page."
+    },
+    "/space/settings/members/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/": {
+      "status": "redirect",
+      "reason": "Navigation entry or legacy alias; configuration belongs to the canonical destination."
+    },
+    "/team/settings/brand-appearance/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/brand-appearance/chart-styles/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/capabilities/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+    },
+    "/team/settings/datasource/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/email-service/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/feedback-inbox/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/integrations/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/integrations/feishu/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/integrations/slack/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/integrations/teams/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/llm/": {
+      "status": "redirect",
+      "reason": "Navigation entry or legacy alias; configuration belongs to the canonical destination."
+    },
+    "/team/settings/models/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config",
+        "team_model_retry"
+      ],
+      "reason": "Non-secret existing connection/model settings, assignments and retries use original validation and Review/Apply. Credentials and connection lifecycle remain manual."
+    },
+    "/team/settings/models/assignments/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config"
+      ],
+      "reason": "Non-secret model settings and assignments share the Team model adapter; original validation and review remain authoritative."
+    },
+    "/team/settings/models/connections/edit/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config"
+      ],
+      "reason": "Non-secret model settings and assignments share the Team model adapter; original validation and review remain authoritative."
+    },
+    "/team/settings/models/connections/new/": {
+      "status": "manual",
+      "forms": [],
+      "reason": "New connections and credentials require the dedicated connection workflow."
+    },
+    "/team/settings/models/external/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config"
+      ],
+      "reason": "Non-secret model settings and assignments share the Team model adapter; original validation and review remain authoritative."
+    },
+    "/team/settings/models/external/image/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config"
+      ],
+      "reason": "Non-secret model settings and assignments share the Team model adapter; original validation and review remain authoritative."
+    },
+    "/team/settings/models/external/search/": {
+      "status": "partial",
+      "forms": [
+        "team_model_config"
+      ],
+      "reason": "Non-secret model settings and assignments share the Team model adapter; original validation and review remain authoritative."
+    },
+    "/team/settings/openapi/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/people/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/public-entries/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/reference-retention/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/scheduled/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+    },
+    "/team/settings/spaces/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/subagents/": {
+      "status": "partial",
+      "forms": [
+        "team_run_limits",
+        "team_execution_limits"
+      ],
+      "reason": "Team agent loop limits, sandbox durations and HTML size limits are supported; Agent authoring and individual Agent overrides retain the Coach workflow."
+    },
+    "/team/settings/team-operations/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/tools/": {
+      "status": "manual",
+      "reason": "Uses the original settings page; no Configuration Agent adapter is admitted."
+    },
+    "/team/settings/workflows/": {
+      "status": "workflow",
+      "reason": "Uses its dedicated authoring or scheduling workflow; not a generic configuration write."
+    }
+  },
+  "source_fields": {
+    "provider": {
+      "provider_id": "Server-owned connection identity.",
+      "runtime_key": "Existing connection key selects the object.",
+      "display_name": "agent",
+      "type": "agent",
+      "base_url": "agent",
+      "endpoint": "agent",
+      "api_version": "agent",
+      "api_key": "Credential entry stays in the original connection editor.",
+      "auth": "Authentication changes need the original connection editor.",
+      "transports": "Transport templates can contain credentials and need the original connection editor.",
+      "models": "agent",
+      "outbound_params": "agent",
+      "context_window": "agent",
+      "max_output_tokens": "agent",
+      "default_headers": "Headers can contain credentials.",
+      "timeout_sec": "agent",
+      "messages_path": "agent",
+      "anthropic_version": "agent"
+    },
+    "model": {
+      "id": "agent",
+      "capabilities": "agent",
+      "declaration_origin": "Server-maintained declaration provenance.",
+      "public_name": "agent",
+      "deployment": "agent",
+      "capability_transports": "agent",
+      "request_body_overrides": "agent",
+      "outbound_params": "agent",
+      "context_window": "agent",
+      "max_output_tokens": "agent",
+      "runtime_parameters": "agent",
+      "api_surface": "agent"
+    },
+    "execution_limits": {
+      "sandbox_default_timeout_s": "agent",
+      "sandbox_max_timeout_s": "agent",
+      "html_max_bytes": "agent"
+    }
+  }
+}

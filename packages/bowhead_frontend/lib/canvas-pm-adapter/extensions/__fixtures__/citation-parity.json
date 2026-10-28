@@ -1,0 +1,45 @@
+{
+  "_comment": "citation-audit 双端 parity fixture（tech-design §5.1 承诺；M1 impl review C-P1-4 落地，M3-4 扩 bake 模式）。BE test_citation_marks.py 断言 binder/convert 产出 == text；FE citation-plugin.test.ts 断言 findCitedNumberRanges(text) 恰好命中 token。改任何一端的输出/识别形状必须让两端测试同时过。",
+  "_bake_comment": "mode=\"bake\": BE citation_marks.strip_legacy(input) == FE citation-marks.stripLegacy(input) == text。两端 bake 分家会让「chat 显示的数 ≠ canvas 显示的数 ≠ 落库的数」——M3-1 逮到的真实事故：老 FE md.ts 对 `%` 做 |v|≤1→×100，把 prod 语料「同比增长仅 0.66% 基本持平」在 chat 里渲成 66%（canvas 侧同期 0.66%）。这些行就是防复发的机器闸。",
+  "rows": [
+    { "mode": "bind", "input": "全省合计 9627万元。", "value": 96270000, "text": "全省合计 9627万元 [1]。", "token": "9627万元", "n": 1 },
+    { "mode": "bind", "input": "增速 17.8%，超预期", "value": 0.178, "text": "增速 17.8% [1]，超预期", "token": "17.8%", "n": 1 },
+    { "mode": "bind", "input": "客流 1200万人次 创新高。", "value": 12000000, "text": "客流 1200万人次 [1] 创新高。", "token": "1200万人次", "n": 1 },
+    { "mode": "bind", "input": "募资 5千万美元 完成。", "value": 50000000, "text": "募资 5千万美元 [1] 完成。", "token": "5千万美元", "n": 1 },
+    { "mode": "convert", "input": "同比 [num:4.18:%:src:tl_par] 提升", "text": "同比 4.18 % [1] 提升", "token": "4.18 %", "n": 1 },
+    { "mode": "convert", "input": "占比 [num:30:percent:src:tl_par] 稳定", "text": "占比 30 % [1] 稳定", "token": "30 %", "n": 1 },
+    { "mode": "convert", "input": "规模 [num:9.6:亿元:src:tl_par] 领先", "text": "规模 9.6 亿元 [1] 领先", "token": "9.6 亿元", "n": 1 },
+    { "mode": "convert", "input": "误差 [num:1.2e-4:%:src:tl_par] 以内", "text": "误差 1.2e-4 % [1] 以内", "token": "1.2e-4 %", "n": 1 },
+    { "mode": "literal", "text": "亏损 -3.5% [2] 收窄", "token": "-3.5%", "n": 2 },
+
+    { "mode": "bake", "input": "营收[num:5.2:亿元:src:tl_1]创新高", "text": "营收5.2亿元创新高" },
+    { "mode": "bake", "input": "[num:5.2:亿元:src:tl_1#highlight=峰值]", "text": "5.2亿元" },
+    { "mode": "bake", "input": "峰值[num:19.82亿:src:art_1]元 vs 低谷", "text": "峰值19.82亿元 vs 低谷" },
+    { "mode": "bake", "input": "利润率[num:17.26%:src:tl_3]", "text": "利润率17.26%" },
+    { "mode": "bake", "input": "[num:34368952:元]", "text": "34368952元" },
+    { "mode": "bake", "input": "[num:42]", "text": "42" },
+    { "mode": "bake", "input": "[num:42:]", "text": "42" },
+    { "mode": "bake", "input": "[num:125000000:count]", "text": "125000000" },
+    { "mode": "bake", "input": "[num:1.618:ratio]", "text": "1.618倍" },
+
+    { "mode": "bake", "_why": "货币枚举=raw 值必须缩放（M3-1 修的 prod 回归：存款卡被烤成 11 位裸数字）", "input": "存款余额 [num:7016893124:CNY]", "text": "存款余额 70.17亿元" },
+    { "mode": "bake", "input": "[num:139000000:CNY]", "text": "1.39亿元" },
+    { "mode": "bake", "input": "[num:78300:CNY]", "text": "7.8万元" },
+    { "mode": "bake", "input": "[num:9999:CNY]", "text": "9,999元" },
+    { "mode": "bake", "input": "[num:1234.5:CNY]", "text": "1,234.50元" },
+    { "mode": "bake", "input": "[num:5200000:USD]", "text": "520.0万美元" },
+
+    { "mode": "bake", "_why": "已是显示形的单位绝不二次缩放（语料 72 处亿元 / 7 处万元）", "input": "[num:165.35:亿元]", "text": "165.35亿元" },
+    { "mode": "bake", "input": "[num:13.78:万元]", "text": "13.78万元" },
+
+    { "mode": "bake", "_why": "`%` 符号形=显示形不放大；只有 percent 枚举（raw 分数）×100。prod 15 处 |v|≤1 的 % 全是真·小百分比，放大=100 倍错数", "input": "同比增长仅 [num:0.66:%] 基本持平", "text": "同比增长仅 0.66% 基本持平" },
+    { "mode": "bake", "input": "[num:-0.034:%]", "text": "-0.034%" },
+    { "mode": "bake", "input": "同比 [num:0.0039:percent]", "text": "同比 0.39%" },
+    { "mode": "bake", "input": "占比[num:30:percent:src:tl_2]", "text": "占比30%" },
+    { "mode": "bake", "input": "[num:1:%]", "text": "1%" },
+
+    { "mode": "bake", "_why": "非 num 族整删；gen3 [N] 与数组下标绝不动", "input": "指标 [fact:ws_measures]，来源 [ref:chunk_abc]，走势[chart:sec_1]", "text": "指标，来源，走势" },
+    { "mode": "bake", "input": "营收 9627万元 [1]，见数组 a[5] 取值", "text": "营收 9627万元 [1]，见数组 a[5] 取值" },
+    { "mode": "bake", "_why": "catch-all 畸形残渣：取值段，不得输出裸首段（丢单位 P0 不许在兜底复活）", "input": "残[num::src:tl_9]渣", "text": "残渣" }
+  ]
+}

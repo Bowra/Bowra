@@ -1,0 +1,224 @@
+/* report-streaming D2 — canvas In Progress band.
+ *
+ * Verbatim port of the .ws-band* section in design `waiting-state/ws.css` (Claude Design project
+ * 8b6a92a0, after r1 review). **Only two necessary mappings, with no parameter retuning**:
+ *   - Design `--f-mono` → this project's `--font-v2-mono`
+ *   - All other tokens (--c-ink/-2/-3/-4, --c-accent, --c-accent-soft, --c-accent-tint,
+ *     --c-line, --c-line-2, --c-surface, --c-pos, --ease-v2) already exist with identical names,
+ *     with dark overrides in globals.css → dark themes follow automatically without a component fork.
+ *
+ * Keep the `wb-` prefix (design ws- is private to that design project).
+ */
+
+.wb-band {
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--c-line);
+  margin-bottom: 6px;
+}
+
+.wb-band-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 16px;
+}
+
+.wb-eyebrow {
+  font-family: var(--font-v2-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--c-accent);
+}
+
+.wb-band.settled .wb-eyebrow {
+  color: var(--c-pos);
+}
+
+.wb-timer {
+  margin-left: auto;
+  font-family: var(--font-v2-mono);
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* min-height is structural: idle only changes the marker, not the text; lock height to prevent jumps. */
+.wb-lede {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--c-ink);
+  margin-top: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  min-height: 23px;
+}
+
+.wb-lede .muted {
+  color: var(--c-ink-3);
+  font-weight: 400;
+}
+
+.wb-note {
+  font-size: 0.78125rem;
+  line-height: 1.62;
+  color: var(--c-ink-3);
+  margin-top: 9px;
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+
+.wb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: 99px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+  cursor: pointer;
+  max-width: 290px;
+}
+
+.wb-chip:hover {
+  border-color: var(--c-accent);
+  background: var(--c-accent-tint);
+  color: var(--c-ink);
+}
+
+.wb-chip .n {
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--c-accent);
+  flex: none;
+}
+
+/* Real chart-title length is uncontrolled (design r1 review adjustment 5): max-width + ellipsis
+ * is the sole truncation strategy here; chips neither wrap nor overflow the band. */
+.wb-chip .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes wb-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wb-chip.fresh {
+  animation: wb-pop 0.4s var(--ease-v2);
+}
+
+/* The band's only moving element: spin with an action running, breathe during idle gaps.
+ * ⚠ Distinguish only whether an action is running; do not attach copy.
+ * No running action can mean thinking, an unreported running subagent, or a stall;
+ * we cannot distinguish them, so naming one invents state (design r1 review hard conflict 3). */
+.wb-mkr {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wb-mkr .run {
+  width: 13px;
+  height: 13px;
+  border-radius: 99px;
+  border: 1.6px solid var(--c-accent-soft);
+  border-top-color: var(--c-accent);
+  animation: wb-spin 1.5s linear infinite;
+}
+
+@keyframes wb-breathe {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.wb-mkr .idle {
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  background: var(--c-accent);
+  animation: wb-breathe 2.6s var(--ease-v2) infinite;
+}
+
+.wb-mkr .fin {
+  color: var(--c-pos);
+  display: flex;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-mkr .run,
+  .wb-mkr .idle,
+  .wb-chip.fresh {
+    animation: none;
+  }
+  .wb-mkr .idle {
+    opacity: 0.75;
+  }
+}
+
+/* Mobile 412 — design .ws-m .ws-band* section. Compress waiting state to ~118px
+ * so the first produced chart remains in the first viewport. */
+@media (max-width: 640px) {
+  .wb-band {
+    padding: 14px 0 15px;
+  }
+  .wb-lede {
+    font-size: 0.875rem;
+    margin-top: 10px;
+    min-height: 21px;
+  }
+  .wb-note {
+    font-size: 0.71875rem;
+    margin-top: 7px;
+  }
+  .wb-chips {
+    margin-top: 11px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .wb-chip {
+    max-width: 180px;
+    height: 26px;
+    font-size: 0.71875rem;
+  }
+}

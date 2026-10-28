@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="workflow-title workflow-desc">
+  <title id="workflow-title">Bowra workflow — Verified Intelligence</title>
+  <desc id="workflow-desc">Sources flow through specialist agents and tools to evidence review and then a report. Sources include authorized data and documents. Reports can be shared, revised, or exported.</desc>
+  <style>
+    text { font-family: 'Trebuchet MS', 'Aptos', sans-serif; }
+    .display { font-family: Georgia, 'Times New Roman', serif; }
+  </style>
+  <rect x="1" y="1" width="1198" height="478" rx="22" fill="#f7f6f0" stroke="#d5dfdd" stroke-width="2"/>
+  <text x="58" y="70" class="display" fill="#0d1e3a" font-size="43" letter-spacing="-1">Verified Intelligence</text>
+  <text x="58" y="109" fill="#557080" font-size="23">A reviewable path from question to report.</text>
+  <path d="M58 141H1142" stroke="#cbd7d2"/>
+  <g fill="none" stroke="#4f8a7b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M248 240H339M329 232L339 240L329 248"/><path d="M536 240H627M617 232L627 240L617 248"/><path d="M824 240H915M905 232L915 240L905 248"/>
+  </g>
+  <g transform="translate(111 196)" fill="none" stroke="#15324f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H44L60 20V68H8Z"/><path d="M44 4V20H60M20 34H48M20 45H48M20 56H38"/><path d="M68 22H80V80H26V76" opacity=".45"/></g>
+<g transform="translate(399 196)" fill="none" stroke="#15324f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="42" cy="40" r="17"/><circle cx="8" cy="12" r="7"/><circle cx="77" cy="12" r="7"/><circle cx="77" cy="69" r="7"/><circle cx="8" cy="69" r="7"/><path d="M14 17L29 29M71 17L55 29M15 63L29 52M70 63L55 52"/></g>
+<g transform="translate(687 196)" fill="none" stroke="#15324f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="34" cy="33" r="28"/><path d="M54 54L77 77M21 32L31 42L49 23"/></g>
+<g transform="translate(975 196)" fill="none" stroke="#15324f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H64V78H12Z"/><path d="M25 20H50M25 32H51M25 49H34M25 60H48"/><circle cx="66" cy="65" r="16" fill="#f7f6f0"/><path d="M58 65L64 71L75 59"/></g>
+  <g fill="#578475" font-size="17" letter-spacing="2" text-anchor="middle">
+    <text x="155" y="182">01</text><text x="443" y="182">02</text><text x="731" y="182">03</text><text x="1019" y="182">04</text>
+  </g>
+  <g fill="#0d1e3a" font-size="31" font-weight="700" text-anchor="middle">
+    <text x="155" y="324">Sources</text><text x="443" y="324">Specialist agents</text><text x="443" y="360">+ tools</text><text x="731" y="324">Evidence review</text><text x="1019" y="324">Report</text>
+  </g>
+  <g fill="#557080" font-size="23" text-anchor="middle">
+    <text x="155" y="380">Authorized data</text><text x="155" y="410">+ documents</text><text x="443" y="410">Skills · MCP · calculations</text>
+    <text x="731" y="380">Check claims</text><text x="731" y="410">+ calculations</text><text x="1019" y="380">Share, revise,</text><text x="1019" y="410">or export</text>
+  </g>
+</svg>

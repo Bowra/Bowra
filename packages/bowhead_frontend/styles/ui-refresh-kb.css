@@ -1,0 +1,914 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · P2 batch 5: two-level knowledge base navigation and knowledge base
+ * dialog interiors.
+ *
+ * Spec: Claude Design "P2 Navigation Spec" section 4 (knowledge base, desktop / phone); decision option B
+ * (user 2026-10-01) in docs/design/界面改版-Apple设计方向.md "P2 视觉改版" item 4; implementation, DOM
+ * changes, deviations and acceptance in docs/design/组件统一-技术设计.md "P2 第 5 批结果".
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles. Colours and layers come from tokens
+ * only. Imported last by the authenticated layout.
+ * Contract: styles/ui-refresh-kb.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ 1 · Sections ═══
+ * The four sections (Files / Document Matrix / Extracted Results / Templates) are the page's underline tabs
+ * (PageTabs in PageFrame, Header, Language & Paging Spec §2, D5; styles/ui-refresh-page-frame.css); below 768 they scroll
+ * sideways. The content area stacks under them. */
+:root:root .kb-page-v2 .kbshell {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+}
+
+/* ═══ 2 · Scope filter and scope column ═══
+ * The scope segments (.kb-scope-bar) are no longer rendered; "Scope: X" is a .kb-filterchip in the
+ * toolbar (filter-chip look from ui-refresh.css: filled, accent tint while narrowing). Its menu is a single-select
+ * .ui-menu whose two-line options carry who can search the scope and a count at the end. The scope column appears
+ * only for "All". */
+:root:root .kb-page-v2 .kb-controls .kb-controls-main .kb-filterchip.active {
+  /* The shared filter-chip accent (pure accent on accent-soft) measured 4.0:1 in the light default palette;
+   * knowledge base filters, and the always-set Scope filter in particular, use the accent text tone. Same
+   * specificity as the shared :is() rule in ui-refresh.css (0,7,0), later in the cascade. */
+  color: var(--c-accent-text);
+}
+:root:root .kb-page-v2 .kb-controls .kb-controls-main .kb-filterchip:focus-visible {
+  /* The shared filter-chip ring reads var(--c-focus) without a fallback; with the product palette that token is
+   * not defined, the shorthand is invalid and no ring is drawn. Knowledge base filters get the fallback. */
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Filter buttons say what they select: the label ellipsizes past 240 px (the full value is in the title, the
+ * selected-filters row and the menu); every button carries a chevron. Sort stays neutral with a leading sort icon. */
+:root:root .kb-controls .kb-filterchip {
+  max-width: 240px;
+}
+:root:root .kb-controls .kb-filterchip .lbl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .kb-controls .kb-filterchip :is(.kb-chevron, .kb-chipicon) {
+  display: inline-flex;
+  flex: none;
+  color: var(--c-ink-3);
+}
+:root:root .kb-controls .kb-filterchip.active :is(.kb-chevron, .kb-chipicon) {
+  color: inherit;
+}
+/* Filter menus: two-line items (title 13/500 + description 12 ink-3) instead of parenthesized notes; the group
+ * clear action ("Clear status") is an accent text item after a separator. */
+:root:root .ui-menu .kb-menu-opt {
+  min-height: 44px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+:root:root .ui-menu .kb-menu-opt .txt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+:root:root .ui-menu .kb-menu-opt .nm {
+  font-weight: 500;
+}
+:root:root .ui-menu .kb-menu-opt .desc {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+:root:root .ui-menu .kb-menu-clear {
+  --ui-menu-item-pl: 30px;
+  color: var(--c-accent-text);
+}
+/* Selected-filters row: 8 px under the toolbar; on phones one horizontally scrolling line. */
+:root:root .kb-controls-wrap .kb-selrow {
+  margin-top: 8px;
+}
+@media (max-width: 640px) {
+  :root:root .kb-controls-wrap .kb-selrow {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  :root:root .kb-controls-wrap .kb-selrow > li {
+    flex: none;
+  }
+}
+:root:root .kb-scope-card .lock {
+  /* Team-scope lock badge in the upload and change-scope cards: no mono 10px */
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root .ui-menu.kb-scope-menu {
+  min-width: min(280px, var(--menu-available-width, 280px));
+}
+:root:root .ui-menu .kb-scope-opt {
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+:root:root .ui-menu .kb-scope-opt .txt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+:root:root .ui-menu .kb-scope-opt .nm {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+:root:root .ui-menu .kb-scope-opt .hint {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+:root:root .ui-menu .kb-scope-opt .count {
+  flex: none;
+  margin-left: 8px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .kb-grid .kb-scope-cell {
+  display: block;
+  overflow: hidden;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══ 3 · File preview (viewer) ═══
+ * Same viewer frame as the result preview: solid surface, --r-4, overlay shadow, --c-scrim without blur, a 48 header
+ * with a hairline under it, title 15/650 on one line, 28 close button (44 on touch); the document fills the rest. */
+:root:root .kb-preview-overlay {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root:root .kb-preview-panel {
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+:root:root .kb-preview-head {
+  flex: none;
+  gap: 8px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 10px 0 16px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .kb-preview-title {
+  overflow: hidden;
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .kb-preview-close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-h-md);
+  min-width: 0;
+  height: var(--control-h-md);
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+  font-size: 0.9375rem;
+  line-height: 1;
+}
+:root:root .kb-preview-close:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .kb-preview-body {
+  border: 0;
+  border-radius: 0 0 var(--r-4) var(--r-4);
+}
+:root:root .kb-preview-state {
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root .kb-preview-pages {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .kb-preview-docx-warnings {
+  font-size: var(--fs-xs);
+}
+@media (pointer: coarse) {
+  :root:root .kb-preview-close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ═══ 4 · Dialog and drawer interiors ═══
+ * Shells (solid surface, --r-4, title 15/650, footer, scrim) come from appearance batch 3; here the bodies follow the
+ * style-tail body rules: descriptions 13 --c-ink-2, notes 12 --c-ink-3, field labels 12/600 --c-ink-2, group blocks
+ * filled or hairline at --r-3 without dark outlines or left colour bars, selection cards as radio cards, numbers
+ * tabular. Covers change scope (three steps), extract to table, delete, upload, run confirmation, save as template,
+ * team template publish / copy, and the file details drawer. */
+:root:root .kb-modal-head {
+  padding: 18px 18px 0;
+}
+:root:root .kb-modal-head h3 {
+  margin: 0 0 4px;
+}
+:root:root .kb-modal-body {
+  padding: 14px 18px 16px;
+}
+:root:root .kb-modal-foot {
+  padding: 10px 18px;
+}
+/* Notice blocks (kb-notice): filled, --r-3, no left bar; tone only through the fill */
+:root:root .kb-notice {
+  padding: 10px 12px;
+  border-left: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+:root:root .kb-notice.err {
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+}
+:root:root .kb-notice.ok {
+  background: var(--c-pos-soft);
+  color: var(--c-ink);
+}
+/* Change scope: the destination stays accent text, readable on the notice fill */
+:root:root .kb-notice .kb-scope-to {
+  color: var(--c-accent-text);
+}
+:root:root .kb-modal-body.kb-scope-progress {
+  padding: 32px 18px;
+}
+:root:root .kb-scope-progress-title {
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+:root:root .kb-scope-progress-sub {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .kb-pop-label.kb-scope-failed-label {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* Rows inside dialog bodies (failed list, ZIP results): hairline rows on one filled group block */
+:root:root :is(.kb-scope-failed, .kb-bundle-list) .kb-up-row {
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--c-fill-1);
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+}
+:root:root :is(.kb-scope-failed, .kb-bundle-list) .kb-up-row:first-of-type {
+  border-radius: var(--r-3) var(--r-3) 0 0;
+}
+:root:root :is(.kb-scope-failed, .kb-bundle-list) .kb-up-row:last-child {
+  border-radius: 0 0 var(--r-3) var(--r-3);
+  box-shadow: none;
+}
+:root:root :is(.kb-scope-failed, .kb-bundle-list) .kb-up-row:first-of-type:last-child {
+  border-radius: var(--r-3);
+}
+:root:root .kb-bundle-head {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Upload: field labels and hints, visual-parsing hint as a warning note, file card and alerts as filled blocks */
+:root:root .kb-upload .scopehd,
+:root:root .kb-up-template-label {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root :is(.kb-up-template-hint, .kb-up-llm-hint) {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  line-height: 1.45;
+}
+:root:root .kb-up-link {
+  color: var(--c-accent-text);
+}
+:root:root .kb-up-vision-hint {
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+:root:root .kb-upload .filecard {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .kb-upload .filecard .mt {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .kb-upload .alert {
+  border: 0;
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+}
+:root:root .kb-upload .alert.info {
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+}
+:root:root .kb-upload .alert.err {
+  color: var(--c-ink);
+}
+/* Run confirmation: estimate number tabular, note secondary */
+:root:root .mx-estimate .big {
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .mx-estimate .big b {
+  color: var(--c-accent-text);
+}
+:root:root .mx-estimate .sub {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Save as template and team template copy: field labels, inputs, mode cards, group blocks */
+:root:root .kb-modal .mx-flabel {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .kb-modal .mx-inp {
+  min-height: var(--control-h-md);
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .kb-modal .mx-inp:focus {
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-tint);
+}
+:root:root .kb-modal .mx-inp.is-invalid,
+:root:root .kb-modal .mx-inp.is-invalid:focus {
+  box-shadow: inset 0 0 0 1px var(--c-err);
+}
+:root:root .kb-modal :is(.mx-fielderr, .otpl-copy-hint) {
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root .kb-modal .mx-mode {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+}
+:root:root .kb-modal .mx-mode.on {
+  background-color: color-mix(in srgb, var(--c-accent-soft) 50%, var(--c-surface));
+  box-shadow: inset 0 0 0 1.5px var(--c-accent);
+}
+:root:root .kb-modal .mx-mode .radio {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+}
+:root:root .kb-modal .mx-mode.on .radio {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+:root:root .kb-modal .mx-mode.on .radio::after {
+  content: none;
+}
+:root:root .kb-modal :is(.mx-grad-scale, .mx-grad-info, .mx-blocked, .mx-warnbar, .otpl-travels) {
+  border: 0;
+  border-radius: var(--r-3);
+}
+:root:root .kb-modal .mx-warnbar {
+  color: var(--c-ink);
+}
+:root:root .kb-modal .mx-warnbar .ic {
+  color: var(--c-warn);
+}
+:root:root .kb-modal .mx-warnbar.danger .ic {
+  color: var(--c-err);
+}
+:root:root .kb-modal .mx-grad-scale {
+  background: var(--c-fill-1);
+}
+:root:root .kb-modal .mx-grad-scale .arrow {
+  color: var(--c-ink-2);
+}
+:root:root .kb-modal .mx-blocked {
+  margin: 0 0 12px;
+  color: var(--c-ink);
+}
+:root:root .kb-modal .otpl-travels {
+  background: var(--c-fill-1);
+}
+:root:root .kb-modal .otpl-travels .h {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  background: transparent;
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .kb-modal .otpl-trow {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .kb-modal .otpl-trow:last-child {
+  border-bottom: 0;
+}
+:root:root .kb-modal .otpl-trow .n {
+  font-family: var(--font-control);
+}
+:root:root .kb-modal .otpl-body-lead {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root .kb-modal .otpl-body-lead.otpl-body-note {
+  font-size: var(--fs-sm);
+}
+/* File details drawer body: 28 close, metadata labels --c-ink-3, section labels 11/600 (no mono capitals),
+ * chunk list and state blocks as filled groups at --r-3 */
+:root:root .kb-drawer-panel .dr-hd {
+  padding: 14px 12px 12px 18px;
+}
+:root:root .kb-drawer-panel .dr-hd .kb-x {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border-radius: var(--r-2);
+}
+:root:root .kb-drawer-panel .dr-hd .kb-x:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .kb-drawer-panel .dr-bd {
+  gap: 16px;
+  padding: 16px 18px;
+}
+:root:root .kb-drawer-panel .meta {
+  gap: 8px 16px;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .kb-drawer-panel .meta dt {
+  color: var(--c-ink-3);
+}
+:root:root .kb-drawer-panel .sub-t {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .kb-drawer-panel .chunks {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .kb-drawer-panel .chunk {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .kb-drawer-panel .chunk:last-child {
+  border-bottom: 0;
+}
+:root:root .kb-drawer-panel .chunk .loc {
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .kb-drawer-panel :is(.reason, .prog, .confirm) {
+  border: 0;
+  border-radius: var(--r-3);
+}
+:root:root .kb-drawer-panel .reason {
+  background: var(--c-err-soft);
+}
+:root:root .kb-drawer-panel .prog {
+  background: var(--c-info-soft);
+}
+:root:root .kb-drawer-panel .confirm {
+  background: var(--c-err-soft);
+}
+:root:root .kb-drawer-panel .reason .t {
+  color: var(--c-err-ink);
+}
+:root:root .kb-drawer-panel :is(.dr-cited, .why) {
+  color: var(--c-ink-3);
+}
+
+/* ═══ 5 · Document matrix: side panels, menus, citation card, column question ═══
+ * Side panels (cell, add column, edit column, template details) stay non-modal panels inside the matrix (user
+ * decision 2026-10-01: visuals only): drawer look (solid, left --r-4, overlay shadow, --c-scrim, header 15/650 with
+ * a hairline, 28 close, transparent footer with a hairline). Their stacking stays local to the matrix area. Run and
+ * column-header menus are shared menus (column-menu.tsx), so .ui-menu styles them; the citation
+ * card is a small solid floating card on the page-local --z-dropdown layer; the column question tooltip follows the
+ * tooltip look. */
+:root:root .mx-panel-scrim {
+  background: var(--c-scrim);
+}
+:root:root .mx-panel {
+  border-left: 0;
+  border-radius: var(--r-4) 0 0 var(--r-4);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+@media (max-width: 720px) {
+  :root:root .mx-panel {
+    border-radius: 0;
+  }
+}
+:root:root .mx-panel-head {
+  padding: 14px 12px 12px 18px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .mx-panel-head .col {
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .mx-panel-head .file {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .mx-panel-head .mx-back {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+}
+:root:root .mx-panel-head .mx-back:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .mx-panel-foot {
+  justify-content: flex-end;
+  padding: 10px 18px;
+  border-top: var(--hairline) solid var(--c-separator);
+  background: transparent;
+}
+:root:root .mx-panel .mx-seclabel {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .mx-panel :is(.mx-quote, .mx-fieldrow, .mx-lockbar) {
+  border: 0;
+  border-radius: var(--r-3);
+}
+:root:root .mx-panel .mx-quote {
+  background: var(--c-fill-1);
+}
+/* "No locatable source" note on the quote fill: --c-ink-3 measured 4.45:1 (blue palette, dark) */
+:root:root .mx-panel .mx-quote .mx-quote-unlocated {
+  color: var(--c-ink-2);
+}
+:root:root .mx-panel .mx-fieldrow {
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+}
+:root:root .mx-panel :is(.mx-srcmeta, .mx-fieldrow .g) {
+  font-family: var(--font-control);
+}
+:root:root .mx-panel .mx-viewsrc {
+  color: var(--c-accent-text);
+}
+:root:root .mx-panel .mx-inlineerr {
+  border-radius: var(--r-3);
+  color: var(--c-ink);
+}
+:root:root .mx-panel .mx-collapse {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .mx-panel .mx-flabel {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+/* Shared run / column menus: the tail count is secondary and tabular */
+:root:root .ui-menu.kb-mx-menu .tail {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* Citation card (formerly z-index 220): small solid card, --r-3, overlay shadow, page-local layer token */
+:root:root .mx-citepop {
+  z-index: var(--z-dropdown);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .mx-citepop .src {
+  border-top: var(--hairline) solid var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+/* Column question tooltip (M1b): tooltip look */
+:root:root .mx-question-text {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* ═══ 6 · Extraction-table wizard ═══
+ * The wizard became a DialogShell (accessibility fix) and takes the dialog spec:
+ * --c-scrim on the --z-dialog layer, solid panel at --r-4 with the overlay shadow, title 15/650, field labels 12/600,
+ * inputs and selects as controls (hairline control line, --r-2, focus ring), the error as a filled notice, field rows as
+ * a filled group block, buttons as the shared secondary / primary look, actions right-aligned with gap 8. */
+:root:root .kt-wizard-overlay {
+  z-index: var(--z-dialog);
+  padding: 16px;
+  background: var(--c-scrim);
+}
+:root:root .kt-wizard-panel {
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  padding: 18px 18px 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .kt-wizard-title {
+  margin: 0 0 14px;
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .kt-wizard-error {
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+:root:root .kt-wizard-label,
+:root:root .kt-wizard-fields-count {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .kt-wizard-label {
+  margin-bottom: 6px;
+}
+:root:root :is(.kt-wizard-input, .kt-wizard-cell) {
+  min-height: var(--control-h-md);
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .kt-wizard-textarea {
+  min-height: 64px;
+  line-height: 1.5;
+}
+:root:root :is(.kt-wizard-input, .kt-wizard-cell):focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-tint);
+}
+:root:root .kt-wizard-check {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+}
+:root:root .kt-wizard-row {
+  margin-bottom: 0;
+  padding: 8px 10px;
+  border-radius: 0;
+  background: var(--c-fill-1);
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+}
+:root:root .kt-wizard-fields-head + .kt-wizard-row {
+  border-radius: var(--r-3) var(--r-3) 0 0;
+}
+:root:root .kt-wizard-row:has(+ .kt-wizard-actions) {
+  border-radius: 0 0 var(--r-3) var(--r-3);
+  box-shadow: none;
+}
+:root:root .kt-wizard-fields-head + .kt-wizard-row:has(+ .kt-wizard-actions) {
+  border-radius: var(--r-3);
+}
+:root:root .kt-wizard-flag {
+  align-items: center;
+  gap: 4px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+:root:root .kt-wizard-actions {
+  gap: 8px;
+  margin-top: 16px;
+}
+:root:root :is(.kt-wizard-btn, .kt-wizard-btn-primary, .kt-wizard-add) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.kt-wizard-btn, .kt-wizard-add) {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root :is(.kt-wizard-btn, .kt-wizard-add):hover:not(:disabled) {
+  background: var(--c-fill-3);
+}
+:root:root .kt-wizard-btn-primary {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+:root:root .kt-wizard-btn-primary:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+:root:root :is(.kt-wizard-btn-primary, .kt-wizard-add):disabled {
+  opacity: 0.4;
+}
+:root:root :is(.kt-wizard-btn, .kt-wizard-btn-primary, .kt-wizard-add, .kt-wizard-del):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* Phone upload sheet: actions side by side with equal width, primary on the right (narrow-dialog rule), instead of
+ * a stack with the primary on top. A bundle note keeps its own line. */
+@media (max-width: 640px) {
+  :root:root .kb-upload .md-ft {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  :root:root .kb-upload .md-ft .kb-btn {
+    flex: 1 1 0;
+    width: auto;
+    justify-content: center;
+  }
+  :root:root .kb-upload .md-ft .kb-bundle-leave-note {
+    flex: 1 0 100%;
+  }
+}
+
+/* ═══ 7 · Knowledge base polish (1.5.0): matrix header and cards ═══
+ * The matrix header sits on the content surface with hairlines (like the file table header) instead of the
+ * accent-tinted --c-surface-2 fill; question columns no longer get an extra accent tint. Matrix, extraction-result
+ * and template cards use a 0.5 px separator ring plus a faint shadow instead of the 1 px --c-line border; empty
+ * groups are a quiet --c-fill-1 block without dashes. */
+:root:root .mx-headrow {
+  background: var(--c-surface);
+}
+:root:root .mx-colh,
+:root:root .mx-colh.q {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  border-right: var(--hairline) solid var(--c-separator);
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+:root:root .kb-page-v2 :is(.mx, .tcard, .kb-tpl-card) {
+  border: 0;
+  box-shadow:
+    0 0 0 var(--hairline) var(--c-separator),
+    0 1px 2px color-mix(in srgb, var(--c-ink) 5%, transparent);
+}
+:root:root .kb-page-v2 :is(.mx, .kb-tpl-card):is(:hover, :focus-visible) {
+  border: 0;
+  box-shadow:
+    0 0 0 var(--hairline) var(--c-control-line),
+    0 2px 8px color-mix(in srgb, var(--c-ink) 8%, transparent);
+}
+:root:root .kb-page-v2 .mx-app {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .kb-page-v2 .emptyline {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .kt-wizard-del {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  padding: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .kt-wizard-del:hover {
+  background: var(--c-fill-2);
+  color: var(--c-err-ink);
+}
+@media (max-width: 640px) {
+  :root:root .kt-wizard-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  :root:root .kt-wizard-panel {
+    width: 100%;
+    max-width: none;
+    max-height: 92vh;
+    border-radius: var(--sheet-radius, 16px) var(--sheet-radius, 16px) 0 0;
+  }
+  :root:root .kt-wizard-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  :root:root .kt-wizard-row > .kt-wizard-cell:nth-child(3),
+  :root:root .kt-wizard-row > .kt-wizard-flags {
+    grid-column: 1 / -1;
+  }
+  :root:root :is(.kt-wizard-btn, .kt-wizard-btn-primary) {
+    min-height: 44px;
+  }
+}

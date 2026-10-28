@@ -1,0 +1,51 @@
+{
+  "contract": "source-linkage-copy/B1a-v1",
+  "source_linkage": {
+    "zh-CN": {
+      "short_definition": "来源引用不代表数字已经过数值核验。",
+      "lifecycle_verified": "报告状态：所有者已标记为已核对",
+      "citation_aria": "数据 {value}，关联来源 {source}"
+    },
+    "en-US": {
+      "short_definition": "Source citations do not mean the numbers were numerically verified.",
+      "lifecycle_verified": "Report status: marked reviewed by owner",
+      "citation_aria": "Data {value}, linked to source {source}"
+    }
+  },
+  "embedded_data": {
+    "zh-CN": {
+      "injected_sources": "已附带生成数据 · 附带来源引用 {sources}",
+      "injected_no_sources": "已附带生成数据 · 未提供来源引用",
+      "computed_sources": "静态内容未与工具输出核对 · 附带来源引用 {sources}",
+      "computed_no_sources": "静态内容未与工具输出核对"
+    },
+    "en-US": {
+      "injected_sources": "Generation data attached · Source citations {sources}",
+      "injected_no_sources": "Generation data attached · No source citations provided",
+      "computed_sources": "Static content was not checked against tool output · Source citations {sources}",
+      "computed_no_sources": "Static content was not checked against tool output"
+    }
+  },
+  "semantic_deny": [
+    "100% 已验证",
+    "verified 100%",
+    "2/3 verified",
+    "已验证数据",
+    "Verified data",
+    "verified sources",
+    "Inputs injected from verified sources"
+  ],
+  "semantic_allow": [
+    "来源引用不代表数字已经过数值核验。",
+    "Source citations do not mean numbers were numerically verified.",
+    "报告状态：所有者已标记为已核对",
+    "Report status: marked reviewed by owner"
+  ],
+  "source_presentation_paths": [
+    {"section_kind": "*", "path": ["source_refs", "*"], "category": "identity"},
+    {"section_kind": "sources", "path": ["entries", "*"], "category": "source_object"},
+    {"section_kind": "chart", "path": ["spec", "source_meta"], "category": "source_object"},
+    {"section_kind": "chart", "path": ["data_source"], "category": "source_object"},
+    {"section_kind": "html_artifact", "path": ["sources", "*"], "category": "ordinal"}
+  ]
+}

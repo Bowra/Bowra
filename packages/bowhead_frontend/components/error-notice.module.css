@@ -1,0 +1,200 @@
+.notice {
+  position: relative;
+  margin-block: 0 12px;
+  padding: 11px 12px 10px;
+  color: var(--c-ink);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 7px;
+}
+
+.primary {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.marker {
+  display: inline-grid;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--c-err-ink);
+  background: var(--c-err-soft);
+  border: 1px solid var(--c-err-line);
+  border-radius: 50%;
+  place-items: center;
+}
+
+.message {
+  min-width: 0;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0;
+  margin: 7px 0 0 25px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--c-accent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.action:hover {
+  text-decoration: underline;
+}
+
+.action:focus-visible,
+.summary:focus-visible,
+.copyButton:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.disclosure {
+  margin: 9px 0 0 25px;
+  color: var(--c-ink-2);
+  border-top: 1px solid var(--c-line);
+}
+
+.summary {
+  padding: 8px 0 1px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+
+.instrumentPanel {
+  margin-top: 7px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--c-ink) 2.5%, var(--c-bg));
+  border: 1px solid var(--c-line);
+  border-radius: 5px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
+  margin: 0;
+}
+
+.facts dt,
+.facts dd {
+  min-width: 0;
+  padding: 5px 8px;
+  margin: 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.facts dt {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  background: color-mix(in srgb, var(--c-ink) 2%, transparent);
+  border-right: 1px solid var(--c-line);
+}
+
+.facts dd {
+  color: var(--c-ink-2);
+}
+
+.facts code {
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.copyRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 5px 8px;
+}
+
+.copyButton {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  color: var(--c-ink-2);
+  cursor: pointer;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+
+.copyButton:hover {
+  color: var(--c-ink);
+  border-color: color-mix(in srgb, var(--c-ink) 35%, var(--c-line));
+}
+
+.copyStatus {
+  min-width: 0;
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+}
+
+/* Small Copy Diagnostics button beside error text when the diagnostics flag is off: secondary text color, not a full row. */
+.quickCopy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+.quickCopyButton {
+  min-height: 24px;
+  padding: 0;
+  font: inherit;
+  color: var(--c-ink-3);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.quickCopyButton:hover {
+  color: var(--c-ink-2);
+}
+
+.quickCopyButton:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.quickCopyStatus {
+  color: var(--c-ink-3);
+}
+
+@media (max-width: 460px) {
+  .disclosure {
+    margin-left: 0;
+  }
+
+  .facts {
+    grid-template-columns: minmax(80px, 36%) minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "skill": "analyst-method-earnings-quality",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "qoe_paper_profit",
+      "query": "某公司净利润1.44亿但经营现金流仅0.6亿, 应收年初1.8亿年末3.2亿, 存货年初1.2亿年末2.0亿, 营收同比+14%。评估盈利质量。",
+      "expects": {
+        "must_compute": ["净现比≈0.42", "应收增速≈78%", "新增营运资本占用≈2.2亿"],
+        "must_flag": ["净现比<0.5红色警报", "应收增速远超营收", "营运资本占用超净利润"],
+        "verdict_contains": "盈利质量偏低",
+        "discipline": "比率经 python_sandbox(qoe_checks.py)计算, 不靠心算; 缺应付/非经常性数据显式标 data_gap"
+      }
+    },
+    {
+      "id": "qoe_with_nonrecurring",
+      "query": "净利润2.0亿其中含政府补助0.4亿+厂房处置0.5亿, 经营现金流0.5亿, 应收同比+60%营收+10%。这2亿质量如何?",
+      "expects": {
+        "must_compute": ["经常性净利润≈1.1亿", "经常性占比<80%", "净现比0.25"],
+        "must_flag": ["非经常性占比高", "净现比红色警报", "应收背离"],
+        "discipline": "剔除非经常性后判真实盈利能力, 不被账面2亿误导"
+      }
+    },
+    {
+      "id": "qoe_healthy",
+      "query": "某公司净利润2亿, 经营现金流2.4亿, 应收营收同步增长约12%。盈利质量?",
+      "expects": {
+        "must_compute": ["净现比1.2"],
+        "must_flag": [],
+        "verdict_contains": "未见明显警报",
+        "discipline": "健康样本不应误报; 但应提示缺非经常性/账龄数据"
+      }
+    }
+  ]
+}

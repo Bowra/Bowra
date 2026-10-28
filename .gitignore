@@ -1,0 +1,29 @@
+# Local secrets, dependency environments and generated runtime data.
+.env
+.env.*
+!.env.example
+.venv/
+.data/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.DS_Store
+
+# Next.js and frontend test/build output; edition-generated files have package-local rules.
+.next/
+out/
+out-*/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Local build artifacts.
+dist/
+build/
+*.egg-info/

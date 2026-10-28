@@ -1,0 +1,89 @@
+/* Edit history sheet (Canvas Objects Spec C13, part 2 screen 13). */
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.list {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+.row {
+  display: grid;
+  gap: 2px;
+  min-height: 52px;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  outline: none;
+}
+.row:hover {
+  background: var(--c-fill-1);
+}
+.row[aria-selected="true"] {
+  background: var(--c-fill-2);
+  cursor: default;
+}
+.row:focus-visible {
+  box-shadow: 0 0 0 2px var(--c-focus);
+}
+.row > :global(*):last-child:not(.rowWhat) {
+  margin-top: 6px;
+  cursor: auto;
+}
+.rowTime {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.rowWhat {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.status {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.statusText {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+}
+.statusText[data-tone="error"] {
+  color: var(--c-err);
+}
+.inserted {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+  border-radius: 2px;
+  text-decoration: none;
+}
+.deleted {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+  border-radius: 2px;
+  text-decoration: line-through;
+}

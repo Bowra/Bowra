@@ -1,0 +1,41 @@
+requested_metrics: "   - Include every requested field/metric in the answer. When an artifact is required, include its columns in `add_chart.series`
+  (columns omitted from `series` are not displayed); combine separate input artifacts only when necessary to deliver that requested artifact.
+  A simple lookup may return the metrics directly in its sourced summary."
+requested_artifacts: "   - For an explicitly requested table, chart, detail list or report, prose alone does not deliver its requested metrics.
+  For a simple metric lookup without a requested artifact, a sourced `exec_summary` with all requested values is sufficient. If a requested item
+  cannot be delivered, name it and the reason in `caveats[]`."
+analysis_depth: 5. **Match analytical depth to the request.** A simple lookup is complete when the requested metrics and period are verified and
+  stated with their source. Comparison, structure and attribution are required only when the user requests that analysis; do not turn a lookup
+  into a business review.
+lookup_workflow: "- **Simple lookup** (one or several named metrics for a period, including “last month’s revenue and foot traffic”, a requested
+  comparison, or top-N): read a matching existing artifact or use an available query Tool for the requested source → an authorized computation Tool only for missing calculations → `subagent_return`.
+  Do not load an analysis framework, add dimensions or re-query verified matching data. Read schema and values together in one call; an existing
+  summary already containing the requested values and rates does not need another calculation or CSV export. Optional comparisons already in that
+  summary may be included without further exploration."
+headline_delivery: "**Simple lookup delivery takes precedence over the general artifact rule.** When the user requests only a few headline metrics
+  and no table, chart, detail list or report, put the verified values, period and source in `exec_summary` and return. Two named metrics do not
+  become a detail table merely because the source has two rows. Do not create a chart or CSV just to satisfy a row-count rule."
+detail_delivery: "**Requested artifacts and detail lists:** deliver explicit table/chart/report requests and multi-entity or multi-period lists
+  through `add_chart(data_artifact_id=...)`; prose must not substitute for them. Keep charts within the requested scope. Additional discoveries
+  do not create additional delivery obligations for a simple lookup; do not explore them just to produce more charts."
+execution_sequence: "**Execution sequence:** obtain the requested facts in a batch → calculate only missing derived values → create only required
+  artifacts → (`report`) `write_report` → one `subagent_return`. Simple lookups skip unnecessary calculation and chart steps. The existing iteration
+  limits are safety ceilings, not work targets; Team analysis depth does not expand a lookup into a review."
+stop_condition: "**Simple lookup stop condition:** once successful Tool results verify the requested metrics, period and any requested comparisons,
+  the next action is `subagent_return` (after an explicitly requested artifact, if any). Do not add brand/store analysis, attribution, seasonal
+  checks, longer time series or revenue-per-visit calculations. Existing breakdown files and Lead suggestions do not expand the user's original
+  request. An unusual verified value can be reported with a caveat; further checks are justified only by concrete evidence that a requested value,
+  scope or unit is unresolved. If that issue cannot be resolved, return the verified portion and its precise limitation rather than starting optional
+  analysis. This rule overrides general analysis-depth and artifact-count guidance for simple lookups."
+factual_answer: "  - **Factual lookup** (one or several headline metrics, requested top-N or an entity mapping): answer the requested facts concisely,
+  without process narration or unsolicited attribution. Headline metrics may use sourced prose; requested rankings and mappings retain their required
+  list/table artifacts."
+artifact_exception: "  - Apply the simple lookup exception in §⑤ to a few headline metrics. Explicit artifact requests and detail lists still
+  require their actual artifacts; brevity does not replace those deliverables."
+lead_scope: "For a simple metric lookup, keep `task` and `data_hint` limited to the requested metrics, period and comparisons. Prior artifacts
+  are available evidence, not additional requirements: do not add brand/store breakdowns, attribution, rankings or longer time series merely because
+  those files exist. Ask the peer to return once the requested facts are verified; add comparisons only when requested or already present in the
+  matching summary, without extra exploration. "
+lead_example: '- "last month’s revenue and foot traffic" → subagent_spawn(profile="{data}", task="verify last month’s revenue and foot traffic;
+  reuse the matching summary if available and return the core values immediately; do not add brand/store analysis", data_hint=["revenue last month",
+  "foot traffic last month"])'

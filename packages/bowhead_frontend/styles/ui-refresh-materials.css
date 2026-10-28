@@ -1,0 +1,148 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · P2 batch 1: base tokens — three material tiers, three separator tiers, accent text on materials, opaque persistent sidebar.
+ *
+ * Spec: Claude Design P2 Materials Spec (material hierarchy and separators); decisions: docs/design/界面改版-Apple设计方向.md,
+ * P2 视觉改版; implementation/acceptance: docs/design/组件统一-技术设计.md, P2 第 1 批结果.
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles. Screenshot-export pages /internal/canvas-export/* use (public) layout and do not load this file. Derive all colors
+ * from --c-ink / --c-accent /
+ * --c-bg / --c-surface (follow team colors and light/dark), without literals; blur only through --ui-material-filter, also with the -webkit- prefix.
+ * Imported last by authenticated layout (after workbench/canvas appearance; changes existing objects' backgrounds/blur).
+ * Contract: styles/ui-refresh-materials.test.ts.
+ *
+ * Three material tiers:
+ *   Opaque      Persistent sidebar (--c-sidebar), idle top bar (transparent, showing window background); dialogs,
+ * drawers, overlay sidebar, mobile drawer (--c-surface, batches three/five).
+ *   Bar         --ui-material-bar = background 94%: scrolled top bar/mobile top bar, save bar, mobile composer dock,
+ * sticky report toolbar and return bar,
+ *               draft command bar, Agent-release task navigation, image download buttons.
+ *   Overlay     --ui-material-bg = surface 88% / 96% (batch three; dark raised to 96% in P2 batch 1): menus, Toasts,
+ * results-navigation overlay, quick results switching.
+ * Reduced transparency, increased contrast or missing backdrop blur make both tiers opaque (bar → background, overlay → surface), with filter none.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── token ──────────────────────────────────────────────────── */
+:root:root {
+  /* Bar material: bars belong to the window plane, using background (overlays above content use surface); light/dark both 94% */
+  --ui-material-bar: color-mix(in srgb, var(--c-bg) 94%, transparent);
+  /* Three separator tiers: hairlines (between rows/groups, with --hairline), structural lines (sidebar edge, header bottom, pane divider, 1px),
+   * and control borders still using --c-control-line / --c-line (3:1 non-text contrast, unchanged). Team-compiled line
+   * matches ink4's tier (3.0–3.7:1),
+   * serving control boundaries only; separators use independent ink-derived tiers here (1.28–1.47:1 against surface). */
+  --c-separator: color-mix(in srgb, var(--c-ink) 12%, transparent);
+  --c-separator-strong: color-mix(in srgb, var(--c-ink) 20%, transparent);
+  /* Opaque persistent sidebar: equal content-surface/window-background mix (no content passes beneath, so translucency would just be a pale solid fill) */
+  --c-sidebar: color-mix(in oklab, var(--c-surface) 50%, var(--c-bg));
+}
+:root:root[data-theme="dark"] {
+  --c-separator: color-mix(in srgb, var(--c-ink) 14%, transparent);
+  --c-separator-strong: color-mix(in srgb, var(--c-ink) 24%, transparent);
+}
+/* Reduced transparency/increased contrast: bar material falls back to opaque background (overlay/filter fallbacks in ui-refresh.css batch three) */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root:root,
+  :root:root[data-theme="dark"] {
+    --ui-material-bar: var(--c-bg);
+  }
+}
+/* Increased contrast: replace hairlines with 1px structural lines (top-bar/sticky-toolbar/save-bar bottoms use --hairline and --c-separator) */
+@media (prefers-contrast: more) {
+  :root:root,
+  :root:root[data-theme="dark"] {
+    --c-separator: var(--c-separator-strong);
+    --hairline: 1px;
+  }
+}
+/* Without backdrop blur, translucency exposes text behind directly; use opaque fills */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root:root,
+  :root:root[data-theme="dark"] {
+    --ui-material-bar: var(--c-bg);
+  }
+}
+
+/* ═══ 1 · Top bar: idle transparent/borderless; scrolled content beneath reveals bar material + bottom hairline (100ms) ═══
+ * lib/use-scroll-edge.ts sets data-scrolled (any main-content scroll container or the page leaves the top).
+ * Keep a transparent 1px bottom border so idle/scrolled heights match; draw hairline as an inset shadow. Top-bar layout
+ * (content beneath it) awaits batch 3. */
+:root:root :is(.v2-main-head, .v2-mobile-topbar) {
+  border-bottom-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root :is(.v2-main-head, .v2-mobile-topbar)[data-scrolled] {
+  background: var(--ui-material-bar);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+}
+
+/* ═══ 2 · Bar material: sticky toolbar and return bar (save/draft command bars switch in place in ui-refresh-pages-settings.css) ═══ */
+:root:root :is(.results-report-object-toolbar, .results-return-context) {
+  background: var(--ui-material-bar);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+}
+/* Return-bar bottom: 1px control line → hairline (same tier as sticky toolbar) */
+:root:root .results-return-context {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+
+/* Single column (< 1024 since P2 batch 4; < 1200 before) composer dock: sticks to bottom, with content passing beneath. Existing rules all use !important; match that to take effect.
+ * Top 1px control line → hairline. Composer itself remains opaque content surface (workbench batch 6).
+ * Exclude home composer (inside .home-work-composer-inner): not bottom-sticky, transparent shell (also reset with !important in globals.css). */
+@media (max-width: 1023.98px) {
+  :root:root .v2-composer-wrap:not(.home-work-composer-inner *) {
+    border-top-color: transparent !important;
+    background: var(--ui-material-bar) !important;
+    -webkit-backdrop-filter: var(--ui-material-filter);
+    backdrop-filter: var(--ui-material-filter);
+    box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+  }
+}
+
+/* Image download buttons (chat inline/report image sections): formerly inline styles (surface 82% + blur 4), requiring !important to override */
+:root:root .ui-image-download {
+  background: var(--ui-material-bar) !important;
+  -webkit-backdrop-filter: var(--ui-material-filter) !important;
+  backdrop-filter: var(--ui-material-filter) !important;
+}
+
+/* ═══ 3 · Overlay material: overlay results navigation and quick results switching (fixed/mobile forms are already opaque, unchanged) ═══ */
+:root:root :is(.results-navigator--overlay, .results-quick) {
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+}
+
+/* ═══ 4 · Remove scrim blur: report HTML fullscreen scrim (others already share --c-scrim in batches three/five) ═══ */
+:root:root .rc-embed-overlay {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ═══ 5 · Accent text/links on materials: --c-accent-text (accent/body-text mix 65:35; pure accent over material and worst-case background
+ * falls to 4.12:1). Toast actions already use --c-accent-text from batch three; this batch's element audit found no
+ * other pure-accent text on materials. ═══ */
+/* ═══ 6 · Persistent sidebar: opaque --c-sidebar, right structural edge; unselected icons ink2, selected accent ═══
+ * Color changes only; sidebar structure and selected-row fill/weight (neutral fill2 + 600) await batch 3. Expanded
+ * overlay/mobile drawer remain opaque surface (batch five). */
+:root:root .unified-sidebar:not(.is-overlay) :is(.unified-sidebar-expanded, .unified-sidebar-compact) {
+  border-right: 1px solid var(--c-separator-strong);
+  background: var(--c-sidebar);
+}
+:root:root .unified-sidebar :is(.unified-sidebar-nav-item, .unified-sidebar-compact-button) > svg {
+  color: var(--c-ink-2);
+}
+:root:root
+  .unified-sidebar
+  :is(.unified-sidebar-nav-item.is-active, .unified-sidebar-nav-group-row.is-active .unified-sidebar-nav-item, .unified-sidebar-compact-button.is-active)
+  > svg {
+  color: var(--c-accent);
+}

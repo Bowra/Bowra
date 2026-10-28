@@ -1,0 +1,130 @@
+/* Knowledge base upload dialog (knowledge base UX cleanup P1; design 04 Upload Dialog / 06 Narrow 390, screen three).
+   Copy class names from design kb.css (md-* / drop / filecard(.bad) / alert(.err/.info) / bar / lockskel);
+   scope everything under .kb-upload to avoid collisions with global .md (Markdown body) and other same-named classes.
+   Scope cards reuse kb-management.css's .kb-scope-card. Use semantic color tokens only. */
+
+.kb-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--c-ink) 45%, transparent);
+  font-family: var(--font-v2-sans);
+}
+
+.kb-upload.md {
+  width: 480px;
+  max-width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.kb-upload .grab { display: none; }
+.kb-upload .md-hd { padding: 18px 20px 0; display: flex; gap: 10px; align-items: flex-start; }
+.kb-upload .md-hd h3 { font-size: 1rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.kb-upload .md-hd .sub { font-size: 0.75rem; color: var(--c-ink-3); margin-top: 4px; line-height: 1.55; }
+.kb-upload .md-bd { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.kb-upload .md-ft {
+  padding: 13px 20px;
+  border-top: 1px solid var(--c-line-2);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: center;
+  background: var(--c-bg);
+}
+.kb-upload .kb-bundle-leave-note {
+  margin-right: auto;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.kb-upload .kb-scope-card { margin-bottom: 0; position: relative; }
+.kb-upload .kb-scope-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.kb-upload .kb-scope-card:has(input:focus-visible) { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.kb-upload .kb-scope-card.loading { cursor: progress; }
+.kb-upload .kb-scope-card.loading .radio { opacity: 0.4; }
+.kb-upload .kb-scope-card .desc a { color: var(--c-accent); text-decoration: none; margin-left: 2px; }
+.kb-upload .kb-scope-card .desc a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.kb-upload .lockskel {
+  margin-left: auto;
+  width: 74px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--c-bg-3);
+  flex: none;
+}
+
+.kb-upload .drop {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.kb-upload .drop:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.kb-upload .drop b { color: var(--c-ink-2); }
+.kb-upload .drop .fmt { font-size: 0.71875rem; color: var(--c-muted-2); margin-top: 4px; }
+
+.kb-upload .filecard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.kb-upload .filecard .nm { font-size: 0.78125rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.kb-upload .filecard .mt { margin-top: 2px; }
+.kb-upload .filecard .st { margin-left: auto; font-size: 0.71875rem; white-space: nowrap; color: var(--c-ink-3); font-variant-numeric: tabular-nums; }
+.kb-upload .filecard.bad { border-color: var(--c-err-line); background: var(--c-err-soft); }
+.kb-upload .filecard.bad .st { color: var(--c-err); font-weight: 500; }
+
+.kb-upload .alert { padding: 11px 12px; font-size: 0.75rem; line-height: 1.6; }
+.kb-upload .alert.err { background: var(--c-err-soft); border: 1px solid var(--c-err-line); }
+.kb-upload .alert.err b { color: var(--c-err); font-weight: 600; }
+.kb-upload .alert.info { border: 1px solid var(--c-line); }
+
+.kb-upload .bar { height: 5px; border-radius: 999px; background: var(--c-bg-3); overflow: hidden; }
+.kb-upload .bar > span { display: block; height: 100%; background: var(--c-blue); border-radius: 999px; transition: width 0.4s ease; }
+.kb-upload .bar.t > span { background: var(--c-accent); }
+
+/* Google Drive import: secondary entry under the drop zone and per-file results. */
+.kb-upload .kb-up-drive { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.75rem; color: var(--c-ink-3); }
+.kb-upload .kb-up-drive-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.kb-upload .kb-up-drive-results li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--c-line); border-radius: 8px; font-size: 0.8125rem; color: var(--c-ink-2); }
+.kb-upload .kb-up-drive-results li.bad { border-color: var(--c-err-line); background: var(--c-err-soft); }
+.kb-upload .kb-up-drive-results li.bad .st { color: var(--c-err); }
+.kb-upload .kb-up-drive-results .nm { min-width: 0; overflow-wrap: anywhere; }
+.kb-upload .kb-up-drive-results .st { flex: none; }
+
+/* Narrow screens: bottom sheet (06 Narrow 390, screen three); full-width 44px primary button, touch targets ≥ 44px. */
+@media (max-width: 640px) {
+  .kb-upload-overlay { align-items: flex-end; padding: 0; }
+  .kb-upload.md {
+    width: 100%;
+    max-height: 92vh;
+  }
+  .kb-upload .grab {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--c-bg-3);
+    margin: 10px auto 0;
+  }
+  .kb-upload .md-hd { padding: 10px 16px 0; }
+  .kb-upload .md-bd { padding: 14px 16px; }
+  .kb-upload .md-ft { align-items: stretch; padding: 12px 16px 18px; gap: 8px; }
+  .kb-upload .md-ft .kb-btn { min-height: 44px; font-size: 0.875rem; }
+  .kb-upload .kb-x { width: 44px; height: 44px; margin: -10px -10px 0 0; }
+  .kb-upload .kb-scope-card { min-height: 44px; }
+}

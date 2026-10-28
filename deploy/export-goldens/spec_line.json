@@ -1,0 +1,30 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_line",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "月度营业额趋势（亿元）",
+      "rows": [
+        { "月份": "1月", "营业额": 14.2 },
+        { "月份": "2月", "营业额": 12.8 },
+        { "月份": "3月", "营业额": 14.9 },
+        { "月份": "4月", "营业额": 14.1 },
+        { "月份": "5月", "营业额": 15.3 },
+        { "月份": "6月", "营业额": 14.4 },
+        { "月份": "7月", "营业额": 14.3 }
+      ],
+      "row_count": 7,
+      "columns": [
+        { "key": "月份", "header": "月份", "type": "categorical", "y_axis_id": 0 },
+        { "key": "营业额", "header": "营业额", "type": "numeric", "y_axis_id": 0 }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "show_data_labels": true,
+      "percent_stack": false,
+      "fallback_kind": "table"
+    }
+  }
+}

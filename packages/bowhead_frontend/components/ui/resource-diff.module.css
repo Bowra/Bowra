@@ -1,0 +1,74 @@
+/* Resource change view (Capability Center brief §4.11). */
+.diff {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.diff section {
+  display: grid;
+  min-width: 0;
+}
+.diff h3 {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2, transparent);
+}
+.diff ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 12px;
+  font-size: 0.8125rem;
+}
+.row + .row,
+.sub + .row {
+  border-top: 1px solid var(--c-line);
+}
+.sign {
+  width: 12px;
+  font-weight: 700;
+  color: var(--c-ink-3);
+}
+.row[data-change="added"] .sign {
+  color: var(--c-positive, var(--c-ink-2));
+}
+.row[data-change="removed"] .name {
+  text-decoration: line-through;
+  color: var(--c-ink-3);
+}
+.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kind {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.toggle {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--c-accent-text, var(--c-ink-2));
+  cursor: pointer;
+}
+.sub {
+  padding: 0 12px 8px 32px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}

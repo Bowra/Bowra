@@ -1,0 +1,34 @@
+{
+  "skill_name": "canvas-pptx",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把当前 canvas 导出 PPT",
+      "files": [],
+      "expected_behavior": [
+        "canvas-pptx renders output.pptx.",
+        "Each H2/section → one slide.",
+        "KPI row → 1 slide with 4 boxes.",
+        "Charts embedded as images, not text."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "导出 PPT 限定 master theme = 北极九章",
+      "files": [],
+      "expected_behavior": [
+        "Palette matches brand.",
+        "Titles use defined font."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "导出 PPT — canvas 含超长表格",
+      "files": [],
+      "expected_behavior": [
+        "Table split across multiple slides if > 20 rows.",
+        "Does not crash with MemoryError."
+      ]
+    }
+  ]
+}

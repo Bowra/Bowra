@@ -1,0 +1,31 @@
+{
+  "operation": "create",
+  "title": "Monthly delivery review",
+  "slides": [
+    {
+      "title": "Pilot results",
+      "bullets": [
+        "240 requests processed",
+        "12-minute median turnaround",
+        "Review failures before expanding"
+      ]
+    },
+    {
+      "title": "Delivery metrics",
+      "columns": [
+        "Metric",
+        "Value"
+      ],
+      "rows": [
+        [
+          "Requests",
+          "240"
+        ],
+        [
+          "Median turnaround",
+          "12 minutes"
+        ]
+      ]
+    }
+  ]
+}

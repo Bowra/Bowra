@@ -1,0 +1,3942 @@
+/* ─────────────────────────────────────────────────────────────
+ * Interface appearance (component unification P1 appearance; released in 1.5.0)
+ *
+ * Spec: Claude Design Bowhead component specs · Apple direction (Component Spec.dc.html);
+ * mappings: docs/design/组件统一-技术设计.md sections 外观段第一批 and 外观段第二批.
+ *
+ * Every rule starts with :root:root (styles/ui-refresh.test.ts anchors it): the (0,2,0) it adds keeps these rules
+ * above the base styles underneath (app/globals.css, styles/ui-controls-legacy.css and the other base stylesheets),
+ * whose declarations these rules always override have been deleted. Imported last only by the (app) layout, never
+ * loaded by public pages.
+ *
+ * Batch 1: dimension/radius tokens, buttons, inputs. Batch 2: switches, checkboxes/radios, segments,
+ * tabs, badges, state dots, filter chips, avatars (file second half). All colors use tokens,
+ * no literal values (test anchored). CSS Module families (Feishu stage/email service states) use
+ * :global(:root:root) prefixes in their own .module.css files.
+ * ───────────────────────────────────────────────────────────── */
+
+/* ── Tokens: radii, control height/font ───────────────────────── */
+:root:root {
+  /* Radii: balanced tier follows spec 6 / 8 / 10 / 14; --radius-* aliases --r-* */
+  --r-1: 6px;
+  --r-2: 8px;
+  --r-3: 10px;
+  --r-4: 14px;
+  --radius-sm: var(--r-1);
+  --radius-md: var(--r-1);
+  --radius-lg: var(--r-2);
+  --radius-xl: var(--r-3);
+  --radius-2xl: var(--r-4);
+  /* Icon buttons follow control height (density through --control-h-md) */
+  --theme-icon-btn: var(--control-h-md);
+  /* Controls (buttons, inputs, menus, navigation) fixed system font; personal appearance font affects content only */
+  --font-control:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+  /* Pressed secondary-button inset shadow, input bottom fine shadow */
+  --shadow-press: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-control-drop: 0 0.5px 1px rgba(15, 23, 42, 0.05);
+  /* Accent text on light badges: mixed toward body text like --c-pos-ink / --c-warn-ink / --c-err-ink,
+     giving even 11px text 4.5:1 in light mode (pure accent is only 4.47:1 in default warm theme), brightening with body text in dark. */
+  --c-accent-text: color-mix(in srgb, var(--c-accent) 65%, var(--c-ink));
+}
+:root:root[data-theme-radius="sharp"] {
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 10px;
+}
+:root:root[data-theme-radius="soft"] {
+  --r-1: 8px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-4: 20px;
+}
+/* Density → control height: compact 24, comfortable 28 (default), spacious 32 */
+:root:root[data-theme-density="compact"] {
+  --control-h-md: 24px;
+}
+:root:root[data-theme-density="spacious"] {
+  --control-h-md: 32px;
+}
+/* Touch always 44px (overrides density) */
+@media (pointer: coarse) {
+  :root:root,
+  :root:root[data-theme-density] {
+    --control-h-sm: var(--control-h-touch);
+    --control-h-md: var(--control-h-touch);
+    --control-h-lg: var(--control-h-touch);
+  }
+}
+
+/* ── Buttons ────────────────────────────────────────────────────
+ * Each family declares only its variant (sets --ui-btn-* variables); shared rules below
+ * read them for shape/state, defining hover/press/disabled once for all variants.
+ *
+ * Text-button families:
+ *   .settings-button (components/ui/button.tsx), .btn-primary/-secondary/-danger,
+ *   .profile-security-page .btn, .admin-audit-page .btn (.btn--*),
+ *   files .btn (.files-main / .dr / .modal / .bulkbar), .sset .btn, .mset .btn,
+ *   .kb-btn*, .memory-v2-button, .memory-v2-text-button, .credits-btn (credits dialogs), .ui-btn (admin in-page buttons, acceptance B),
+ *   .report-edit-btn (report edit / done / exit), .ws-export (workbench export),
+ *   .reports-filter-toggle (report-library filters)
+ * Icon-button families:
+ *   .v2-icon-btn, .kb-iconbtn, .mset .iconbtn, .memory-v2-icon-button, .memory-v2-refresh
+ */
+:root:root
+  :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle) {
+  /* Default secondary: filled background, body-text color */
+  --ui-btn-bg: var(--c-fill-2);
+  --ui-btn-bg-hover: var(--c-fill-3);
+  --ui-btn-bg-press: var(--c-fill-3);
+  --ui-btn-fg: var(--c-ink);
+  --ui-btn-weight: 500;
+  --ui-btn-press-shadow: var(--shadow-press);
+  --ui-btn-press-filter: none;
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: auto;
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--ui-btn-bg);
+  color: var(--ui-btn-fg);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: var(--ui-btn-weight);
+  line-height: var(--lh-tight);
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  filter: none;
+  opacity: 1;
+  transform: none;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+
+/* Primary buttons */
+:root:root
+  :is(.settings-button--primary, .btn-primary, .profile-security-page .btn--primary, .files-main .btn.pri, .dr .btn.pri, .modal .btn.pri, .sset .btn.pri, .mset .btn.pri, .kb-btn-primary, .memory-v2-button.primary, .memory-v2-icon-button.approve, .credits-btn--primary, .ui-btn--primary, .report-edit-btn--active) {
+  --ui-btn-bg: var(--c-accent);
+  --ui-btn-bg-hover: var(--c-accent-hover);
+  --ui-btn-bg-press: var(--c-accent-press);
+  --ui-btn-fg: var(--c-accent-ink);
+  --ui-btn-weight: 600;
+  --ui-btn-press-shadow: none;
+}
+
+/* Ghost buttons: transparent background, accent text */
+:root:root
+  :is(
+    .settings-button--ghost,
+    .profile-security-page .btn--ghost,
+    .files-main .btn.ghost,
+    .dr .btn.ghost,
+    .modal .btn.ghost,
+    .bulkbar .btn.ghost,
+    .sset .btn.ghost,
+    .mset .btn.ghost,
+    .kb-btn-ghost,
+    .memory-v2-text-button
+  ) {
+  --ui-btn-bg: transparent;
+  --ui-btn-bg-hover: var(--c-fill-1);
+  --ui-btn-bg-press: var(--c-fill-2);
+  --ui-btn-fg: var(--c-accent);
+  --ui-btn-press-shadow: none;
+}
+
+/* Plain text buttons: transparent background, secondary text (Canvas Objects Spec `.btn.plain`: Dismiss, Undo, Restore) */
+/* Doubled class: matches the shared button rule (:root:root :is(…), 0,4,0) and wins by order. */
+:root:root .settings-button.settings-button--plain {
+  --ui-btn-bg: transparent;
+  --ui-btn-bg-hover: var(--c-fill-1);
+  --ui-btn-bg-press: var(--c-fill-2);
+  --ui-btn-fg: var(--c-ink-2);
+  --ui-btn-press-shadow: none;
+}
+
+/* Destructive text on a secondary fill: Canvas close guard “Discard changes” (Canvas Objects Spec C14 `.btn.dng`) */
+:root:root .settings-button.settings-button--destructive-text {
+  --ui-btn-fg: var(--c-err);
+  --ui-btn-weight: 600;
+}
+
+/* Danger buttons. Spec allows solid red only in confirmations (decision 3). Transition period (decision 23):
+ * only confirmation actions in dialog footers are solid red; other danger buttons (on pages, drawer/panel-content deletion entries,
+ * removals in dialog body lists) are red text without background. List-row entries move into ⋯ in page-layout batches. */
+:root:root
+  :is(
+    .settings-button--danger,
+    .btn-danger,
+    .profile-security-page .btn--danger,
+    .modal .btn.danger,
+    .sset .btn.danger,
+    .mset .btn.danger,
+    .kb-btn-danger,
+    .memory-v2-button:is(.is-danger, .danger),
+    .memory-v2-text-button.is-danger,
+    .memory-v2-privacy-danger .memory-v2-text-button,
+    .credits-btn--danger
+  ) {
+  --ui-btn-bg: transparent;
+  --ui-btn-bg-hover: var(--c-err-soft);
+  --ui-btn-bg-press: var(--c-err-soft);
+  --ui-btn-fg: var(--c-err);
+  --ui-btn-weight: 500;
+  --ui-btn-press-shadow: none;
+  --ui-btn-press-filter: none;
+}
+
+/* Confirmation actions stay solid red: check footer, not dialog ancestry — inline deletion entries in role=dialog drawers/panels
+ * require another confirmation when clicked, so are not confirmation actions. Footers: Dialog / ConfirmDialog
+ * .settings-dialog__footer, custom skill/model confirmations .modal-foot, file confirmations .modal .mrow,
+ * knowledge-base .kb-modal-foot, credits reset .credits-modal-foot.
+ * .kb-btn-danger-solid itself means execute: all call sites are confirmation actions (including KB file-drawer
+ * deletion confirmation bar), solid anywhere. */
+:root:root
+  :is([role="dialog"], [role="alertdialog"])
+  :is(.settings-dialog__footer, .modal-foot, .modal .mrow, .kb-modal-foot, .credits-modal-foot)
+  :is(
+    .settings-button--danger,
+    .btn-danger,
+    .modal .btn.danger,
+    .sset .btn.danger,
+    .mset .btn.danger,
+    .kb-btn-danger,
+    .memory-v2-button:is(.is-danger, .danger),
+    .credits-btn--danger
+  ),
+:root:root .kb-btn.kb-btn-danger-solid {
+  --ui-btn-bg: var(--c-err);
+  --ui-btn-bg-hover: var(--c-err-hover);
+  --ui-btn-bg-press: var(--c-err);
+  --ui-btn-fg: var(--c-err-on);
+  --ui-btn-weight: 600;
+  --ui-btn-press-shadow: none;
+  --ui-btn-press-filter: brightness(0.92);
+}
+
+/* Open report-library filter is selected state */
+:root:root .reports-filter-toggle[data-active="true"] {
+  --ui-btn-bg: var(--c-accent-soft);
+  --ui-btn-bg-hover: var(--c-accent-soft);
+  --ui-btn-fg: var(--c-accent);
+}
+/* Workbench report editing toolbar button already has !important radius (globals.css); !important also needed here */
+:root:root .results-report-edit-controls .v2-edit-toggle-btn {
+  border-radius: var(--r-2) !important;
+}
+
+/* Sizes: sm 24 / md 28 (default) / lg 32; sm radius --r-1 */
+:root:root
+  :is(
+    .settings-button--sm,
+    .sset .btn.sm,
+    .mset .btn.sm,
+    .mset .btn.tiny,
+    .kb-btn-sm
+  ) {
+  min-height: var(--control-h-sm);
+  padding: 0 9px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+}
+:root:root .settings-button--lg {
+  min-height: var(--control-h-lg);
+  padding: 0 14px;
+}
+
+/* ── Icon buttons: square, transparent background, description-color icon ── */
+:root:root
+  :is(
+    .v2-icon-btn,
+    .kb-iconbtn,
+    .mset .iconbtn,
+    .memory-v2-icon-button,
+    .memory-v2-refresh
+  ) {
+  --ui-btn-bg: transparent;
+  --ui-btn-bg-hover: var(--c-fill-1);
+  --ui-btn-bg-press: var(--c-fill-2);
+  --ui-btn-fg: var(--c-ink-3);
+  --ui-btn-fg-hover: var(--c-ink);
+  --ui-btn-press-shadow: none;
+  --ui-btn-press-filter: none;
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--ui-btn-bg);
+  color: var(--ui-btn-fg);
+  cursor: pointer;
+  box-shadow: none;
+  filter: none;
+  opacity: 1;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+/* Memory approval check button is primary action */
+:root:root .memory-v2-icon-button.approve {
+  --ui-btn-fg-hover: var(--c-accent-ink);
+}
+/* Open state for expandable icon buttons (notifications etc.) */
+:root:root .v2-icon-btn.active {
+  --ui-btn-bg: var(--c-fill-2);
+  --ui-btn-bg-hover: var(--c-fill-3);
+  --ui-btn-fg: var(--c-ink);
+}
+:root:root .mset .iconbtn.danger {
+  --ui-btn-fg-hover: var(--c-err);
+}
+
+/* ── States: hover / press / focus / disabled / loading (shared by text/icon buttons) ── */
+:root:root
+  :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle, .v2-icon-btn, .kb-iconbtn, .mset .iconbtn, .memory-v2-icon-button, .memory-v2-refresh):hover:not(:disabled, [aria-disabled="true"], .dis) {
+  background: var(--ui-btn-bg-hover);
+  border-color: transparent;
+  color: var(--ui-btn-fg-hover, var(--ui-btn-fg));
+  text-decoration: none;
+  filter: none;
+  opacity: 1;
+}
+:root:root
+  :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle, .v2-icon-btn, .kb-iconbtn, .mset .iconbtn, .memory-v2-icon-button, .memory-v2-refresh):active:not(:disabled, [aria-disabled="true"], .dis) {
+  background: var(--ui-btn-bg-press);
+  box-shadow: var(--ui-btn-press-shadow);
+  filter: var(--ui-btn-press-filter);
+  transform: none;
+}
+:root:root
+  :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle, .v2-icon-btn, .kb-iconbtn, .mset .iconbtn, .memory-v2-icon-button, .memory-v2-refresh):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  box-shadow: none;
+}
+:root:root
+  :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle, .v2-icon-btn, .kb-iconbtn, .mset .iconbtn, .memory-v2-icon-button, .memory-v2-refresh):is(:disabled, [aria-disabled="true"], .dis) {
+  background: var(--ui-btn-bg);
+  color: var(--ui-btn-fg);
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.4;
+}
+/* Loading: Button loading (aria-busy) shows spinner before retained text */
+:root:root .settings-button[aria-busy="true"] {
+  cursor: progress;
+}
+:root:root .settings-button[aria-busy="true"]::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ui-refresh-spin 0.7s linear infinite;
+}
+@keyframes ui-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Touch: buttons 44 high, radius --r-3, text 15px */
+@media (pointer: coarse) {
+  :root:root
+    :is(.settings-button, .btn-primary, .btn-secondary, .btn-danger, .profile-security-page .btn, .files-main .btn, .dr .btn, .modal .btn, .bulkbar .btn, .sset .btn, .mset .btn, .kb-btn, .memory-v2-button, .memory-v2-text-button, .credits-btn, .ui-btn, .report-edit-btn, .ws-export, .reports-filter-toggle) {
+    padding: 0 18px;
+    border-radius: var(--r-3);
+    font-size: 0.9375rem;
+  }
+}
+
+/* ── Inputs · Field ────────────────────────────────────────
+ * 28 high (at least 1.6em, so larger root text grows the field), --r-2, 0.5px inset border --c-control-line; focus 1px accent + 3px --c-accent-soft
+ * halo; error (aria-invalid) same shape in danger color; disabled filled background, no border.
+ * Families: .settings-input / .settings-select / .settings-prompt-input, .ui-input (original inline
+ * inputStyle call sites), model .mset .fld .inp, and filter dropdowns beside search
+ * (files .f-tools .sel, report library, memory filters).
+ */
+:root:root
+  :is(
+    .settings-input,
+    .settings-select,
+    .settings-prompt-input,
+    .ui-input,
+    .mset .fld .inp,
+    .f-tools .sel:not(.quiet),
+    .memory-v2-filters select
+  ) {
+  box-sizing: border-box;
+  /* The floor at the default root; 1.6em lets larger root text grow the field (WebKit selects ignore min-height). */
+  height: max(var(--control-h-md), 1.6em);
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: var(--lh-tight);
+  outline: none;
+  transition: box-shadow var(--dur-fast) linear;
+}
+:root:root
+  :is(
+    textarea.settings-input,
+    textarea.ui-input,
+    .mset .fld textarea.inp
+  ) {
+  height: auto;
+  min-height: 64px;
+  padding: 6px 9px;
+  line-height: 1.5;
+}
+/* Mono content (keys, templates, IDs) retains mono font */
+:root:root
+  :is(.settings-input.bh-mono, .mset .fld .inp.mono) {
+  font-family: var(--font-v2-mono);
+}
+:root:root
+  :is(
+    .settings-input,
+    .settings-select,
+    .settings-prompt-input,
+    .ui-input,
+    .mset .fld .inp,
+    .f-tools .sel:not(.quiet),
+    .memory-v2-filters select
+  )::placeholder {
+  color: var(--c-ink-4);
+}
+:root:root
+  :is(
+    .settings-input,
+    .settings-select,
+    .settings-prompt-input,
+    .ui-input,
+    .mset .fld .inp,
+    .f-tools .sel:not(.quiet),
+    .memory-v2-filters select
+  ):is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root
+  :is(
+    .settings-input,
+    .settings-select,
+    .settings-prompt-input,
+    .ui-input,
+    .mset .fld .inp,
+    .f-tools .sel:not(.quiet),
+    .memory-v2-filters select
+  )[aria-invalid="true"] {
+  box-shadow:
+    inset 0 0 0 1px var(--c-err),
+    0 0 0 3px var(--c-err-soft);
+}
+:root:root
+  :is(
+    .settings-input,
+    .settings-select,
+    .settings-prompt-input,
+    .ui-input,
+    .mset .fld .inp,
+    .f-tools .sel:not(.quiet),
+    .memory-v2-filters select
+  ):disabled {
+  background: var(--c-fill-1);
+  box-shadow: none;
+  color: var(--c-ink-4);
+  cursor: not-allowed;
+}
+
+/* Dropdowns: WebKit native selects do not draw box-shadow, use real border (0.5px renders 1px on 1x screens) */
+:root:root
+  :is(
+    select.settings-select,
+    select.settings-input,
+    select.ui-input,
+    .mset .fld select.inp,
+    .f-tools select.sel:not(.quiet),
+    .memory-v2-filters select
+  ) {
+  border: var(--hairline) solid var(--c-control-line);
+  box-shadow: var(--shadow-control-drop);
+}
+:root:root
+  :is(
+    select.settings-select,
+    select.settings-input,
+    select.ui-input,
+    .mset .fld select.inp,
+    .f-tools select.sel:not(.quiet),
+    .memory-v2-filters select
+  ):is(:focus, :focus-visible) {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
+}
+:root:root
+  :is(
+    select.settings-select,
+    select.settings-input,
+    select.ui-input,
+    .mset .fld select.inp,
+    .f-tools select.sel:not(.quiet),
+    .memory-v2-filters select
+  )[aria-invalid="true"] {
+  border-color: var(--c-err);
+  box-shadow: 0 0 0 3px var(--c-err-soft);
+}
+:root:root
+  :is(
+    select.settings-select,
+    select.settings-input,
+    select.ui-input,
+    .mset .fld select.inp,
+    .f-tools select.sel:not(.quiet),
+    .memory-v2-filters select
+  ):disabled {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Field: labels 12/600 secondary, hints 11.5 auxiliary, errors 11.5 danger */
+:root:root .settings-field {
+  gap: 5px;
+}
+:root:root .settings-field__label {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .settings-field__hint {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root .settings-field__error {
+  color: var(--c-err);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+
+/* ── Search: filled background, no border; focus solid background + focus halo ──
+ * Containers (icon/input within same border): .f-search, .reports-search, .memory-v2-search,
+ *   .verification-selector-search
+ * Inputs (absolutely positioned icon over input): .v2-sr-search input, .kb-search input,
+ *   .sset .searchbox input
+ */
+:root:root
+  :is(
+    .f-search,
+    .reports-search,
+    .memory-v2-search,
+    .verification-selector-search
+  ) {
+  box-sizing: border-box;
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root
+  :is(
+    .f-search,
+    .reports-search,
+    .memory-v2-search,
+    .verification-selector-search
+  )
+  input {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  color: var(--c-ink);
+}
+:root:root
+  :is(
+    .f-search,
+    .reports-search,
+    .memory-v2-search,
+    .verification-selector-search
+  ):focus-within {
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root
+  :is(.v2-sr-search input, .kb-search input, .sset .searchbox input) {
+  box-sizing: border-box;
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
+  padding-top: 0;
+  padding-bottom: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  outline: none;
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root
+  :is(.v2-sr-search input, .kb-search input, .sset .searchbox input):is(
+    :focus,
+    :focus-visible
+  ) {
+  background: var(--c-surface);
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+/* KB deep-content search active uses focus styling */
+:root:root .kb-search.deep input {
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Batch 2: selection controls/badges (spec selection controls, badges · state dots · Chip,
+ * Misc Spec avatars/filter bar; mappings in technical design 外观段第二批)
+ *
+ * Components have base classes:
+ *   Switch → .ui-switch; TabList appearance → .ui-tabs--underline / .ui-tabs--segmented;
+ *   SegmentedControl → .ui-segmented; RadioGroup → .ui-radio-cards; Badge → .ui-badge; StatusDot → .ui-status-dot.
+ * Page-owned switch/tab/badge families map to the same visuals here; colors only tokens (test anchored).
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Tokens: switch thumb, selected segment ── */
+:root:root {
+  /* Switch thumb white in both light/dark (spec) */
+  --c-switch-thumb: #ffffff;
+  --shadow-switch-thumb: 0 1px 2px rgba(0, 0, 0, 0.25);
+  /* Selected segment: content surface in light, one tier brighter in dark (spec #2A3650) */
+  --c-segment-on: var(--c-surface);
+  --shadow-segment-on:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 0 0 0.5px var(--c-separator);
+}
+:root:root[data-theme="dark"] {
+  --c-segment-on: color-mix(in srgb, var(--c-ink) 12%, var(--c-surface));
+}
+
+/* ── Switches: 34×20, one size ─────────────────────────────────
+ * .ui-switch (components/ui/switch.tsx) covers skills .sset .sw, skill drawer .sw, Feishu .switch (original 44 target,
+ * 42×24 pseudo-element track), chart styles .cs-switch-row > button, scheduled .legacy-switch-sched (original 38×22,
+ * green when enabled), tools .legacy-switch-tools (original 38×22), feedback .legacy-switch-coach.
+ * Thumb: caller's first child; with no child (Feishu), drawn on ::after.
+ * Memory auto-learning is an entire card (appearance="none"); its .memory-v2-switch separately maps to same shape. */
+:root:root .ui-switch[role="switch"] {
+  appearance: none;
+  box-sizing: border-box;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-fill-3);
+  box-shadow: none;
+  color: inherit;
+  opacity: 1;
+  filter: none;
+  transform: none;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .ui-switch[role="switch"][aria-checked="true"] {
+  background: var(--c-accent);
+}
+:root:root .ui-switch[role="switch"]::before {
+  content: none;
+}
+:root:root .ui-switch[role="switch"] > :first-child,
+:root:root .ui-switch[role="switch"]:empty::after {
+  box-sizing: border-box;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-switch-thumb);
+  box-shadow: var(--shadow-switch-thumb);
+  opacity: 1;
+  display: grid;
+  place-items: center;
+  transform: translateX(0);
+  transition:
+    transform var(--dur-base) var(--ease-standard),
+    width var(--dur-fast) linear;
+}
+:root:root .ui-switch[role="switch"]:empty::after {
+  content: "";
+}
+:root:root .ui-switch[role="switch"] > :not(:first-child) {
+  display: none;
+}
+:root:root .ui-switch[role="switch"][aria-checked="true"] > :first-child,
+:root:root .ui-switch[role="switch"][aria-checked="true"]:empty::after {
+  transform: translateX(14px);
+}
+/* Hover: track one tier darker; press: thumb 3px wider (toward track interior) */
+:root:root .ui-switch[role="switch"]:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--c-ink) 18%, transparent);
+}
+:root:root .ui-switch[role="switch"][aria-checked="true"]:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--c-accent-hover);
+}
+:root:root .ui-switch[role="switch"]:active:not(:disabled):not([aria-disabled="true"]) > :first-child,
+:root:root .ui-switch[role="switch"]:active:not(:disabled):not([aria-disabled="true"]):empty::after {
+  width: 19px;
+}
+:root:root .ui-switch[role="switch"][aria-checked="true"]:active:not(:disabled):not([aria-disabled="true"]) > :first-child,
+:root:root .ui-switch[role="switch"][aria-checked="true"]:active:not(:disabled):not([aria-disabled="true"]):empty::after {
+  transform: translateX(11px);
+}
+:root:root .ui-switch[role="switch"]:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+:root:root .ui-switch[role="switch"]:disabled,
+:root:root .ui-switch[role="switch"][aria-disabled="true"]:not([aria-busy="true"]) {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Saving (busy): remains focusable, spinner in thumb */
+:root:root .ui-switch[role="switch"][aria-busy="true"] {
+  cursor: progress;
+}
+:root:root .ui-switch[role="switch"][aria-busy="true"] > :first-child::after,
+:root:root .ui-switch[role="switch"][aria-busy="true"]:empty::before {
+  content: "";
+  box-sizing: border-box;
+  grid-area: 1 / 1;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--c-fill-3);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  background: none;
+  animation: ui-refresh-spin 0.7s linear infinite;
+}
+:root:root .ui-switch[role="switch"] > :first-child > * {
+  grid-area: 1 / 1;
+}
+/* Touch: visuals still 34×20, target expanded to 44 high */
+@media (pointer: coarse) {
+  :root:root .ui-switch[role="switch"]:not(:empty)::before {
+    content: "";
+    position: absolute;
+    inset: -12px -5px;
+  }
+}
+
+/* Switch shape in memory auto-learning card */
+:root:root .memory-v2-learning .memory-v2-switch {
+  box-sizing: border-box;
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--c-accent);
+}
+:root:root .memory-v2-learning.is-paused .memory-v2-switch {
+  background: var(--c-fill-3);
+}
+:root:root .memory-v2-learning .memory-v2-switch span {
+  width: 16px;
+  height: 16px;
+  background: var(--c-switch-thumb);
+  box-shadow: var(--shadow-switch-thumb);
+}
+
+/* ── Checkboxes/radios (native input): 16px ─────────────────────── */
+:root:root input:is([type="checkbox"], [type="radio"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+  color: var(--c-accent-ink);
+  vertical-align: middle;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root input[type="radio"] {
+  border-radius: 50%;
+}
+:root:root input[type="checkbox"]::before {
+  content: "";
+  box-sizing: border-box;
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translate(0, -1px) rotate(45deg);
+  opacity: 0;
+}
+:root:root input[type="checkbox"]:is(:checked, :indeterminate) {
+  background: var(--c-accent);
+  box-shadow: none;
+}
+:root:root input[type="checkbox"]:checked::before {
+  opacity: 1;
+}
+/* Indeterminate: horizontal 8×2 bar */
+:root:root input[type="checkbox"]:indeterminate::before {
+  width: 8px;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: currentColor;
+  transform: none;
+  opacity: 1;
+}
+:root:root input[type="radio"]:checked {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+:root:root input:is([type="checkbox"], [type="radio"]):hover:not(:disabled):not(:checked):not(:indeterminate) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-ink) 32%, transparent);
+}
+:root:root input[type="checkbox"]:is(:checked, :indeterminate):hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+:root:root input[type="radio"]:checked:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 5px var(--c-accent-hover);
+}
+:root:root input:is([type="checkbox"], [type="radio"]):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root input:is([type="checkbox"], [type="radio"]):disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Custom checkboxes (KB table .kb-cb, skills enabled-only .tk) use same shape */
+:root:root :is(.kb-cb, .sset .fchip.toggle .tk) {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+  color: var(--c-accent-ink);
+}
+:root:root :is(.kb-cb.on, .kb-cb.mixed, .sset .fchip.toggle.on .tk) {
+  background: var(--c-accent);
+  box-shadow: none;
+  color: var(--c-accent-ink);
+}
+:root:root .kb-cb:hover:not(.on):not(.mixed) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-ink) 32%, transparent);
+}
+:root:root .sset .fchip.toggle:not(.on) .tk {
+  color: transparent;
+}
+/* Indeterminate bar retains on-accent color */
+:root:root .kb-cb-mixed {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c-accent-ink);
+}
+
+/* ── Radio cards (RadioGroup → .ui-radio-cards) ───────────────
+ * Covers model protocol .mset .proto-opt, Feishu event integration .choiceCard, files/KB scope .kb-scope-card,
+ * KB document-type cards, chart-style .cs-member-card. Internal layouts unchanged; only borders/background/states unified. */
+:root:root .ui-radio-cards [role="radio"] {
+  border: 0;
+  border-radius: var(--r-3);
+  background-color: var(--c-surface);
+  background-image: none;
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+  opacity: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root .ui-radio-cards [role="radio"]:hover:not(:disabled):not([aria-disabled="true"]) {
+  background-image: linear-gradient(var(--c-fill-1), var(--c-fill-1));
+}
+:root:root .ui-radio-cards [role="radio"]:active:not(:disabled):not([aria-disabled="true"]) {
+  background-image: linear-gradient(var(--c-fill-2), var(--c-fill-2));
+}
+:root:root .ui-radio-cards [role="radio"][aria-checked="true"] {
+  background-color: color-mix(in srgb, var(--c-accent-soft) 50%, var(--c-surface));
+  box-shadow: inset 0 0 0 1.5px var(--c-accent);
+}
+:root:root .ui-radio-cards [role="radio"]:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root .ui-radio-cards [role="radio"]:is(:disabled, [aria-disabled="true"], .disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+:root:root .ui-radio-cards[aria-busy="true"] [role="radio"] {
+  cursor: progress;
+}
+/* Selected text no longer accent (selection expressed by border) */
+:root:root .ui-radio-cards .proto-opt.on .pn {
+  color: var(--c-ink);
+}
+/* Radio dots in cards per spec: 16px, 1px border, selected 5px accent inner ring */
+:root:root .kb-scope-card .radio {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+}
+:root:root .kb-scope-card:is(.on, [aria-checked="true"]) .radio {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+:root:root .kb-scope-card .radio::after {
+  content: none;
+}
+
+/* ── Segmented controls: 28 high (container padding 2px + options 24 high) ──────────
+ * .ui-segmented (SegmentedControl) and .ui-tabs--segmented (segmented TabList) cover:
+ * chart styles .cs-segment / .cs-choice-group, matrix booleans .mx-triseg,
+ * single/bulk invites .people-invite-mode, team-theme preview .tb-mode-switch, personal appearance .segmented,
+ * memory active/trash, agent marketplace sources, result filters .results-explorer-filter-row,
+ * notifications .notification-tabs, chart inspection .rc-inspect-seg, result-viewer modes .result-viewer-modes,
+ * workbench report/data/code .v2-ws-right-head .tabs, mobile chat/results .v2-ws-mobile-tabs-pill.
+ * Two button groups lack radio semantics, appearance only: KB scope .kb-scope-chips, file categories .f-tools .chips.
+ * Layout (flex/grid, equal option widths) remains family-owned. */
+:root:root :is(.ui-segmented, .ui-tabs--segmented, .kb-scope-chips, .f-tools .chips) {
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"],
+    .ui-tabs--segmented [role="tab"],
+    .kb-scope-chips .kb-chip,
+    .f-tools .chips .chip
+  ) {
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: auto;
+  min-height: calc(var(--control-h-md) - 4px);
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  box-shadow: none;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: calc(var(--fs-md) - 0.03125rem);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  opacity: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"],
+    .ui-tabs--segmented [role="tab"],
+    .kb-scope-chips .kb-chip,
+    .f-tools .chips .chip
+  )::after {
+  content: none;
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"]:not([aria-checked="true"]),
+    .ui-tabs--segmented [role="tab"]:not([aria-selected="true"]),
+    .kb-scope-chips .kb-chip:not(.active),
+    .f-tools .chips .chip:not(.on)
+  ):hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"]:not([aria-checked="true"]),
+    .ui-tabs--segmented [role="tab"]:not([aria-selected="true"]),
+    .kb-scope-chips .kb-chip:not(.active),
+    .f-tools .chips .chip:not(.on)
+  ):active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--c-fill-2);
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"][aria-checked="true"],
+    .ui-tabs--segmented [role="tab"][aria-selected="true"],
+    .kb-scope-chips .kb-chip.active,
+    .f-tools .chips .chip.on
+  ) {
+  background: var(--c-segment-on);
+  color: var(--c-ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-segment-on);
+}
+:root:root
+  :is(
+    .ui-segmented [role="radio"],
+    .ui-tabs--segmented [role="tab"],
+    .kb-scope-chips .kb-chip,
+    .f-tools .chips .chip
+  ):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root :is(.ui-segmented [role="radio"], .ui-tabs--segmented [role="tab"]):is(:disabled, [aria-disabled="true"]) {
+  opacity: 0.4;
+  cursor: default;
+}
+:root:root .ui-segmented[aria-busy="true"] [role="radio"] {
+  opacity: 1;
+  cursor: progress;
+}
+/* Counts within options: spec 11px auxiliary */
+:root:root
+  :is(.ui-segmented, .ui-tabs--segmented, .kb-scope-chips)
+  :is(.n, .count, small) {
+  color: var(--c-ink-4);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  font-family: var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+/* Notification-tab unread count remains count badge, only font unified */
+:root:root .notification-tabs [role="tab"] span {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+
+/* Memory: active/trash standard segmented control; empty-trash moves outside switcher to right on same row (legacy red text inside switcher) */
+:root:root .memory-v2-state-tabs {
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+:root:root .memory-v2-state-tabs > .memory-v2-state-seg {
+  display: inline-flex;
+  gap: 2px;
+}
+:root:root .memory-v2-state-tabs .memory-v2-clear-trash {
+  box-sizing: border-box;
+  min-height: var(--control-h-md);
+  margin-left: auto;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-err);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .memory-v2-state-tabs .memory-v2-clear-trash:hover {
+  background: var(--c-fill-1);
+}
+:root:root .memory-v2-state-tabs .memory-v2-clear-trash:active {
+  background: var(--c-fill-2);
+}
+:root:root .memory-v2-state-tabs .memory-v2-clear-trash:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* ── Underline tabs (TabList appearance="underline" → .ui-tabs--underline) ──
+ * Covers files .f-tabs, skill drawer .drawer-tabs, members .people-view-tabs, OpenAPI .team-openapi-tabs,
+ * team-theme history .tb-history-tabs, personal MCP .personal-mcp-tabs.
+ * 13px, vertical 8px, gap 20; selected body-text color 600 + 2px accent underline; list bottom 0.5px hairline. */
+:root:root .ui-tabs--underline {
+  gap: 20px;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 -0.5px 0 var(--c-separator);
+}
+:root:root .ui-tabs--underline [role="tab"] {
+  appearance: none;
+  box-sizing: border-box;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: var(--lh-tight);
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  opacity: 1;
+  cursor: pointer;
+  transition: color var(--dur-fast) linear;
+}
+:root:root .ui-tabs--underline [role="tab"]::after {
+  content: "";
+  position: absolute;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c-accent);
+  opacity: 0;
+}
+:root:root .ui-tabs--underline [role="tab"]:hover:not(:disabled):not([aria-disabled="true"]) {
+  color: var(--c-ink-2);
+  background: transparent;
+}
+:root:root .ui-tabs--underline [role="tab"][aria-selected="true"] {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .ui-tabs--underline [role="tab"][aria-selected="true"]::after {
+  opacity: 1;
+}
+:root:root .ui-tabs--underline [role="tab"]:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+:root:root .ui-tabs--underline [role="tab"]:is(:disabled, [aria-disabled="true"]) {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Tab counts: 11px auxiliary, no small filled pill */
+:root:root .ui-tabs--underline [role="tab"] .cnt {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Badges: 20 high (small 18), 11.5px/600, pill radius ─────────────
+ * One rule below unifies shape; families set --ui-badge-bg / --ui-badge-fg / --ui-badge-ring tones
+ * (values only var(--c-*), transparent or border shadows; test anchored). Tone :where() adds no specificity,
+ * overrides in family-default → variant order. */
+:root:root
+  :is(
+    .ui-badge,
+    .team-role-badge,
+    .people-role-pill,
+    .ap-team-pill,
+    .mset .pill,
+    .mset .cap-chip,
+    .mset .proto-chip,
+    .mset .mset-outbound__chip,
+    .legacy-badge-sched,
+    .legacy-badge-sched-fail,
+    .legacy-badge-tool-kind,
+    .legacy-badge-tool-scope,
+    .sset .sbadge,
+    .sset .tool-chip,
+    .kb-pill,
+    .kb-page-v2 .tcard .tag,
+    .cbadge,
+    .kbbadge,
+    .sugchip,
+    .am-status,
+    .am-limited-chip,
+    .am-team-tag-row span,
+    .am-management-status > span,
+    .notification-row__chip,
+    .cs-member-card__badge,
+    .kb-otpl-tag,
+    .kb-otpl-mybadge
+  ) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  height: auto;
+  min-height: var(--ui-badge-min-h, var(--ui-badge-h, 20px));
+  max-width: 100%;
+  padding: var(--ui-badge-py, 0) var(--ui-badge-px, 8px);
+  border: 0;
+  border-radius: 999px;
+  background: var(--ui-badge-bg, var(--c-fill-2));
+  box-shadow: var(--ui-badge-ring, none);
+  color: var(--ui-badge-fg, var(--c-ink-2));
+  font-family: var(--font-control);
+  font-size: var(--ui-badge-fs, 0.71875rem);
+  font-style: normal;
+  font-weight: 600;
+  line-height: var(--ui-badge-lh, 1);
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: var(--ui-badge-ws, nowrap);
+  vertical-align: middle;
+}
+/* Long consecutive-failure badge descriptions may wrap (still badge shape) */
+:root:root :where(.legacy-badge-sched-fail) {
+  --ui-badge-h: auto;
+  --ui-badge-min-h: 20px;
+  --ui-badge-py: 3px;
+  --ui-badge-lh: 1.3;
+  --ui-badge-ws: normal;
+}
+/* Files page knowledge-base column: the state badge wraps inside the narrow column (still badge shape) instead of
+   being cut, so the state after "Added ·" stays readable at every text size and locale. */
+:root:root :where(.kbcol .kbbadge) {
+  --ui-badge-h: auto;
+  --ui-badge-min-h: 20px;
+  --ui-badge-py: 3px;
+  --ui-badge-lh: 1.3;
+  --ui-badge-ws: normal;
+}
+/* Icon badges: 12px icon, text color */
+:root:root
+  :is(.ui-badge, .cbadge, .kbbadge, .sset .sbadge, .legacy-badge-sched-fail, .mset .pill)
+  svg {
+  width: 12px;
+  height: 12px;
+  color: currentColor;
+}
+/* Badge dots/pips duplicate state dots; remove */
+:root:root :is(.legacy-badge-sched-pip, .mset .pill .pip, .ap-team-pill .pip) {
+  display: none;
+}
+:root:root .kb-pill .dot {
+  width: 6px;
+  height: 6px;
+}
+
+/* Small: 18 high, 11px, horizontal 6px */
+:root:root
+  :where(
+    .ui-badge--sm,
+    .legacy-badge-tool-kind,
+    .sset .sbadge,
+    .sset .tool-chip,
+    .mset .pill,
+    .mset .cap-chip,
+    .mset .proto-chip,
+    .kb-pill.sm,
+    .kb-page-v2 .tcard .tag,
+    .cbadge,
+    .sugchip,
+    .notification-row__chip,
+    .kb-otpl-tag,
+    .kb-otpl-mybadge
+  ) {
+  --ui-badge-h: 18px;
+  --ui-badge-px: 6px;
+  --ui-badge-fs: 0.6875rem;
+}
+
+/* Tone · family defaults (other than neutral) */
+:root:root
+  :where(
+    .ui-badge--outline,
+    .people-role-pill,
+    .ap-team-pill,
+    .cbadge.export,
+    .sugchip,
+    .legacy-badge-tool-scope
+  ) {
+  --ui-badge-bg: transparent;
+  --ui-badge-fg: var(--c-ink-3);
+  --ui-badge-ring: inset 0 0 0 0.5px var(--c-control-line);
+}
+:root:root
+  :where(
+    .ui-badge--neutral,
+    .team-role-badge--admin,
+    .team-role-badge--audit,
+    .kb-pill.queued,
+    .cbadge.upload,
+    .legacy-badge-sched.is-paused,
+    .legacy-badge-tool-kind.is-openapi,
+    .sset .sbadge:is(.upload, .gen, .auto, .from),
+    .am-status,
+    .am-team-tag-row span,
+    .notification-row__chip.quiet
+  ) {
+  --ui-badge-bg: var(--c-fill-2);
+  --ui-badge-fg: var(--c-ink-2);
+  --ui-badge-ring: none;
+}
+:root:root
+  :where(
+    .ui-badge--outline,
+    .team-role-badge--member,
+    .team-role-badge--current,
+    .team-role-badge--self
+  ) {
+  --ui-badge-bg: transparent;
+  --ui-badge-fg: var(--c-ink-3);
+  --ui-badge-ring: inset 0 0 0 0.5px var(--c-control-line);
+}
+/* Tone · accent (only identities needing emphasis: owner, current, MCP, results and KB files) */
+:root:root
+  :where(
+    .ui-badge--accent,
+    .team-role-badge--creator,
+    .team-role-badge--founder,
+    .people-role-pill--edit,
+    .ap-team-pill.all,
+    .legacy-badge-tool-kind.is-mcp,
+    .kb-pill:is(.proc, .extracting),
+    .cbadge:is(.result, .kb),
+    .kbbadge.proc,
+    .am-status-included,
+    .notification-row__chip.normal
+  ) {
+  --ui-badge-bg: var(--c-accent-soft);
+  --ui-badge-fg: var(--c-accent-text);
+  --ui-badge-ring: none;
+}
+/* Automatic KB inclusion: accent border (previously dashed) */
+:root:root :where(.cbadge.kb.auto) {
+  --ui-badge-bg: transparent;
+  --ui-badge-fg: var(--c-accent);
+  --ui-badge-ring: inset 0 0 0 0.5px var(--c-accent);
+}
+/* Tone · success */
+:root:root
+  :where(
+    .ui-badge--positive,
+    .legacy-badge-sched.is-active,
+    .kb-pill.avail,
+    .kbbadge.avail,
+    .sset .sbadge.verified,
+    .am-status-active,
+    .am-management-status > span:is([data-status="relationship-hired"], [data-status="relationship-team"]),
+    .kb-otpl-tag.copied,
+    .kb-otpl-mybadge
+  ) {
+  --ui-badge-bg: var(--c-pos-soft);
+  --ui-badge-fg: var(--c-pos-ink);
+  --ui-badge-ring: none;
+}
+/* Tone · pending verification */
+:root:root
+  :where(
+    .ui-badge--warning,
+    .legacy-badge-sched-fail,
+    .kb-pill.review,
+    .kbbadge.sugg,
+    .sset .sbadge:is(.unverified, .skeleton),
+    .mset .mset-outbound__chip.is-adapted,
+    .am-limited-chip,
+    .am-status-warning,
+    .am-management-status
+      > span:is(
+        [data-status="relationship-created"],
+        [data-status="assignment-unavailable"],
+        [data-status="relationship-archived"]
+      )
+  ) {
+  --ui-badge-bg: var(--c-warn-soft);
+  --ui-badge-fg: var(--c-warn-ink);
+  --ui-badge-ring: none;
+}
+/* Tone · danger (after pending verification: rejected skills also .unverified; mark terminal danger, distinct from under review) */
+:root:root
+  :where(
+    .ui-badge--danger,
+    .sset .sbadge.unverified.is-rejected,
+    .legacy-badge-sched-fail.is-crit,
+    .kb-pill.failed,
+    .kbbadge.failed,
+    .mset .pill.err,
+    .am-management-status > span[data-status="listing-blocked"],
+    .notification-row__chip.urgent
+  ) {
+  --ui-badge-bg: var(--c-err-soft);
+  --ui-badge-fg: var(--c-err-ink);
+  --ui-badge-ring: none;
+}
+/* Model own badge remains neutral (original model-specific own color) */
+:root:root :where(.mset .pill.own) {
+  --ui-badge-bg: var(--c-fill-2);
+  --ui-badge-fg: var(--c-ink-2);
+  --ui-badge-ring: none;
+}
+/* Clickable state badges (KB failure reasons) retain pointer */
+:root:root .kb-pill.clickable {
+  cursor: pointer;
+}
+:root:root .kb-pill.clickable:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* ── State dots: 7px, always accompanied by text ── */
+:root:root
+  :is(
+    .ui-status-dot,
+    .notification-row__dot,
+    .mset .live-dot,
+    .mset .draft-dot,
+    .mset .tier-label .tdot,
+    .kb-otpl-drift .dot
+  ) {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+}
+:root:root .ui-status-dot {
+  background: var(--c-ink-4);
+}
+:root:root .ui-status-dot--accent {
+  background: var(--c-accent);
+}
+:root:root .ui-status-dot--positive {
+  background: var(--c-pos);
+}
+:root:root .ui-status-dot--warning {
+  background: var(--c-warn);
+}
+:root:root .ui-status-dot--danger {
+  background: var(--c-err);
+}
+
+/* ── Filter chips (clickable, radio or toggle): 28 high, --r-2, filled background; selected light accent (Misc Spec filter bar) ──
+ * Covers skill categories .sset .fchip and the KB filter dropdown .kb-filterchip. */
+:root:root
+  :is(.sset .fchip, .kb-filterchip) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  min-height: var(--control-h-md);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root
+  :is(.sset .fchip, .kb-filterchip):hover:not(:disabled) {
+  background: var(--c-fill-3);
+  border-color: transparent;
+}
+:root:root
+  :is(.sset .fchip.on, .kb-filterchip.active) {
+  background: var(--c-accent-soft);
+  /* Pure accent on accent-soft is 4.47:1 in the default warm palette (and lower on served palettes with a
+     deeper soft fill); the accent/ink mix keeps selected chip text at body contrast in every palette. */
+  color: var(--c-accent-text);
+  font-weight: 500;
+  box-shadow: none;
+}
+/* Hover on a selected chip keeps the accent fill, eased toward the surface so the label only gains contrast (the generic hover above outranked the selected
+   rule, so selected chips flashed to the neutral fill). */
+:root:root
+  :is(.sset .fchip.on, .kb-filterchip.active):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-accent-soft) 82%, var(--c-surface));
+}
+:root:root
+  :is(.sset .fchip, .kb-filterchip):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root .kb-filterchip.active .kb-chevron {
+  color: inherit;
+}
+/* "Label: Value ⌄" menu buttons (components/ui/filter-menu-button.tsx): the filter-chip look (28 high, filled,
+ * accent-soft while narrowing); label in secondary ink, value in body ink, ellipsized past 240px. */
+:root:root .ui-filter-menu-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .ui-filter-menu-button:hover:not(:disabled) {
+  background: var(--c-fill-3);
+}
+:root:root .ui-filter-menu-button[data-active="true"] {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .ui-filter-menu-button[data-active="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-accent-soft) 82%, var(--c-surface));
+}
+:root:root .ui-filter-menu-button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .ui-filter-menu-button__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .ui-filter-menu-button__label {
+  color: var(--c-ink-3);
+}
+:root:root .ui-filter-menu-button__value {
+  font-weight: 500;
+}
+:root:root .ui-filter-menu-button[data-active="true"] .ui-filter-menu-button__label {
+  color: inherit;
+}
+:root:root .ui-filter-menu-button__chevron {
+  flex: none;
+  color: var(--c-ink-3);
+}
+:root:root .ui-filter-menu-button[data-active="true"] .ui-filter-menu-button__chevron {
+  color: inherit;
+}
+:root:root .ui-filter-menu-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+@media (pointer: coarse) {
+  :root:root .ui-filter-menu-button {
+    min-height: 44px;
+  }
+}
+
+/* ── Avatars: neutral background, only self accent (decision 22) ── */
+:root:root :is(.member-cell__avatar, .target-info__avatar) {
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-fill-3);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .member-cell__avatar[data-self="true"] {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+/* Sidebar/account-menu avatars can only be self */
+:root:root :is(.v2-sb-avatar, .unified-sidebar .v2-sb-avatar, .v2-user-menu-avatar) {
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-family: var(--font-control);
+  font-weight: 600;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Batch 3: overlays (Menus Spec; Component Spec dialogs/confirmations, overlay menus/drawers, Toast;
+ * Misc Spec Tooltip; Narrow Spec Toast placement. Mappings in technical design 外观段第三批)
+ *
+ * Menus: useMenu getFloatingProps adds .ui-menu to every container,
+ * items unified by role (menuitem / menuitemradio / menuitemcheckbox / option), no per-family class enumeration.
+ * Material (translucency + blur) only for menus/Toasts (decision 2); dialogs/drawers solid surface.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Tokens: menu-row height, control material, overlay shadow, Tooltip ── */
+:root:root {
+  --menu-item-h: 32px;
+  /* Control material: content surface + blur 24px, saturation 1.4. Spec is 72%; worst backdrop (large pure black / white / accent regions,
+   * still same color after blur) requires secondary text (--c-ink-3, danger red) ≥4.5:1, needing light 88%, dark 95%;
+   * dark raised to 96% on 2026-09-30 for margin (technical design 外观段第三批：浮层 · 与规格稿的偏差). Solid fallback for reduced
+   * transparency, high contrast or unsupported backdrop blur. */
+  --ui-material-bg: color-mix(in srgb, var(--c-surface) 88%, transparent);
+  --ui-material-filter: blur(24px) saturate(1.4);
+  /* Overlay shadow (spec shadow-float): 0.5px border + 12/32 shadow. New token, existing card --shadow-float unchanged */
+  --shadow-overlay:
+    0 0 0 0.5px color-mix(in srgb, var(--c-ink) 12%, transparent),
+    0 12px 32px color-mix(in srgb, var(--c-ink) 16%, transparent);
+  /* Tooltip: dark background/light text in light theme, reversed in dark (spec tip / on-tip) */
+  --c-tooltip: color-mix(in srgb, var(--c-ink) 90%, var(--c-bg));
+  --c-tooltip-ink: var(--c-bg);
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.18);
+  /* Leading check in selection menus (mask, text color) */
+  --menu-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.4 6.3l2.4 2.4 4.8-5.2' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root:root[data-theme="dark"] {
+  --ui-material-bg: color-mix(in srgb, var(--c-surface) 96%, transparent);
+  --shadow-overlay:
+    0 0 0 0.5px color-mix(in srgb, var(--c-ink) 12%, transparent),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  --c-tooltip: color-mix(in srgb, var(--c-ink) 80%, white);
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+@media (pointer: coarse) {
+  :root:root {
+    --menu-item-h: var(--control-h-touch);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root:root,
+  :root:root[data-theme="dark"] {
+    --ui-material-bg: var(--c-surface);
+    --ui-material-filter: none;
+  }
+}
+/* Without backdrop blur, translucent backgrounds expose underlying text directly: use solid */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root:root,
+  :root:root[data-theme="dark"] {
+    --ui-material-bg: var(--c-surface);
+    --ui-material-filter: none;
+  }
+}
+
+@keyframes ui-overlay-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+/* ── Menu container: padding 6, radius 12, material, overlay shadow + 1px material border ──
+ * All useMenu menus: account .v2-user-menu, session/member ⋯ .app-floating-menu, compact sidebar .unified-sidebar-flyout,
+ * model picker, plan mode, space switcher, workbench more/export .ws-menu, report-library download/status, result-object ⋯,
+ * selection-toolbar fonts, chart types, chart/table ⋯, KB rows, credit-user rows.
+ * Width: minimum 220; useMenu sets maximum inline from available space. */
+/* Question-mark help popover (decision 21): the menu material, radius 12 (component spec "Help Popover Spec"). */
+:root:root .ui-help-popover__surface {
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+}
+:root:root .ui-menu {
+  --ui-menu-item-pl: 10px;
+  box-sizing: border-box;
+  /* Minimum 220; narrower available width (useMenu --menu-available-width, capped at viewport minus 16) takes precedence, no viewport overflow */
+  min-width: min(220px, var(--menu-available-width, 220px));
+  padding: 6px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.35;
+  text-align: left;
+  gap: 1px;
+  animation: ui-overlay-in var(--dur-menu) var(--ease-standard);
+}
+/* Exception (user decision 2026-09-26): report selection font/size/weight dropdowns remain compact, without menu minimum 220;
+ * retain legacy 100, content-sized (option names untruncated), yielding to narrower available width too. Other specs unchanged. */
+:root:root .ui-menu.legacy-menu-font {
+  min-width: min(100px, var(--menu-available-width, 100px));
+}
+/* If any menu item has leading marker (icon/check), unmarked items align text in same column: 6 + 18 + 6 */
+:root:root
+  .ui-menu:has(
+    :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"])
+      > :is(svg, .v2-user-menu-icon):first-child,
+    [role="menuitemradio"],
+    [role="menuitemcheckbox"],
+    .legacy-menu-font-item,
+    .unified-sidebar-flyout-item
+  ) {
+  --ui-menu-item-pl: 30px;
+}
+
+/* ── Menu items: 32 high (touch 44), 13px, radius 7, left 6 (with marker) right 10 ── */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: var(--menu-item-h);
+  margin: 0;
+  padding: 0 10px 0 var(--ui-menu-item-pl);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: left;
+  text-decoration: none;
+  text-transform: none;
+  opacity: 1;
+  outline: none;
+  cursor: pointer;
+  transition: none;
+}
+/* Leading markers: action icons (14–16px, text color) and selection checks share column 18px */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):has(
+    > :is(svg, .v2-user-menu-icon):first-child
+  ),
+:root:root
+  .ui-menu
+  :is([role="menuitemradio"], [role="menuitemcheckbox"], .legacy-menu-font-item, .unified-sidebar-flyout-item) {
+  --ui-menu-item-pl: 6px;
+}
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"])
+  > svg:first-child {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0 1px;
+  color: inherit;
+}
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"])
+  > .v2-user-menu-icon:first-child {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+:root:root .ui-menu .v2-user-menu-icon > svg {
+  width: 16px;
+  height: 16px;
+}
+:root:root
+  .ui-menu
+  :is([role="menuitemradio"], [role="menuitemcheckbox"], .legacy-menu-font-item, .unified-sidebar-flyout-item)::before {
+  content: "";
+  flex: 0 0 18px;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: var(--menu-check) center / 12px 12px no-repeat;
+  mask: var(--menu-check) center / 12px 12px no-repeat;
+  opacity: 0;
+}
+/* Current selection = leading check; selected text/background match others (highlight below) */
+:root:root
+  .ui-menu
+  :is(
+    [role="menuitemradio"][aria-checked="true"],
+    [role="menuitemcheckbox"][aria-checked="true"],
+    .legacy-menu-font-item[data-selected="true"],
+    .unified-sidebar-flyout-item[aria-current="page"]
+  )::before {
+  opacity: 1;
+}
+
+/* Keyboard/hover highlight = full accent row (separate from selection marker; both may coexist).
+ * useMenu moves focus on hover, so :hover / :focus express same highlight. */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    :hover,
+    :focus
+  ):not(:disabled, [aria-disabled="true"]) {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    :hover,
+    :focus
+  ):not(:disabled, [aria-disabled="true"])
+  * {
+  color: inherit;
+}
+
+/* Danger items: red text, red highlight background (spec only red text; highlight follows macOS destructive items).
+ * Logout deletes no data, uses regular text color (decision 7). */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    .is-danger,
+    [data-danger="true"],
+    .danger
+  ) {
+  color: var(--c-err);
+}
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    .is-danger,
+    [data-danger="true"],
+    .danger
+  ):is(:hover, :focus):not(:disabled, [aria-disabled="true"]) {
+  background: var(--c-err);
+  color: var(--c-err-on);
+}
+:root:root .ui-menu.v2-user-menu .v2-user-menu-item.is-danger {
+  color: var(--c-ink);
+}
+:root:root
+  .ui-menu.v2-user-menu
+  .v2-user-menu-item.is-danger:is(:hover, :focus):not(:disabled, [aria-disabled="true"]) {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+
+/* Disabled: whole item ink4, no highlight/opacity reduction */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    :disabled,
+    [aria-disabled="true"]
+  ) {
+  background: transparent;
+  color: var(--c-ink-3);
+  opacity: 1;
+  cursor: default;
+}
+/* Disabled reason always visible on second line (decision 9): session/member ⋯ reasons were screen-reader text immediately after buttons, now visible;
+ * screen-reader semantics unchanged (still aria-describedby). Other disabled menu items have no reason text, none added. */
+:root:root
+  .ui-menu
+  .app-floating-menu-item:is(:disabled, [aria-disabled="true"]):has(+ .unified-work-sr-only) {
+  min-height: 26px;
+  padding-top: 5px;
+  align-items: flex-end;
+}
+:root:root
+  .ui-menu
+  .app-floating-menu-item:is(:disabled, [aria-disabled="true"])
+  + .unified-work-sr-only {
+  position: static;
+  display: block;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 1px 10px 6px var(--ui-menu-item-pl);
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+
+/* ── Two-line items: minimum 44, title 13/500, description 12 ink3 ── */
+:root:root .ui-menu .composer-v2__planning-item,
+:root:root .ui-menu .legacy-menu-space-item:has(.legacy-menu-space-desc),
+:root:root .ui-menu .rc-export-row-btn {
+  min-height: 44px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+/* Plan mode: trailing check becomes leading ::before; original mode icon/trailing check hidden (both aria-hidden) */
+:root:root .ui-menu :is(.composer-v2__planning-item-ic, .composer-v2__planning-item-ck) {
+  display: none;
+}
+:root:root .ui-menu .composer-v2__planning-item-tx {
+  gap: 1px;
+}
+:root:root .ui-menu :is(.composer-v2__planning-item-tx .n, .rc-export-row-name) {
+  color: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .ui-menu :is(.composer-v2__planning-item-tx .d, .rc-export-row-desc, .legacy-menu-space-desc) {
+  margin-top: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+/* Space switcher: leading-check column, name/description two lines; ID in code/ID tier 11px ink4 at row end */
+:root:root .ui-menu .legacy-menu-space-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 6px;
+  align-content: center;
+}
+:root:root .ui-menu .legacy-menu-space-item::before {
+  grid-row: 1 / span 2;
+}
+:root:root .ui-menu .legacy-menu-space-item > * {
+  grid-column: 2;
+  min-width: 0;
+}
+:root:root .ui-menu .legacy-menu-space-title {
+  align-items: baseline;
+}
+:root:root .ui-menu .legacy-menu-space-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+:root:root .ui-menu .legacy-menu-space-item:has(.legacy-menu-space-desc) .legacy-menu-space-name {
+  font-weight: 500;
+}
+:root:root .ui-menu .legacy-menu-space-id {
+  margin-left: auto;
+  flex: none;
+  color: var(--c-ink-3);
+  font-family: var(--font-v2-mono);
+  font-size: var(--fs-xs);
+  opacity: 1;
+}
+/* Model picker: selected text screen-reader only, leading check visually */
+:root:root .ui-menu .legacy-menu-model-mark {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+:root:root .ui-menu .legacy-menu-model-item--default {
+  margin-bottom: 0;
+}
+/* Export menu: format badges retain size (not squeezed into marker slot 18px), gap 6 to name/description */
+:root:root .ui-menu .rc-export-row-btn {
+  --ui-menu-item-pl: 6px;
+}
+
+/* ── Group title 11/600 ink4, top 6 bottom 2; separator 0.5px, horizontal 8 ── */
+:root:root
+  .ui-menu
+  :is(.v2-user-menu-label, .unified-sidebar-flyout-title, .legacy-menu-model-group-title, .kb-pop-label) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* Model picker: provider names retain original case (no uppercase), API type regular small label */
+:root:root .ui-menu .legacy-menu-model-provider-upper {
+  display: none;
+}
+:root:root .ui-menu .legacy-menu-model-provider-name {
+  display: inline;
+}
+:root:root .ui-menu .legacy-menu-model-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 0.5px var(--c-control-line);
+  color: var(--c-ink-3);
+  font-size: 0.65625rem;
+  font-weight: 600;
+}
+:root:root .ui-menu .legacy-menu-model-group {
+  margin-bottom: 0;
+}
+:root:root .ui-menu .legacy-menu-model-stale {
+  padding: 6px 10px 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+  color: var(--c-warn-ink);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+:root:root .ui-menu .kb-pop-sep,
+:root:root .ui-menu :is(.v2-user-menu-header, .v2-user-menu-section)::after,
+:root:root .ui-menu .legacy-menu-model-item--default + .legacy-menu-model-group::before {
+  content: "";
+  display: block;
+  height: var(--hairline);
+  margin: 4px 8px;
+  background: var(--c-separator);
+}
+/* Separator below stale notice drawn in notice's ::after: notice horizontal padding 10, separator horizontal inset 8 */
+:root:root .ui-menu .legacy-menu-model-stale::after {
+  content: "";
+  display: block;
+  height: var(--hairline);
+  margin: 6px -2px 4px;
+  background: var(--c-separator);
+}
+:root:root .ui-menu :is(.v2-user-menu-header, .v2-user-menu-section) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+:root:root .ui-menu .unified-sidebar-flyout-item.is-overview {
+  margin-bottom: 0;
+  border-bottom: 0;
+  border-radius: 7px;
+}
+:root:root .ui-menu .rc-export-history {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Account-menu identity header: avatar 32, name 13/600, second line 12 ink3 ── */
+:root:root .ui-menu .v2-user-menu-header {
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 6px;
+}
+:root:root .ui-menu .v2-user-menu-header::after {
+  display: none;
+}
+:root:root .ui-menu .v2-user-menu-header + .v2-user-menu-section::before {
+  content: "";
+  display: block;
+  height: var(--hairline);
+  margin: 4px 8px;
+  background: var(--c-separator);
+}
+:root:root .ui-menu .v2-user-menu-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  font-size: var(--fs-md);
+}
+:root:root .ui-menu .v2-user-menu-identity strong {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-menu :is(.v2-user-menu-identity small, .v2-user-menu-loading) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+
+/* ── Item tails (badge / current value / shortcut) unified 12px ink4 ── */
+:root:root .ui-menu :is(.v2-user-menu-gate, .kb-opt .tail) {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+/* ── Menu search: 28 high, fill2, at top; empty/loading results ── */
+:root:root .ui-menu .legacy-menu-space-search {
+  width: calc(100% - 4px);
+  height: var(--control-h-md);
+  margin: 2px 2px 4px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  outline: none;
+}
+:root:root .ui-menu .legacy-menu-space-search::placeholder {
+  color: var(--c-ink-3);
+}
+:root:root .ui-menu .legacy-menu-space-search:focus {
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root .ui-menu .legacy-menu-space-note {
+  padding: 14px 10px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+
+/* ── Dialogs: solid surface, r4 radius 14, overlay shadow, title 15/650, body 13 ink2, right footer gap 8 ──
+ * Families: Dialog / ConfirmDialog / PromptDialog (.settings-dialog), KB .kb-modal, models .mset-modal,
+ * skills .sset .modal (including create/upload), files .files-main .modal, memory .memory-modal-box,
+ * rule conflict .v29-modal, personal MCP / email confirmation .personal-mcp-confirmation.
+ * Family padding/width unchanged (content layout in page batches); only shell/title/description/footer unified. */
+:root:root
+  :is(
+    .settings-dialog,
+    .kb-modal,
+    .mset-modal,
+    .sset .modal,
+    .files-main .modal,
+    .memory-modal-box,
+    .v29-modal,
+    .personal-mcp-confirmation
+  ) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+:root:root .settings-dialog:not(.settings-dialog--drawer) {
+  padding: 18px 18px 14px;
+  animation: ui-overlay-in var(--dur-base) var(--ease-standard);
+}
+:root:root
+  :is(
+    .settings-dialog__title,
+    .kb-modal-head h3,
+    .mset-modal .modal-title,
+    .sset .modal-title,
+    .files-main .modal h3,
+    .memory-modal-box h2,
+    .v29-modal-title,
+    .personal-mcp-confirmation h2
+  ) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+:root:root .settings-dialog:not(.settings-dialog--drawer) > .settings-dialog__title {
+  margin: 0 0 8px;
+}
+:root:root
+  :is(
+    .settings-dialog__description,
+    .mset-modal .modal-body,
+    .sset .modal-body,
+    .files-main .modal p,
+    .v29-modal-hint,
+    .kb-modal-head .sub
+  ) {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root
+  :is(
+    .settings-dialog__footer,
+    .kb-modal-foot,
+    .sset .modal-foot,
+    .mset-modal .modal-foot,
+    .files-main .modal .mrow,
+    .memory-modal-actions,
+    .v29-modal-foot
+  ) {
+  justify-content: flex-end;
+  gap: 8px;
+}
+:root:root .settings-dialog:not(.settings-dialog--drawer) > .settings-dialog__footer {
+  margin-top: 16px;
+}
+/* KB, skill/model settings footers had light background or separators: remove background, hairline separators */
+:root:root .kb-modal-foot {
+  background: transparent;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.sset .modal-foot, .mset-modal .modal-foot) {
+  border-top: 0;
+}
+
+/* ── Backdrops: unified --c-scrim (light rgba(6,18,35,.28), dark rgba(0,0,0,.45)), no blur ── */
+:root:root
+  :is(
+    .settings-dialog-backdrop,
+    .kb-overlay,
+    .kb-drawer-overlay,
+    .kb-upload-overlay,
+    .mset-scrim,
+    .sset .scrim,
+    .sset .drawer-scrim,
+    .files-main .scrim,
+    .memory-modal-overlay,
+    .v29-modal-backdrop,
+    .personal-mcp-confirmation-backdrop,
+    .rc-drawer-scrim,
+    .rc-inspect-backdrop,
+    .reference-parameter-overlay
+  ) {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ── Drawers: solid surface, left r4 corners, overlay shadow; header title 15/650, hairline separator; right footer gap 8 ──
+ * Families: Dialog variant="drawer" (.settings-dialog--drawer), KB file .kb-drawer-panel,
+ * report exports .rc-exports-drawer, model review .review-panel, skills .sset .drawer. */
+:root:root
+  :is(.settings-dialog--drawer, .kb-drawer-panel, .rc-exports-drawer, .review-panel, .sset .drawer) {
+  border: 0;
+  border-radius: var(--r-4) 0 0 var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+@media (max-width: 720px) {
+  :root:root
+    :is(.settings-dialog--drawer, .kb-drawer-panel, .rc-exports-drawer, .review-panel, .sset .drawer) {
+    border-radius: 0;
+  }
+}
+:root:root
+  :is(.settings-dialog__drawer-head, .kb-drawer-panel .dr-hd, .rc-exports-head, .review-head, .sset .drawer-head) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .settings-dialog__drawer-head {
+  padding: 16px 12px 12px 18px;
+}
+:root:root
+  :is(
+    .settings-dialog__drawer-head .settings-dialog__title,
+    .kb-drawer-panel .dr-name,
+    .rc-exports-title,
+    .review-head h2,
+    .sset .drawer-title
+  ) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+/* Drawer close: square 28 icon button */
+:root:root .settings-dialog__drawer-head button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+:root:root .settings-dialog__drawer-head button:hover:not(:disabled) {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .settings-dialog--drawer .settings-dialog__body {
+  padding: 16px 18px;
+}
+:root:root .settings-dialog--drawer .settings-dialog__footer {
+  padding: 10px 18px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Toast: control material, r3 radius 10, 13px body-text color; error icon+text (decision 4) ──
+ * Desktop top-right, width 320; mobile (<640) top, 10 each side (decision 13). */
+:root:root .legacy-toast-container {
+  top: calc(var(--theme-topbar-height, 52px) + 8px);
+  width: min(320px, calc(100vw - 2rem));
+  max-width: none;
+}
+:root:root .legacy-toast-region {
+  align-items: stretch;
+}
+:root:root .rho-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+:root:root .rho-toast > span:not([class]) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* State markers: error/warning 16px circular !, success circular check, ordinary notice no marker */
+:root:root .rho-toast .legacy-toast-dot {
+  display: none;
+}
+:root:root :is(.rho-toast-error, .rho-toast-warning, .rho-toast-success) .legacy-toast-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 50%;
+  color: var(--c-err-on);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1;
+}
+:root:root :is(.rho-toast-error, .rho-toast-warning) .legacy-toast-dot::before {
+  content: "!";
+}
+:root:root .rho-toast-error .legacy-toast-dot {
+  background: var(--c-err);
+}
+:root:root .rho-toast-warning .legacy-toast-dot {
+  background: var(--c-warn);
+  color: var(--c-surface);
+}
+:root:root .rho-toast-success .legacy-toast-dot {
+  background: var(--c-pos);
+  color: var(--c-surface);
+}
+:root:root .rho-toast-success .legacy-toast-dot::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  -webkit-mask: var(--menu-check) center / 10px 10px no-repeat;
+  mask: var(--menu-check) center / 10px 10px no-repeat;
+}
+:root:root .rho-toast .legacy-toast-count {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  opacity: 1;
+}
+/* Action: small ghost button (accent text); close: icon button.
+ * Accent text on material uses --c-accent-text: pure accent over 88% material/worst backdrop only 4.12–4.32:1
+ * (default warm, custom teal light), so P2 design unifies material accent text/links with this token. */
+:root:root .rho-toast-action {
+  /* A two-character label (撤销) must not wrap one character per line next to a long message. */
+  flex: none;
+  white-space: nowrap;
+  min-height: var(--control-h-sm);
+  margin: -4px 0 -4px auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-accent-text);
+  font: 600 var(--fs-sm) / 1 var(--font-control);
+}
+:root:root .rho-toast-action:hover:not(:disabled) {
+  background: var(--c-fill-1);
+}
+:root:root .rho-toast-action + .rho-toast-close {
+  margin-left: 0;
+}
+:root:root .rho-toast-close {
+  color: var(--c-ink-3);
+  opacity: 1;
+}
+:root:root .rho-toast-close:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+@media (max-width: 639px) {
+  :root:root .legacy-toast-container {
+    /* Mobile topbar (.v2-mobile-topbar) ~57px high, Toast 8px below */
+    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+  :root:root .rho-toast {
+    border-radius: 14px;
+  }
+}
+
+/* ── Tooltip: dark background/light text (reversed in dark), 12px, padding 6 9, radius 7, max 240; hidden on touch ──
+ * Families: compact sidebar .unified-sidebar-tooltip, composer model/send .composer-v2__tooltip,
+ * file KB badge .tipbody, Agent card "+N" capability list .am-capability-more-tip. KB matrix other-template .kb-otpl-tip is a content overlay, treated as a small solid overlay. */
+:root:root :is(.unified-sidebar-tooltip, .composer-v2__tooltip, .files-main .tip > .tipbody, .am-capability-more-tip) {
+  max-width: 240px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--c-tooltip);
+  color: var(--c-tooltip-ink);
+  box-shadow: var(--shadow-tooltip);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.45;
+}
+:root:root .unified-sidebar-tooltip::before {
+  border-right-color: var(--c-tooltip);
+}
+:root:root .tipbody .tipact {
+  color: var(--c-tooltip-ink);
+  font-size: var(--fs-sm);
+}
+:root:root .kb-otpl-tip {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+@media (hover: none) {
+  :root:root :is(.unified-sidebar-tooltip, .composer-v2__tooltip) {
+    display: none;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 第四批：页面结构与数据表格 (Page Layout Spec; Component Spec headers / management tables and empty states;
+ * Misc Spec pagination, filter bars, file drop areas; Narrow Spec management tables).
+ * Mappings: docs/design/组件统一-技术设计.md section 外观段第四批：页面与表格.
+ * Moving inline danger actions into ⋯ is a DOM change (components/ui/row-actions-menu.tsx).
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Tokens: page gutters, content width, table-row height ──
+ * Density-dependent rows: comfortable 44 (28 + 16), compact 40, spacious 48; touch 56 (narrow-spec list-row minimum). */
+:root:root {
+  --page-gutter: 40px;
+  --content-w-form: 880px;
+  --content-w-table: 1120px;
+  --table-row-h: calc(var(--control-h-md) + 16px);
+  --table-head-h: 32px;
+  /* Row hover background: one tier lighter than --c-fill-1 (5–6%), dark row --c-ink-3 still ≥4.5:1 */
+  --row-hover-bg: color-mix(in srgb, var(--c-ink) 4%, transparent);
+}
+@media (max-width: 1279.98px) {
+  :root:root {
+    --page-gutter: 32px;
+  }
+}
+@media (max-width: 1023.98px) {
+  :root:root {
+    --page-gutter: 24px;
+  }
+}
+@media (max-width: 767.98px) {
+  :root:root {
+    --page-gutter: 16px;
+  }
+}
+@media (pointer: coarse) {
+  :root:root,
+  :root:root[data-theme-density] {
+    --table-row-h: 56px;
+  }
+}
+
+/* ── Content: two widths (forms 880 / tables 1120), gutters by breakpoint 40 / 32 / 24 / 16, topbar→header 8 ──
+ * Settings shell .settings-content padding originally !important (globals.css), so !important also needed here. */
+:root:root .settings-shell.is-settings-surface > .settings-content {
+  padding: 8px var(--page-gutter) 48px !important;
+}
+:root:root .settings-shell .settings-content-inner {
+  width: min(var(--content-w-form), 100%);
+}
+:root:root .settings-shell .settings-content-inner[data-ui-width="table"] {
+  width: min(var(--content-w-table), 100%);
+}
+/* Admin pages (audit, approvals, access, credits, run history) all list pages: 1120 */
+:root:root .admin-config-page {
+  width: min(calc(var(--content-w-table) + 2 * var(--page-gutter)), 100%);
+  padding: 8px var(--page-gutter) 48px;
+}
+
+/* ── Header: breadcrumb 12 ink4 (optional) · title 22/700 · one-line description 13 ink3 · primary action right ── */
+:root:root .ui-page-head {
+  margin: 0 0 24px;
+}
+:root:root h1.ui-page-title {
+  margin: 2px 0 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-transform: none;
+}
+:root:root .ui-page-desc {
+  max-width: 560px;
+  margin: 4px 0 24px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: 1.5;
+}
+/* Descriptions in header containers lose independent bottom margin (spacing container-owned) */
+:root:root :is(.ui-page-head, header, .settings-people-hero, .memory-v2-hero, .admin-config-page__header) .ui-page-desc {
+  margin-bottom: 0;
+}
+/* Breadcrumb / header eyebrow: mono uppercase small text → regular auxiliary 12px */
+:root:root :is(.settings-people-hero__eyebrow, .memory-v2-eyebrow, .ph-eyebrow) {
+  margin-bottom: 0;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+/* Large memory/member headers use same sizes (original serif / large 28–40px) */
+:root:root .memory-v2-hero {
+  padding: 0 0 24px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Sections: title 16/650, description 12.5 ink3; content-surface hairline cards, --r-4 ── */
+:root:root .ui-section-title {
+  margin: 0 0 2px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+  text-transform: none;
+}
+:root:root .ui-section-desc {
+  margin: 0 0 12px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ui-section-card {
+  margin-top: 24px;
+  padding: 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-table-frame,
+:root:root .team-members-table-wrap {
+  max-width: 100%;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Narrow: only frame itself may scroll horizontally */
+:root:root :is(.ui-table-frame, .team-members-table-wrap) {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+:root:root .ui-table.ui-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .ui-table.ui-table thead,
+:root:root .ui-table.ui-table thead tr {
+  background: transparent;
+}
+/* Header on the content surface like the knowledge-base tables (the --c-surface-2 fill read accent-blue in light
+   palettes and as a groove in dark ones); the first row's top hairline draws the line under the header. */
+:root:root .ui-table.ui-table th {
+  height: var(--table-head-h);
+  padding: 0 12px;
+  border: 0;
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.3;
+  text-transform: none;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+:root:root .ui-table.ui-table tr {
+  border: 0;
+}
+:root:root .ui-table.ui-table td {
+  height: var(--table-row-h);
+  padding: 6px 12px;
+  border: 0;
+  border-top: var(--hairline) solid var(--c-separator);
+  vertical-align: middle;
+}
+:root:root .ui-table.ui-table tbody tr {
+  transition: background-color var(--dur-fast) linear;
+}
+/* Hover/selection: as background darkens, row auxiliary text (--c-ink-4, e.g. email) rises to --c-ink-3,
+ * ensuring ≥4.5:1 across three palettes/light-dark (selected --c-accent-tint lighter than --c-accent-soft;
+ * ink-3 on dark accent-soft only 3.98–4.57). Variables changed only within rows, not outside. */
+:root:root .ui-table.ui-table tbody tr:hover {
+  --c-ink-4: var(--c-ink-3);
+  background: var(--row-hover-bg);
+}
+:root:root .ui-table.ui-table tbody tr:is([aria-selected="true"], .is-selected, .row--selected) {
+  --c-ink-4: var(--c-ink-3);
+  background: var(--c-accent-tint);
+}
+/* Numeric columns right-aligned, tabular digits; dates etc. tabular digits only */
+:root:root .ui-table.ui-table :is(th, td).ui-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-tabular {
+  font-variant-numeric: tabular-nums;
+}
+/* Action column: minimum necessary width, right-aligned */
+:root:root .ui-table.ui-table .ui-table-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Team member table: two identity lines (name 13/500, email 12 ink4), avatar 28; tier/last-active one line, tabular digits */
+:root:root .team-members-table.ui-table th:first-child,
+:root:root .team-members-table.ui-table td:first-child {
+  padding-left: 14px;
+}
+:root:root .team-members-table .row--creator {
+  background: transparent;
+}
+/* Name/email lines each 16 high + vertical cell padding 6 = row 44 (view credits moved into ⋯) */
+:root:root .team-members-table .member-cell__body {
+  gap: 0;
+}
+:root:root .team-members-table .member-cell__name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1rem;
+}
+:root:root .team-members-table .member-cell__email {
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+  line-height: 1rem;
+}
+/* Tier/last-active one line (original cell grid with two mono lines); restore table-cell for row height to apply */
+:root:root .team-members-table .team-members-table__tier-activity {
+  display: table-cell;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .team-members-table .team-members-meta-item {
+  display: inline;
+}
+:root:root .team-members-table .team-members-meta-item + .team-members-meta-item::before {
+  content: " · ";
+}
+:root:root .team-members-table .team-members-meta-label {
+  font-family: var(--font-control);
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* At ≤720 member table already one card per person (globals.css narrow rules): no table row height/separators/cell padding;
+ * hairline card borders, tier/last-active restore original two-column stacked layout */
+@media (max-width: 720px) {
+  :root:root .team-members-table.ui-table.ui-table td {
+    height: auto;
+    padding: 4px 0;
+    border-top: 0;
+  }
+  :root:root .team-members-table.ui-table.ui-table td:first-child {
+    padding-top: 0;
+  }
+  :root:root .team-members-table.ui-table.ui-table tr {
+    border: 0;
+    border-radius: var(--r-3);
+    background: var(--c-surface);
+    box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  }
+  :root:root .team-members-table.ui-table.ui-table tbody tr:hover {
+    background: var(--c-surface);
+  }
+  :root:root .team-members-table .team-members-table__tier-activity {
+    display: grid;
+  }
+  :root:root .team-members-table .team-members-meta-item {
+    display: grid;
+  }
+  :root:root .team-members-table .team-members-meta-item + .team-members-meta-item::before {
+    content: none;
+  }
+}
+
+/* Access table: second-line small text 12 ink4 */
+:root:root .access-table.ui-table.ui-table td > span {
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+}
+/* Credits users: deleted users remain translucent, without background (only selection/hover have background) */
+:root:root .legacy-credits-user-row.is-removed {
+  background: transparent;
+}
+
+/* Tabular lists (div grid): KB files .kb-grid, files .f-row, same headers/row height/hairlines/hover/selection */
+:root:root .kb-tablewrap {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Header on the content surface with a hairline (the --c-surface-2 fill read accent-blue in light palettes and as a
+   groove darker than the page in dark ones). The first row's top hairline draws the line under the header. */
+:root:root .kb-th-row {
+  min-height: var(--table-head-h);
+  border-bottom: 0;
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .kb-th {
+  padding-top: 0;
+  padding-bottom: 0;
+  min-height: var(--table-head-h);
+}
+:root:root .kb-row {
+  min-height: var(--table-row-h);
+  border-bottom: 0;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .kb-cell {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+:root:root :is(.kb-row, .f-row):hover {
+  --c-ink-4: var(--c-ink-3);
+  background: var(--row-hover-bg);
+}
+:root:root :is(.kb-row.sel, .kb-row.sel:hover, .f-row.sel-on) {
+  --c-ink-4: var(--c-ink-3);
+  background: var(--c-accent-tint);
+}
+:root:root .kb-num {
+  font-variant-numeric: tabular-nums;
+}
+:root:root .f-head {
+  height: max(var(--table-head-h), 2.4em);
+  border-bottom: 0;
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .f-row {
+  height: auto;
+  min-height: var(--table-row-h);
+  border-bottom: 0;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+/* Files numeric/time columns: system-font tabular digits, not mono font (Misc Spec: dates/numbers always system font) */
+:root:root :is(.f-row, .f-head) :is(.num, .mono) {
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Item lists (memory): hairline row separators, light hover background */
+:root:root .memory-v2-items {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .memory-v2-item {
+  min-height: var(--table-row-h);
+  padding: 12px 0;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Trailing ⋯: square icon button 28, visible in table rows on hover/keyboard focus/menu-open, always on touch at 44 square ── */
+:root:root .ui-row-more {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  cursor: pointer;
+  vertical-align: middle;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear,
+    opacity var(--dur-fast) linear;
+}
+:root:root .ui-row-more:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .ui-row-more:active,
+:root:root .ui-row-more[aria-expanded="true"] {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .ui-row-more:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root .ui-row-more svg {
+  width: 16px;
+  height: 16px;
+}
+:root:root tr .ui-row-more {
+  opacity: 0;
+}
+:root:root tr:is(:hover, :focus-within) .ui-row-more,
+:root:root tr .ui-row-more[aria-expanded="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  :root:root tr .ui-row-more {
+    opacity: 1;
+  }
+}
+/* Card-header right: state badge/⋯ grouped right (OpenAPI key cards), preventing space-between from pushing state to center */
+:root:root .ui-card-head-end {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+/* Separator between danger/regular items (same as batch 3 menu separators) */
+:root:root .ui-menu .ui-row-menu-sep {
+  height: var(--hairline);
+  margin: 4px 8px;
+  background: var(--c-separator);
+}
+/* Row action in progress: ⋯ becomes spinner, menu cannot reopen */
+:root:root .ui-row-more.is-busy {
+  opacity: 1;
+  cursor: progress;
+}
+:root:root .ui-row-more-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--c-fill-3);
+  border-top-color: var(--c-ink-3);
+  border-radius: 50%;
+  animation: ui-row-more-spin 0.8s linear infinite;
+}
+@keyframes ui-row-more-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Disabled row-menu reason: second-line small text always visible (decision 9) */
+:root:root .ui-menu .ui-row-menu-reason {
+  display: block;
+  margin: -4px 0 2px;
+  padding: 0 10px 4px var(--ui-menu-item-pl);
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+/* Former danger-button locations in cards/rows: ⋯ shares row with other buttons */
+:root:root .memory-v2-item-actions .ui-row-more {
+  align-self: center;
+}
+
+/* ── Pagination: 28 high, current light accent; left display x–y / total n in 12.5 ink3 tabular digits ──
+ * Families: KB .kb-pagination / .kb-pagebtn, files .f-pager .pgb, members .people-pagination,
+ * spaces .team-spaces-pagination, audit .audit-pagination, credits users .ui-pager. */
+:root:root :is(.kb-pagination, .f-pager, .people-pagination, .team-spaces-pagination, .ui-pager) {
+  gap: 2px 12px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .kb-pagination-num {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .f-pager {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.kb-pagebtn, .f-pager .pgb, .ui-pager-btn) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: var(--control-h-md);
+  width: auto;
+  height: var(--control-h-md);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.kb-pagebtn, .f-pager .pgb, .ui-pager-btn):hover:not(:disabled, .active) {
+  border-color: transparent;
+  background: var(--c-fill-1);
+}
+:root:root :is(.kb-pagebtn, .f-pager .pgb, .ui-pager-btn):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+:root:root .kb-pagebtn.active {
+  border-color: transparent;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+:root:root :is(.kb-pagebtn, .f-pager .pgb, .ui-pager-btn):disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+:root:root .kb-pagedots {
+  padding: 0 4px;
+  color: var(--c-ink-4);
+}
+
+/* ── Filter bar: search/filters same row, gap 8, vertically centered; count right 12 ink4 ── */
+:root:root :is(.f-tools, .people-list-toolbar, .memory-v2-filters) {
+  gap: var(--space-2);
+}
+:root:root .f-tools {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.ui-empty, .team-members-empty, .people-pending-empty, .memory-v2-empty) {
+  padding: 22px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  text-align: center;
+}
+:root:root :is(.kb-empty .big, .memory-v2-empty strong) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.kb-empty .sub, .memory-v2-empty span) {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+
+/* ── File drop area: dashed 1.5px, --r-4; dragging accent border + light accent background ──
+ * Families: KB upload .kb-upload .drop (.active), skills .sset .dropzone (.hot). */
+:root:root .kb-upload .drop,
+:root:root .sset .dropzone {
+  min-height: 120px;
+  padding: 18px 14px;
+  border: 1.5px dashed var(--c-control-line);
+  border-radius: var(--r-4);
+  background: transparent;
+  font-family: var(--font-control);
+  text-align: center;
+}
+:root:root .kb-upload .drop {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  /* A flex item of the upload sheet body: never shrink below its text (large text sizes) */
+  flex-shrink: 0;
+}
+:root:root .kb-upload .drop:hover,
+:root:root .sset .dropzone:hover {
+  border-color: var(--c-accent);
+  background: transparent;
+}
+:root:root .kb-upload .drop.active,
+:root:root .sset .dropzone.hot {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+}
+:root:root :is(.kb-upload .drop b, .sset .dropzone .dz-t) {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.kb-upload .drop.active b, .sset .dropzone.hot .dz-t) {
+  color: var(--c-accent-text);
+}
+:root:root :is(.kb-upload .drop .fmt, .sset .dropzone .dz-s) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .sset .dropzone .dz-ico {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+:root:root .sset .dropzone.hot .dz-ico {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+
+/* ── Composer: prioritize input, reduce tool prominence; existing editing/sending behavior retained ── */
+:root:root .composer-v2 {
+  /* rem, not px: the input text follows the user's root text size (WCAG 1.4.4); 15px at the default 16px root. */
+  --composer-input-font-size: 0.9375rem;
+  --theme-composer-textarea-y: 14px;
+  --theme-composer-textarea-x: 16px;
+  border: 1px solid var(--c-separator);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-family: var(--font-control);
+  outline: none;
+}
+:root:root .composer-v2:has(:is(textarea, .tiptap):focus) {
+  border-color: var(--c-focus);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--c-focus) 25%, transparent),
+    0 8px 24px -18px color-mix(in srgb, var(--c-ink) 35%, transparent);
+}
+:root:root .composer-v2:has(:is(textarea, .tiptap):focus-visible) {
+  outline: none;
+}
+:root:root .composer-v2 textarea:focus-visible {
+  outline: none;
+}
+:root:root .composer-v2 :is(textarea, .composer-reference-editor__input .tiptap) {
+  min-height: var(--composer-input-min-height, 72px);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--composer-input-font-size);
+  line-height: 1.5;
+}
+:root:root .composer-v2 textarea::placeholder,
+:root:root .composer-v2 .composer-reference-editor__placeholder {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--composer-input-font-size);
+  line-height: 1.5;
+}
+:root:root .composer-v2__autocomplete-overlay {
+  font-family: var(--font-control);
+  line-height: 1.5;
+}
+:root:root .composer-v2__toolbar {
+  gap: 8px;
+  padding: 2px 10px 10px;
+}
+:root:root .composer-v2__tools {
+  gap: 4px;
+}
+:root:root .composer-v2__tool-button {
+  min-width: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .composer-v2__tool-button:hover:not(:disabled) {
+  background: var(--c-fill-1);
+}
+:root:root .composer-v2__legacy-glyph {
+  display: none;
+}
+:root:root .composer-v2__refresh-glyph {
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+:root:root .composer-v2__model-trigger {
+  min-height: 32px;
+  padding: 0 10px;
+  gap: 8px;
+  border: 1px solid var(--c-control-line);
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .composer-v2__model-trigger:hover:not(:disabled) {
+  background: var(--c-fill-2);
+}
+:root:root .composer-v2__model-trigger.is-unavailable {
+  color: var(--c-ink-3);
+  opacity: 1;
+}
+:root:root .composer-v2__model-chevron {
+  width: 6px;
+  height: 6px;
+  margin: -3px 1px 0 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  font-size: 0;
+  transform: rotate(45deg);
+}
+:root:root .composer-v2__planning {
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font: 500 var(--fs-md) var(--font-control);
+}
+:root:root .composer-v2__planning:hover:not(:disabled) {
+  background: var(--c-fill-1);
+}
+:root:root .composer-v2__planning.is-active {
+  color: var(--c-accent-text);
+  background: var(--c-accent-tint);
+}
+:root:root .composer-v2[data-layout-mode="compact"] :is(.composer-v2__model-trigger, .composer-v2__planning),
+:root:root .composer-v2[data-layout-mode="ultra"] :is(.composer-v2__model-trigger, .composer-v2__planning) {
+  min-width: 44px;
+  min-height: 44px;
+}
+:root:root .composer-v2 .v2-send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  box-shadow: none;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .composer-v2 .v2-send-btn:hover:not(:disabled) {
+  transform: none;
+  box-shadow: 0 3px 10px -6px var(--c-accent);
+}
+:root:root .composer-v2 .v2-send-btn:disabled {
+  box-shadow: none;
+}
+:root:root .composer-v2 .v2-send-btn--cancel {
+  width: auto;
+  min-width: 40px;
+  padding: 0 12px;
+  border-radius: var(--r-3);
+}
+:root:root .composer-v2 .v2-send-btn--cancel .composer-v2__refresh-glyph {
+  width: 15px;
+  height: 15px;
+}
+:root:root .composer-v2__sheet-row .composer-v2__refresh-glyph {
+  display: block;
+}
+:root:root .composer-v2__sheet {
+  border: 1px solid var(--c-separator);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+:root:root .composer-v2__sheet-head {
+  font: 600 var(--fs-md) var(--font-control);
+}
+:root:root .composer-v2__sheet-row {
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font: 500 var(--fs-md) var(--font-control);
+}
+:root:root .composer-v2__sheet-row:hover {
+  background: var(--c-fill-1);
+}
+:root:root .composer-v2 :is(.composer-v2__draft-warning, .composer-reference-editor__notice) {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .composer-v2__draft-warning-actions button {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-weight: 600;
+}
+:root:root :is(.composer-recovery-notice, .reference-follow-up-queue) {
+  border: 1px solid var(--c-control-line);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root :is(.composer-recovery-notice__actions button, .reference-follow-up-queue button) {
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-weight: 600;
+}
+:root:root .composer-recovery-notice__actions .composer-recovery-notice__primary {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+@media (max-width: 640px) {
+  :root:root .composer-v2__sheet {
+    border-radius: var(--sheet-radius, var(--r-4)) var(--sheet-radius, var(--r-4)) 0 0;
+  }
+}
+@media (pointer: coarse) {
+  :root:root .composer-v2 {
+    --composer-input-font-size: max(1rem, 16px);
+  }
+  :root:root .composer-v2 :is(.composer-v2__tool-button, .composer-v2__model-trigger, .composer-v2__planning, .v2-send-btn) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .composer-v2 :is(.v2-send-btn, .composer-v2__tool-button, .composer-v2__model-trigger, .composer-v2__planning) {
+    transition: none;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Behavior batch A: menus (Menus Spec sections 2, 4, 5, 6; Narrow Spec breakpoints; technical design 行为批 A：菜单)
+ *
+ * DOM: narrow bottom-sheet host .ui-menu-sheet(-host), submenus (trailing ›/drill header),
+ * disabled reasons .ui-menu-reason, keyboard hints .ui-menu-hints.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Sheet host: MenuFloating always wraps it for refresh+narrow; below threshold (still overlay) takes no box */
+:root:root .ui-menu-sheet-host {
+  display: contents;
+}
+
+@keyframes ui-sheet-in {
+  from {
+    opacity: 0;
+    translate: 0 24px;
+  }
+}
+@keyframes ui-sheet-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Backdrop blocks clicks/scroll behind; click closes */
+:root:root .ui-menu-sheet-scrim {
+  background: var(--c-scrim);
+  animation: ui-sheet-scrim-in var(--dur-menu) var(--ease-standard);
+}
+
+/* Bottom sheet: bottom-aligned, side/bottom space 8 (+safe area), radius 20, control material; content scrolls separately */
+:root:root .ui-menu-sheet {
+  position: fixed;
+  right: 8px;
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  left: 8px;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  max-height: calc(100vh - 72px);
+  max-height: calc(100dvh - 72px);
+  padding: 0 8px 10px;
+  border-radius: 20px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  overscroll-behavior: contain;
+  transition: transform var(--dur-menu) var(--ease-standard);
+  animation: ui-sheet-in var(--dur-menu) var(--ease-standard);
+}
+/* Handle: 36×5, hold/swipe down to close (target 22 high, full width) */
+:root:root .ui-menu-sheet-grab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  cursor: grab;
+  touch-action: none;
+}
+:root:root .ui-menu-sheet-grab::before {
+  content: "";
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--c-fill-3);
+}
+:root:root .ui-menu-sheet-title {
+  flex: none;
+  padding: 0 8px 8px;
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  text-align: center;
+  touch-action: none;
+}
+:root:root .ui-menu-sheet[data-drilled="true"] > .ui-menu-sheet-title,
+:root:root .ui-menu-sheet[data-drilled="true"] .ui-menu.is-sheet {
+  display: none !important;
+}
+/* Drill submenu mount/portal nodes take no box; submenu directly a sheet row */
+:root:root .ui-menu-sheet-drill,
+:root:root .ui-menu-sheet-drill > div {
+  display: contents;
+}
+
+/* Menu within sheet: no longer overlay (no positioning/material/shadow), sheet scrolls.
+ * useMenu size middleware writes inline max-width/max-height, overridden here with !important. */
+:root:root .ui-menu-sheet .ui-menu:is(.is-sheet, .is-drill) {
+  position: static !important;
+  inset: auto !important;
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0;
+  max-height: none !important;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  transform: none !important;
+  animation: none;
+}
+/* Rows 44 high, 14px; groups inset rounded lists: each consecutive item section (including disabled reasons) is a rounded surface card,
+ * gap 8 between sections; separators become section gaps in sheets */
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]) {
+  min-height: 44px;
+  border-radius: 0;
+  background: var(--c-surface);
+  font-size: var(--fs-base);
+}
+:root:root .ui-menu:is(.is-sheet, .is-drill) :is(.ui-menu-reason, .ui-row-menu-reason) {
+  margin: 0;
+  background: var(--c-surface);
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"])
+  + :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]),
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is(.ui-menu-reason, .ui-row-menu-reason)
+  + :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]) {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):not(
+    :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], .ui-menu-reason, .ui-row-menu-reason)
+      + *
+  ) {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):not(
+    :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], .ui-menu-reason, .ui-row-menu-reason)
+      + *
+  ):not(:first-child) {
+  margin-top: 8px;
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is(
+    [role="menuitem"],
+    [role="menuitemradio"],
+    [role="menuitemcheckbox"],
+    [role="option"],
+    .ui-menu-reason,
+    .ui-row-menu-reason
+  ):not(
+    :has(
+      + :is(
+          [role="menuitem"],
+          [role="menuitemradio"],
+          [role="menuitemcheckbox"],
+          [role="option"],
+          .ui-menu-reason,
+          .ui-row-menu-reason
+        )
+    )
+  ) {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+:root:root .ui-menu:is(.is-sheet, .is-drill) :is([role="separator"], .ui-row-menu-sep, .kb-pop-sep) {
+  display: none;
+}
+/* Sheets mostly on touch: :hover sticks after tap to last finger row (both iOS/Android), combining with keyboard focus into two highlights.
+ * Sheets highlight only focus, no hover background. */
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):hover:not(:focus) {
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    .is-danger,
+    [data-danger="true"],
+    .danger
+  ):hover:not(:focus) {
+  color: var(--c-err);
+}
+:root:root
+  .ui-menu:is(.is-sheet, .is-drill)
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):hover:not(:focus)
+  :is(.composer-v2__planning-item-tx .d, .ui-menu-item-tail, .rc-export-row-desc, .legacy-menu-space-desc, .legacy-menu-space-id) {
+  color: var(--c-ink-3);
+}
+/* Account-menu sections originally hairline-separated, now gaps in sheets */
+:root:root .ui-menu.is-sheet :is(.v2-user-menu-header, .v2-user-menu-section)::after,
+:root:root .ui-menu.is-sheet .v2-user-menu-header + .v2-user-menu-section::before {
+  display: none;
+}
+:root:root .ui-menu.is-sheet .v2-user-menu-section {
+  padding: 0;
+}
+:root:root .ui-menu.is-sheet .v2-user-menu-section + :is(.v2-user-menu-section, .v2-user-menu-item) {
+  margin-top: 8px;
+}
+/* Group titles in sheets: above list */
+:root:root .ui-menu.is-sheet :is(.v2-user-menu-label, .legacy-menu-model-group) {
+  padding: 8px 12px 4px;
+}
+
+/* ── Disabled items can receive keyboard highlight (announce reason), filled position background, no accent; Enter does not execute ── */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):is(
+    :disabled,
+    [aria-disabled="true"]
+  ):focus {
+  background: var(--c-fill-2);
+}
+/* Disabled reason: second-line small text always visible (decision 9), announced by aria-describedby */
+:root:root
+  .ui-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):has(+ .ui-menu-reason) {
+  min-height: 26px;
+  padding-top: 5px;
+  align-items: flex-end;
+}
+:root:root .ui-menu .ui-menu-reason {
+  display: block;
+  padding: 1px 10px 6px var(--ui-menu-item-pl);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+/* ── Submenus: trailing current value + ›; parent stays highlighted while submenu open ── */
+:root:root .ui-menu .ui-menu-item-tail {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-menu .ui-menu-chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+:root:root
+  .ui-menu:not(.is-sheet)
+  [role="menuitem"][aria-haspopup="menu"][aria-expanded="true"]:not(:disabled, [aria-disabled="true"]) {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+:root:root
+  .ui-menu:not(.is-sheet)
+  [role="menuitem"][aria-haspopup="menu"][aria-expanded="true"]:not(:disabled, [aria-disabled="true"])
+  * {
+  color: inherit;
+}
+/* Drill header: ‹ back left, submenu title centered */
+:root:root .ui-menu-drill-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0 8px;
+}
+:root:root .ui-menu-drill-back {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+:root:root .ui-menu-drill-back-icon {
+  width: 8px;
+  height: 8px;
+  border-bottom: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+:root:root .ui-menu-drill-title {
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+
+/* ── Keyboard hints at completion/space-switcher bottom: only desktop pointer (Menus Spec section 4) ── */
+:root:root .ui-menu-hints {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  /* Stick to list bottom: hints remain while long list scrolls (space-switcher menu container itself scrolls) */
+  :root:root .ui-menu-hints {
+    position: sticky;
+    bottom: -6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 4px -6px -6px;
+    padding: 6px 16px 6px;
+    background: var(--ui-material-bg);
+    -webkit-backdrop-filter: var(--ui-material-filter);
+    backdrop-filter: var(--ui-material-filter);
+    box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+    color: var(--c-ink-3);
+    font-family: var(--font-control);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+  }
+  /* Bottom-stuck hints cover final rows: arrow scroll (scrollIntoView) reserves space with scroll-padding,
+   * so highlighted items do not land beneath hints (15-space switcher measured 28px occlusion). */
+  :root:root .ui-menu:has(> .ui-menu-hints) {
+    scroll-padding-bottom: 36px;
+  }
+}
+:root:root .ui-menu-hints kbd {
+  margin-right: 3px;
+  padding: 0 4px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+}
+/* Export format rows each in .rc-export-row (PPTX also template radio): four sheet rows combine into one rounded list */
+:root:root .ui-menu.is-sheet.rc-export-menu .rc-export-row {
+  overflow: hidden;
+  background: var(--c-surface);
+}
+:root:root .ui-menu.is-sheet.rc-export-menu .rc-export-row > .rc-export-row-btn {
+  border-radius: 0;
+  box-shadow: none;
+}
+:root:root .ui-menu.is-sheet.rc-export-menu .rc-export-row:first-child {
+  border-radius: 12px 12px 0 0;
+}
+:root:root .ui-menu.is-sheet.rc-export-menu .rc-export-row:has(+ :not(.rc-export-row)) {
+  border-radius: 0 0 12px 12px;
+}
+:root:root .ui-menu.is-sheet.rc-export-menu .rc-export-row + .rc-export-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Behavior batch B: narrow dialogs/undo (Narrow Spec drawers/dialogs/Toast placement; Menus Spec section 5;
+ * Component Spec Toast; technical design 行为批 B：窄屏弹窗与撤销)
+ *
+ * DOM: dialog-sheet host .ui-dialog-sheet(-host), handle .ui-dialog-sheet-grab,
+ * `Dialog` header .ui-dialog-sheet-head; panel/backdrop [data-dialog-presentation="sheet"];
+ * undo Toast .ui-toast--undo, swiping [data-swiping].
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Sheet host: DialogShell always wraps it; centered cards (wide or below threshold) take no box */
+:root:root .ui-dialog-sheet-host {
+  display: contents;
+}
+
+/* Bottom sheet: full-width bottom, top radius 16, solid (dialogs/drawers solid, decision 2); max 92% of visible area.
+ * Soft keyboard raises bottom above keyboard; max height from visible area (--ui-sheet-keyboard-inset / --ui-sheet-viewport-height
+ * written inline by DialogShell using visualViewport). */
+:root:root .ui-dialog-sheet {
+  --ui-sheet-safe-bottom: env(safe-area-inset-bottom, 0px);
+  position: fixed;
+  right: 0;
+  bottom: var(--ui-sheet-keyboard-inset, 0px);
+  left: 0;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  max-height: calc(100vh * 0.92);
+  max-height: calc(var(--ui-sheet-viewport-height, 100dvh) * 0.92);
+  border-radius: 16px 16px 0 0;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  overscroll-behavior: contain;
+  transition: transform var(--dur-menu) var(--ease-standard);
+  animation: ui-sheet-in var(--dur-menu) var(--ease-standard);
+}
+/* Open keyboard covers Home indicator, action bar no longer reserves safe area */
+:root:root .ui-dialog-sheet[data-keyboard="open"] {
+  --ui-sheet-safe-bottom: 0px;
+}
+/* Sheet backdrop itself does not scroll (sheet fixed, content scrolls in sheet) */
+:root:root [data-settings-dialog-portal][data-dialog-presentation="sheet"] {
+  overflow: hidden;
+}
+/* Handle 36×5 (top 6 bottom 2), hold/swipe down to close */
+:root:root .ui-dialog-sheet-grab {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 13px;
+  padding-top: 6px;
+  cursor: grab;
+  touch-action: none;
+}
+:root:root .ui-dialog-sheet-grab::before {
+  content: "";
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--c-fill-3);
+}
+
+/* Dialog within sheet: no floating card (width/height/margin/radius/shadow/background owned by sheet), scrolls itself.
+ * Override caller inline width/max-width and family max-height with !important. */
+:root:root .ui-dialog-sheet > [data-dialog-presentation="sheet"] {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 0;
+  max-height: none !important;
+  margin: 0 !important;
+  /* Bottom spacing owned by sticky footer or sheet (below); sheet's own bottom padding would push sticky footer off bottom */
+  padding-bottom: 0 !important;
+  overflow-y: auto;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+  animation: none !important;
+  overscroll-behavior: contain;
+  /* Sticky action bar ~64 high: keyboard focus moves input above it */
+  scroll-padding-bottom: 72px;
+}
+/* Custom-dialog footer sticks (Narrow Spec persistent bottom actions, separately scrolling content): entire sheet scrolls, footer sticks at bottom */
+:root:root
+  .ui-dialog-sheet
+  > [data-dialog-presentation="sheet"]
+  :is(
+    .kb-modal-foot,
+    .modal-foot,
+    .memory-modal-actions,
+    .v29-modal-foot,
+    .legacy-credits-modal-foot,
+    .personal-mcp-confirmation-actions,
+    .legacy-share-foot,
+    .connect-foot,
+    .md-ft
+  ) {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: calc(10px + var(--ui-sheet-safe-bottom));
+  background: var(--c-surface);
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+/* Custom dialogs without sticky footer: safe area below sheet (Home indicator) */
+:root:root
+  .ui-dialog-sheet:not(
+    :has(
+      > .settings-dialog,
+      > [data-dialog-presentation="sheet"]
+        :is(
+          .kb-modal-foot,
+          .modal-foot,
+          .memory-modal-actions,
+          .v29-modal-foot,
+          .legacy-credits-modal-foot,
+          .personal-mcp-confirmation-actions,
+          .legacy-share-foot,
+          .connect-foot,
+          .md-ft
+        )
+    )
+  ) {
+  padding-bottom: var(--ui-sheet-safe-bottom);
+}
+
+/* `Dialog` (.settings-dialog): header + separately scrolling body + persistent footer */
+:root:root .ui-dialog-sheet > .settings-dialog[data-dialog-presentation="sheet"] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+:root:root .ui-dialog-sheet-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 8px 16px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  touch-action: none;
+}
+:root:root .ui-dialog-sheet-head .settings-dialog__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+}
+/* Persistent close (swipe undiscoverable and unusable by screen reader): square 32, filled, outward target expansion to 44 */
+:root:root .ui-dialog-sheet-close {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+:root:root .ui-dialog-sheet-close::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+:root:root .ui-dialog-sheet-close:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+:root:root .ui-dialog-sheet-close:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+:root:root .settings-dialog[data-dialog-presentation="sheet"] > .settings-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Actions: buttons 44 high, equal widths, primary right; hairline above, 10 + safe area below */
+:root:root .settings-dialog[data-dialog-presentation="sheet"] > .settings-dialog__footer {
+  display: grid;
+  flex: none;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 16px calc(10px + var(--ui-sheet-safe-bottom));
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .settings-dialog[data-dialog-presentation="sheet"] > .settings-dialog__footer > :is(button, a) {
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  font-size: var(--fs-base);
+}
+/* Forms: iOS focus zooms whole page for fonts below 16px, so sheet text inputs use 16px (Narrow Spec form controls) */
+:root:root
+  .ui-dialog-sheet
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select) {
+  font-size: max(1rem, 16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .ui-dialog-sheet {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ── Toast swipe dismissal: touch horizontal/upward swipe (Narrow Spec Toast placement).
+ * Gesture movement in inline translate (independent property, no conflict with framer-motion transform). */
+:root:root .rho-toast {
+  touch-action: none;
+}
+/* Undo Toast (Menus Spec section 5, Component Spec Toast): completed action + undo, no state marker */
+:root:root .rho-toast.ui-toast--undo .legacy-toast-dot {
+  display: none;
+}

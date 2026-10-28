@@ -1,0 +1,48 @@
+# Copy into a trusted repository only after provisioning a persistent runner volume.
+name: Agent candidate evaluation
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Reviewed repository commit containing the proposal
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: agent-ci-${{ github.repository }}-${{ inputs.commit_sha }}
+  cancel-in-progress: false
+jobs:
+  evaluate:
+    environment: agent-evaluation
+    runs-on: [self-hosted, linux, agent-evaluation]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - name: Resume exact candidate evaluation
+        env:
+          BOWHEAD_CI_TOKEN: ${{ secrets.BOWHEAD_CI_TOKEN }}
+          BOWHEAD_URL: ${{ vars.BOWHEAD_URL }}
+          BOWHEAD_AGENT_ID: ${{ vars.BOWHEAD_AGENT_ID }}
+          BOWHEAD_GRANT_ID: ${{ vars.BOWHEAD_GRANT_ID }}
+          CI_CHECKPOINT_ROOT: ${{ vars.CI_CHECKPOINT_ROOT }}
+          PROPOSAL_COMMIT: ${{ inputs.commit_sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          set -eu
+          test -d "$CI_CHECKPOINT_ROOT"
+          resolved_commit=$(git rev-parse HEAD)
+          test "$resolved_commit" = "$PROPOSAL_COMMIT"
+          python3 scripts/agent-ci/run.py \
+            --base-url "$BOWHEAD_URL" \
+            --agent-id "$BOWHEAD_AGENT_ID" \
+            --grant-id "$BOWHEAD_GRANT_ID" \
+            --repository "$SOURCE_REPOSITORY" \
+            --ref "$SOURCE_REF" \
+            --commit-sha "$resolved_commit" \
+            --payload agent-proposal.json \
+            --checkpoint "$CI_CHECKPOINT_ROOT/$BOWHEAD_AGENT_ID-$resolved_commit.json" \
+            --timeout 1800

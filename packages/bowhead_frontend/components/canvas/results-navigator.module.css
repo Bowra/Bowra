@@ -1,0 +1,40 @@
+:global(.results-navigator).inline {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  padding: 16px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.landing {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 880px;
+  padding: 24px;
+  margin-inline: auto;
+}
+
+.landing h2 {
+  margin: 0 0 8px;
+  font-size: var(--fs-lg);
+}
+
+.hint {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+}
+
+@media (max-width: 767px) {
+  .landing {
+    padding: 16px;
+  }
+}

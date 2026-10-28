@@ -1,0 +1,19 @@
+/* ─────────────────────────────────────────────────────────────
+ * Public pages: 1024–1199 page scrolling
+ *
+ * The authenticated (app) layout starts its desktop layout at 1024 (P2 batch 4). Public pages keep the
+ * single-column document scrolling they had below the former 1200 breakpoint: app/globals.css applies these
+ * rules below 1024 to every page, and this file adds the 1024–1199 band for the (public) layout only.
+ * Imported by app/(public)/layout.tsx right after app/globals.css; never by the (app) layout.
+ * ───────────────────────────────────────────────────────────── */
+
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  body {
+    overflow: visible !important;
+    height: auto !important;
+  }
+  html,
+  body {
+    min-height: -webkit-fill-available;
+  }
+}

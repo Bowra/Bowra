@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "presetRevision": "2026.10.1",
+  "id": "bowhead-editorial",
+  "labelKey": "bowheadEditorial",
+  "descriptionKey": "bowheadEditorialDesc",
+  "status": "active",
+  "extends": "product-base",
+  "fallbackPresetId": "product-base",
+  "capabilities": {
+    "coveredFamilies": ["comparison", "trend", "composition", "distribution", "relationship", "flow", "matrix"],
+    "requiredRendererFeatures": [],
+    "verifiedAccessibilityClaims": ["minimum-contrast"]
+  },
+  "tokens": {
+    "light": {
+      "palette": ["#B04A2A", "#5E7D8A", "#A98028", "#775B45", "#9A8A6A", "#3A342C"],
+      "sequential": { "from": "#FAF0E8", "to": "#B04A2A" },
+      "diverging": { "neg": "#9F2438", "mid": "#E8E2D4", "pos": "#3A724A" }
+    },
+    "dark": {
+      "palette": ["#D4714E", "#7E9DAB", "#C9A045", "#967B64", "#B5A584", "#C9C2B8"],
+      "sequential": { "from": "#3B241C", "to": "#D4714E" },
+      "diverging": { "neg": "#E88A98", "mid": "#3A3630", "pos": "#7BC28F" }
+    },
+    "geometry": { "lineWidth": 2, "pointRadius": 2.5, "barRadius": 3, "gridDensity": "quiet" }
+  }
+}

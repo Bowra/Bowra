@@ -1,0 +1,61 @@
+/* Knowledge base UX cleanup P1 — page body (interaction design §2, Final: 2b; 05, 06).
+   Copy design kb.css / kb2.css classes (kbshell, kbmain, viewhd, tgrp, tgh, tcards, tcard, mxlist, mx, emptyline),
+   scoped under .kb-page-v2 to avoid collisions with other pages. The header and section tabs are PageFrame's.
+   Use globals.css semantic colors only; design terra-tint maps to accent-tint (follows color schemes). */
+
+/* Width and gutters come from PageFrame (Header, Language & Paging Spec D4). */
+.kb-page-v2 { box-sizing: border-box; width: 100%; min-width: 0; }
+
+.kb-page-v2 .kb-v2-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin-bottom: 16px; border: 1px solid var(--c-line); border-radius: 9px; padding: 8px 13px; color: var(--c-ink-2); background: var(--c-surface); font-size: 0.75rem; }
+.kb-page-v2 .kb-v2-banner .muted { color: var(--c-ink-3); }
+.kb-page-v2 .kb-v2-bannerlink { border: 0; padding: 0; color: var(--c-ink); background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
+
+/* ---- shell ---- */
+.kb-page-v2 .kbshell { display: flex; }
+.kb-page-v2 .kbshell > .kbmain { flex: 1; min-width: 0; }
+
+/* ---- view head ---- */
+.kb-page-v2 .viewhd { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; min-height: 32px; }
+.kb-page-v2 .viewhd .t { font-size: 0.9375rem; font-weight: 600; }
+.kb-page-v2 .viewhd .d { font-size: 0.75rem; color: var(--c-ink-3); }
+.kb-page-v2 .viewhd .a { margin-left: auto; display: flex; gap: 8px; }
+.kb-page-v2 .emptyline { padding: 14px 16px; font-size: 0.75rem; line-height: 1.6; color: var(--c-ink-3); }
+
+/* ---- Document matrix / template-record cards ---- */
+.kb-page-v2 .mxlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.kb-page-v2 .mx { border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); padding: 13px 14px; cursor: pointer; transition: border-color .12s; }
+.kb-page-v2 .mx:hover, .kb-page-v2 .mx:focus-visible { border-color: var(--c-ink-4); }
+.kb-page-v2 .mx .nm { font-size: 0.84375rem; font-weight: 600; overflow-wrap: anywhere; }
+.kb-page-v2 .mx .mt { font-size: 0.75rem; color: var(--c-ink-3); margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.kb-page-v2 .mx .mt2 { font-size: 0.71875rem; color: var(--c-muted-2); margin-top: 6px; min-height: 1em; }
+.kb-page-v2 .mx .status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.kb-page-v2 .mx .status.ok { color: var(--c-pos-ink); }
+.kb-page-v2 .mx .status.run { color: var(--c-accent-hover); }
+.kb-page-v2 .mx .status.err { color: var(--c-err); }
+
+/* ---- Templates: three groups ---- */
+/* `.nav` also matches the global sidebar rule (padding 4px 8px, flex column): reset it so the content lines up with the tabs. */
+.kb-page-v2 .mx-tpl-page.nav { display: block; padding: 0; background: transparent; min-height: 0; }
+.kb-page-v2 .mx-tpl-page.nav .kb-tpl-group { padding: 0 0 8px; }
+.kb-page-v2 .mx-tpl-page.nav .kb-tpl-group + .kb-tpl-group { margin-top: 14px; }
+.kb-page-v2 .tgrp { display: flex; flex-direction: column; gap: 10px; }
+.kb-page-v2 .tgrp + .tgrp { margin-top: 22px; }
+.kb-page-v2 .mx-mobile > .tgh,
+.kb-page-v2 .mx-mobile .kb-tpl-group { padding: 0 14px; }
+.kb-page-v2 .tgh { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 16px 0 10px; }
+.kb-page-v2 .tgrp .tgh { margin: 0; }
+.kb-page-v2 .tgh .t { font-size: 0.84375rem; font-weight: 600; }
+.kb-page-v2 .tgh .n { font-size: 0.71875rem; color: var(--c-muted-2); }
+.kb-page-v2 .tgh .d { font-size: 0.75rem; color: var(--c-ink-3); margin-left: 4px; }
+.kb-page-v2 .tcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.kb-page-v2 .tcard { border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); padding: 12px 13px; display: flex; flex-direction: column; gap: 6px; }
+.kb-page-v2 .tcard .nm { font-size: 0.8125rem; font-weight: 600; display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; }
+.kb-page-v2 .tcard .tag { font-family: var(--mono); font-size: 0.59375rem; font-weight: 600; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--c-line); color: var(--c-ink-3); background: var(--c-bg-2); }
+.kb-page-v2 .tcard .tag.x { color: var(--c-blue-ink); background: var(--c-blue-soft); border-color: color-mix(in srgb, var(--c-blue) 30%, transparent); }
+.kb-page-v2 .tcard .cols { font-size: 0.71875rem; color: var(--c-ink-3); line-height: 1.55; }
+.kb-page-v2 .tcard .ft { display: flex; align-items: center; gap: 8px; font-size: 0.71875rem; color: var(--c-muted-2); margin-top: 2px; }
+.kb-page-v2 .tcard .ft .a { margin-left: auto; display: flex; gap: 10px; }
+
+/* Create Template purpose selection: two scope-card buttons */
+.kb-purpose { width: 100%; text-align: left; font: inherit; color: inherit; }
+.kb-purpose .title, .kb-purpose .desc { display: block; }

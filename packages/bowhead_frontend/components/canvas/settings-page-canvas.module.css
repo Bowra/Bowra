@@ -1,0 +1,8 @@
+/* Space settings in Canvas: chrome comes from the shared canvas object components (C1–C11). */
+.fieldset {
+  display: contents;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}

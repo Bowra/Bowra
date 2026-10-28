@@ -1,0 +1,187 @@
+# Sprint θ Phase 8b-4: Lead orchestrator manifest.
+#
+# Single-orchestrator pattern (Anthropic-aligned). Lead is the only turn entry point.
+# Always runs: answers simple queries, uses tools for medium complexity, callable_peer for complex work.
+#
+# Key differences from specialist manifests:
+# - system: ~ (None): prompts/lead.py:build_lead_system_prompt creates the Lead system prompt
+#   in memory per turn (F2 fix), bypassing file paths to prevent concurrent-turn races.
+# - tools.allow excludes canvas writes (canvas.{write,patch,delete,reorder}).
+# - callable_peers: 6 specialist peers, 1-hop (I2 invariant).
+#
+# Key invariants:
+# - I1: no turn entry path bypasses Lead (turn_runner directly calls lead_orchestrator.run_turn).
+# - I2: callable_peers must have callable_peers: [] in their own manifests (one hop).
+# - I3: tools.allow MUST NOT include canvas.{write,patch,delete,reorder,export}
+# - I4: dispatcher forwards workspace_id + project_id + kb_role to peer parent_ctx.
+# - I5: δ active facts wire ≤ 2 callsite (lead build + agent_runner_adapter)
+
+name: lead
+version: 1
+model: lead # DeepSeek V4 Pro primary (per project memory)
+trust_class: read-mostly
+max_iterations: 12 # Lead's step limit; the turn deadline bounds its time
+max_output_tokens: null # Automatic; resolved for each model request
+
+description: |
+  Bowhead Lead orchestrator — single entry point for all chat turns.
+  Self-answers simple queries (chat / concept with active_facts), dispatches
+  middle tools (kb.* / bi.*), invokes callable_peers for complex analysis.
+  Lean system prompt built per-turn in-memory
+  via prompts/lead.py.
+
+# Sprint θ Phase 8b-4 + CTO P0 #3 fix: system: ~ (None). Lead bypasses manifest
+# system loading; lead_orchestrator.run_turn injects prompt to LLM directly.
+system: ~
+
+tools:
+  default_enabled: false
+  allow:
+    # Lazy-fetch BI tools (G2 capability_check pattern, Spike #3 100% pass)
+    # lead-analyst-logic batch 4: removed the unused `bi_list_measures` entry, sunset since omicron
+    # (visible_to_llm=False; tool_registry.py notes no LLM visibility and 0% production usage);
+    # its advertise intersection is always empty; bi_schema() is the replacement entry.
+    # ⚠ Entries in tool_aliases.yaml **must not be deleted** (deletion restores default role bindings, widening permissions;
+    # lesson ③ from the 2026-07 tool audit).
+    - bi_schema
+    # ⚠ Listing bi_query here does not give Lead access: since delegation became production on 2026-08-21, the run-level
+    # `_LEAD_TOOL_DENY` (lead_orchestrator.py) permanently removes it from Lead's tool list.
+    # Read this allow-list together with _LEAD_TOOL_DENY when determining Lead capabilities.
+    - bi_query
+    # KB read-only
+    - kb_search
+    - kb_list_tables
+    - kb_query_records
+    - kb_get_record
+    # web_search resolves team search configuration (model settings search section or team-enabled Tavily); hidden when unconfigured.
+    - web_search
+    # web_fetch reads known URL bodies (user links / full web_search results) and registers unconditionally
+    # (soft-disable with BOWHEAD_WEB_FETCH=0). Paired with web_search: search discovers URLs; fetch reads full text.
+    # _KNOWLEDGE_BOUNDARY: fetch only URLs already present in context; do not invent them.
+    - web_fetch
+    # web_extract bulk-reads public pages (Tavily backend, FEATURE_TAVILY_TOOLS); like web_fetch, only URLs already present in context.
+    - web_extract
+    # Skill: lead only uses skill.list (catalog hints); skill.read/invoke remain analyst-only.
+    # per role-binding tool_registry.py:2548-2551.
+    - skill_list
+    - skill_save_generated
+    # cca P2/P3 conversational-authoring TRIGGERS. Must be in the Lead whitelist or the
+    # advertise (subagent.py — to_schemas ∩ effective_whitelist) drops them and the Lead
+    # can never open the create card (dogfood: it fell back to skill-creation). Each is
+    # registered ONLY behind its flag (BOWHEAD_CCA_TOOL_CREATOR / _SUBAGENT_CREATOR), and
+    # the advertise yields only REGISTERED tools — so whitelisting here is inert when the
+    # flag is off (not registered → not advertised), live when on.
+    - tool_creator # P2: create-tool card (team API -> tools).
+    - subagent_creator # P3: create-subagent card (team tools -> routable subagent).
+    - workflow_creator # workflow-solidify S2: solidify-workflow card (past turn -> reusable recipe).
+    - scheduled_job_create # routines ⑥: create scheduled tasks through chat (BOWHEAD_SCHEDULED_JOB_TOOL, default off).
+    - template_document_submit # Registered only for the private template-document pilot; returns admission, never file completion.
+    # Configuration copilot batch 0.5 (tech-design-batch05-chat.md §3): configuration Q&A + lightweight tier-one setting confirmation.
+    # Always registered since 2026-08-18. Configuration Agent delegates reasoning;
+    # these read/proposal tools retain Lead-only authority.
+    - config_read # R6: read current registered configuration surfaces with the current user's permissions; members querying admin-only surfaces get structured denial.
+    - config_propose # R7: reversible tier-one settings (appearance/Space i18n) -> inline chat confirmation; no tool writes, applied only after the user clicks.
+    # HITL: clarification.ask (sentinel-based, F3)
+    - clarification_ask
+    # agent-feedback-loop batch 3c: explicit user request to submit improvement suggestions -> team suggestion inbox (same write entry as confirmation card).
+    - feedback_escalate
+    # On an explicit send request, deliver email through the current team's configured SMTP service.
+    - send_email
+    - get_current_user
+    # On an explicit Google write request, use the user's grant for Google Docs/Slides/Sheets (advertised only on Web with the team connection enabled).
+    - google_doc_write
+    - google_slides_write
+    - google_sheet_write
+    # ★2026-08-14: in Auto mode, Lead decides whether the task needs a Plan (the same sentinel mechanism).
+    # Present in the tool set only in Auto; explicit planning goes straight through before the loop, while off omits it.
+    - plan_propose
+    # Batch 2/c6 (workspace-space-split PRD §3.4): restricted switch primitive for querying another named Datarc workspace.
+    # LLM provides only the name; ID resolution/authorization is server-side (match within accessible resources). Without a per-user callback
+    # (legacy/scheduled/IM), the handler returns a structured rejection; keeping the allowlist entry is harmless.
+    - tool_switch_context
+    # bi-workspace-list: read-only entry for accessible Datarc workspaces (the read-side sibling of switch).
+    # This entry lets Lead list the Datarc workspaces accessible to the current user.
+    - tool_list_workspaces
+    # Remember-rebuild (dogfood s_3e854 item 2): long-term memory write and read tools.
+    # remember persists an explicit "记住" to the user's notes (deterministic — no
+    # classifier); recall reads them back mid-turn. Registered unconditionally
+    # (register_memory_tools); whitelisting here advertises them to the Lead.
+    - remember
+    - recall
+    # bi-hitl-cleanup B1: BI concept resolver — LLM-callable atomic tool exposing
+    # ar2 internal classify+hypothesize+decompose. LLM decides when to disambiguate
+    # BI tokens (per discovery §6.1 — helper-as-tool, not auto-emit middleware).
+    - bi_concept_resolve
+    # Peer dispatch: spawn callable_peers.
+    # P0-CTO-1: without this, Lead has no LLM-callable tool to invoke any peer,
+    # so callable_peers above are inert. Profile resolution still gates which
+    # peers Lead may target (lint enforces 1-hop I2 invariant).
+    - subagent_spawn
+    # Termination
+    - subagent_return
+
+# Phase 8b-4: callable_peers — strict 1-hop (I2 invariant lint-enforced).
+# chat-v4 W2 (2026-05-17): 3 specialist peers added. financial-analyst migrated
+# to callable_peers: [] (was [business-analyst], multi-hop v2 pattern) to keep I2
+# 1-hop invariant intact. Cross-domain analysis still routes via compute fallback.
+callable_peers:
+  - agent-coach # Scoped draft inspection, validation and pending suggestions.
+  - configuration-agent # Default-off settings reasoning; no peer calls or apply authority.
+  - kb-analyst # Phase 8b-4; callable_peers: []
+  - compute # existing data-analyst alias (no callable_peers)
+  - financial-analyst # NEW chat-v4 W2 — PE financial due diligence (callable_peers: [] after W2.1 migration).
+  - business-analyst # NEW chat-v4 W2 — industry / business analysis.
+  - compliance-analyst # NEW chat-v4 W2 — legal / compliance due diligence.
+  - consultant # NEW subagent-unification capstone — comprehensive business consultant producing PPT decks; callable_peers: [].
+  - marketing-analyst # multimodal-v1 rework — marketing specialist (materials/campaign reviews/media buying/research); manifest description + dynamic peer block routing, no Lead prompt edits.
+
+input_schema:
+  type: object
+  additionalProperties: false
+  required: [user_question]
+  properties:
+    user_question:
+      type: string
+      maxLength: 4000
+    workspace_id:
+      type: string
+      maxLength: 64
+    project_id:
+      type: string
+      maxLength: 64
+    kb_role:
+      type: string
+      maxLength: 32
+      description: "user-scoped (private) / workspace-shared (team-shared)"
+
+output_schema:
+  type: object
+  additionalProperties: false
+  required: [final_answer, status]
+  properties:
+    final_answer:
+      type: string
+      maxLength: 16000
+    status:
+      type: string
+      enum: [completed, clarification_pending, aborted, error]
+    sections_count:
+      type: integer
+      minimum: 0
+      maximum: 50
+    used_peers:
+      type: array
+      items:
+        type: string
+        maxLength: 64
+      maxItems: 6
+
+examples:
+  - event: "用户: '你好' → Lead self-answer prose, 0 tool calls, 0 peer invocations"
+    description: 闲聊路径 — Step 2 of decision tree, prose answer
+  - event: "用户: '4月营业额' → Lead → bi.list_measures → bi.schema → bi.query → narrate"
+    description: 数据 lazy-fetch 路径 (Spike #3 100% pass)
+  - event: "用户: '查一下' → Lead → clarification.ask (sentinel) → turn_aborted with candidates"
+    description: 模糊 query 路径 — heuristic + LLM hybrid (Spike #2 Plan B)
+  - event: "用户: '把这份合同写成在线报告' → Lead → kb-analyst peer → 1 turn 出"
+    description: 复合 query 路径 (S2 single-turn composite)

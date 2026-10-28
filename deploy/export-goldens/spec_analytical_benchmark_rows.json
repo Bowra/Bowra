@@ -1,0 +1,232 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_analytical_benchmark_rows",
+  "payload": {
+    "spec": {
+      "kind": "table",
+      "title": "Benchmark estimates and supplied reference points · 第 1–8 行，共 29 行",
+      "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+      "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "rows": [
+        {
+          "city": "City 01",
+          "tier": "Tier 1",
+          "low": -40,
+          "high": -24,
+          "baseline": -32,
+          "current": -20,
+          "official": -14,
+          "price": null,
+          "period": "2029Q4",
+          "origin": "estimated"
+        },
+        {
+          "city": "City 02",
+          "tier": "Tier 1",
+          "low": -41,
+          "high": -25,
+          "baseline": -33,
+          "current": -21,
+          "official": -15,
+          "price": 34950,
+          "period": "2029Q4",
+          "origin": "reported"
+        },
+        {
+          "city": "City 03",
+          "tier": "Tier 1",
+          "low": -42,
+          "high": null,
+          "baseline": -34,
+          "current": -22,
+          "official": -16,
+          "price": 34100,
+          "period": "2029Q4",
+          "origin": "reported"
+        },
+        {
+          "city": "City 04",
+          "tier": "Tier 1",
+          "low": -43,
+          "high": -27,
+          "baseline": -35,
+          "current": null,
+          "official": -17,
+          "price": 33250,
+          "period": "2029Q4",
+          "origin": "estimated"
+        },
+        {
+          "city": "City 05",
+          "tier": "Tier 2",
+          "low": -44,
+          "high": -28,
+          "baseline": -36,
+          "current": -24,
+          "official": -18,
+          "price": 32400,
+          "period": "2029Q4",
+          "origin": "reported"
+        },
+        {
+          "city": "City 06",
+          "tier": "Tier 2",
+          "low": -45,
+          "high": -29,
+          "baseline": -37,
+          "current": -25,
+          "official": -19,
+          "price": null,
+          "period": "2029Q4",
+          "origin": "reported"
+        },
+        {
+          "city": "City 07",
+          "tier": "Tier 2",
+          "low": -46,
+          "high": -46,
+          "baseline": -38,
+          "current": -26,
+          "official": -20,
+          "price": 30700,
+          "period": "2029Q4",
+          "origin": "estimated"
+        },
+        {
+          "city": "City 08",
+          "tier": "Tier 2",
+          "low": -47,
+          "high": -31,
+          "baseline": -39,
+          "current": -27,
+          "official": -21,
+          "price": 29850,
+          "period": "2029Q4",
+          "origin": "reported"
+        }
+      ],
+      "row_count": 8,
+      "columns": [
+        {
+          "key": "city",
+          "header": "City",
+          "type": "categorical"
+        },
+        {
+          "key": "tier",
+          "header": "Tier",
+          "type": "categorical"
+        },
+        {
+          "key": "low",
+          "header": "Low",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "high",
+          "header": "High",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "baseline",
+          "header": "Baseline",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "current",
+          "header": "Current",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "official",
+          "header": "Official",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "price",
+          "header": "Price",
+          "type": "numeric",
+          "unit": "CNY"
+        },
+        {
+          "key": "period",
+          "header": "Period",
+          "type": "categorical"
+        },
+        {
+          "key": "origin",
+          "header": "Origin",
+          "type": "categorical"
+        }
+      ],
+      "_export_analytical": {
+        "view_id": "comparison",
+        "preset": "interval_rows",
+        "row_keys": [
+          "city"
+        ],
+        "group_key": "tier",
+        "range": {
+          "lower_key": "low",
+          "upper_key": "high",
+          "kind": "estimate",
+          "note_ids": [
+            "basis"
+          ],
+          "origin_key": "origin"
+        },
+        "points": [
+          {
+            "key": "baseline",
+            "role": "primary"
+          },
+          {
+            "key": "official",
+            "role": "reference"
+          }
+        ],
+        "detail_keys": [
+          "price",
+          "origin"
+        ],
+        "binding_id": "analytical_339177e3f054",
+        "binding": {
+          "observation_keys": [
+            "city"
+          ],
+          "measure_keys": [
+            "baseline",
+            "high",
+            "low",
+            "official"
+          ],
+          "value_domain": [
+            -70.7,
+            -11.3
+          ],
+          "group_values": [
+            "Tier 1",
+            "Tier 2",
+            "Tier 3"
+          ]
+        },
+        "availability": "available"
+      }
+    }
+  }
+}

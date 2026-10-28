@@ -1,0 +1,101 @@
+/* ════════════════════════════════════════════════════════════════
+   Bowhead — memory-revive S1 · SaveToMemoryButton (.v4-save-to-memory-*)
+   V4 PRD-D-5 component classes have never had CSS (nobody noticed the unstyled popover while the feature was dark).
+   Add it before enabling BOWHEAD_MEMORY_FROM_CANVAS_ENABLED. Reuse --c-* tokens.
+   ════════════════════════════════════════════════════════════════ */
+
+.v4-save-to-memory-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--c-accent-soft);
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.v4-save-to-memory-btn:hover { background: var(--c-accent-tint); color: var(--c-ink); }
+.v4-saved-tick { color: var(--c-accent); font-weight: 700; }
+
+.v4-save-to-memory-popover {
+  /* review-fix: the actual mount point is a canvas-section chrome 28px hover pill (.rc-actions,
+     position:absolute + overflow semantics); the popover must float out absolutely or stretch the pill. */
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 12px;
+  background: var(--c-surface);
+  box-shadow: 0 4px 14px rgba(22, 19, 16, .10);
+  width: 300px;
+  max-width: min(340px, 80vw);
+}
+
+/* review-fix: the pill defaults to opacity:0 + pointer-events:none, appearing only on :hover/:focus-within;
+   keep it visible and clickable while the popover is open (losing focus by clicking elsewhere must not make
+   the popover and its input transparent). Preserve streaming's !important hiding semantics without overriding them. */
+.rc-actions:has(.v4-save-to-memory-popover) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.v4-save-to-memory-input {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 8px;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  resize: vertical;
+}
+.v4-save-to-memory-input:focus { outline: 2px solid var(--c-accent-soft); }
+
+.v4-save-to-memory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.v4-save-to-memory-counter { font-size: 0.6875rem; color: var(--c-ink-4); }
+.v4-save-to-memory-actions { display: flex; gap: 8px; }
+
+.v4-save-to-memory-cancel,
+.v4-save-to-memory-confirm {
+  font-size: 0.78125rem;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--c-accent-soft);
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+}
+.v4-save-to-memory-confirm {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  /* review-fix: dark-theme accent is light, breaking #fff contrast; use the paired ink token */
+  color: var(--c-accent-ink);
+}
+.v4-save-to-memory-confirm:disabled,
+.v4-save-to-memory-cancel:disabled { opacity: .5; cursor: default; }
+
+.v4-save-to-memory-warn {
+  font-size: 0.75rem;
+  color: var(--c-warn, #a15c00);
+  line-height: 1.4;
+}
+.v4-save-to-memory-error {
+  font-size: 0.75rem;
+  color: var(--c-err);
+  line-height: 1.4;
+}

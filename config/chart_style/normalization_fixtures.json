@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "name": "missing-columns",
+      "rawSpec": {
+        "kind": "line",
+        "title": "历史图",
+        "row_count": 2,
+        "columns": [],
+        "rows": [
+          { "month": "1月", "east": 1, "west": -1 },
+          { "month": "2月", "east": 2, "west": 3 }
+        ]
+      },
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 2,
+        "categoryCount": 2,
+        "seriesCount": 2,
+        "longestLabelGraphemes": 2,
+        "series": [
+          { "key": "line:0", "role": "line", "pointCount": 2, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "line:1", "role": "line", "pointCount": 2, "stackKey": null, "hasPositive": true, "hasNegative": true }
+        ],
+        "flags": { "stacked": false, "crossesZero": true, "hasMissingValues": false }
+      }
+    },
+    {
+      "name": "long-table",
+      "rawSpec": {
+        "kind": "line",
+        "title": "月度趋势",
+        "row_count": 3,
+        "columns": [
+          { "key": "month", "header": "月份", "type": "date" },
+          { "key": "region", "header": "区域", "type": "categorical" },
+          { "key": "value", "header": "收入", "type": "numeric" }
+        ],
+        "rows": [
+          { "month": "M1", "region": "A", "value": "1" },
+          { "month": "M1", "region": "B", "value": 2 },
+          { "month": "M2", "region": "A", "value": 3 }
+        ]
+      },
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 2,
+        "categoryCount": 2,
+        "seriesCount": 2,
+        "longestLabelGraphemes": 2,
+        "series": [
+          { "key": "line:0", "role": "line", "pointCount": 2, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "line:1", "role": "line", "pointCount": 2, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": true }
+      }
+    },
+    {
+      "name": "time-wide",
+      "rawSpec": {
+        "kind": "line",
+        "title": "品类趋势",
+        "row_count": 2,
+        "columns": [
+          { "key": "category", "header": "品类", "type": "categorical" },
+          { "key": "m1", "header": "1月", "type": "numeric" },
+          { "key": "m2", "header": "2月", "type": "numeric" },
+          { "key": "m3", "header": "3月", "type": "numeric" }
+        ],
+        "rows": [
+          { "category": "A", "m1": 1, "m2": 2, "m3": 3 },
+          { "category": "B", "m1": -1, "m2": 1, "m3": 2 }
+        ]
+      },
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 3,
+        "categoryCount": 3,
+        "seriesCount": 2,
+        "longestLabelGraphemes": 2,
+        "series": [
+          { "key": "line:0", "role": "line", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "line:1", "role": "line", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": true }
+        ],
+        "flags": { "stacked": false, "crossesZero": true, "hasMissingValues": false }
+      }
+    },
+    {
+      "name": "stacked-declared-axis-roles",
+      "rawSpec": {
+        "kind": "stacked_bar",
+        "title": "各市营业额（按省着色）",
+        "row_count": 4,
+        "columns": [
+          { "key": "省", "header": "省", "type": "geo", "role": "color" },
+          { "key": "市", "header": "市", "type": "categorical", "role": "x" },
+          { "key": "金额", "header": "金额", "type": "numeric" }
+        ],
+        "rows": [
+          { "省": "江苏", "市": "南京", "金额": 30 },
+          { "省": "江苏", "市": "无锡", "金额": 20 },
+          { "省": "浙江", "市": "杭州", "金额": 25 },
+          { "省": "浙江", "市": "宁波", "金额": -5 }
+        ]
+      },
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "stacked_bar",
+        "family": "composition",
+        "rowCount": 4,
+        "categoryCount": 4,
+        "seriesCount": 2,
+        "longestLabelGraphemes": 2,
+        "series": [
+          { "key": "bar:0", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:1", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": true }
+        ],
+        "flags": { "stacked": true, "crossesZero": true, "hasMissingValues": true },
+        "barStackEdges": { "positiveOuterSeriesIndexByCategory": [0, 0, 1, null], "negativeOuterSeriesIndexByCategory": [null, null, null, 1] }
+      }
+    }
+  ]
+}

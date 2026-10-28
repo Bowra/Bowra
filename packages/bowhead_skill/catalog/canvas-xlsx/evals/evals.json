@@ -1,0 +1,34 @@
+{
+  "skill_name": "canvas-xlsx",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把 canvas 导出 xlsx",
+      "files": [],
+      "expected_behavior": [
+        "canvas-xlsx produces output.xlsx.",
+        "Each data_table → 1 sheet.",
+        "KPI row → summary sheet with colored cells.",
+        "Colors follow blue/black/red convention."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "xlsx 导出时把图表 embed 进 sheet",
+      "files": [],
+      "expected_behavior": [
+        "Charts inserted as openpyxl charts (native, not images).",
+        "User can edit data and chart updates."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "xlsx 导出 narrative 段到文字单元",
+      "files": [],
+      "expected_behavior": [
+        "Narrative sections go into a 'Notes' sheet.",
+        "Wrapped text fits cell width."
+      ]
+    }
+  ]
+}

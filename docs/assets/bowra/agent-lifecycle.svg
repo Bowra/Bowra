@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="agent-lifecycle-title agent-lifecycle-desc">
+  <title id="agent-lifecycle-title">Bowra Agent version lifecycle — opt-in workflow</title>
+  <desc id="agent-lifecycle-desc">A change proposal passes through owner review, candidate preparation and evaluation, and owner release. Automation cannot approve or release its own changes. This opt-in workflow remains subject to deployment readiness.</desc>
+  <style>
+    text { font-family: 'Trebuchet MS', 'Aptos', sans-serif; }
+    .display { font-family: Georgia, 'Times New Roman', serif; }
+  </style>
+  <rect x="1" y="1" width="1198" height="438" rx="22" fill="#f7f6f0" stroke="#d5dfdd" stroke-width="2"/>
+  <text x="58" y="69" class="display" fill="#0d1e3a" font-size="43" letter-spacing="-1">Agent version lifecycle</text>
+  <rect x="902" y="36" width="239" height="43" rx="21.5" fill="#dfede6"/><text x="1021.5" y="65" text-anchor="middle" fill="#295c4d" font-size="22">Opt-in workflow</text>
+  <text x="58" y="108" fill="#557080" font-size="23">Automation proposes. The owner decides.</text>
+  <path d="M58 140H1142" stroke="#cbd7d2"/>
+  <g fill="none" stroke="#4f8a7b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M279 247H346M336 239L346 247L336 255"/><path d="M566 247H634M624 239L634 247L624 255"/><path d="M854 247H922M912 239L922 247L912 255"/>
+  </g>
+  <g fill="#e8ece5"><rect x="58" y="183" width="220" height="130" rx="12"/><rect x="634" y="183" width="220" height="130" rx="12"/></g>
+  <g fill="#0d1e3a"><rect x="346" y="183" width="220" height="130" rx="12"/><rect x="922" y="183" width="220" height="130" rx="12"/></g>
+  <g font-size="18" text-anchor="middle" letter-spacing="1.5">
+    <text x="168" y="213" fill="#527666">01</text><text x="456" y="213" fill="#75d7c1">02</text><text x="744" y="213" fill="#527666">03</text><text x="1032" y="213" fill="#75d7c1">04</text>
+  </g>
+  <g font-size="31" text-anchor="middle" font-weight="700">
+    <text x="168" y="267" fill="#0d1e3a">Proposal</text><text x="456" y="251" fill="#f7f6f0">Owner</text><text x="456" y="288" fill="#f7f6f0">review</text>
+    <text x="744" y="251" fill="#0d1e3a">Candidate</text><text x="744" y="288" fill="#0d1e3a">+ evaluation</text><text x="1032" y="251" fill="#f7f6f0">Owner</text><text x="1032" y="288" fill="#f7f6f0">release</text>
+  </g>
+  <text x="58" y="380" fill="#557080" font-size="23">Scoped automation. Explicit approval. Subject to deployment readiness.</text>
+</svg>

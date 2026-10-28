@@ -1,0 +1,35 @@
+# pptx-from-template M2 — bound the enlarged sandbox build context.
+# The sandbox build context is `catalog/` (so the Dockerfile can COPY both
+# python_sandbox/ and pptx/scripts/ — see scripts/build-sandbox-image.sh and
+# scripts/ship-to-remote.sh). Without this, the whole multi-skill catalog/ tree
+# (every skill dir) would be sent to the docker daemon.
+#
+# Strategy: exclude everything, then re-allow ONLY the two dirs the Dockerfile
+# COPYs from. Re-including a nested path requires un-ignoring each parent (the
+# leading `*` ignores top-level entries, so `pptx/` itself must be un-ignored
+# before `pptx/scripts/` can be).
+*
+
+# Sandbox image build dir (Dockerfile + runner scripts + bootstrap, etc.).
+!python_sandbox/
+
+# skill-multiruntime S1 — 语言/运行时契约 SSOT，Dockerfile COPY 进镜像供 image-contract
+# build gate 读取。顶层文件，需从 `*` 里显式 un-ignore。
+!script_langs.json
+
+# pptx-from-template M2 (wheelhouse): the built wheelhouse/ (flat .whl dir, can be
+# tens of MB) is a RUNTIME read-only bind (/var/lib/bowhead/wheelhouse), NOT COPY'd
+# into the image — keep it out of the docker build context. constraints.txt +
+# requirements.lock stay in context (the office-pip layer `-c`'s constraints, and
+# the lock is reviewed alongside the Dockerfile).
+python_sandbox/wheelhouse/
+
+# pptx skill helper scripts — COPY'd to /opt/bowhead/skills/pptx (Layer 2).
+!pptx/
+pptx/*
+!pptx/scripts/
+
+# Large, runtime-unused OOXML schema tree (~1.0 MB, 39 *.xsd) — used only by the
+# gateway-side validators, never inside the --network=none sandbox. Keep it out
+# of the daemon context even though pptx/scripts/ is otherwise allowed.
+pptx/scripts/office/schemas/

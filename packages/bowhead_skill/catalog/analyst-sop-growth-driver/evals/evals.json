@@ -1,0 +1,33 @@
+{
+  "skill_name": "analyst-sop-growth-driver",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "今年 GMV 增长来自哪里",
+      "files": [],
+      "expected_behavior": [
+        "MUST-2 attribution via bi_query (按主维度 + 同比 native, or 两期 bi_query + python_sandbox).",
+        "Narrative names top-1 driver + delta + recommendation.",
+        "Uses real dimension values from bi_schema() (no assumed '渠道/品类')."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "增长全面归因",
+      "files": [],
+      "expected_behavior": [
+        "Triggers SHOULD + MAY: cross-dim validation + concentration.",
+        "Reports top-1 共识 across multiple dimensions."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "A 品牌的增长来自哪里",
+      "files": [],
+      "expected_behavior": [
+        "Filter fixed 品牌=A.",
+        "SHOULD-1 drill into 次级维度."
+      ]
+    }
+  ]
+}

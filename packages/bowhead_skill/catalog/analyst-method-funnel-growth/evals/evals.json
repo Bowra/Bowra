@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-funnel-growth",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "funnel_bottleneck",
+      "query": "Convert raw BI data into funnel analysis: visit=10000, register=5000, activate=2000, purchase=400, revenue=$48k, users=400, users_prior=350. Identify the most critical conversion bottleneck.",
+      "expects": "bottleneck: activate→purchase (20% conversion, critical <30%), user_growth_rate: 14.3%, arpu_implied: $120. Flag: 首单转化率<30% — 该环节严重制约增长"
+    },
+    {
+      "id": "arpu_decomposition",
+      "query": "ARPU growth analysis: revenue=$100k, revenue_prior=$80k, users=1000, users_prior=950, avg_price=50, avg_price_prior=40, avg_units_per_user=2, avg_units_prior=2. Decompose ARPU growth into price and volume drivers.",
+      "expects": "revenue_growth_rate: 25%, user_growth_rate: 5.3%, price_growth: 25%, units_growth: 0%, arpu_components: ['价格+25%']. Verdict: 增长结构有疑点/需深入拆解 (price alone outpaces user growth)"
+    },
+    {
+      "id": "user_churn_signal",
+      "query": "User cohort analysis: users=800, users_prior=1000, new_users=400, churned_users=600. Identify churn rate and growth quality signal.",
+      "expects": "user_delta_absolute: -200, user_growth_rate: -20%, implied_churn_rate: 60%, new_users: 400, churned_users: 600. Flag: 流失率>15% — 新增拉新增长压力大 (actually 60% critical). Verdict: 增长瓶颈明确/需重点优化"
+    }
+  ]
+}

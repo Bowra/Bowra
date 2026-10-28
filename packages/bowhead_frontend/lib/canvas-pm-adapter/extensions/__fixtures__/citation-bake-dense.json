@@ -1,0 +1,829 @@
+{
+  "_comment": "citation-audit M3 impl-review P1-1 机器闸：BE 生成、FE 对拍的**密集** bake 语料。人挑的 26 行 golden 是抽样不是证明——同一套格式化逻辑写两遍（Python/TS）必然在某处分家，实锤：BE f-string `.Nf` 是 round-half-even、JS toFixed 是 half-away，`[num:12500:CNY]` → 1.2万元 vs 1.3万元（万档每 1 万撞一次）。本文件用 BE 输出当 golden 密集扫 tie 边界/分档边界/四货币族/脏输入（nan/inf/原型链键/非数值），FE citation-plugin.test.ts 逐行断言 stripLegacy 输出相同。重生成：见 test_citation_marks.py::test_dense_bake_fixture_is_current（改 bake 语义时它会红并提示怎么重生成）。",
+  "rows": [
+    {
+      "input": "[num:0.5:CNY]",
+      "text": "0.50元"
+    },
+    {
+      "input": "[num:0.5:USD]",
+      "text": "0.50美元"
+    },
+    {
+      "input": "[num:0.5:EUR]",
+      "text": "0.50欧元"
+    },
+    {
+      "input": "[num:0.5:JPY]",
+      "text": "0.50日元"
+    },
+    {
+      "input": "[num:1.005:CNY]",
+      "text": "1.00元"
+    },
+    {
+      "input": "[num:1.005:USD]",
+      "text": "1.00美元"
+    },
+    {
+      "input": "[num:1.005:EUR]",
+      "text": "1.00欧元"
+    },
+    {
+      "input": "[num:1.005:JPY]",
+      "text": "1.00日元"
+    },
+    {
+      "input": "[num:2.675:CNY]",
+      "text": "2.67元"
+    },
+    {
+      "input": "[num:2.675:USD]",
+      "text": "2.67美元"
+    },
+    {
+      "input": "[num:2.675:EUR]",
+      "text": "2.67欧元"
+    },
+    {
+      "input": "[num:2.675:JPY]",
+      "text": "2.67日元"
+    },
+    {
+      "input": "[num:1234.5:CNY]",
+      "text": "1,234.50元"
+    },
+    {
+      "input": "[num:1234.5:USD]",
+      "text": "1,234.50美元"
+    },
+    {
+      "input": "[num:1234.5:EUR]",
+      "text": "1,234.50欧元"
+    },
+    {
+      "input": "[num:1234.5:JPY]",
+      "text": "1,234.50日元"
+    },
+    {
+      "input": "[num:1250:CNY]",
+      "text": "1,250元"
+    },
+    {
+      "input": "[num:1250:USD]",
+      "text": "1,250美元"
+    },
+    {
+      "input": "[num:1250:EUR]",
+      "text": "1,250欧元"
+    },
+    {
+      "input": "[num:1250:JPY]",
+      "text": "1,250日元"
+    },
+    {
+      "input": "[num:2500:CNY]",
+      "text": "2,500元"
+    },
+    {
+      "input": "[num:2500:USD]",
+      "text": "2,500美元"
+    },
+    {
+      "input": "[num:2500:EUR]",
+      "text": "2,500欧元"
+    },
+    {
+      "input": "[num:2500:JPY]",
+      "text": "2,500日元"
+    },
+    {
+      "input": "[num:3750:CNY]",
+      "text": "3,750元"
+    },
+    {
+      "input": "[num:3750:USD]",
+      "text": "3,750美元"
+    },
+    {
+      "input": "[num:3750:EUR]",
+      "text": "3,750欧元"
+    },
+    {
+      "input": "[num:3750:JPY]",
+      "text": "3,750日元"
+    },
+    {
+      "input": "[num:5000:CNY]",
+      "text": "5,000元"
+    },
+    {
+      "input": "[num:5000:USD]",
+      "text": "5,000美元"
+    },
+    {
+      "input": "[num:5000:EUR]",
+      "text": "5,000欧元"
+    },
+    {
+      "input": "[num:5000:JPY]",
+      "text": "5,000日元"
+    },
+    {
+      "input": "[num:7500:CNY]",
+      "text": "7,500元"
+    },
+    {
+      "input": "[num:7500:USD]",
+      "text": "7,500美元"
+    },
+    {
+      "input": "[num:7500:EUR]",
+      "text": "7,500欧元"
+    },
+    {
+      "input": "[num:7500:JPY]",
+      "text": "7,500日元"
+    },
+    {
+      "input": "[num:9999:CNY]",
+      "text": "9,999元"
+    },
+    {
+      "input": "[num:9999:USD]",
+      "text": "9,999美元"
+    },
+    {
+      "input": "[num:9999:EUR]",
+      "text": "9,999欧元"
+    },
+    {
+      "input": "[num:9999:JPY]",
+      "text": "9,999日元"
+    },
+    {
+      "input": "[num:10000:CNY]",
+      "text": "1.0万元"
+    },
+    {
+      "input": "[num:10000:USD]",
+      "text": "1.0万美元"
+    },
+    {
+      "input": "[num:10000:EUR]",
+      "text": "1.0万欧元"
+    },
+    {
+      "input": "[num:10000:JPY]",
+      "text": "1.0万日元"
+    },
+    {
+      "input": "[num:11250:CNY]",
+      "text": "1.1万元"
+    },
+    {
+      "input": "[num:11250:USD]",
+      "text": "1.1万美元"
+    },
+    {
+      "input": "[num:11250:EUR]",
+      "text": "1.1万欧元"
+    },
+    {
+      "input": "[num:11250:JPY]",
+      "text": "1.1万日元"
+    },
+    {
+      "input": "[num:12500:CNY]",
+      "text": "1.3万元"
+    },
+    {
+      "input": "[num:12500:USD]",
+      "text": "1.3万美元"
+    },
+    {
+      "input": "[num:12500:EUR]",
+      "text": "1.3万欧元"
+    },
+    {
+      "input": "[num:12500:JPY]",
+      "text": "1.3万日元"
+    },
+    {
+      "input": "[num:13750:CNY]",
+      "text": "1.4万元"
+    },
+    {
+      "input": "[num:13750:USD]",
+      "text": "1.4万美元"
+    },
+    {
+      "input": "[num:13750:EUR]",
+      "text": "1.4万欧元"
+    },
+    {
+      "input": "[num:13750:JPY]",
+      "text": "1.4万日元"
+    },
+    {
+      "input": "[num:15000:CNY]",
+      "text": "1.5万元"
+    },
+    {
+      "input": "[num:15000:USD]",
+      "text": "1.5万美元"
+    },
+    {
+      "input": "[num:15000:EUR]",
+      "text": "1.5万欧元"
+    },
+    {
+      "input": "[num:15000:JPY]",
+      "text": "1.5万日元"
+    },
+    {
+      "input": "[num:17500:CNY]",
+      "text": "1.8万元"
+    },
+    {
+      "input": "[num:17500:USD]",
+      "text": "1.8万美元"
+    },
+    {
+      "input": "[num:17500:EUR]",
+      "text": "1.8万欧元"
+    },
+    {
+      "input": "[num:17500:JPY]",
+      "text": "1.8万日元"
+    },
+    {
+      "input": "[num:22500:CNY]",
+      "text": "2.3万元"
+    },
+    {
+      "input": "[num:22500:USD]",
+      "text": "2.3万美元"
+    },
+    {
+      "input": "[num:22500:EUR]",
+      "text": "2.3万欧元"
+    },
+    {
+      "input": "[num:22500:JPY]",
+      "text": "2.3万日元"
+    },
+    {
+      "input": "[num:25000:CNY]",
+      "text": "2.5万元"
+    },
+    {
+      "input": "[num:25000:USD]",
+      "text": "2.5万美元"
+    },
+    {
+      "input": "[num:25000:EUR]",
+      "text": "2.5万欧元"
+    },
+    {
+      "input": "[num:25000:JPY]",
+      "text": "2.5万日元"
+    },
+    {
+      "input": "[num:32500:CNY]",
+      "text": "3.3万元"
+    },
+    {
+      "input": "[num:32500:USD]",
+      "text": "3.3万美元"
+    },
+    {
+      "input": "[num:32500:EUR]",
+      "text": "3.3万欧元"
+    },
+    {
+      "input": "[num:32500:JPY]",
+      "text": "3.3万日元"
+    },
+    {
+      "input": "[num:78300:CNY]",
+      "text": "7.8万元"
+    },
+    {
+      "input": "[num:78300:USD]",
+      "text": "7.8万美元"
+    },
+    {
+      "input": "[num:78300:EUR]",
+      "text": "7.8万欧元"
+    },
+    {
+      "input": "[num:78300:JPY]",
+      "text": "7.8万日元"
+    },
+    {
+      "input": "[num:101250:CNY]",
+      "text": "10.1万元"
+    },
+    {
+      "input": "[num:101250:USD]",
+      "text": "10.1万美元"
+    },
+    {
+      "input": "[num:101250:EUR]",
+      "text": "10.1万欧元"
+    },
+    {
+      "input": "[num:101250:JPY]",
+      "text": "10.1万日元"
+    },
+    {
+      "input": "[num:102500:CNY]",
+      "text": "10.3万元"
+    },
+    {
+      "input": "[num:102500:USD]",
+      "text": "10.3万美元"
+    },
+    {
+      "input": "[num:102500:EUR]",
+      "text": "10.3万欧元"
+    },
+    {
+      "input": "[num:102500:JPY]",
+      "text": "10.3万日元"
+    },
+    {
+      "input": "[num:103750:CNY]",
+      "text": "10.4万元"
+    },
+    {
+      "input": "[num:103750:USD]",
+      "text": "10.4万美元"
+    },
+    {
+      "input": "[num:103750:EUR]",
+      "text": "10.4万欧元"
+    },
+    {
+      "input": "[num:103750:JPY]",
+      "text": "10.4万日元"
+    },
+    {
+      "input": "[num:105000:CNY]",
+      "text": "10.5万元"
+    },
+    {
+      "input": "[num:105000:USD]",
+      "text": "10.5万美元"
+    },
+    {
+      "input": "[num:105000:EUR]",
+      "text": "10.5万欧元"
+    },
+    {
+      "input": "[num:105000:JPY]",
+      "text": "10.5万日元"
+    },
+    {
+      "input": "[num:107500:CNY]",
+      "text": "10.8万元"
+    },
+    {
+      "input": "[num:107500:USD]",
+      "text": "10.8万美元"
+    },
+    {
+      "input": "[num:107500:EUR]",
+      "text": "10.8万欧元"
+    },
+    {
+      "input": "[num:107500:JPY]",
+      "text": "10.8万日元"
+    },
+    {
+      "input": "[num:115000:CNY]",
+      "text": "11.5万元"
+    },
+    {
+      "input": "[num:115000:USD]",
+      "text": "11.5万美元"
+    },
+    {
+      "input": "[num:115000:EUR]",
+      "text": "11.5万欧元"
+    },
+    {
+      "input": "[num:115000:JPY]",
+      "text": "11.5万日元"
+    },
+    {
+      "input": "[num:122500:CNY]",
+      "text": "12.3万元"
+    },
+    {
+      "input": "[num:122500:USD]",
+      "text": "12.3万美元"
+    },
+    {
+      "input": "[num:122500:EUR]",
+      "text": "12.3万欧元"
+    },
+    {
+      "input": "[num:122500:JPY]",
+      "text": "12.3万日元"
+    },
+    {
+      "input": "[num:1250000:CNY]",
+      "text": "125.0万元"
+    },
+    {
+      "input": "[num:1250000:USD]",
+      "text": "125.0万美元"
+    },
+    {
+      "input": "[num:1250000:EUR]",
+      "text": "125.0万欧元"
+    },
+    {
+      "input": "[num:1250000:JPY]",
+      "text": "125.0万日元"
+    },
+    {
+      "input": "[num:12500000:CNY]",
+      "text": "1250.0万元"
+    },
+    {
+      "input": "[num:12500000:USD]",
+      "text": "1250.0万美元"
+    },
+    {
+      "input": "[num:12500000:EUR]",
+      "text": "1250.0万欧元"
+    },
+    {
+      "input": "[num:12500000:JPY]",
+      "text": "1250.0万日元"
+    },
+    {
+      "input": "[num:12510000:CNY]",
+      "text": "1251.0万元"
+    },
+    {
+      "input": "[num:12510000:USD]",
+      "text": "1251.0万美元"
+    },
+    {
+      "input": "[num:12510000:EUR]",
+      "text": "1251.0万欧元"
+    },
+    {
+      "input": "[num:12510000:JPY]",
+      "text": "1251.0万日元"
+    },
+    {
+      "input": "[num:12600000:CNY]",
+      "text": "1260.0万元"
+    },
+    {
+      "input": "[num:12600000:USD]",
+      "text": "1260.0万美元"
+    },
+    {
+      "input": "[num:12600000:EUR]",
+      "text": "1260.0万欧元"
+    },
+    {
+      "input": "[num:12600000:JPY]",
+      "text": "1260.0万日元"
+    },
+    {
+      "input": "[num:37500000:CNY]",
+      "text": "3750.0万元"
+    },
+    {
+      "input": "[num:37500000:USD]",
+      "text": "3750.0万美元"
+    },
+    {
+      "input": "[num:37500000:EUR]",
+      "text": "3750.0万欧元"
+    },
+    {
+      "input": "[num:37500000:JPY]",
+      "text": "3750.0万日元"
+    },
+    {
+      "input": "[num:37510000:CNY]",
+      "text": "3751.0万元"
+    },
+    {
+      "input": "[num:37510000:USD]",
+      "text": "3751.0万美元"
+    },
+    {
+      "input": "[num:37510000:EUR]",
+      "text": "3751.0万欧元"
+    },
+    {
+      "input": "[num:37510000:JPY]",
+      "text": "3751.0万日元"
+    },
+    {
+      "input": "[num:37600000:CNY]",
+      "text": "3760.0万元"
+    },
+    {
+      "input": "[num:37600000:USD]",
+      "text": "3760.0万美元"
+    },
+    {
+      "input": "[num:37600000:EUR]",
+      "text": "3760.0万欧元"
+    },
+    {
+      "input": "[num:37600000:JPY]",
+      "text": "3760.0万日元"
+    },
+    {
+      "input": "[num:99999999:CNY]",
+      "text": "10000.0万元"
+    },
+    {
+      "input": "[num:99999999:USD]",
+      "text": "10000.0万美元"
+    },
+    {
+      "input": "[num:99999999:EUR]",
+      "text": "10000.0万欧元"
+    },
+    {
+      "input": "[num:99999999:JPY]",
+      "text": "10000.0万日元"
+    },
+    {
+      "input": "[num:100000000:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100000000:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100000000:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100000000:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100001250:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100001250:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100001250:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100001250:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100002500:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100002500:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100002500:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100002500:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100003750:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100003750:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100003750:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100003750:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100005000:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100005000:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100005000:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100005000:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100007500:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100007500:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100007500:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100007500:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100015000:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100015000:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100015000:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100015000:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:100022500:CNY]",
+      "text": "1.00亿元"
+    },
+    {
+      "input": "[num:100022500:USD]",
+      "text": "1.00亿美元"
+    },
+    {
+      "input": "[num:100022500:EUR]",
+      "text": "1.00亿欧元"
+    },
+    {
+      "input": "[num:100022500:JPY]",
+      "text": "1.00亿日元"
+    },
+    {
+      "input": "[num:112500000:CNY]",
+      "text": "1.13亿元"
+    },
+    {
+      "input": "[num:112500000:USD]",
+      "text": "1.13亿美元"
+    },
+    {
+      "input": "[num:112500000:EUR]",
+      "text": "1.13亿欧元"
+    },
+    {
+      "input": "[num:112500000:JPY]",
+      "text": "1.13亿日元"
+    },
+    {
+      "input": "[num:137500000:CNY]",
+      "text": "1.38亿元"
+    },
+    {
+      "input": "[num:137500000:USD]",
+      "text": "1.38亿美元"
+    },
+    {
+      "input": "[num:137500000:EUR]",
+      "text": "1.38亿欧元"
+    },
+    {
+      "input": "[num:137500000:JPY]",
+      "text": "1.38亿日元"
+    },
+    {
+      "input": "[num:825712133:CNY]",
+      "text": "8.26亿元"
+    },
+    {
+      "input": "[num:825712133:USD]",
+      "text": "8.26亿美元"
+    },
+    {
+      "input": "[num:825712133:EUR]",
+      "text": "8.26亿欧元"
+    },
+    {
+      "input": "[num:825712133:JPY]",
+      "text": "8.26亿日元"
+    },
+    {
+      "input": "[num:6686243482:CNY]",
+      "text": "66.86亿元"
+    },
+    {
+      "input": "[num:6686243482:USD]",
+      "text": "66.86亿美元"
+    },
+    {
+      "input": "[num:6686243482:EUR]",
+      "text": "66.86亿欧元"
+    },
+    {
+      "input": "[num:6686243482:JPY]",
+      "text": "66.86亿日元"
+    },
+    {
+      "input": "[num:7016893124:CNY]",
+      "text": "70.17亿元"
+    },
+    {
+      "input": "[num:7016893124:USD]",
+      "text": "70.17亿美元"
+    },
+    {
+      "input": "[num:7016893124:EUR]",
+      "text": "70.17亿欧元"
+    },
+    {
+      "input": "[num:7016893124:JPY]",
+      "text": "70.17亿日元"
+    },
+    {
+      "input": "[num:13638408229:CNY]",
+      "text": "136.38亿元"
+    },
+    {
+      "input": "[num:13638408229:USD]",
+      "text": "136.38亿美元"
+    },
+    {
+      "input": "[num:13638408229:EUR]",
+      "text": "136.38亿欧元"
+    },
+    {
+      "input": "[num:13638408229:JPY]",
+      "text": "136.38亿日元"
+    },
+    {
+      "input": "[num:nan:CNY]",
+      "text": "nan元"
+    },
+    {
+      "input": "[num:inf:CNY]",
+      "text": "inf元"
+    },
+    {
+      "input": "[num:-inf:USD]",
+      "text": "-inf美元"
+    },
+    {
+      "input": "[num:5:constructor]",
+      "text": "5 constructor"
+    },
+    {
+      "input": "[num:5:__proto__]",
+      "text": "5 __proto__"
+    },
+    {
+      "input": "[num:5:toString]",
+      "text": "5 toString"
+    },
+    {
+      "input": "[num:5:hasOwnProperty]",
+      "text": "5 hasOwnProperty"
+    },
+    {
+      "input": "[num:abc:CNY]",
+      "text": "abc元"
+    },
+    {
+      "input": "[num:1e-9:percent]",
+      "text": "1e-07%"
+    },
+    {
+      "input": "[num:0.0039:percent]",
+      "text": "0.39%"
+    }
+  ]
+}

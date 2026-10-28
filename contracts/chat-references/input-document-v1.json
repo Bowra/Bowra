@@ -1,0 +1,2471 @@
+{
+  "valid": [
+    {
+      "name": "literal_text_is_not_a_reference",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  邮箱 a@b.com /tmp/2026/09/08\r\n＠不是标签／也不是"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  邮箱 a@b.com /tmp/2026/09/08\n＠不是标签／也不是"
+          }
+        ]
+      },
+      "display_text": "  邮箱 a@b.com /tmp/2026/09/08\n＠不是标签／也不是",
+      "text_content": "  邮箱 a@b.com /tmp/2026/09/08\n＠不是标签／也不是",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  邮箱 a@b.com /tmp/2026/09/08\n＠不是标签／也不是"
+          }
+        ]
+      }
+    },
+    {
+      "name": "text_merge_preserves_unicode",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  Ａ👩‍💻\r\n"
+          },
+          {
+            "type": "text",
+            "text": "é 盈利\r尾 "
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  Ａ👩‍💻\né 盈利\n尾 "
+          }
+        ]
+      },
+      "display_text": "  Ａ👩‍💻\né 盈利\n尾 ",
+      "text_content": "  Ａ👩‍💻\né 盈利\n尾 ",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "  Ａ👩‍💻\né 盈利\n尾 "
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact_agent_and_parameterized_skill",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      },
+      "display_text": "@经营分析师 /杜邦分析 分析本季度盈利能力",
+      "text_content": "  分析本季度盈利能力",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      }
+    },
+    {
+      "name": "same_label_different_skill_sources",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "user",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "user",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "display_text": "/杜邦分析/杜邦分析 分析",
+      "text_content": " 分析",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "user",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      }
+    },
+    {
+      "name": "source_and_operations_share_one_binding",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "mcp_prompt",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "prompt_name": "profit_review",
+              "prompt_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "盈利模板",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "mcp_prompt",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "prompt_name": "profit_review",
+              "prompt_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "盈利模板",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "display_text": "/销售/销售查询/盈利模板 分析",
+      "text_content": " 分析",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_prompt",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "prompt_name": "profit_review",
+              "prompt_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      }
+    },
+    {
+      "name": "system_agent_and_capability",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "计算",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "计算",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      },
+      "display_text": "@计算/可视化 展示",
+      "text_content": " 展示",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      }
+    },
+    {
+      "name": "null_and_empty_parameter_values",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "a": null,
+              "b": [],
+              "c": {},
+              "d": false,
+              "e": ""
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "a": null,
+              "b": [],
+              "c": {},
+              "d": false,
+              "e": ""
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      },
+      "display_text": "/杜邦分析 分析",
+      "text_content": " 分析",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "a": null,
+              "b": [],
+              "c": {},
+              "d": false,
+              "e": ""
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析"
+          }
+        ]
+      }
+    },
+    {
+      "name": "system_null_fields_normalize_to_absent",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "assignment_id": null,
+              "release_id": null
+            },
+            "label": "计算",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "计算",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      },
+      "display_text": "@计算/可视化 展示",
+      "text_content": " 展示",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "compute",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " 展示"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ten_visible_references_with_implicit_sources_deduplicated",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_0",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_1",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_2",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000005",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000006",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000007",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000008",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000009",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000010",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_0",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_1",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_2",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000005",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000006",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000007",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000008",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000009",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000010",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          }
+        ]
+      },
+      "display_text": "@经营分析师/杜邦分析/杜邦分析/杜邦分析/可视化/销售/销售/销售/销售查询/销售查询",
+      "text_content": "",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_0",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_1",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_2",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "crlf_split_across_adjacent_text_nodes",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "第一行\r"
+          },
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "text",
+            "text": "\n第二行"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "第一行\n第二行"
+          }
+        ]
+      },
+      "display_text": "第一行\n第二行",
+      "text_content": "第一行\n第二行",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "第一行\n第二行"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_text_kept_in_source_but_not_semantic_identity",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      },
+      "display_text": "@经营分析师 /杜邦分析 分析本季度盈利能力",
+      "text_content": "  分析本季度盈利能力",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "parameters": {}
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": " 分析本季度盈利能力"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reference_is_a_text_normalization_boundary",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "上\r"
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "方法",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "\n下"
+          }
+        ]
+      },
+      "normalized": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "上\n"
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "方法",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "\n下"
+          }
+        ]
+      },
+      "display_text": "上\n/方法\n下",
+      "text_content": "上\n\n下",
+      "semantic": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "上\n"
+          },
+          {
+            "type": "reference",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "\n下"
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unknown_schema",
+      "input": {
+        "schema_version": 2,
+        "nodes": []
+      }
+    },
+    {
+      "name": "boolean_schema",
+      "input": {
+        "schema_version": true,
+        "nodes": []
+      }
+    },
+    {
+      "name": "unknown_node",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "html",
+            "text": "<b>x</b>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_document_field",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "text",
+            "text": "x"
+          }
+        ],
+        "html": "x"
+      }
+    },
+    {
+      "name": "unknown_reference_field",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {},
+            "grant": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_resource_field",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "allowed_tools": [
+                "python_exec"
+              ]
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "label_is_not_identity",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "杜邦分析",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "path_is_not_identity",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "../../dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "skill_requires_full_hash",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "latest"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "agent_requires_assignment",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "system_cannot_use_team_release",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "system",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "personal_agent_not_exact",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "user",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "capability_version_is_integer",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": "1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "mcp_requires_subject",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "mcp_prompt_cannot_be_tool",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_prompt",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "prompt_name": "profit_review",
+              "prompt_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "operation_name": "sales.query"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate_node_id",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_other",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate_resource_new_node",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate_resource_other_version",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate_operation_other_params",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "limit": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "source_binding_conflict",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "two_agents",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_other",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "four_skills",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_0",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_1",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_2",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_3",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "four_sources",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_3",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "four_operations",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "query_0",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "query_1",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "query_2",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_sales",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "query_3",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsafe_integer",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "amount": 9007199254740992
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "parameter_object_required",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing_parameters",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_dupont",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析"
+          }
+        ]
+      }
+    },
+    {
+      "name": "eleven_references_exceeds_total_even_with_valid_kind_counts",
+      "input": {
+        "schema_version": 1,
+        "nodes": [
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000001",
+            "resource": {
+              "kind": "agent",
+              "source_kind": "team",
+              "id": "ta_analyst",
+              "version": "arv_1",
+              "assignment_id": "aa_1",
+              "release_id": "arl_1"
+            },
+            "label": "经营分析师",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_0",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000003",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_1",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000004",
+            "resource": {
+              "kind": "skill",
+              "source_kind": "team",
+              "id": "sk_method_2",
+              "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "杜邦分析",
+            "parameters": {
+              "period": "2026Q3",
+              "optional": null,
+              "rate": 0.125,
+              "exact_id": "9007199254740993",
+              "empty": {},
+              "items": [
+                1,
+                true,
+                null
+              ]
+            }
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000005",
+            "resource": {
+              "kind": "capability",
+              "id": "cap_visualize",
+              "version": 1
+            },
+            "label": "可视化",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000006",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000007",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000008",
+            "resource": {
+              "kind": "mcp_source",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "label": "销售",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000009",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_0",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000010",
+            "resource": {
+              "kind": "mcp_tool",
+              "source_id": "ts_1",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "operation_name": "sales.query",
+              "operation_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "销售查询",
+            "parameters": {}
+          },
+          {
+            "type": "reference",
+            "node_id": "00000000-0000-4000-8000-000000000011",
+            "resource": {
+              "kind": "mcp_prompt",
+              "source_id": "ts_2",
+              "local_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "connection_binding_id": "ts_sales",
+              "connection_subject_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "prompt_name": "profit_review",
+              "prompt_contract_revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "label": "盈利模板",
+            "parameters": {}
+          }
+        ]
+      }
+    }
+  ]
+}

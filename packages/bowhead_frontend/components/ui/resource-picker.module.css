@@ -1,0 +1,199 @@
+/* Shared Plugin picker and resource summary (Capability Center brief §4.10). */
+.picker {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.groupTitle {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-3);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-bg);
+  cursor: pointer;
+}
+.card[data-selected="true"] {
+  background: var(--c-accent-tint);
+  border-color: color-mix(in srgb, var(--c-accent) 38%, transparent);
+}
+.card[data-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.card input {
+  margin: 3px 0 0;
+  accent-color: var(--c-accent);
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.body strong {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.body small {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+.version {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.reason {
+  color: var(--c-warn-ink, var(--c-ink-2)) !important;
+}
+.empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill, var(--c-bg-2));
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.chip[data-selected="true"] {
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+  font-weight: 600;
+}
+.chip:disabled {
+  color: var(--c-ink-3);
+  cursor: not-allowed;
+}
+.summary {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-bg);
+}
+.summary h4 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.summary dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+}
+.summary dl > div[data-tone="warning"] {
+  color: var(--c-warning, var(--c-ink));
+}
+.summary dd {
+  margin: 0;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.guidance {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 0.75rem;
+}
+.note {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.ref {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+  overflow-wrap: anywhere;
+}
+
+.consequence {
+  color: var(--c-warn-ink, var(--c-ink-2)) !important;
+  font-weight: 600;
+}
+.badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.compact {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.compactList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.compactRow {
+  padding: 8px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-bg);
+  min-width: 0;
+}
+.emptyState {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px dashed var(--c-line);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.emptyState strong {
+  color: var(--c-ink-1, inherit);
+  font-size: 0.8125rem;
+}

@@ -1,0 +1,1390 @@
+{
+  "entries": {
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.publish_failure|turn_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Publish screened observed provider failure through the owning durable bus before UNKNOWN fences event admission. This semantic failure neither commits a Terminal receipt nor settles an effect or authorizes retry. The original unknown-outcome recovery remains authoritative."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.materialize_reference_steer_follow_up|session_active": {
+      "owner": "composer-resource-references",
+      "reason": "Existing reference queue materialization checks the exact active parent, queue head/version, original source/attachments and live parent dispatch generation in one BEGIN IMMEDIATE. It admits and records the exact child before a session_id plus old active_turn_id CAS publishes the child and preserves the suffix; a lost CAS rolls the transaction back. Registers the already implemented write, not a new ingress. See terminal-ingress-review-2026-09-09.md September 21 review."
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/slack.py|<module>._start_turn|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Existing Slack text ingress calls the sole legacy adapter and passes its admitted bus to spawn_turn. Its mirror subscribes with producer=False and does not emit root outcomes. Registers that caller identity only; this does not certify Slack reference input, authorization or deployment readiness. See terminal-ingress-review-2026-09-09.md September 21 review."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/figure_anchor_layout.py|<module>.normalize_figure_anchors|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical name collision: the nested emit(line) helper only appends text and optional blank lines to a local list while normalizing Markdown figure anchors. It neither constructs an event nor accesses a bus, store or execution. The scanner remains conservative; this exact function identity is the reviewed non-event case. See terminal-ingress-review-2026-09-09.md September 21 review. Counted since 2026-09-30 (occurrences=5): 5 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 5
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/chat_reference_bi_continuation.py|<module>.bind_question|clarification_decision_source": {
+      "owner": "composer-resource-references",
+      "reason": "Called only by ReferencePrimaryRuntime.bind_bi_clarification after exact current worker authorization in BEGIN IMMEDIATE on the same database. Binds the existing pending single-select datarc question to its encrypted checkpoint and matching Turn/Session/user/space/candidates; captured-to-ready and resume context commit together. It neither supplies an answer nor launches a new execution. See implementation section 85 and test_reference_bi_continuation.py."
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/teams.py|<module>._start_turn|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Existing Teams text-only entry delegates producer admission to the sole legacy adapter and passes the resulting bus to spawn_turn for canonical persistence and dispatch ownership. Its mirror subscribes as producer=False. This registers the call identity only; Teams does not accept reference documents or gain reference readiness. See implementation section 85."
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._maybe_propose_plan._await_plan_cas|create_task:operation": {
+      "effect_scope": "exact_plan_claim_cas",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Auto Plan claim and release are shielded and awaited so cancellation cannot leave an unowned execution fence",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._flush_citations|create_detached_auxiliary_task:citation_metric": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Citation telemetry is best-effort observability and cannot retain root dispatch or turn billing authority",
+      "task_class": "observability_only",
+      "usage_scope": "detached_reason:citation_metric"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._lead_loop._scanner_gated_stream_cb|create_detached_auxiliary_task:response_kind_metric": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Response-kind telemetry is best-effort observability and cannot retain root dispatch or turn billing authority",
+      "task_class": "observability_only",
+      "usage_scope": "detached_reason:response_kind_metric"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/agents/task_runner.py|<module>.LocalTaskRunner.dispatch|create_task:_run_one": {
+      "effect_scope": "root_generation_inherited",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Each peer task is an awaited root producer and must retain the exact generation effect and usage scopes",
+      "task_class": "root_producer",
+      "usage_scope": "root_turn_sink_inherited"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/canvas_composers/streaming.py|<module>.StreamingDecomposer._schedule_flush|create_task:_delayed_flush": {
+      "effect_scope": "root_event_delivery",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The bounded timer flushes root canvas events and is cancelled or drained by the owning decomposer",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/delta_lifecycle.py|<module>.DefaultDeltaLifecycle.on_post_turn|create_detached_auxiliary_task:delta_auto_learner": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Post-turn fact learning is a best-effort auxiliary with independent usage attribution",
+      "task_class": "post_terminal_business_auxiliary",
+      "usage_scope": "detached_reason:delta_auto_learner"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/events.py|<module>.EventBusRegistry.close|create_task:_close_exact_generation": {
+      "effect_scope": "exact_bus_retire_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Registry close shields retirement and subscriber wakeup for one exact bus generation through caller cancellation",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/events.py|<module>.TurnEventBus.emit|create_task:_persist_then_publish": {
+      "effect_scope": "root_event_persistence",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The admitted event bus persists the exact root event before live publication and tracks the task to its ordered tail",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/subagent_return_tool.py|<module>._xi_track_metric|create_detached_auxiliary_task:subagent_return_metric": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Subagent-return telemetry is fire-and-forget observability and cannot inherit the active tool ticket or root usage sink",
+      "task_class": "observability_only",
+      "usage_scope": "detached_reason:subagent_return_metric"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_finalizer.py|<module>.TerminalFinalizer._commit_finalization|create_task:confirm_commit": {
+      "effect_scope": "root_finalization_commit",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Finalization commit is a shielded root producer whose durable outcome must be learned despite caller cancellation",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_event_writer.py|<module>.TurnEventWriter._ensure_worker_locked|create_task:_run": {
+      "effect_scope": "root_event_persistence",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The generation writer owns one retained queue worker that persists ordered terminal event proposals",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_event_writer.py|<module>.TurnEventWriter.flush_through|shield:fail_fanout": {
+      "effect_scope": "generation_failure_fanout",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "A writer failure shields and awaits the exact generation fanout failure transition before the queue worker exits",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.create_detached_auxiliary_task|create_task:coroutine": {
+      "effect_scope": "cleared_by_enclosing_scope",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The single auxiliary task factory schedules only after clearing Core, Router, tool-ticket and root usage authority",
+      "task_class": "post_terminal_auxiliary_factory",
+      "usage_scope": "detached_reason:required_argument"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>.TerminalProtocolBusAdapter._publish_compat|create_task:emit": {
+      "effect_scope": "root_live_delivery",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Compatibility live delivery is shielded and awaited after the durable event proposal has committed",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>.TerminalProtocolBusAdapter._shielded_close_terminal_delivery_for_replay|create_task:_close_terminal_delivery_for_replay": {
+      "effect_scope": "terminal_delivery_cleanup",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Replay cleanup closes only the exact terminal delivery and is awaited through repeated cancellation",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>.TerminalTurnRuntime.start|create_task:_heartbeat_loop": {
+      "effect_scope": "generation_lease_control",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The heartbeat task maintains only the exact generation writer lease and is retired with the runtime",
+      "task_class": "control_watcher",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime_factory.py|<module>.TerminalRuntimeFactory._trigger_recovery_preserving_cancellation|create_task:_trigger_recovery": {
+      "effect_scope": "recovery_handoff_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The shielded task records an exact generation recovery handoff without resuming provider dispatch",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime_factory.py|<module>.TerminalRuntimeFactory.admit_web_turn|create_task:_trigger_recovery": {
+      "effect_scope": "recovery_handoff_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Admission failure schedules only the existing exact-scope recovery path and cannot execute the Turn",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime_factory.py|<module>.TerminalRuntimeFactory.commit_active_web_cancel|create_task:_trigger_recovery": {
+      "effect_scope": "recovery_handoff_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Cancel commit ambiguity hands the exact generation to recovery without signalling or redispatching work",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/terminal_runtime_factory.py|<module>.TerminalRuntimeRegistry.attach_runtime_once|create_task:_complete_runtime_attach": {
+      "effect_scope": "root_runtime_attach_singleflight",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The registry single-flights one persisted runtime attach and all callers await the same completion task",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/tool_finding.py|<module>.schedule_finding|create_task:_emit_finding_async": {
+      "effect_scope": "root_generation_producer_lease",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Tool finding registers a generation producer lease before spawning and is drained before root finalization",
+      "task_class": "root_producer",
+      "usage_scope": "root_turn_sink_inherited"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._maybe_save_pack_snapshot|create_detached_auxiliary_task:memory_pack_snapshot": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Memory-pack snapshot persistence is best-effort and independent of root finalization",
+      "task_class": "post_terminal_business_auxiliary",
+      "usage_scope": "detached_reason:memory_pack_snapshot"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>.TurnRunner._spawn_session_title|create_detached_auxiliary_task:session_title": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Successful-turn title generation is separately attributed and never gates the root receipt",
+      "task_class": "post_terminal_business_auxiliary",
+      "usage_scope": "detached_reason:session_title"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>.TurnRunner.run|create_detached_auxiliary_task:delta_post_verify": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Post-verification metrics are best-effort and independent of root effect accounting",
+      "task_class": "observability_only",
+      "usage_scope": "detached_reason:delta_post_verify"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>.TurnRunner.run|create_detached_auxiliary_task:dreaming": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Dreaming writes post-turn memory candidates and is not part of the root receipt",
+      "task_class": "post_terminal_business_auxiliary",
+      "usage_scope": "detached_reason:dreaming"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>.TurnRunner.run|create_detached_auxiliary_task:nl_memory_intent": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Natural-language memory capture is a post-turn auxiliary with independent usage",
+      "task_class": "post_terminal_business_auxiliary",
+      "usage_scope": "detached_reason:nl_memory_intent"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>.TurnRunner.run|create_task:_cancel_worker_on_signal": {
+      "effect_scope": "inherited_control_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The task only translates the generation-scoped durable cancel event into local task cancellation",
+      "task_class": "control_watcher",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_core/src/bowhead_core/turn_log_store.py|<module>.OrderedTurnLogSink._enqueue|create_task:_record_after_previous": {
+      "effect_scope": "root_event_persistence",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The ordered log sink serializes and retains the durable legacy event tail before dispatch settlement",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|create_task:handoff_to_recovery": {
+      "effect_scope": "recovery_handoff_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The worker tail transfers an unsealed runtime to existing recovery and performs no provider dispatch",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.TerminalApprovalRunner.spawn.create|create_task:worker": {
+      "effect_scope": "exact_approval_generation_inherited",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The singleflight approval worker owns one persisted-v1 decision generation and must retain its exact writer and effect authority",
+      "task_class": "root_producer",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>._await_durable_cleanup|create_task:operation": {
+      "effect_scope": "exact_recovery_handoff",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Cancellation-shielded approval cleanup must complete the exact persisted-v1 ownership handoff before cancellation escapes",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._send_impl._release_plan_claim|create_task:_release_exact_claim": {
+      "effect_scope": "none",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The task releases an exact preflight Plan claim after response construction",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._terminal_v1_stream_response.event_gen|create_task:anext": {
+      "effect_scope": "none",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The task only awaits the next committed Terminal delivery frame",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>.stream.event_gen|create_task:__anext__": {
+      "effect_scope": "none",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The legacy SSE task only awaits a subscriber-local event iterator",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>._run_cleanup_through_repeated_cancellation|create_task:cleanup_coro": {
+      "effect_scope": "inherited_cleanup_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The helper shields a caller-owned cleanup operation through repeated cancellation and introduces no provider work",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn._monitor_dispatch_lease|create_task:drain_turn_persistence": {
+      "effect_scope": "persistence_drain_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The lease monitor drains the admitted legacy persistence tail before dispatch settlement",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn._monitor_dispatch_lease|create_task:wait": {
+      "effect_scope": "inherited_control_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The task only waits for the exact generation cancel signal and performs no model or mutation work",
+      "task_class": "control_watcher",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn.create_worker._observe_worker_done|create_task:_retire_worker_generation": {
+      "effect_scope": "legacy_retire_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The callback retires one exact legacy bus generation after monitor settlement",
+      "task_class": "infrastructure_cleanup",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn.create_worker|create_task:worker": {
+      "effect_scope": "root_runtime_owner",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "This is the sole channel-neutral root worker spawn after durable ownership and generation normalization",
+      "task_class": "root_producer",
+      "usage_scope": "root_turn_sink_installed_in_worker"
+    },
+    "chat_task_spawn|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn|create_task:monitor_worker": {
+      "effect_scope": "inherited_control_only",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The monitor owns dispatch lease heartbeat, cancellation signalling and terminal tail settlement only",
+      "task_class": "control_watcher",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "chat_task_spawn|packages/bowhead_router/src/bowhead_router/invocation.py|<module>.abandon_physical_invocation|create_task:unknown": {
+      "effect_scope": "exact_physical_attempt_unknown_handoff",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Cancellation must not interrupt the exact provider attempt UNKNOWN transition before control returns to the generation owner",
+      "task_class": "control_watcher",
+      "usage_scope": "no_llm_or_accounting"
+    },
+    "effect_control_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.settle_approval_effect_from_projection|record_approval_projection_effect_settlement": {
+      "effect_class": "side_effect_possible",
+      "identity": "persisted approval projection + exact approval attempt CAS",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision_projection/v1",
+      "reason": "Rollback reader binds an already durable approval result to an exact contract-v2 DISPATCHED or UNKNOWN attempt without executing the provider again",
+      "release_waiver": "D2b.2 persisted-v2 approval recovery compatibility only; it does not admit fresh contract-v2 executions"
+    },
+    "effect_control_writer|packages/bowhead_gateway/src/bowhead_gateway/routes/turns.py|<module>.probe_effect_attempt|record_admin_probed_effect_settlement": {
+      "effect_class": "side_effect_possible",
+      "identity": "provider evidence fact digest + attempt CAS + stable admin probe audit",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "Dormant admin control reconciles an UNKNOWN attempt through the canonical provider settlement winner; it never re-executes the action",
+      "release_waiver": "D2b.2 reader/control floor only; generic production attempts and marker emits remain zero"
+    },
+    "effect_retention_gate_definition|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.aggregate_effect_retention|aggregate_effect_retention": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The sole aggregate-retention gate verifies the receipt-bound final overlay before replacing detailed effect rows"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.aggregate_effect_retention|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The aggregate-retention transaction deletes the exact settled attempt bundle only after tombstone and final-overlay verification"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.aggregate_effect_retention|turn_effect_evidence_links": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The aggregate-retention transaction removes exact purged evidence links after their member identities are captured in the tombstone"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.aggregate_effect_retention|turn_effect_settlements": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The aggregate-retention transaction removes exact settled rows only after receipt-bound final-overlay verification"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.begin_effect_attempt|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Authorization denial removes only the exact pre-dispatch INTENT in the same fenced transaction"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.claim_effect_dispatch|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "A dispatch authorization loser removes only its exact unclaimed INTENT before any provider boundary"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.discard_effect_intent|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The canonical discard seam deletes one exact owner-fenced INTENT that provably never crossed the provider boundary"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.discard_recovery_effect_intents|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Recovery removes the exact generation set of unclaimed side-effect INTENT rows before converging persisted facts"
+    },
+    "effect_detail_delete|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._freeze_cancelled_effect_set_in_tx|turn_effect_attempts": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Cancelled finalization removes only never-dispatched INTENT rows before freezing the remaining effect disclosure"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_finalizer.py|<module>.TerminalFinalizer.finalize_cancelled|begin_cancelled_finalization_with_local_billing": {
+      "effect_class": "accounting",
+      "identity": "exact closing generation + frozen usage + stable billing slot",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "credit_ledger/v1",
+      "reason": "Cancelled finalization atomically freezes usage, local billing, effect disclosure and the closing fence",
+      "release_waiver": "D2b.3a3 dormant finalization seam; generic writer activation remains blocked"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_finalizer.py|<module>.TerminalFinalizer.finalize|freeze_usage_and_claim_billing_attempt": {
+      "effect_class": "accounting",
+      "identity": "exact generation usage aggregate + stable billing slot",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "credit_ledger/v1",
+      "reason": "Normal finalization freezes usage and claims the single local accounting attempt before receipt commit",
+      "release_waiver": "D2b.3a2 dormant local accounting seam; generic writer activation remains blocked"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_finalizer.py|<module>.TerminalFinalizer.finalize|record_local_billing_settlement": {
+      "effect_class": "accounting",
+      "identity": "stable credit ledger row + exact billing attempt CAS",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "credit_ledger/v1",
+      "reason": "Normal finalization settles the local ledger and accounting effect in one SQLite transaction",
+      "release_waiver": "D2b.3a2 dormant local accounting seam; generic writer activation remains blocked"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook._claim_effect|begin_effect_attempt": {
+      "effect_class": "side_effect_possible",
+      "identity": "persisted EventTicket slot + provider semantic fact digest",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "The common physical-dispatch hook creates the single generation-bound effect intent before claim",
+      "release_waiver": "D2b.3b/c dormant producer boundary; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook._claim_effect|claim_effect_dispatch": {
+      "effect_class": "side_effect_possible",
+      "identity": "exact attempt row version + current execution and authorization fence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "The common physical-dispatch hook claims once immediately before transport or handler mutation",
+      "release_waiver": "D2b.3b/c dormant producer boundary; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook._claim_effect|discard_effect_intent": {
+      "effect_class": "side_effect_possible",
+      "identity": "unclaimed exact attempt identity",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "A rejected pre-dispatch claim discards only an INTENT that provably performed no physical action",
+      "release_waiver": "D2b.3b/c dormant producer boundary; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook._claim_effect|mark_effect_unknown_and_discover_recovery": {
+      "occurrences": 2,
+      "effect_class": "side_effect_possible",
+      "identity": "claimed attempt + generation recovery fence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "A claim-path ambiguity atomically poisons the generation and hands it to recovery",
+      "release_waiver": "D2b.3b/c dormant producer boundary; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook.mark_unknown|mark_effect_unknown_and_discover_recovery": {
+      "effect_class": "side_effect_possible",
+      "identity": "post-dispatch attempt + generation recovery fence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry",
+      "reason": "A physical outcome ambiguity atomically marks UNKNOWN and prevents Router retry or fallback",
+      "release_waiver": "D2b.3b/c dormant producer boundary; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook.settle._commit|record_llm_effect_settlement_with_usage": {
+      "effect_class": "inference_internal",
+      "identity": "exact LLM attempt + authoritative response and usage digest",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "llm_provider/v1",
+      "reason": "The LLM adapter atomically settles its physical attempt and generation usage",
+      "release_waiver": "D2b.3b dormant transport hook; production caller remains zero before activation"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.TerminalLLMInvocationHook.settle_tool._commit|record_tool_effect_settlement": {
+      "effect_class": "side_effect_possible",
+      "identity": "exact tool attempt + Bowhead-owned classifier evidence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "tool_external/v1",
+      "reason": "The generic tool boundary accepts settlement only from trusted classifier evidence",
+      "release_waiver": "D2b.3c dormant tool hook; production side-effect eligible set remains zero"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.TerminalProtocolStore.mark_effect_dispatched|claim_effect_dispatch": {
+      "effect_class": "side_effect_possible",
+      "identity": "legacy effect compatibility attempt row version",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision_projection/v1",
+      "reason": "The compatibility wrapper delegates to the same fenced dispatch CAS without a second implementation",
+      "release_waiver": "Persisted approval compatibility only"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_reconciler.py|<module>.TerminalReconciler.converge|freeze_usage_and_claim_billing_attempt": {
+      "effect_class": "accounting",
+      "identity": "recovery capability + exact persisted generation usage",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "credit_ledger/v1",
+      "reason": "Recovery creates the missing stable billing attempt without authorizing provider redispatch",
+      "release_waiver": "D2b.3a2 dormant recovery seam; generic writer activation remains blocked"
+    },
+    "effect_runtime_writer|packages/bowhead_core/src/bowhead_core/terminal_reconciler.py|<module>.TerminalReconciler.converge|record_local_billing_settlement": {
+      "effect_class": "accounting",
+      "identity": "recovery capability + stable credit ledger row",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "credit_ledger/v1",
+      "reason": "Recovery reconciles only the local accounting effect already required by frozen usage",
+      "release_waiver": "D2b.3a2 dormant recovery seam; generic writer activation remains blocked"
+    },
+    "effect_runtime_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.TerminalApprovalRunner._execute_started|begin_effect_attempt": {
+      "effect_class": "approval_decision",
+      "identity": "exact decision effect and approval action",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision/v1",
+      "reason": "The existing durable approval runner persists its effect intent before executor dispatch",
+      "release_waiver": "Persisted approval path retained independently of generic writer activation"
+    },
+    "effect_runtime_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.TerminalApprovalRunner._execute_started|claim_effect_dispatch": {
+      "effect_class": "approval_decision",
+      "identity": "exact approval attempt + decision execution fence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision/v1",
+      "reason": "The existing durable approval runner claims immediately before its sole executor dispatch",
+      "release_waiver": "Persisted approval path retained independently of generic writer activation"
+    },
+    "effect_runtime_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.TerminalApprovalRunner._execute_started|discard_effect_intent": {
+      "effect_class": "approval_decision",
+      "identity": "unclaimed approval attempt",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision/v1",
+      "reason": "A decision-fence loser discards only the approval INTENT before executor dispatch",
+      "release_waiver": "Persisted approval path retained independently of generic writer activation"
+    },
+    "effect_runtime_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.TerminalApprovalRunner._execute_started|mark_effect_unknown": {
+      "effect_class": "approval_decision",
+      "identity": "dispatched approval attempt",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision/v1",
+      "reason": "The existing approval runner preserves an ambiguous executor outcome as UNKNOWN",
+      "release_waiver": "Persisted approval path retained independently of generic writer activation"
+    },
+    "effect_runtime_writer|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>.settle_approval_effect_from_projection|record_effect_settlement": {
+      "effect_class": "approval_decision",
+      "identity": "legacy disclosure approval attempt + exact projection evidence",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "approval_decision_projection/v1",
+      "reason": "The approval compatibility branch settles historical disclosure-v1 attempts through the original Store seam",
+      "release_waiver": "Historical persisted-v1 compatibility only"
+    },
+    "post_terminal_auxiliary_scope|packages/bowhead_core/src/bowhead_core/canvas_store.py|<module>.CanvasStore._fire_anchor_invalidation|detached_auxiliary_scope": {
+      "effect_scope": "cleared",
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canvas anchor invalidation runs after primary commit and cannot reuse the root action or usage sink",
+      "task_class": "non_root_cache_auxiliary",
+      "usage_scope": "detached_reason:canvas_anchor_invalidation"
+    },
+    "effect_control_writer|packages/bowhead_gateway/src/bowhead_gateway/routes/turns.py|<module>.settle_effect_manually|record_manual_effect_settlement": {
+      "effect_class": "side_effect_possible",
+      "identity": "admin evidence fact digest + attempt CAS",
+      "owner": "terminal-protocol-reviewers",
+      "provider_adapter_key": "immutable provider-contract registry manual capability",
+      "reason": "Dormant team-admin control settles only UNKNOWN attempts after same-transaction role and auth-fence revalidation",
+      "release_waiver": "D2b.2 reader/control floor only; generic production attempts and marker emits remain zero"
+    },
+    "approval_bare_task|packages/bowhead_core/src/bowhead_core/canvas_export.py|<module>._persist_nowait|execute": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed false-positive: background SQLite persistence execute, not ApprovalExecutor"
+    },
+    "approval_bare_task|packages/bowhead_gateway/src/bowhead_gateway/llm_verification_runner.py|<module>._run|execute": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed false-positive: verification runner adapter execute, not ApprovalExecutor"
+    },
+    "approval_bare_task|packages/bowhead_gateway/src/bowhead_gateway/routes/approvals.py|<module>._approve_decision|execute": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy-only approval executor spawn; persisted v1 branches use TerminalApprovalRunner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/approval_store.py|<module>.record_execution|approval_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "ApprovalStore canonical idempotent execution projection; v1 provider effects bind it to settlement recovery"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/approval_store.py|<module>.set_decision_once|approval_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "ApprovalStore legacy decision CAS; v1 routes bypass it and use TerminalProtocolStore source CAS"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/ordinary_lead_continuation.py|<module>.consume_ordinary_resume_in_tx|clarification_decision_source": {
+      "owner": "chat-runtime",
+      "reason": "Ordinary Lead question resume consumption (fabf9b1f0). Called only by ordinary_lead_runtime inside BEGIN IMMEDIATE after require_live_worker_in_tx re-proves the exact legacy (terminal_protocol_version 0) running Turn, Session, user, Space, team, generation and live spawned lease owner, the dispatch lease is resume and the generation is newer than the card's creation worker. It only stamps injected_at, continuation_generation and continuation_owner_id on the already resolved card (status='resolved', injected_at and continuation_generation still NULL, rowcount must be 1). It never changes status, answer or decision source, and commits before provider or Tool work, so a lost ACK cannot replay the answer; the same post-resolution projection shape as ClarificationStore.mark_injected."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.cancel_directive|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Cancellation writes only directive_cancelled_at and preserves source fields bound by any v1 decision digest"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.expire_pending_for_turn|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Planning is forced to legacy before admission; this in-generation cleanup is additionally restricted to the exact Turn and plan_midrun_plan_id"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.invalidate_pending_in_tx|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canonical legacy-only invalidation CAS and durable outbox transaction; v1 rows are excluded and settle through TerminalProtocolStore"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.mark_injected|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed post-resolution directive injection projection"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.resolve_once|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "ClarificationStore legacy atomic resolve and outbox CAS; persisted v1 routes use TerminalProtocolStore source CAS"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/clarification_store.py|<module>.set_resume_context|clarification_decision_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Decision-scoped idempotent clarification resume-context projection"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/migrations/versions/0014_terminal_decision_recovery.py|<module>.upgrade|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Immutable migration backfill binds pre-0011 system revocations to access_revoked"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_lifecycle.py|<module>._commit_operation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "SessionLifecycleCoordinator canonical lifecycle transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_lifecycle.py|<module>._commit_operation|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "SessionLifecycleCoordinator canonical lifecycle transaction owner Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_lifecycle.py|<module>._legacy_transition_if_still_legacy|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "SessionLifecycleCoordinator fenced legacy fallback; transaction rechecks that no protocol-owned row became active Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.advance_turn_execution_generation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy clarification resume atomically restores the exact idle parent as active with its pre-worker generation lease"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.advance_turn_execution_generation|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy resume-generation primitive; persisted v1 resume opens its generation through TerminalProtocolStore"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>._insert_chat_turn_user_source_in_tx|chat_turn_user_source": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Sole transaction-local canonical Chat Turn user-source writer shared by legacy and typed Terminal admission"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>._isolate_legacy_continuation_in_tx|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canonical continuation-isolation transaction clears only the exact legacy active Turn and preserves managed v1 ownership"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>._isolate_legacy_continuation_in_tx|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canonical continuation-isolation transaction terminalizes only a protocol-fenced legacy parent"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.claim_chat_spawn_dispatch_for_worker|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy dispatch-lease claim; terminal-v1 turns are excluded before this store primitive is called Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.cleanup_stale_running_turns|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.cleanup_stale_running_turns|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.finalize_cancelled_usage|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy cancellation accounting transaction; v1 finalization is owned by TerminalProtocolStore"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.finalize_started_chat_submission|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer admission transaction including internal single-reference start; persisted Terminal v1 history is fenced before writes, reference HTTP remains closed and legacy workers reject reference Turns"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.finalize_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version Counted since 2026-09-30 (occurrences=3): the function holds 3 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 3
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_aborted|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_cancelled|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_clarification_pending|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_completed|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_failed|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.materialize_steer_follow_up|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy steer FIFO materialization; v1 follow-up materialization is owned by TerminalProtocolStore Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.prepare_chat_spawn_failure|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy spawn-failure transaction; managed-protocol failures close through TerminalRuntime"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.record_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.recover_expired_chat_spawn_dispatches|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy dispatch recovery; terminal-v1 execution leases are recovered by TerminalReconciler Counted since 2026-09-30 (occurrences=4): the function holds 4 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 4
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.recover_expired_chat_spawn_dispatches|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy dispatch recovery; terminal-v1 execution leases are recovered by TerminalReconciler Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.request_cancel_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy durable Stop receipt writer; the route branches on persisted v1 before this call"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.request_cancel_turn|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Composer legacy durable Stop receipt writer; the route branches on persisted v1 before this call"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.revive_session|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.rollback_turn_resume_generation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy resume rollback clears only an empty exact active parent and preserves accepted steer ownership"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.rollback_turn_resume_generation|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy resume rollback primitive; v1 recovery is decision-scoped in TerminalProtocolStore"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.soft_delete_session|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy store primitive; production callers must branch on persisted protocol version"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._append_or_replay_steer|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._append_or_replay_steer|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._apply_session_mutation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._insert_admitted_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._insert_admitted_turn|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._insert_deferred_admitted_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 deferred FIFO admission transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._insert_deferred_admitted_turn|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 deferred FIFO admission transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._skip_available_decision_effects|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore transactional helper settles only pending or abandoned superseded decision effects"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._update_turn_terminal_projection|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner Counted since 2026-09-30 (occurrences=6): the function holds 6 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 6
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>._begin_finalization_in_tx|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.claim_decision_effects|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical decision-effect claim transaction"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.claim_generation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.commit_control_generation|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical control-generation decision transaction"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.commit_protocol_delete|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.defer_decision_effect_group|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical per-effect-group recovery defer transaction"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.defer_pending_decision|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical per-decision recovery defer transaction"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.open_resume_generation|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 decision resume transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.open_resume_generation|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical resume-generation decision transaction"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.open_resume_generation|turn_status": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical v1 decision resume transaction owner"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.record_decision|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore sole durable decision writer"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.record_decision|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore atomically registers decision projection effects"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.settle_decision_effect|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical decision-effect settlement transaction Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.skip_decision_effects|terminal_decision_effect": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical terminal settlement for permanently inapplicable decision effects"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/terminal_protocol_store.py|<module>.supersede_pending_decision_with_revoke|terminal_decision": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "TerminalProtocolStore canonical permanent-denial supersede transaction Counted since 2026-09-30 (occurrences=2): the function holds 2 writes of this class; each was re-read when the scanner stopped de-duplicating and is a branch or compensating write of the reviewed semantics above (mutually exclusive status branches, rollback-to-prior-value, or the same CAS on a sibling row), not a new ingress.",
+      "occurrences": 2
+    },
+    "legacy_direct_run_turn_call|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|run_turn": {
+      "owner": "chat-runtime",
+      "reason": "The sole worker body reached only after centralized admission and durable dispatch claim"
+    },
+    "legacy_event_bus_constructor|packages/bowhead_core/src/bowhead_core/events.py|<module>.EventBusRegistry.emit_out_of_band|TurnEventBus": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canonical transient persistence-only bus; it is never registered as a worker producer"
+    },
+    "legacy_event_bus_constructor|packages/bowhead_core/src/bowhead_core/events.py|<module>.EventBusRegistry.get_or_create|TurnEventBus": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Canonical EventBusRegistry construction path; production producer callers are separately restricted to the legacy execution adapter"
+    },
+    "legacy_event_bus_constructor|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>.TerminalProtocolBusAdapter.__init__|TurnEventBus": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Terminal v1 compatibility projection bus; generation ownership remains in TerminalRuntime"
+    },
+    "legacy_event_bus_producer|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.admit_legacy_chat_execution|get_or_create": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Sole legacy producer generation creator and sequence seed before worker scheduling"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/_scheduled_runner.py|<module>.run_scheduled_turn|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Scheduled chat ingress delegates legacy execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/feishu/bridge.py|<module>.FeishuTurnBridge.handle_message_event|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Feishu chat ingress delegates legacy execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy steer continuation delegates child execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._send_impl|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Web chat ingress delegates legacy execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/plans.py|<module>._run_with_plan_claim_heartbeat|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Development plan ingress delegates legacy execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/routes/workflow_solidify.py|<module>._dispatch_dryrun_turn|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Workflow dry-run ingress delegates legacy execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_call|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_resume_turn|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy clarification resume delegates execution admission to the sole adapter"
+    },
+    "legacy_execution_adapter_definition|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.admit_legacy_chat_execution|admit_legacy_chat_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Sole production owner for legacy producer bus creation and durability upgrade"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.complete_turn|mark_completed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._finish_cancelled|mark_cancelled": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._transition_turn_state|mark_aborted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch. Moved unchanged from TurnRunner._persist_turn_state into _transition_turn_state by dc05866ae, which split the status CAS from the post-CAS done-summary projection; the reference-runtime branch and the store.mark_* CAS are the same code."
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._transition_turn_state|mark_cancelled": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch. Moved unchanged from TurnRunner._persist_turn_state into _transition_turn_state by dc05866ae, which split the status CAS from the post-CAS done-summary projection; the reference-runtime branch and the store.mark_* CAS are the same code."
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._transition_turn_state|mark_clarification_pending": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch. Moved unchanged from TurnRunner._persist_turn_state into _transition_turn_state by dc05866ae, which split the status CAS from the post-CAS done-summary projection; the reference-runtime branch and the store.mark_* CAS are the same code."
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._transition_turn_state|mark_completed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch. Moved unchanged from TurnRunner._persist_turn_state into _transition_turn_state by dc05866ae, which split the status CAS from the post-CAS done-summary projection; the reference-runtime branch and the store.mark_* CAS are the same code."
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._transition_turn_state|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch. Moved unchanged from TurnRunner._persist_turn_state into _transition_turn_state by dc05866ae, which split the status CAS from the post-CAS done-summary projection; the reference-runtime branch and the store.mark_* CAS are the same code."
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._run_inner|complete_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._run_inner|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/canvas.py|<module>.delete_canvas|soft_delete_session": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._persist_turn_row_for_stream|record_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/session_lifecycle.py|<module>.revive_session_for_im|revive_session": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed legacy call edge; production caller must prove a persisted non-v1 branch"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_turn|record_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Fenced legacy untracked dispatch admission; record_turn rejects managed protocol history before any worker can be scheduled"
+    },
+    "legacy_mutator|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.handoff_legacy_spawn_failure_to_recovery|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Single legacy pre-worker failure owner closes the canonical Turn before atomically handing its dispatch and accepted steer to recovery"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._emit_event|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=5): 5 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 5
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._emit_narrative_delta|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._flatten_turn_posters|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agents/lead_orchestrator.py|<module>._lead_loop._scanner_gated_stream_cb|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agents/report_tools.py|<module>._emit_section_added|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/approval_gate.py|<module>.maybe_gate|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>._emit_canvas_done|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>._try_auto_build_chart_section|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>.compose_canvas_from_payload|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=5): 5 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 5
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>.compose_payload_missing_guard|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=3): 3 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 3
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>.reorder_for_chart_refs|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composers/realtime_stream.py|<module>.stream_sections_for_inv|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_revise.py|<module>.emit_section_patched|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_revise.py|<module>.emit_sections_superseded|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_revise.py|<module>.place_appended_before_tail|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_revise.py|<module>.upsert_provenance_section|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_keepalive|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_section_chunk|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_section_done|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_section_streaming|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_streaming_state|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_trace_skill|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_streaming.py|<module>.emit_turn_streaming|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_chart|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_external_iframe|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_html_artifact|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_image|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_insight|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._add_spec_block|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._emit_design_added|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_tools.py|<module>._emit_design_patched|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/config_copilot_chat_tools.py|<module>._propose_form_draft|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/config_copilot_chat_tools.py|<module>._propose_handler|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/events.py|<module>.emit_if_local_producer|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Local live-only auxiliary projection; it cannot create a durable v1 root receipt and adapts legacy fail-stop into an ordinary caller-visible omission error"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/events.py|<module>.emit_out_of_band|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/events.py|<module>.emit|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "report-streaming P1: same-bus exactly-once backfill of the non-terminal canvas.turn_streaming lifecycle frame, emitted immediately before the turn's first canvas content event (see TurnEventBus.emit). It re-enters this same emit path, carries no terminal semantics and cannot create a durable v1 root receipt; root close remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/plan_driver.py|<module>._emit|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/report_writer_loop.py|<module>._revise_finish_if_applicable|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/report_writer_loop.py|<module>._emit_section|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/report_writer_loop.py|<module>._seed_draft_slot|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned. report-streaming 批A: 该 emit 由 compose_report 内联抽进 _seed_draft_slot（单写手/多写手两路共用同一份槽位预建）——**位置搬家，不是新增 ingress**，语义与登记理由一字未改"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/sources_resolver.py|<module>._upsert_turn_sources_locked|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._execute_tool|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=6): 6 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 6
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._legacy_run|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed peer-scoped agent_spawned/peer.iter forwarding (7 sites), including collaboration finish refusal; ff08b1fcc removed the document inspection rejection emit. Every site retains the original parent Turn and subagent identity; none closes the root Turn.",
+      "occurrences": 7
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._legacy_run._limit_wrap_up|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Agent run limits wrap-up: one peer-scoped agent_spawned{status: partial} for a subagent stopped at a run limit, with the parent Turn and subagent identity (parent_agent_id). It reports the helper's partial outcome and never closes the root Turn.",
+      "occurrences": 1
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._stream_invoke._attempt_stream._drain|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=3): 3 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 3
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._stream_invoke|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>.register_subagent_tool._handler|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=3): 3 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 3
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent_creator_trigger.py|<module>._emit_open|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/terminal_llm_invocation.py|<module>.emit_tool_step_started_ticket|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "D2b.3c protocol-neutral tool marker bridge; Terminal bus requires and returns a persisted EventTicket while legacy keeps its existing emit path"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>._publish_compat|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/terminal_runtime.py|<module>.emit|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/tool_creator_trigger.py|<module>._handler|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/tool_finding.py|<module>._emit_finding_async|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._finish_cancelled|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._finish_cancelled|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._preprocess_attachments_with_events._parse_one|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._run_inner|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._run_inner|turn_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/turn_runner.py|<module>._run_inner|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/workflow_creator_trigger.py|<module>._handler|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup._materialize_steer_before_terminal|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy steer follow-up emitter is reached only when no Terminal runtime owns the Turn"
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/routes/chat.py|<module>._run_turn_and_cleanup|turn_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>._execute_started|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Durable approval runner closes through TerminalProtocolBusAdapter and TerminalFinalizer"
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>._execute_started|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed persist-before-live manual-check event; fail-stop exceptions propagate to the outer recovery supervisor"
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>._finalize_pre_dispatch_denial|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed v1 approval pre-dispatch denial; done is emitted through the protocol runtime and commits the sole failed receipt"
+    },
+    "root_terminal_emit|packages/bowhead_gateway/src/bowhead_gateway/turn_service.py|<module>.spawn_resume_turn._emit_resume_notice|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy resume notice path; v1 resume opens and runs through TerminalRuntime instead"
+    },
+    "s5_control_mutator|packages/bowhead_core/src/bowhead_core/access_request_store.py|<module>.resolve_pending_for_grant|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Unrelated access-request decision API with a reviewed same-name method"
+    },
+    "s5_control_mutator|packages/bowhead_core/src/bowhead_core/approval_executor.py|<module>._record_execution_and_notify|record_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Legacy executor projection; v1 TerminalApprovalRunner calls execute_effect instead"
+    },
+    "s5_control_mutator|packages/bowhead_core/src/bowhead_core/approval_store.py|<module>.set_decision|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "ApprovalStore legacy compatibility wrapper"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/feishu/bridge.py|<module>._resume_clarification_turn|spawn_resume_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Feishu legacy resume path is preceded by persisted-version fail-closed surface gate"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/access_requests.py|<module>.decide_access_request|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Unrelated access-request decision API with a reviewed same-name method"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/access_requests.py|<module>._decide_release_managed|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Release-managed access-request claim calls AccessRequestStore.set_decision_once, an unrelated same-name method"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/approvals.py|<module>._approve_decision|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Persisted-version branch limits this call to legacy approvals"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/approvals.py|<module>._reject_decision|set_decision_once": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Persisted-version branch limits this call to legacy approvals"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/routes/clarifications.py|<module>.resume_turn|spawn_resume_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Persisted-version branch limits this helper to legacy resume; v1 uses factory open"
+    },
+    "s5_control_mutator|packages/bowhead_gateway/src/bowhead_gateway/terminal_approval_runner.py|<module>._execute_started|record_execution": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Durable provider result projection precedes settlement and is idempotently recoverable"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/agent_eval_job_store.py|<module>.start_scratch_turn|session_active": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval job store creates a fresh origin=agent_eval Session, legacy scratch Turn and immutable job/attempt/lease-generation link in one transaction under the current unexpired job lease; it cannot claim an existing Chat Session or create a v1 Turn"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.delete_session|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Owner-scoped pre-protocol compatibility primitive; the transaction first rejects migrated or partial protocol schemas via _assert_legacy_session_lifecycle, so migrated production deletion stays with SessionLifecycleCoordinator"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.rename_session|session_deleted": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Owner rename (8d838bfa4) writes only title and title_source; deleted_at appears solely in the WHERE clause (owner match and deleted_at IS NULL), so it never deletes or restores a Session and touches no Turn, active pointer or protocol row"
+    },
+    "legacy_event_bus_constructor|packages/bowhead_core/src/bowhead_core/agent_eval_subagent_executor.py|<module>.ExactSubagentEvalExecutor.execute|TurnEventBus": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Private Eval scratch trace bus with ordered persistence; no EventBusRegistry or Chat worker attachment. admit_eval_execution requires the exact run/case/attempt/current-lease scratch link before any run or emit, and the isolated context exposes only the safe Eval tool view"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._execute_attempt|finalize_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval service clears only the fresh scratch Session created for its claimed job generation; next_turn_id is None, so this edge never spawns a Chat follow-up; persisted v1 ownership is still rejected by SessionStore"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._execute_attempt|mark_completed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval attempt result projection on the freshly linked scratch Turn; user-visible pass/fail evidence belongs to the lease-fenced Eval job settlement, not a Terminal v1 completion receipt; SessionStore rejects v1 Turns"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_cancelled|finalize_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval cancellation clears its own scratch active pointer with next_turn_id=None; the private scratch id comes from _execute_claim and SessionStore still enforces persisted protocol ownership"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_cancelled|mark_cancelled": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval cancellation projects status only onto the attempt scratch Turn before lease-fenced cancelled job settlement; no Chat worker or Terminal v1 completion producer is attached"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_infra_failure|finalize_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval infrastructure failure clears only its scratch Session active pointer with no child; persisted protocol ownership remains enforced by SessionStore"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_infra_failure|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval timeout or infrastructure failure projects the private attempt trace Turn before lease-fenced infra_failed job settlement; SessionStore rejects v1 Turns"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_time_limit|finalize_turn": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval time-limit cut clears only its scratch Session active pointer with no child, like _settle_infra_failure; persisted protocol ownership remains enforced by SessionStore"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/agent_eval_service.py|<module>._settle_time_limit|mark_failed": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Eval attempt or run time-limit cut projects the private attempt trace Turn before lease-fenced infra_failed job settlement with time_limit evidence; SessionStore rejects v1 Turns"
+    },
+    "legacy_mutator|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.undelete_session|revive_session": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Owner-scoped compatibility wrapper delegates to revive_session, whose transaction rejects migrated and partial schemas; this edge does not bypass SessionLifecycleCoordinator"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_eval_subagent_executor.py|<module>.execute|done": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "End of model execution in the private Eval scratch trace after exact lease-linked admission; not registered for Chat live delivery and not a v1 terminal receipt. Eval service and job settlement own the subsequent scoring outcome"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_eval_subagent_executor.py|<module>.execute|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "The literal final_answer is persisted to the same private Eval scratch trace bus after exact admission; no shared Chat producer or protocol finalizer authority is acquired"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>.promote_document_chrome|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Forwards only literal canvas.reordered after successful section reorder on the supplied bus; no root terminal event or new producer"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/canvas_composer.py|<module>.reorder_canvas_by_slots|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Forwards only literal canvas.reordered after the slot-order write on the supplied bus; no root terminal event or new producer"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/report_writer_loop.py|<module>._apply_canonical_order|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Forwards only literal canvas.reordered after canonical section reorder on the supplied bus; unchanged ordering emits nothing and this helper cannot finalize a Turn"
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/chat_reference_runtime.py|<module>.persist_turn_state|turn_status": {
+      "owner": "composer-resource-references",
+      "reason": "Initial reference adapter uses the shared done callback; one writer transaction checks exact Session scope, owner, generation, lease, cancellation, material lifecycle and required primary output before canonical status and usage commit. See reference runtime/retention tests and implementation sections 22-23."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/session_store.py|<module>.mark_chat_spawn_dispatch_terminal|session_active": {
+      "owner": "composer-resource-references",
+      "reason": "Initial reference settlement releases only the original Session active Turn after exact live owner/generation, empty buffer and persisted wire-terminal proof; dispatch CAS and Session release share the transaction. Late workers cannot clear a newer Turn. See test_reference_primary_runtime.py."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/chat_reference_runtime.py|<module>.run|clarification_decision_source": {
+      "owner": "composer-resource-references",
+      "reason": "Post-dispatch read-question continuation (f732098af). Inside the invocation-boundary BEGIN IMMEDIATE, after _read re-proves the exact current worker (owner_id + generation), receiver identity, delegate_started evidence, a running primary, require_resume (resolved pause, generation 2, live resume lease) and an unchanged attachment snapshot and checkpoint iteration, it only removes the sealed private read-question transcript and its hash from the already resolved clarification's resume_context_json (status='resolved' predicate, rowcount must be 1). It never changes status, answer or decision source and commits atomically with the post-dispatch attempt row, so a lost ACK cannot re-run the model."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/kb/turn_guard.py|<module>.annotate_turn_report|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed non-terminal forwarding edge added by d06c9a976 (KB source barrier). It emits only canvas.section_added for a warning narrative it has just persisted with append_section on a canvas this turn already wrote to, via the report_tools _event factory the scanner cannot resolve through the local import; patched sections go through canvas_revise.emit_section_patched. Persist precedes emit so live equals replay, and it never constructs done/error/cancelled; root close remains protocol-adapter owned."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/google_canvas_preview.py|<module>.publish|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed lexical match: publish() persists a Google file preview card through canvas_store.append_section/patch_section and then emits canvas.section_added or the shared emit_section_patched on the turn bus. Both are canvas section events whose payload is the stored section, so live and replayed state agree; it never constructs a root turn outcome or closes the Turn."
+    },
+    "direct_sql|packages/bowhead_core/src/bowhead_core/document_clarification_lifecycle.py|<module>.recover_document_pauses_in_tx|turn_status": {
+      "owner": "composer-resource-references",
+      "reason": "Shared dispatch maintenance only: exact retained document/card association and generation are revalidated in the caller transaction before repairing the original pause or terminalizing unavailable evidence. No model, new Turn or answer replacement. Per-card savepoints preserve queue settlement and failed validation rolls back pause repair. See shared-runtime-composer-handoff.md section 12.",
+      "occurrences": 2
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/document_chat_runtime.py|<module>.finish_document_planning|unresolved": {
+      "owner": "composer-resource-references",
+      "reason": "Only the exact typed DocumentPlanningReview can produce this optional document.draft_open pointer through documents.canvas_open under current worker, ownership and digest guards. The existing generation-fenced durable bus persists before delivery; failure propagates. This forwarding edge never constructs a terminal outcome or publishes a document."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_coach.py|<module>.register_agent_coach_tools.handler|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed existing nonterminal Coach resource, operation and Tool onboarding pointers. Each of the three emit sites follows the original admitted binding and domain reader/handoff service; event delivery does not authorize writes or root completion. Registers exact existing forwarding sites; does not certify their rollout.",
+      "occurrences": 3
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_coach.py|<module>._emit_alignment_card|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed nonterminal coach.alignment_card pointer on the original Turn after a successful alignment Tool result; a failed emit leaves the Tool result unchanged and root terminal publication remains protocol-adapter owned"
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/configuration_agent.py|<module>._open|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed existing configuration Canvas navigation: _read first checks the admitted form binding and original authorization, then a fixed form-to-page mapping emits only its scoped open pointer. It neither saves configuration nor constructs a root terminal outcome."
+    },
+    "chat_task_spawn|packages/bowhead_router/src/bowhead_router/invocation.py|<module>._begin_authorities|shield:confirmed_not_applied": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed existing nested authority cleanup before any transport dispatch. On failed child admission, shield the exact parent reservation known-not-applied settlement; failed settlement records unknown before propagating the original failure. No new model invocation or retry authority.",
+      "task_class": "root_producer",
+      "effect_scope": "exact_parent_invocation_reservation",
+      "usage_scope": "existing_invocation_settlement_only"
+    },
+    "legacy_direct_run_turn_call|packages/bowhead_core/src/bowhead_core/documents/tool.py|<module>.register_document_tool.submit|run_turn": {
+      "owner": "template-document-delivery",
+      "reason": "Exact reviewed name collision: DocumentService.run_turn returns a typed document planning outcome inside the original already-claimed Turn worker. It does not call Orchestrator.run_turn, create a root producer or allocate another Turn. Original Turn lease, document dispatch ownership, checkpoint and physical-call fences remain mandatory; see document-planning-continuation-spike.md."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_collaboration_runtime.py|<module>.publish_pending|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Publishes committed agent.collaboration facts through the original worker bus with durable event identity and persistence before delivery. Acknowledges only successful delivery; no root terminal outcome is constructed."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/agent_collaboration_runtime.py|<module>.complete_owner|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Existing Plan collaboration completion emits only agent_spawned(completed) after durable owner completion, bound to the original worker Turn and owner subagent identity. No root terminal outcome is constructed."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>.run_plan_collaboration|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Existing Plan collaboration setup emits only agent_spawned(running) for the exact bound Lead on the original Turn. The owner subagent identity is retained; root terminal publication remains with the Plan finalizer."
+    },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>.admit_retry|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed nonterminal llm.retry_scheduled progress on the original Turn, scoped to the running subagent; emit failure never cancels the admitted retry and root terminal publication remains protocol-adapter owned"
+    }
+  },
+  "manifest_version": 8,
+  "scan_roots": [
+    "packages/bowhead_core/src",
+    "packages/bowhead_gateway/src",
+    "packages/bowhead_router/src"
+  ]
+}

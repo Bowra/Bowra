@@ -1,0 +1,249 @@
+/* Width, gutters and the header come from PageFrame (Header, Language & Paging Spec §2, D4); tabs are PageTabs (D5). */
+.content {
+  width: 100%;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.card:hover {
+  background: var(--c-surface-2);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--ui-radius-card, 12px);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  text-decoration: none;
+}
+.card h2,
+.card h3,
+.list h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.card p,
+.list p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+}
+.card .cardLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: auto;
+  color: var(--c-accent);
+  font-size: 0.8125rem;
+}
+.list {
+  padding: 0;
+  margin: 24px 0;
+  list-style: none;
+}
+.list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--c-line-2);
+}
+.list p {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 140px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.tabs a:focus-visible,
+.card:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 3px;
+}
+@media (max-width: 639px) {
+  .content {
+    padding-top: 24px;
+  }
+  .tabs a {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .list li {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .meta {
+    align-items: flex-start;
+  }
+  .pluginMeta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .switchColumn {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+.overviewSection {
+  margin-top: 24px;
+}
+.overviewHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.overviewHead .viewAll {
+  margin-left: auto;
+  color: var(--c-accent);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+.overviewSection .grid {
+  margin-top: 12px;
+}
+.cardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.attention {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+.count {
+  display: block;
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+/* Count beside a list or group heading on the Plugins and Tools pages. */
+.headingCount {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+.toolGroup {
+  margin-top: 28px;
+}
+.toolGroup .list {
+  margin-top: 8px;
+}
+.groupTitle {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.badge {
+  margin-left: 8px;
+  vertical-align: 2px;
+}
+/* Plugin Switch Row Spec: one 56px column per switch, label above, Me always in the rightmost slot. */
+.switches {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 56px;
+  gap: 8px;
+  justify-content: end;
+}
+.switchColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.switchColumn:has(:disabled) {
+  cursor: default;
+}
+.switchLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-ink-2);
+}
+.version {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.onlyMine {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+}
+
+/* Tool details panel (mockup file 3, C4). */
+.details {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.details h3 {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.details label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.hint {
+  display: block;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.detailsButton {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--c-accent-text, var(--c-accent));
+  font-size: 0.75rem;
+  cursor: pointer;
+}

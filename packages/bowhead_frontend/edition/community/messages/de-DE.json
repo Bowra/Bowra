@@ -1,0 +1,89 @@
+{
+  "team_onboarding": {
+    "items": {
+      "license_active": {
+        "title": "Installation ist bereit",
+        "action": "Einrichtung prüfen",
+        "impact": "Richten Sie das erste Eigentümerkonto ein, bevor Sie das Team verwenden."
+      }
+    },
+    "reasons": {
+      "license_active": "Diese Community-Installation ist eingerichtet. Eine kommerzielle Lizenz oder Benutzerobergrenze ist nicht erforderlich.",
+      "suspended": "Dieses Team ist gesperrt.",
+      "license_state_unavailable": "Der Installationsstatus konnte nicht ermittelt werden.",
+      "kb_not_licensed": "Die Wissensdatenbank ist für dieses Team nicht verfügbar."
+    }
+  },
+  "settings": {
+    "appearance": {
+      "viewTeamAppearance": "Team-Diagrammstile verwalten"
+    },
+    "members": {
+      "err_seat_full": "Diese Aktion ist nicht verfügbar. Prüfen Sie Ihre Team-Berechtigungen oder kontaktieren Sie die Administration.",
+      "err_over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "err_needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+      "err_license_invalid": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration.",
+      "err_entitlement_unavailable": "Dieser Dienst ist nicht verfügbar. Versuchen Sie es später erneut oder kontaktieren Sie die Systemadministration."
+    },
+    "people": {
+      "err_seat_full": "Diese Aktion ist nicht verfügbar. Prüfen Sie Ihre Team-Berechtigungen oder kontaktieren Sie die Administration.",
+      "err_over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "err_needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+      "err_license_invalid": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration."
+    },
+    "datarc": {
+      "errors": {
+        "entitlement_unavailable": "Dieser Dienst ist nicht verfügbar. Versuchen Sie es später erneut oder kontaktieren Sie die Systemadministration.",
+        "over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+        "needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+        "tamper": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration."
+      }
+    },
+    "scheduled": {
+      "errors": {
+        "feature_unlicensed": "Diese Funktion ist für dieses Team nicht verfügbar. Wenden Sie sich an die Systemadministration.",
+        "over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+        "needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+        "tamper": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration."
+      }
+    },
+    "integrations": {
+      "email_err_readonly": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "email_err_entitlement_unavailable": "Dieser Dienst ist nicht verfügbar. Versuchen Sie es später erneut oder kontaktieren Sie die Systemadministration."
+    },
+    "models": {
+      "errors": {
+        "err_readonly": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration."
+      }
+    },
+    "subagents": {
+      "draft_locked_mcp": "Diese Funktion ist für dieses Team nicht verfügbar. Wenden Sie sich an die Systemadministration."
+    },
+    "tabs": {
+      "team-appearance": "Diagrammstile"
+    }
+  },
+  "auth": {
+    "error": {
+      "oauth_over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "oauth_needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+      "oauth_tamper": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration."
+    }
+  },
+  "admin": {
+    "credits": {
+      "err_over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "err_needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+      "err_license_invalid": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration.",
+      "err_entitlement_unavailable": "Dieser Dienst ist nicht verfügbar. Versuchen Sie es später erneut oder kontaktieren Sie die Systemadministration.",
+      "err_feature_unlicensed": "Diese Funktion ist für dieses Team nicht verfügbar. Wenden Sie sich an die Systemadministration.",
+      "err_managed_by_license": "Diese Aktion ist nicht verfügbar. Prüfen Sie Ihre Team-Berechtigungen oder kontaktieren Sie die Administration."
+    },
+    "members_promote": {
+      "err_over_grace": "Dieses Team ist gesperrt oder schreibgeschützt. Kontaktieren Sie vor Änderungen die Systemadministration.",
+      "err_needs_license": "Schließen Sie vor dem Fortfahren die Einrichtung ab. Wenden Sie sich an die Systemadministration.",
+      "err_license_invalid": "Der Installationsstatus konnte nicht überprüft werden. Wenden Sie sich an die Systemadministration.",
+      "err_entitlement_unavailable": "Dieser Dienst ist nicht verfügbar. Versuchen Sie es später erneut oder kontaktieren Sie die Systemadministration."
+    }
+  }
+}

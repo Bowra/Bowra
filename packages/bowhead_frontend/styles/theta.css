@@ -1,0 +1,46 @@
+/* ─────────────────────────────────────────────────────────────
+ * Sprint θ Phase 8d-3+4 — role palette and status tokens.
+ *
+ * Source: Claude design bundle Sprint-Theta-Frontend-Flow.html /
+ * styles-theta.css (role palette tokens: kb/data/canvas/clarification).
+ * The bundle's component classes (status badge, prior-turn pill, warning
+ * footnote, toast, cache-bust banner) had no remaining users and were removed.
+ *
+ * Additive only — existing globals.css `--c-bg`/`--c-accent`/`--c-warn`/`--c-err`
+ * tokens reused (Chat-Home-Polish lineage), only new chip + status soft pairs added.
+ *
+ * Loaded after globals.css from app/layout.tsx so dark-theme overrides cascade.
+ * ──────────────────────────────────────────────────────────── */
+
+:root {
+  /* role palette — design §6.2 (light) */
+  --c-kb:          #3A6FA8;
+  --c-kb-soft:     #E1ECF7;
+  --c-data:        #3F8460;
+  --c-data-soft:   #DFEEDF;
+  --c-canvas:      #B0703A;
+  --c-canvas-soft: #F7E7D2;
+  --c-clari:       #A88830;
+  --c-clari-soft:  #F4E8C8;
+  /* status — `--c-ok` not in globals.css, only here */
+  --c-ok:        #2F6B57;
+  --c-ok-soft:   #DFEEDF;
+}
+
+[data-theme="dark"] {
+  --c-kb:          #6FA8D6;
+  --c-kb-soft:     #1A2330;
+  --c-data:        #6FB58A;
+  --c-data-soft:   #1A2620;
+  --c-canvas:      #D9A06A;
+  --c-canvas-soft: #2C2218;
+  --c-clari:       #D6B863;
+  --c-clari-soft:  #2B2519;
+  --c-ok:          #62B89C;
+  --c-ok-soft:     #1A2620;
+}
+
+/* Sprint κ Phase C: typewriter cursor blink for streaming narrative.
+ * Per PRD r2 §4.4.2 — only the most-recently-emitted streaming section
+ * shows it. Inline-rendered via narrative.tsx <span class="kappa-cursor">. */
+@keyframes kappa-cursor-blink { 50% { opacity: 0; } }

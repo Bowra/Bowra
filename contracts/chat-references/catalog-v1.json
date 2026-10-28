@@ -1,0 +1,997 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "team_agent",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "@",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "a112246b4787046697b1213047b7b4f27da1a1addf726dcfb28bd6534c0166a4",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "team_agents",
+            "items": [
+              {
+                "kind": "agent",
+                "source_kind": "team",
+                "id": "osa_catalog",
+                "label": "盈利分析师",
+                "summary": "Profit analysis",
+                "resource": {
+                  "kind": "agent",
+                  "source_kind": "team",
+                  "id": "osa_catalog",
+                  "version": "arv_catalog",
+                  "assignment_id": "asa_catalog",
+                  "release_id": "arl_catalog"
+                },
+                "availability": "unavailable",
+                "reason_code": "unsupported_entry"
+              }
+            ],
+            "error": null
+          },
+          {
+            "id": "system_agents",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "slash_unavailable",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "/",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "21a72a3062de3ad78080a292e5faaf4ce265fb14485139c305b292176a3ff37a",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "skills",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "capabilities",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "mcp",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "builtin_skill",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "/",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "dc1dfe169252ccac75ed4a0d01dca00125d2274822306c07d6d48cd14d888e1d",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "skills",
+            "items": [
+              {
+                "kind": "skill",
+                "source_kind": "builtin",
+                "id": "builtin:dupont",
+                "label": "杜邦分析",
+                "summary": "Profitability method",
+                "resource": {
+                  "kind": "skill",
+                  "source_kind": "builtin",
+                  "id": "builtin:dupont",
+                  "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                },
+                "read_only_parameter_schema": {
+                  "type": "object",
+                  "properties": {
+                    "company": {
+                      "type": "string",
+                      "default": "Example"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "availability": "unavailable",
+                "reason_code": "unsupported_entry"
+              }
+            ],
+            "error": null
+          },
+          {
+            "id": "capabilities",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "mcp",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "personal_skill",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "/",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "1e83060c4117d1c717b2181f24293ee3b5213adfbe017fca92745483316402d8",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "skills",
+            "items": [
+              {
+                "kind": "skill",
+                "source_kind": "user",
+                "id": "ski_catalog_personal",
+                "label": "杜邦分析",
+                "summary": "Profitability method",
+                "resource": {
+                  "kind": "skill",
+                  "source_kind": "user",
+                  "id": "ski_catalog_personal",
+                  "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                },
+                "read_only_parameter_schema": {
+                  "type": "object",
+                  "properties": {
+                    "company": {
+                      "type": "string",
+                      "default": "Example"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "availability": "unavailable",
+                "reason_code": "unsupported_entry"
+              }
+            ],
+            "error": null
+          },
+          {
+            "id": "capabilities",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "mcp",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "team_skill",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "/",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "b8f23a302c85be871b0bdf5ab4f02eb282246ee422c30b4e372bbcd2a64f8486",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "skills",
+            "items": [
+              {
+                "kind": "skill",
+                "source_kind": "team",
+                "id": "oskill_catalog_team",
+                "label": "杜邦分析",
+                "summary": "Profitability method",
+                "resource": {
+                  "kind": "skill",
+                  "source_kind": "team",
+                  "id": "oskill_catalog_team",
+                  "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                },
+                "read_only_parameter_schema": {
+                  "type": "object",
+                  "properties": {
+                    "company": {
+                      "type": "string",
+                      "default": "Example"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "availability": "unavailable",
+                "reason_code": "unsupported_entry"
+              }
+            ],
+            "error": null
+          },
+          {
+            "id": "capabilities",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "mcp",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "personal_skill_metadata_pending",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "/",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "25b12e065d72b180622be55e38d307ca5aa1882a471cecac18df663082481184",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "skills",
+            "items": [
+              {
+                "kind": "skill",
+                "source_kind": "user",
+                "id": "ski_catalog_pending",
+                "label": "杜邦分析",
+                "summary": "Profitability method",
+                "resource": null,
+                "read_only_parameter_schema": null,
+                "availability": "unavailable",
+                "reason_code": "catalog_metadata_unavailable"
+              }
+            ],
+            "error": "catalog_metadata_unavailable"
+          },
+          {
+            "id": "capabilities",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          },
+          {
+            "id": "mcp",
+            "items": [],
+            "error": "catalog_adapter_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "system_agent",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "@",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "f3c15f89ae4d7cf4442e1d1a5a066997616d104f4c1f8de5ca5a4898f03ccf30",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "team_agents",
+            "items": [],
+            "error": null
+          },
+          {
+            "id": "system_agents",
+            "items": [
+              {
+                "kind": "agent",
+                "source_kind": "system",
+                "id": "system:compute",
+                "label": "数据与计算分析师",
+                "summary": "Query and analyze data.",
+                "resource": {
+                  "kind": "agent",
+                  "source_kind": "system",
+                  "id": "system:compute",
+                  "version": "arv_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "availability": "unavailable",
+                "reason_code": "unsupported_entry"
+              }
+            ],
+            "error": null
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "system_metadata_pending",
+      "request": {
+        "workspace_id": "ws_catalog",
+        "session_id": null,
+        "trigger": "@",
+        "query": "",
+        "cursor": null,
+        "selected_refs": [],
+        "entry_mode": "ordinary",
+        "submission_protocol": "chat-references.v1"
+      },
+      "response": {
+        "catalog_generation": "d80386f5dabafeac346659e7eafea4d306a0f8c44a198b7231d9f9f061c29bf1",
+        "input_schema_versions": [
+          1
+        ],
+        "entry_support": [
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "agent",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "skill",
+            "authorization_mode": "readonly_extension",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "capability",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_source",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_tool",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          },
+          {
+            "submission_protocol": "chat-references.v1",
+            "entry_mode": "ordinary",
+            "resource_kind": "mcp_prompt",
+            "authorization_mode": "baseline",
+            "adapter_id": "unavailable",
+            "adapter_version": 0,
+            "supported": false,
+            "reason_code": "unsupported_entry"
+          }
+        ],
+        "groups": [
+          {
+            "id": "team_agents",
+            "items": [],
+            "error": null
+          },
+          {
+            "id": "system_agents",
+            "items": [
+              {
+                "kind": "agent",
+                "source_kind": "system",
+                "id": "system:compute",
+                "label": "数据与计算分析师",
+                "summary": "Query and analyze data.",
+                "resource": null,
+                "availability": "unavailable",
+                "reason_code": "catalog_metadata_unavailable"
+              }
+            ],
+            "error": "catalog_metadata_unavailable"
+          }
+        ],
+        "next_cursor": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,342 @@
+.page {
+  display: grid;
+  gap: 20px;
+  max-width: 1120px;
+  min-width: 0;
+  color: var(--c-ink);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header h1 {
+  margin: 0;
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.header p {
+  max-width: 700px;
+  margin: 7px 0 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.header > button {
+  flex: none;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--c-danger);
+  border-radius: 8px;
+  color: var(--c-danger);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 18px;
+  min-width: 0;
+}
+
+.singleColumn {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.singleColumn .form {
+  max-width: 720px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.listTitle {
+  margin: 0 0 4px;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+
+.empty {
+  padding: 48px 24px;
+  border: 1px dashed var(--c-line);
+  border-radius: 12px;
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+  text-align: center;
+}
+
+.empty h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: var(--fs-lg);
+}
+
+.empty p,
+.loading {
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.loading {
+  color: var(--c-ink-3);
+}
+
+.card,
+.form {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+}
+
+.selectedCard {
+  border-color: var(--c-accent);
+  box-shadow: inset 3px 0 0 var(--c-accent);
+}
+
+.cardHeader,
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.selectButton {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--c-ink);
+  background: none;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.selectButton:hover,
+.selectButton:focus-visible {
+  color: var(--c-accent);
+}
+
+.status {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
+.active {
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+}
+
+.disabled {
+  color: var(--c-ink-3);
+  background: var(--c-bg);
+}
+
+.cardDescription {
+  margin: 10px 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.cardFooter {
+  margin-top: 12px;
+}
+
+.cardFooter small {
+  color: var(--c-ink-3);
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+}
+
+.formFields {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* Hosted in Canvas: the object body supplies padding and reading width (C4), so the form is not a card. */
+.singleColumn .form.hostedForm,
+.form.hostedForm {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.form h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  color: var(--c-ink);
+  background: var(--c-bg);
+  font: inherit;
+  font-weight: 400;
+}
+
+.field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset legend {
+  margin-bottom: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.resources {
+  display: grid;
+  max-height: 250px;
+  overflow: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+}
+
+.emptyResources {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.resource {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.resource + .resource {
+  border-top: 1px solid var(--c-line);
+}
+
+.resource:hover {
+  background: var(--c-bg);
+}
+
+.resource:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.resource input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--c-accent);
+}
+
+.resource span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.resource strong,
+.resource small {
+  overflow-wrap: anywhere;
+}
+
+.resource strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.resource small {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.resource .resourceSource {
+  color: var(--c-accent);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-line);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .header {
+    flex-direction: column;
+  }
+}

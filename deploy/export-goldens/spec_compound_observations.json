@@ -1,0 +1,337 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "sec_observations",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "Regional observations",
+      "row_count": 4,
+      "columns": [
+        {
+          "key": "region",
+          "header": "Region",
+          "type": "categorical"
+        },
+        {
+          "key": "month",
+          "header": "Month",
+          "type": "date"
+        },
+        {
+          "key": "revenue",
+          "header": "Revenue",
+          "type": "numeric",
+          "unit": "USD"
+        }
+      ],
+      "rows": [
+        {
+          "region": "East",
+          "month": "2026-02",
+          "revenue": 0,
+          "cost": 5
+        },
+        {
+          "region": "West",
+          "month": "2026-01",
+          "revenue": 0.000012345,
+          "cost": 0.05
+        },
+        {
+          "region": "East",
+          "month": "2026-01",
+          "revenue": 52.12345,
+          "cost": 30.16789
+        },
+        {
+          "region": "West",
+          "month": "2026-02",
+          "revenue": null,
+          "cost": -5
+        }
+      ],
+      "data_artifact_id": "art_observations",
+      "presentation_plan": {
+        "version": 1,
+        "dataset": {
+          "artifact_id": "data.fixture",
+          "availability": "available",
+          "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "evidence_notes": [],
+        "text_dependencies": {},
+        "view_bindings": {
+          "trend": "time.fixture",
+          "relationship": "time.fixture",
+          "detail": "time.fixture"
+        },
+        "bindings": {
+          "time.fixture": {
+            "kind": "time",
+            "availability": "available",
+            "dimension_keys": [
+              "month"
+            ],
+            "observation_keys": [
+              "region",
+              "month"
+            ],
+            "measure_keys": [
+              "revenue",
+              "cost"
+            ],
+            "time_key": "month",
+            "order": "date",
+            "eligible_views": [
+              "trend",
+              "relationship",
+              "detail"
+            ],
+            "coverage": {
+              "artifact_rows": {
+                "available": 4,
+                "total": 4
+              },
+              "views": {
+                "trend": {
+                  "retained_rows": 4
+                },
+                "relationship": {
+                  "retained_rows": 4
+                },
+                "detail": {
+                  "retained_rows": 4
+                }
+              }
+            }
+          }
+        },
+        "interactions": [
+          {
+            "preset": "linked_focus",
+            "from_view": "trend",
+            "to_views": [
+              "relationship",
+              "detail"
+            ],
+            "binding_id": "time.fixture"
+          },
+          {
+            "preset": "linked_focus",
+            "from_view": "detail",
+            "to_views": [
+              "trend",
+              "relationship"
+            ],
+            "binding_id": "time.fixture"
+          },
+          {
+            "preset": "time_window",
+            "view_ids": [
+              "trend",
+              "relationship",
+              "detail"
+            ],
+            "binding_id": "time.fixture"
+          }
+        ]
+      },
+      "views": [
+        {
+          "id": "trend",
+          "kind": "chart",
+          "spec": {
+            "kind": "line",
+            "title": "Revenue by region",
+            "row_count": 4,
+            "columns": [
+              {
+                "key": "region",
+                "header": "Region",
+                "type": "categorical"
+              },
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "region": "East",
+                "month": "2026-02",
+                "revenue": 0,
+                "cost": 5
+              },
+              {
+                "region": "West",
+                "month": "2026-01",
+                "revenue": 0.000012345,
+                "cost": 0.05
+              },
+              {
+                "region": "East",
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "region": "West",
+                "month": "2026-02",
+                "revenue": null,
+                "cost": -5
+              }
+            ],
+            "data_artifact_id": "art_observations"
+          }
+        },
+        {
+          "id": "relationship",
+          "kind": "chart",
+          "spec": {
+            "kind": "scatter",
+            "title": "Revenue and cost",
+            "row_count": 4,
+            "columns": [
+              {
+                "key": "region",
+                "header": "Region",
+                "type": "categorical"
+              },
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              },
+              {
+                "key": "cost",
+                "header": "Cost",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "region": "East",
+                "month": "2026-02",
+                "revenue": 0,
+                "cost": 5
+              },
+              {
+                "region": "West",
+                "month": "2026-01",
+                "revenue": 0.000012345,
+                "cost": 0.05
+              },
+              {
+                "region": "East",
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "region": "West",
+                "month": "2026-02",
+                "revenue": null,
+                "cost": -5
+              }
+            ],
+            "data_artifact_id": "art_observations"
+          }
+        },
+        {
+          "id": "detail",
+          "kind": "chart",
+          "spec": {
+            "kind": "table",
+            "title": "Original observations",
+            "row_count": 4,
+            "columns": [
+              {
+                "key": "region",
+                "header": "Region",
+                "type": "categorical"
+              },
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              },
+              {
+                "key": "cost",
+                "header": "Cost",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "region": "East",
+                "month": "2026-02",
+                "revenue": 0,
+                "cost": 5
+              },
+              {
+                "region": "West",
+                "month": "2026-01",
+                "revenue": 0.000012345,
+                "cost": 0.05
+              },
+              {
+                "region": "East",
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "region": "West",
+                "month": "2026-02",
+                "revenue": null,
+                "cost": -5
+              }
+            ],
+            "data_artifact_id": "art_observations"
+          }
+        }
+      ],
+      "layout": {
+        "type": "stack",
+        "children": [
+          {
+            "type": "split",
+            "children": [
+              {
+                "view": "trend"
+              },
+              {
+                "view": "relationship"
+              }
+            ]
+          },
+          {
+            "view": "detail"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,387 @@
+/* ═════════════════════════════════════════════════════════════
+ * First-level page header and content column (Header, Language & Paging Spec §2, D4–D7).
+ * Component: components/shell/page-frame.tsx (PageFrame / PageHeader / PageTabs).
+ *
+ * Vertical rhythm: top bar 44 → header 8 → tabs 16 → toolbar 16 → list 12. Column: min(1120, main − 2 × gutter),
+ * gutter 40 / 32 / 24 / 16 by breakpoint, centered (x 288 at 1440 with the 248 sidebar; x 524 at 1920).
+ * Settings pages keep SettingsShell's 880 column. No new tokens; every rule starts with :root:root.
+ * Contract: styles/ui-refresh-page-frame.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Scrolling area under the top bar: the shell main is a flex column that does not scroll itself. */
+:root:root .ui-page-frame-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--c-bg);
+}
+:root:root .ui-page-frame {
+  box-sizing: content-box;
+  width: min(var(--content-w-table), calc(100% - 2 * var(--page-gutter)));
+  margin-inline: auto;
+  padding: 8px var(--page-gutter) 48px;
+  color: var(--c-ink);
+}
+:root:root .ui-page-frame[data-width="form"] {
+  width: min(var(--content-w-form), calc(100% - 2 * var(--page-gutter)));
+}
+
+/* ── Header: copy left (title 22/700, one-line description 13 ink3), actions right (⋯ · secondary · primary) ── */
+:root:root .ui-page-frame .ui-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+}
+:root:root .ui-page-header__copy {
+  min-width: 0;
+}
+:root:root .ui-page-header__copy .ui-page-title {
+  margin: 0;
+}
+:root:root .ui-page-header__copy .ui-page-desc {
+  max-width: 560px;
+  margin: 4px 0 0;
+}
+:root:root .ui-page-header__crumb {
+  margin-bottom: 2px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-page-header__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .ui-page-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+:root:root .ui-page-action svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Sibling-page tabs: underline links (13px, selected ink 600 + 2px accent; counts 11 ink4) ── */
+:root:root .ui-page-tabs {
+  display: flex;
+  gap: 20px;
+  margin: 0 0 16px;
+  box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--c-separator);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+:root:root .ui-page-tabs::-webkit-scrollbar {
+  display: none;
+}
+:root:root .ui-page-tab {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: var(--lh-tight);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--dur-fast) linear;
+}
+:root:root .ui-page-tab::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c-accent);
+  opacity: 0;
+}
+:root:root .ui-page-tab:hover {
+  color: var(--c-ink-2);
+}
+:root:root .ui-page-tab[aria-current="page"] {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .ui-page-tab[aria-current="page"]::after {
+  opacity: 1;
+}
+:root:root .ui-page-tab:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+:root:root .ui-page-tab .cnt {
+  color: var(--c-ink-4);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-page-tab .cnt--loading {
+  display: inline-block;
+  width: 14px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--c-fill-2);
+}
+
+/* Phone top-bar copies of the header actions exist only below 768 */
+:root:root .ui-page-mobile-actions {
+  display: none;
+}
+:root:root .ui-page-mobile-action {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink);
+  cursor: pointer;
+}
+:root:root .ui-page-mobile-action:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+@media (max-width: 767.98px) {
+  /* The top bar names the page and holds the actions; the page does not repeat the H1 and description. */
+  :root:root .ui-page-frame .ui-page-header {
+    display: none;
+  }
+  :root:root .ui-page-mobile-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  :root:root .ui-page-frame .ui-page-tabs {
+    margin-top: 8px;
+  }
+  /* Three or fewer sibling pages: one full-width segmented row */
+  :root:root .ui-page-tabs:not([data-count="4"], [data-count="5"], [data-count="6"]) {
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--r-2);
+    background: var(--c-fill-2);
+    box-shadow: none;
+  }
+  :root:root .ui-page-tabs:not([data-count="4"], [data-count="5"], [data-count="6"]) .ui-page-tab {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 8px;
+    border-radius: var(--r-1);
+    color: var(--c-ink-2);
+  }
+  :root:root .ui-page-tabs:not([data-count="4"], [data-count="5"], [data-count="6"]) .ui-page-tab::after {
+    content: none;
+  }
+  :root:root .ui-page-tabs:not([data-count="4"], [data-count="5"], [data-count="6"]) .ui-page-tab[aria-current="page"] {
+    background: var(--c-segment-on);
+    box-shadow: var(--shadow-segment-on);
+    color: var(--c-ink);
+  }
+  /* Four or more: underline tabs scrolling sideways (no fade mask), touch height 44 */
+  :root:root .ui-page-tabs:is([data-count="4"], [data-count="5"], [data-count="6"]) .ui-page-tab {
+    min-height: 44px;
+    padding: 0;
+  }
+}
+
+/* ═══ Page mappings: the pages' own containers yield width, gutters and header spacing to PageFrame ═══ */
+
+/* Skills & Workflows: no 812 cap; the toolbar follows the header 16 below */
+:root:root .ui-page-frame .sset {
+  max-width: none;
+  margin: 0;
+  gap: 16px;
+}
+:root:root .ui-page-frame .sset > .ui-page-header {
+  margin-bottom: 0;
+}
+
+/* Agents: Marketplace, My agents and Top Charts reserve two description lines so switching tabs never moves the
+   tabs (116: tabs y 117 vs 137). */
+:root:root :is(.am-page, .ac-page) .ui-page-header .ui-page-desc {
+  min-height: calc(2 * 1.5em);
+}
+
+/* Knowledge base: header → notice → tabs → content */
+:root:root .ui-page-frame .kb-page-v2 .kb-v2-banner {
+  margin-bottom: 16px;
+}
+
+/* Library › Files: the column fills the main height so the list keeps scrolling inside .f-scroll; the tab strip,
+   toolbar and hint align with the header's left edge instead of their own 22px inset. */
+:root:root .files-main .ui-page-frame-scroll {
+  display: flex;
+  flex-direction: column;
+}
+:root:root .files-main .ui-page-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 0;
+}
+:root:root .files-main .ui-page-frame :is(.f-tabs, .f-tools, .f-hint) {
+  padding-inline: 0;
+  background: transparent;
+}
+:root:root .files-main .ui-page-header .f-lede {
+  display: inline;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* ═══ My Reports: toolbar count, empty-report count, list footer (Header, Language & Paging Spec §3, D8) ═══ */
+:root:root .reports-toolbar-count {
+  margin-left: auto;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:root:root .reports-filter-toggle .cnt {
+  margin-left: 6px;
+  color: var(--c-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .reports-list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 0 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .reports-list-footer__count {
+  font-variant-numeric: tabular-nums;
+}
+:root:root .reports-list-footer__more {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-width: 112px;
+}
+:root:root .reports-list-footer__more[aria-busy="true"] {
+  cursor: progress;
+}
+:root:root .reports-list-footer__end {
+  margin: 0;
+  color: var(--c-ink-4);
+}
+:root:root .reports-list-footer__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  color: var(--c-ink-2);
+}
+/* The first row of a newly loaded batch: a soft accent background that fades after 1.2s */
+@keyframes reports-row-flash {
+  from {
+    background-color: var(--c-accent-soft);
+  }
+}
+:root:root .reports-row[data-flash="true"] {
+  animation: reports-row-flash 1.2s var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .reports-row[data-flash="true"] {
+    animation: none;
+  }
+}
+@media (max-width: 767.98px) {
+  /* Phones: no toolbar count (the footer carries it); centered count over a full-width 44 Load more */
+  :root:root .reports-toolbar-count {
+    display: none;
+  }
+  :root:root .reports-list-footer {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+  :root:root .reports-list-footer__more {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+/* ═══ Language menus (Header, Language & Paging Spec §1, D1–D2) ═══ */
+/* Two-line options ("Automatic" / "Match my question"): name, then what it resolves to in ink3 */
+:root:root .ui-menu .ui-language-option {
+  min-height: 44px;
+  padding-block: 4px;
+}
+:root:root .ui-language-option__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+:root:root .ui-language-option__hint {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .ui-menu .ui-language-answer-link .ui-menu-item-tail {
+  margin-left: auto;
+}
+/* Settings menu buttons: the value with a chevron; while switching a small ring and the progress text */
+:root:root .ui-language-button {
+  max-width: 100%;
+}
+:root:root .ui-language-button__spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+:root:root .ui-answer-language {
+  display: inline-grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+}
+:root:root .ui-answer-language .ui-language-button[aria-disabled="true"] {
+  background: var(--c-fill-2);
+  color: var(--c-ink-4);
+  cursor: not-allowed;
+}
+:root:root .ui-answer-language__reason {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+@media (max-width: 767.98px) {
+  /* Phones: the settings menu buttons span the row at 44 */
+  :root:root .ui-group-control :is(.ui-language-button, .ui-answer-language) {
+    width: 100%;
+  }
+  :root:root .ui-group-control .ui-language-button {
+    min-height: 44px;
+    justify-content: space-between;
+  }
+}

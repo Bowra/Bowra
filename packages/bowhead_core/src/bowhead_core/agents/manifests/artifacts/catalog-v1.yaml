@@ -1,0 +1,120 @@
+schema_version: 1
+
+# ⚠ `sha256` hashes the **raw file bytes** (`agent_artifact_capability.py` checks them byte for byte when loading).
+# After changing the body, first run `make fmt` (prettier reformats md), then `shasum -a 256 <file>` and update this value;
+# otherwise startup fails with `Prompt Module digest mismatch`.
+#
+# `priority` determines concatenation order (smaller first), not importance.
+prompt_modules:
+  - id: data-query-datarc-protocol
+    version: 1
+    lifecycle: active
+    path: data-query-datarc-protocol-v1.md
+    sha256: sha256:cc2e7503e3d4697673cca91b0f33f5bf8202ada4a71c4c86a807f0ba11776d34
+    priority: 90
+    conflicts_with: []
+    # The anchor comes from `capi_data_query_native.required_tools` (`bi_query`); no further narrowing is needed.
+    anchor_tools: []
+
+  - id: canvas-delivery-protocol
+    version: 1
+    lifecycle: active
+    path: canvas-delivery-protocol-v1.md
+    sha256: sha256:b88f4df626efdae161f50e9af6d0d0962fe15ab7405b58d38eaf15ec8a8cfa05
+    priority: 95
+    conflicts_with: []
+    # Only executors that can place content on the canvas read this section.
+    anchor_tools: [add_chart, add_image]
+
+  - id: report-authoring-protocol
+    version: 1
+    lifecycle: active
+    path: report-authoring-protocol-v1.md
+    sha256: sha256:4d45040cca212e1594cda66073f9accd388fd73c2239d8ff007b118c07b4b36c
+    priority: 96
+    conflicts_with: []
+    # Rules for writing the body go **only to executors that actually have that tool**. `consultant` has `add_chart` but no
+    # `write_report`; it receives the preceding section, not this one. Teaching an unavailable tool is exactly the pattern
+    # this sprint removes (see the datarc hint in discovery §2.3).
+    anchor_tools: [write_report]
+
+  - id: sandbox-io-protocol
+    version: 1
+    lifecycle: active
+    path: sandbox-io-protocol-v1.md
+    sha256: sha256:9ffdf85b3dcff413db38fd174c940bddb3e46f5bf81ea0ce8f8b1531b32c47a5
+    priority: 97
+    conflicts_with: []
+    # Only executors that can access the sandbox read this section. `skill_invoke` is also an anchor: the `business-analyst` family
+    # has **no** `python_exec` in its allowlist and enters through `skill_invoke(name="python_sandbox")` instead.
+    # Omitting this caused invented `/mnt/data/...` paths and five consecutive crashes in one turn during 116 testing.
+    anchor_tools: [python_exec, python_sandbox, skill_invoke]
+
+  - id: canvas-report-protocol
+    version: 1
+    lifecycle: active
+    path: canvas-report-protocol-v1.md
+    sha256: sha256:a5b858fd525ebbc92a9f1d55e29c7135c776ce4fe6187ce6ef9a0f4dd15c9f48
+    priority: 100
+    conflicts_with: []
+    # Adapter protocol already written in M3-A (read before editing / minimal patches / real IDs only). It attaches to
+    # `capi_report_canvas`, whose Implementation has empty `required_tools`; without an anchor,
+    # everyone receives it. Use the Adapter's own declared delegate_tools as the anchor.
+    anchor_tools: [read_report, write_report, add_chart, add_image, remove_chart]
+
+adapters:
+  - id: canvas-report
+    version: 1
+    lifecycle: active
+    output: { contract: report.document, version: 1 }
+    # ⚠ This list must **exactly match** `capi_report_canvas.prompt_modules`
+    # (the existing `validate_implementation` gate rejects loading when declared != required).
+    prompt_modules:
+      [{ id: canvas-report-protocol, version: 1 }, { id: canvas-delivery-protocol, version: 1 }, { id: report-authoring-protocol, version: 1 }]
+    operations:
+      - operation: artifact_read
+        delegate_tools: [read_report]
+        grant_operations: [read]
+      - operation: artifact_apply_patch
+        delegate_tools: [write_report]
+        grant_operations: [append_owned, patch_owned]
+        requires_expected_revision: true
+      - operation: artifact_add_asset
+        delegate_tools: [add_chart, add_image]
+        grant_operations: [add_owned_asset]
+        requires_expected_revision: true
+      - operation: artifact_finalize
+        delegate_tools: []
+        grant_operations: [finalize]
+        requires_expected_revision: true
+      # canvas-update-turn (FEATURE_CANVAS_SECTION_REVISE): revise the previous turn's report in a follow-up turn. Actual enforcement is in tools:
+      # only system-writer trust (`_write_guard`), revision-scope sections (`out_of_revise_scope`), and previous-turn
+      # body/plan chapter headings (`is_cross_turn_editable`) are allowed. Register this faithfully in the capability layer.
+      # ⚠ Added in place to v1: cap_report implementation still has review_state=shadow and has never compiled into any execution plan;
+      # persisted CapabilityCatalog.fingerprint also excludes this directory. Once cap_report becomes reviewed, further changes require a version bump.
+      # ⚠ Address before reviewed (review P2): composition compilation treats every operation's delegate_tools as required tools;
+      # business / financial / kb analysts lack remove_chart, and deployments with the switch off never register it, losing cap_report entirely
+      # (tool_dependency_unavailable). First add optional-operation semantics or separate chart retirement into its own adapter / version.
+      - operation: artifact_revise_prior
+        delegate_tools: [write_report]
+        grant_operations: [patch_prior]
+        requires_expected_revision: true
+      - operation: artifact_retire_asset
+        delegate_tools: [remove_chart]
+        grant_operations: [retire_prior_asset]
+        requires_expected_revision: false
+
+grant_policies:
+  - id: report-writer-grant
+    version: 1
+    lifecycle: active
+    output: { contract: report.document, version: 1 }
+    # patch_prior / retire_prior_asset: follow-up-turn revisions (the two canvas-report@1 revision operations); heading = plan chapter heading.
+    allowed_operations: [append_owned, patch_owned, add_owned_asset, finalize, patch_prior, retire_prior_asset]
+    allowed_section_kinds: [analysis, chart, conclusion, image, recommendation, summary, heading]
+    max_sections: 24
+    max_bytes: 1048576
+    ttl_seconds: 1800
+    # Declaration only: write authorization does not read this field (artifact_write_denial ignores validators, and names have no registry);
+    # actual revision-scope / system-writer-trust enforcement lives in tools (out_of_revise_scope / _write_guard).
+    validators: [canvas_revision_cas, section_ownership, artifact_reference_integrity, canvas_revise_scope, system_writer_trust_class]

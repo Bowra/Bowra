@@ -1,0 +1,119 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_bar_multiseries",
+  "payload": {
+    "spec": {
+      "kind": "bar",
+      "title": "各大区月度销售额（万元）",
+      "rows": [
+        {
+          "月份": "1月",
+          "华东": 40.0,
+          "华北": 57.0,
+          "华南": 69.5,
+          "华中": 76.8,
+          "西南": 83.5,
+          "西北": 94.2,
+          "东北": 110.3,
+          "港澳": 127.9
+        },
+        {
+          "月份": "2月",
+          "华东": 45.0,
+          "华北": 57.5,
+          "华南": 64.8,
+          "华中": 71.5,
+          "西南": 82.2,
+          "西北": 98.3,
+          "东北": 115.9,
+          "港澳": 129.9
+        },
+        {
+          "月份": "3月",
+          "华东": 45.5,
+          "华北": 52.8,
+          "华南": 59.5,
+          "华中": 70.2,
+          "西南": 86.3,
+          "西北": 103.9,
+          "东北": 117.9,
+          "港澳": 126.5
+        },
+        {
+          "月份": "4月",
+          "华东": 40.8,
+          "华北": 47.5,
+          "华南": 58.2,
+          "华中": 74.3,
+          "西南": 91.9,
+          "西北": 105.9,
+          "东北": 114.5,
+          "港澳": 120.7
+        }
+      ],
+      "row_count": 4,
+      "columns": [
+        {
+          "key": "月份",
+          "header": "月份",
+          "type": "categorical",
+          "y_axis_id": 0
+        },
+        {
+          "key": "华东",
+          "header": "华东",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "华北",
+          "header": "华北",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "华南",
+          "header": "华南",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "华中",
+          "header": "华中",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "西南",
+          "header": "西南",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "西北",
+          "header": "西北",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "东北",
+          "header": "东北",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "港澳",
+          "header": "港澳",
+          "type": "numeric",
+          "y_axis_id": 0
+        }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "show_data_labels": false,
+      "percent_stack": false,
+      "fallback_kind": "table"
+    }
+  }
+}

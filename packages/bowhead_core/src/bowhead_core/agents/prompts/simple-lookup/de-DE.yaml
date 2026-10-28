@@ -1,0 +1,43 @@
+requested_metrics: "   - Alle angefragten Felder und Kennzahlen in der Antwort nennen. Wenn ein Ergebnisartefakt erforderlich ist, seine Spalten
+  in `add_chart.series` aufnehmen; ausgelassene Spalten werden nicht angezeigt. Eingabedateien nur zusammenführen, wenn das angeforderte Artefakt
+  dies benötigt. Bei einer einfachen Abfrage genügt eine Zusammenfassung mit Quellen."
+requested_artifacts: "   - Bei ausdrücklich angeforderten Tabellen, Diagrammen, Detaildaten oder Berichten reicht Fließtext nicht als Lieferung
+  ihrer Kennzahlen. Bei einer einfachen Abfrage ohne angefordertes Artefakt genügt `exec_summary` mit allen geprüften Werten und Quellen. Fehlende
+  Elemente und deren Gründe in `caveats[]` nennen."
+analysis_depth: 5. **Die Analysetiefe folgt der Anfrage.** Eine einfache Abfrage ist abgeschlossen, sobald die gewünschten Kennzahlen und der
+  Zeitraum geprüft und mit Quellen genannt sind. Vergleich, Struktur und Ursachenanalyse sind nur bei entsprechender Anfrage erforderlich; eine
+  Abfrage nicht zu einem Geschäftsbericht ausweiten.
+lookup_workflow:
+  "- **Einfache Abfrage** (eine oder mehrere Kennzahlen für einen Zeitraum, etwa „Umsatz und Besucherzahl im letzten Monat“, angeforderter
+  Vergleich oder Top-N): passende vorhandene Datei lesen oder ein verfügbares Abfrage-Tool für die angeforderte Quelle verwenden → ein autorisiertes Berechnungs-Tool nur für fehlende Berechnungen → `subagent_return`.
+  Kein Analyseframework laden, keine Dimensionen ergänzen und geprüfte passende Daten nicht erneut abfragen. Spalten und Werte gemeinsam lesen;
+  eine Zusammenfassung mit den benötigten Werten und Änderungsraten braucht weder neue Berechnungen noch einen CSV-Export. Vorhandene Vergleiche
+  dürfen ohne weitere Erkundung genannt werden."
+headline_delivery:
+  "**Die Lieferregel für einfache Abfragen hat Vorrang vor der allgemeinen Artefaktregel.** Bei wenigen Kernkennzahlen ohne angeforderte
+  Tabelle, Diagramm, Detaildaten oder Bericht die geprüften Werte, den Zeitraum und die Quelle in `exec_summary` zurückgeben. Zwei Zeilen in der
+  Quelle sind keine Anforderung einer Detailtabelle. Kein Diagramm oder CSV allein wegen einer Zeilenzahlregel erzeugen."
+detail_delivery: "**Angeforderte Artefakte und Detaillisten:** ausdrücklich angeforderte Tabellen, Diagramme, Berichte sowie Listen mehrerer Entitäten
+  oder Zeiträume über `add_chart(data_artifact_id=...)` liefern. Fließtext ersetzt sie nicht. Diagramme auf den angefragten Umfang begrenzen.
+  Zusätzliche Entdeckungen erzeugen bei einer einfachen Abfrage keine weiteren Lieferpflichten; nicht für zusätzliche Diagramme weiterforschen."
+execution_sequence: "**Ausführungsfolge:** angefragte Fakten gebündelt beschaffen → nur fehlende abgeleitete Werte berechnen → nur erforderliche
+  Artefakte erstellen → (`report`) `write_report` → einmal `subagent_return`. Unnötige Berechnungen und Diagramme überspringen. Iterationsgrenzen
+  sind Sicherheitsobergrenzen, keine Arbeitsziele; die Analysetiefe des Teams erweitert eine Abfrage nicht zu einer Geschäftsübersicht."
+stop_condition: "**Stoppbedingung für einfache Abfragen:** sobald erfolgreiche Werkzeugergebnisse die angefragten Kennzahlen, den Zeitraum und
+  die gewünschten Vergleiche bestätigen, folgt `subagent_return` (gegebenenfalls nach dem ausdrücklich angeforderten Artefakt). Keine Marken-
+  oder Filialanalyse, Ursachenanalyse, Saisonprüfung, längere Zeitreihen oder Umsatz-pro-Besuch-Berechnung ergänzen. Vorhandene Detaildateien
+  und Vorschläge von Lead erweitern die ursprüngliche Anfrage nicht. Ein geprüfter ungewöhnlicher Wert darf mit einem Vorbehalt genannt werden;
+  weitere Prüfungen nur bei konkreten Hinweisen auf ungeklärte angefragte Werte, Umfänge oder Einheiten. Bleibt das Problem ungelöst, den geprüften
+  Teil mit der genauen Einschränkung liefern statt optionaler Analyse. Diese Regel hat Vorrang vor allgemeinen Vorgaben zu Analysetiefe und Artefaktanzahl."
+factual_answer: "  - **Faktenabfrage** (Kernkennzahlen, angeforderte Top-N oder Entitätszuordnung): knapp die angefragten Fakten beantworten,
+  ohne Prozessbeschreibung oder ungefragte Ursachenanalyse. Kernkennzahlen dürfen als Text mit Quellen erscheinen; Ranglisten und Zuordnungen
+  behalten erforderliche Listen oder Tabellen."
+artifact_exception: "  - Für wenige Kernkennzahlen gilt die Ausnahme für einfache Abfragen in Abschnitt ⑤. Ausdrücklich angeforderte Artefakte
+  und Detaillisten müssen weiterhin tatsächlich geliefert werden; Kürze ersetzt sie nicht."
+lead_scope: "Bei einer einfachen Abfrage `task` und `data_hint` auf die gewünschten Kennzahlen, den Zeitraum und die Vergleiche begrenzen. Frühere
+  Artefakte sind verfügbare Belege, keine zusätzlichen Anforderungen: keine Marken- oder Filialaufteilung, Ursachenanalyse, Ranglisten oder längeren
+  Zeitreihen ergänzen, nur weil Dateien vorhanden sind. Den Agenten anweisen, nach Prüfung der angefragten Fakten zurückzukehren; Vergleiche nur
+  aufnehmen, wenn sie angefordert oder bereits in der passenden Zusammenfassung enthalten sind, ohne zusätzliche Erkundung. "
+lead_example: '- „Umsatz und Besucherzahl im letzten Monat“ → subagent_spawn(profile="{data}", task="Umsatz und Besucherzahl des letzten Monats
+  prüfen; vorhandene passende Zusammenfassung wiederverwenden und die Kernwerte sofort zurückgeben; keine Marken- oder Filialanalyse ergänzen",
+  data_hint=["Umsatz letzter Monat", "Besucherzahl letzter Monat"])'

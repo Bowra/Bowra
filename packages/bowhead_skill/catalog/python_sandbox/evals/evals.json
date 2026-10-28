@@ -1,0 +1,82 @@
+{
+  "skill_name": "python_sandbox",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "用 python 算 [1,2,3,4,5] 的均值和标准差",
+      "files": [],
+      "expected_behavior": [
+        "skill.invoke(name=python_sandbox) with simple numpy code.",
+        "stdout contains mean 3.0, std ~1.41.",
+        "Tool returns ok=True."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "读附件 users.csv 跑 t-test 比较男女消费差异",
+      "files": [
+        "fixtures/users.csv"
+      ],
+      "expected_behavior": [
+        "Code loads df via INPUTS['users']['path'].",
+        "scipy.stats.ttest_ind run; p-value in stdout.",
+        "If p<0.05 narrative says '显著'; else '不显著'."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "尝试 requests.get 外网（应该失败）",
+      "files": [],
+      "expected_behavior": [
+        "Network disabled; code errors.",
+        "Tool returns ok=False or result.error set.",
+        "Narrative explains sandbox blocks network."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "读附件 dirty_bank.xlsx(多级表头+合并单元格+单位行)算各科目借方合计",
+      "files": [
+        "fixtures/dirty_bank.xlsx"
+      ],
+      "expected_behavior": [
+        "excel RC-6: 用 from dirty_table import read_dirty_table 读(非裸 pd.read_excel).",
+        "列名是合成后的干净名(如 '本期 / 借方'),标题行/单位行被跳.",
+        "借方合计正确,不因多级表头/合并单元格崩(exit_code=0)."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "This is a sandbox contract test, not a document delivery. Run Python that prints 'contract_total=42' and writes one top-level working file and one nested debug file. Report the printed value and which files actually received artifact IDs; do not infer an uploaded file from the filename listing or create a presentation.",
+      "files": [],
+      "expected_output": "The reported value comes from the script result, and only actual registered artifact references are named as reusable.",
+      "expected_behavior": [
+        "The actual code prints contract_total=42 and writes files at the requested two locations.",
+        "The answer uses result_json.stdout rather than guessing from the wrapper stdout.",
+        "The nested listing-only file is not claimed as an uploaded or downloadable artifact."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "This is a deliberate failure test. Run one short Python script that prints 'partial_total=42', writes a top-level CSV as analysis data, then raises ValueError('contract test failure'). Explain what succeeded and what failed. Do not repair the intentional error or claim the final task succeeded because a file exists.",
+      "files": [],
+      "expected_output": "An honest failed-run explanation preserves the confirmed printed fact and any real partial Data reference without claiming completed delivery.",
+      "expected_behavior": [
+        "One intentional failed script is executed without blind repair or a new file-generation attempt.",
+        "The final response distinguishes partial Data from task completion using the actual ok/error result.",
+        "No invented artifact ID or private-draft publication claim appears."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Create a small synthetic CSV as working analysis data, then use its actual artifact ID as an input to a second Python call that reads it and prints the row count. Use the supported input mapping; do not reuse the first call's workdir path. This is not a downloadable presentation request.",
+      "files": [],
+      "expected_output": "Two short calls reuse the exact registered output through the input mapping and report its checked row count.",
+      "expected_behavior": [
+        "The first call produces a real registered CSV artifact.",
+        "The second call declares that artifact ID and opens INPUTS[key]['path'].",
+        "No previous temporary path or listing-only file is treated as a new input."
+      ]
+    }
+  ]
+}

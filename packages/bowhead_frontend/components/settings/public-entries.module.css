@@ -1,0 +1,367 @@
+.page {
+  display: grid;
+  max-width: 960px;
+  gap: 18px;
+  color: var(--c-ink);
+}
+
+.header h1 {
+  margin: 0;
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.header p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.addForm {
+  min-width: 0;
+}
+
+.addControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.addControls > button {
+  min-height: 40px;
+}
+
+.verification {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 15px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-surface);
+}
+
+.verification strong {
+  font-size: 0.8125rem;
+}
+
+.verification p {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.verification .warningText {
+  color: var(--c-warning);
+}
+
+.verification a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: 0.71875rem/1.55 var(--font-v2-mono);
+}
+
+.verificationActions,
+.entryId {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.currentSummary {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 10px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 30%, var(--c-line));
+  border-radius: 9px;
+  background: var(--c-accent-tint);
+}
+
+.currentSummary span {
+  color: var(--c-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.currentSummary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: 600 0.75rem/1.5 var(--font-v2-mono);
+}
+
+.currentSummary small {
+  color: var(--c-ink-3);
+  font-size: 0.65625rem;
+}
+
+/* Use monospace text so small host spelling differences remain readable. */
+.unmatchedAddress {
+  display: block;
+  min-width: 0;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font: 600 0.75rem/1.5 var(--font-v2-mono);
+}
+
+.cards {
+  display: grid;
+  gap: 12px;
+}
+
+.empty {
+  margin: 0;
+  color: var(--c-ink-3);
+}
+
+.card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--c-line);
+  border-radius: 13px;
+  background: var(--c-surface);
+  box-shadow: 0 18px 48px -44px color-mix(in srgb, var(--c-ink) 55%, transparent);
+}
+
+.currentCard {
+  border-color: color-mix(in srgb, var(--c-accent) 42%, var(--c-line));
+  box-shadow:
+    inset 3px 0 0 var(--c-accent),
+    0 18px 48px -44px color-mix(in srgb, var(--c-ink) 55%, transparent);
+}
+
+.cardHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.entryIdentity {
+  min-width: 0;
+}
+
+.entryIdentity > div {
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.entryId {
+  margin-top: 4px;
+}
+
+.entryId code {
+  color: var(--c-ink-4);
+  font: 0.65625rem/1.4 var(--font-v2-mono);
+}
+
+.badges {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.badge {
+  padding: 3px 7px;
+  border: 1px solid var(--c-line-2);
+  border-radius: 999px;
+  color: var(--c-ink-3);
+  background: var(--c-bg);
+  font-size: 0.625rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.currentBadge {
+  border-color: color-mix(in srgb, var(--c-accent) 35%, var(--c-line));
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+}
+
+.httpWarning {
+  display: grid;
+  gap: 2px;
+  margin-top: 13px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--c-warning) 38%, var(--c-line));
+  border-radius: 8px;
+  color: var(--c-warning);
+  background: color-mix(in srgb, var(--c-warning) 7%, var(--c-surface));
+}
+
+.httpWarning strong {
+  font-size: 0.71875rem;
+}
+
+.httpWarning span {
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.providers {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sectionHeading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.sectionHeading strong {
+  color: var(--c-ink-2);
+  font-size: 0.71875rem;
+}
+
+.sectionHeading span {
+  color: var(--c-ink-4);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+}
+
+.providerList {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--c-line-2);
+  border-radius: 9px;
+}
+
+.providerRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns:
+    minmax(92px, 0.55fr)
+    minmax(135px, 0.75fr)
+    minmax(0, 2fr)
+    auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--c-bg) 66%, var(--c-surface));
+}
+
+.providerRow + .providerRow {
+  border-top: 1px solid var(--c-line-2);
+}
+
+.providerName {
+  color: var(--c-ink-2);
+  font-size: 0.71875rem;
+  font-weight: 650;
+}
+
+.providerSelect {
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 0.6875rem;
+}
+
+.callbackUrl {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--c-ink-3);
+  font: 0.65625rem/1.45 var(--font-v2-mono);
+}
+
+.copyButton {
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.dialogText {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .cardHeader {
+    display: grid;
+  }
+
+  .badges {
+    justify-content: flex-start;
+  }
+
+  .providerRow {
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 0.75fr);
+    gap: 8px 10px;
+    align-items: center;
+  }
+
+  .callbackUrl {
+    grid-column: 1;
+  }
+
+  .copyButton {
+    grid-column: 2;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 480px) {
+  .addControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .addControls > button {
+    width: 100%;
+  }
+
+  .currentSummary {
+    display: grid;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .providerRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .providerName {
+    grid-column: 1;
+  }
+
+  .providerSelect {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .callbackUrl {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .copyButton {
+    grid-column: 2;
+    grid-row: 3;
+  }
+}

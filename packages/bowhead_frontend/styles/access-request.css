@@ -1,0 +1,297 @@
+/*
+ * Access requests: the no-access request panel, the "who can help" block on role pages and
+ * the access-requests settings page. Neutral tones only: no access is not an error.
+ */
+
+.acr-panel {
+  width: 100%;
+  max-width: 440px;
+  margin: 24px auto 0;
+  padding: 28px 20px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--c-ink);
+}
+.acr-panel-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+  background: var(--c-fill-2, var(--c-surface-2));
+  color: var(--c-ink-3);
+}
+.acr-panel-icon.is-pending {
+  background: var(--c-accent-tint, var(--c-surface-2));
+  color: var(--c-accent);
+}
+.acr-panel-icon.is-approved {
+  background: var(--c-pos-soft, var(--c-surface-2));
+  color: var(--c-pos, var(--c-ink-2));
+}
+.acr-panel-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--c-ink);
+}
+.acr-panel-body {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+.acr-panel-quote {
+  width: 100%;
+  border-radius: 10px;
+  background: var(--c-fill-1, var(--c-surface-2));
+  padding: 8px 12px;
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  color: var(--c-ink-2);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.acr-panel-quote-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--c-ink-4);
+  margin-bottom: 2px;
+}
+.acr-panel-form {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  text-align: left;
+}
+.acr-panel-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+.acr-panel-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.acr-panel-textarea:focus-visible {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-tint, transparent);
+}
+.acr-panel-hint {
+  display: flex;
+  gap: 8px;
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+.acr-panel-hint-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.acr-panel-error {
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  margin: 2px 0 0;
+}
+.acr-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.acr-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.acr-panel-title:focus {
+  outline: none;
+}
+.acr-panel-title:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.acr-who {
+  width: 100%;
+  border-radius: 10px;
+  background: var(--c-fill-1, var(--c-surface-2));
+  padding: 10px 12px;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+  color: var(--c-ink-2);
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+}
+.acr-who-title {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+/* Expanded settings page */
+.acr-x-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--c-fill-1, var(--c-surface-2));
+  margin-bottom: 16px;
+}
+.acr-x-seg-btn {
+  font: inherit;
+  font-size: 0.78125rem;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+.acr-x-seg-btn.is-active {
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 0.5px var(--c-line), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.acr-x-grants {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+}
+.acr-x-note {
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  color: var(--c-ink-2);
+  margin-top: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.acr-x-decide {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.acr-x-decide-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.acr-x-input {
+  flex: 1;
+  min-width: 160px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  padding: 0 9px;
+  font: inherit;
+  font-size: 0.78125rem;
+}
+.acr-x-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+}
+.acr-x-spacer {
+  flex: 1;
+}
+.acr-x-more {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--c-accent);
+  cursor: pointer;
+  padding: 0;
+}
+.acr-x-mine-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+  color: var(--c-ink);
+}
+.acr-x-sheet {
+  display: grid;
+  gap: 10px;
+}
+.acr-x-sheet .acr-x-input {
+  height: auto;
+  min-height: 52px;
+  padding: 8px 10px;
+}
+.acr-x-sheet-actions {
+  display: grid;
+  gap: 8px;
+}
+.acr-x-sheet-actions .settings-button {
+  min-height: 44px;
+  width: 100%;
+}
+
+@media (max-width: 639.98px) {
+  .acr-panel {
+    margin-top: 4px;
+    padding: 8px 0 0;
+    max-width: none;
+  }
+  /* Primary action is a full-width 44px button pinned to the bottom of the content. */
+  .acr-panel-actions {
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+    flex-direction: column;
+    padding: 10px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--c-bg, var(--c-surface));
+  }
+  .acr-panel-actions .settings-button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+.acr-report-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 420px;
+  padding: 0 16px 60px;
+  background: var(--c-bg, var(--c-surface));
+}
+.acr-report-page[data-mobile="1"] {
+  min-height: 60vh;
+  padding-bottom: 0;
+}

@@ -1,0 +1,6 @@
+{
+  "operations": [{"op": "replace", "path": "/listing/description", "value": "Summarizes the reviewed source data with citations."}],
+  "atomic_groups": [{"id": "description", "operation_indexes": [0], "depends_on": []}],
+  "suggested_cases": [],
+  "rationale": "Clarify the Agent's supported task."
+}

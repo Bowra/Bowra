@@ -1,0 +1,35 @@
+{
+  "skill_name": "analyst-framework",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "最近经营怎么样？",
+      "files": [],
+      "expected_behavior": [
+        "Subagent loads analyst-framework first.",
+        "Classifies as Type C (broad review).",
+        "Negotiates scope: picks 3-5 MUST metrics + main dim breakdown.",
+        "Narrative includes scope + findings + recommendations (not data dump)."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "为什么 Q3 GMV 下滑",
+      "files": [],
+      "expected_behavior": [
+        "Type A (diagnostic). Framework routes to analyst-sop-diagnosis.",
+        "Does not do generic business review."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "基于附件做合规监控看板",
+      "files": ["fixtures/sample.csv"],
+      "expected_behavior": [
+        "Framework enforces data-source routing: attachment path.",
+        "Does not call bi_query / datarc BI (attachment present).",
+        "Routes to building-dashboards skill."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,237 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_analytical_scenario_facets",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "Faceted supplied scenarios with common scales · Tier 1",
+      "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+      "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "rows": [
+        {
+          "tier": "Tier 1",
+          "series": "Observed",
+          "elapsed_years": -3,
+          "value": 80,
+          "trough_change": null,
+          "trough_period": null
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Observed",
+          "elapsed_years": 0,
+          "value": 100,
+          "trough_change": null,
+          "trough_period": null
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Observed",
+          "elapsed_years": 2,
+          "value": 95,
+          "trough_change": null,
+          "trough_period": null
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Observed",
+          "elapsed_years": 5,
+          "value": 78,
+          "trough_change": null,
+          "trough_period": null
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Current",
+          "elapsed_years": 5,
+          "value": 70,
+          "trough_change": null,
+          "trough_period": null
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Optimistic",
+          "elapsed_years": 5,
+          "value": 70,
+          "trough_change": -30,
+          "trough_period": "2027Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Optimistic",
+          "elapsed_years": 7.5,
+          "value": 75,
+          "trough_change": -30,
+          "trough_period": "2027Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Optimistic",
+          "elapsed_years": 10,
+          "value": 80,
+          "trough_change": -30,
+          "trough_period": "2027Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Baseline",
+          "elapsed_years": 5,
+          "value": 70,
+          "trough_change": -38,
+          "trough_period": "2029Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Baseline",
+          "elapsed_years": 7.5,
+          "value": 62,
+          "trough_change": -38,
+          "trough_period": "2029Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Baseline",
+          "elapsed_years": 10,
+          "value": 64,
+          "trough_change": -38,
+          "trough_period": "2029Q4"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Pessimistic",
+          "elapsed_years": 5,
+          "value": 70,
+          "trough_change": -52,
+          "trough_period": "2034Q3"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Pessimistic",
+          "elapsed_years": 7.5,
+          "value": 55,
+          "trough_change": -52,
+          "trough_period": "2034Q3"
+        },
+        {
+          "tier": "Tier 1",
+          "series": "Pessimistic",
+          "elapsed_years": 10,
+          "value": 48,
+          "trough_change": -52,
+          "trough_period": "2034Q3"
+        }
+      ],
+      "row_count": 14,
+      "columns": [
+        {
+          "key": "tier",
+          "header": "Tier",
+          "type": "categorical"
+        },
+        {
+          "key": "series",
+          "header": "Series",
+          "type": "categorical"
+        },
+        {
+          "key": "elapsed_years",
+          "header": "Elapsed Years",
+          "type": "numeric"
+        },
+        {
+          "key": "value",
+          "header": "Value",
+          "type": "numeric"
+        },
+        {
+          "key": "trough_change",
+          "header": "Trough Change",
+          "type": "numeric",
+          "format": "percent",
+          "percent_scale": "points",
+          "unit": "%"
+        },
+        {
+          "key": "trough_period",
+          "header": "Trough Period",
+          "type": "categorical"
+        }
+      ],
+      "_export_analytical": {
+        "view_id": "comparison",
+        "preset": "series_plot",
+        "x_key": "elapsed_years",
+        "x_kind": "numeric",
+        "value_key": "value",
+        "series_key": "series",
+        "series_roles": [
+          {
+            "series_value": "Observed",
+            "role": "observed"
+          },
+          {
+            "series_value": "Current",
+            "role": "current"
+          },
+          {
+            "series_value": "Optimistic",
+            "role": "optimistic",
+            "note_ids": [
+              "basis"
+            ]
+          },
+          {
+            "series_value": "Baseline",
+            "role": "baseline",
+            "note_ids": [
+              "basis"
+            ]
+          },
+          {
+            "series_value": "Pessimistic",
+            "role": "pessimistic",
+            "note_ids": [
+              "basis"
+            ]
+          }
+        ],
+        "summary_keys": [
+          "trough_change",
+          "trough_period"
+        ],
+        "binding_id": "analytical_ecbd5d89f7ad",
+        "binding": {
+          "observation_keys": [
+            "tier",
+            "series",
+            "elapsed_years"
+          ],
+          "measure_keys": [
+            "value"
+          ],
+          "value_domain": [
+            28.6,
+            103.4
+          ],
+          "x_domain": [
+            -3.65,
+            10.65
+          ],
+          "series_values": [
+            "Observed",
+            "Current",
+            "Optimistic",
+            "Baseline",
+            "Pessimistic"
+          ],
+          "group_values": [
+            "Tier 1",
+            "Tier 2",
+            "Tier 3"
+          ]
+        },
+        "availability": "available"
+      }
+    }
+  }
+}

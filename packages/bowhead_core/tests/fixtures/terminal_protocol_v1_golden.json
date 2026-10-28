@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "legacy_core_error",
+      "protocol_version": null,
+      "consumer_profile": "core_bus",
+      "event": {"event_type": "error"},
+      "expected": "root_committed"
+    },
+    {
+      "id": "legacy_web_turn_cancelled_is_feedback",
+      "protocol_version": null,
+      "consumer_profile": "web",
+      "event": {"event_type": "turn_cancelled"},
+      "expected": "non_terminal"
+    },
+    {
+      "id": "legacy_feishu_turn_failed",
+      "protocol_version": null,
+      "consumer_profile": "feishu",
+      "event": {"event_type": "turn_failed"},
+      "expected": "root_committed"
+    },
+    {
+      "id": "legacy_im_error",
+      "protocol_version": null,
+      "consumer_profile": "im_renderer",
+      "event": {"event_type": "error"},
+      "expected": "root_committed"
+    },
+    {
+      "id": "legacy_history_error_is_not_terminal",
+      "protocol_version": null,
+      "consumer_profile": "turn_history",
+      "event": {"event_type": "error"},
+      "expected": "non_terminal"
+    },
+    {
+      "id": "v1_committed_done",
+      "protocol_version": 1,
+      "consumer_profile": "web",
+      "event": {
+        "event_type": "done",
+        "event_id": "evt_done",
+        "generation": 1,
+        "actor_scope": "root",
+        "phase_scope": "in_generation",
+        "terminal_receipt_id": "trc_1",
+        "payload": {"receipt_id": "trc_1", "status": "completed", "durability": "committed"}
+      },
+      "expected": "root_committed"
+    },
+    {
+      "id": "v1_peer_error_is_non_terminal",
+      "protocol_version": 1,
+      "consumer_profile": "im_renderer",
+      "event": {
+        "event_type": "error",
+        "event_id": "evt_peer_error",
+        "generation": 1,
+        "actor_scope": "peer",
+        "phase_scope": "in_generation",
+        "payload": {"durability": "unknown"}
+      },
+      "expected": "non_terminal"
+    },
+    {
+      "id": "v1_legacy_turn_failed_name_is_non_terminal",
+      "protocol_version": 1,
+      "consumer_profile": "feishu",
+      "event": {
+        "event_type": "turn_failed",
+        "event_id": "evt_feedback",
+        "generation": 1,
+        "actor_scope": "root",
+        "phase_scope": "in_generation",
+        "payload": {"reason": "lead_internal_error"}
+      },
+      "expected": "non_terminal"
+    },
+    {
+      "id": "v1_root_non_durable",
+      "protocol_version": 1,
+      "consumer_profile": "web",
+      "event": {
+        "event_type": "error",
+        "event_id": "evt_non_durable",
+        "generation": 1,
+        "actor_scope": "transport",
+        "phase_scope": "in_generation",
+        "payload": {"durability": "non_durable"}
+      },
+      "expected": "root_non_durable"
+    },
+    {
+      "id": "v1_root_unknown",
+      "protocol_version": 1,
+      "consumer_profile": "im_renderer",
+      "event": {
+        "event_type": "error",
+        "event_id": "evt_unknown",
+        "generation": 2,
+        "actor_scope": "transport",
+        "phase_scope": "control_transition",
+        "payload": {"durability": "unknown"}
+      },
+      "expected": "root_unknown"
+    },
+    {
+      "id": "v1_done_without_receipt",
+      "protocol_version": 1,
+      "consumer_profile": "web",
+      "event": {
+        "event_type": "done",
+        "event_id": "evt_bad",
+        "generation": 1,
+        "actor_scope": "root",
+        "phase_scope": "in_generation",
+        "payload": {"status": "completed"}
+      },
+      "expected": "malformed"
+    },
+    {
+      "id": "v1_done_receipt_mismatch",
+      "protocol_version": 1,
+      "consumer_profile": "web",
+      "event": {
+        "event_type": "done",
+        "event_id": "evt_bad_receipt",
+        "generation": 1,
+        "actor_scope": "root",
+        "phase_scope": "in_generation",
+        "terminal_receipt_id": "trc_1",
+        "payload": {"receipt_id": "trc_2", "status": "completed"}
+      },
+      "expected": "malformed"
+    },
+    {
+      "id": "v1_missing_scope",
+      "protocol_version": 1,
+      "consumer_profile": "im_renderer",
+      "event": {
+        "event_type": "step_done",
+        "event_id": "evt_missing_scope",
+        "generation": 1,
+        "phase_scope": "in_generation",
+        "payload": {}
+      },
+      "expected": "malformed"
+    },
+    {
+      "id": "future_protocol_version",
+      "protocol_version": 2,
+      "consumer_profile": "web",
+      "event": {"event_type": "done"},
+      "expected": "malformed"
+    }
+  ]
+}

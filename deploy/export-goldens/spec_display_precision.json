@@ -1,0 +1,170 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_display_precision",
+  "payload": {
+    "spec": {
+      "kind": "table",
+      "title": "Native precision and visible-share scope",
+      "columns": [
+        {
+          "key": "name",
+          "header": "Region",
+          "type": "categorical"
+        },
+        {
+          "key": "amount",
+          "header": "Amount",
+          "type": "numeric",
+          "unit": "$",
+          "currency_code": "CAD",
+          "format": "currency",
+          "display": {
+            "decimal_places": 3,
+            "decimal_mode": "fixed"
+          }
+        },
+        {
+          "key": "rate",
+          "header": "Rate",
+          "type": "numeric",
+          "percent_scale": "fraction",
+          "display": {
+            "decimal_places": 3,
+            "decimal_mode": "fixed"
+          }
+        },
+        {
+          "key": "count",
+          "header": "Count",
+          "type": "numeric",
+          "format": "int"
+        }
+      ],
+      "rows": [
+        {
+          "name": "A",
+          "amount": 120.5,
+          "rate": 0.0035,
+          "count": 30
+        },
+        {
+          "name": "B",
+          "amount": 0.004,
+          "rate": 2.1735,
+          "count": 70
+        }
+      ],
+      "row_count": 2,
+      "show_data_labels": true,
+      "views": [
+        {
+          "id": "values",
+          "kind": "chart",
+          "spec": {
+            "kind": "table",
+            "title": "Declared precision and currency",
+            "columns": [
+              {
+                "key": "name",
+                "header": "Region",
+                "type": "categorical"
+              },
+              {
+                "key": "amount",
+                "header": "Amount",
+                "type": "numeric",
+                "unit": "$",
+                "currency_code": "CAD",
+                "format": "currency",
+                "display": {
+                  "decimal_places": 3,
+                  "decimal_mode": "fixed"
+                }
+              },
+              {
+                "key": "rate",
+                "header": "Rate",
+                "type": "numeric",
+                "percent_scale": "fraction",
+                "display": {
+                  "decimal_places": 3,
+                  "decimal_mode": "fixed"
+                }
+              },
+              {
+                "key": "count",
+                "header": "Count",
+                "type": "numeric",
+                "format": "int"
+              }
+            ],
+            "rows": [
+              {
+                "name": "A",
+                "amount": 120.5,
+                "rate": 0.0035,
+                "count": 30
+              },
+              {
+                "name": "B",
+                "amount": 0.004,
+                "rate": 2.1735,
+                "count": 70
+              }
+            ],
+            "row_count": 2,
+            "show_data_labels": true
+          }
+        },
+        {
+          "id": "shares",
+          "kind": "chart",
+          "spec": {
+            "kind": "pie",
+            "title": "Composition of admitted items",
+            "columns": [
+              {
+                "key": "name",
+                "header": "Region",
+                "type": "categorical"
+              },
+              {
+                "key": "count",
+                "header": "Count",
+                "type": "numeric",
+                "format": "int"
+              }
+            ],
+            "rows": [
+              {
+                "name": "A",
+                "amount": 120.5,
+                "rate": 0.0035,
+                "count": 30
+              },
+              {
+                "name": "B",
+                "amount": 0.004,
+                "rate": 2.1735,
+                "count": 70
+              }
+            ],
+            "row_count": 2,
+            "show_data_labels": true
+          }
+        }
+      ],
+      "layout": {
+        "type": "grid2",
+        "children": [
+          {
+            "view": "values"
+          },
+          {
+            "view": "shares"
+          }
+        ]
+      }
+    }
+  }
+}

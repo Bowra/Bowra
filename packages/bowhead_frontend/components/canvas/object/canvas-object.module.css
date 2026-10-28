@@ -1,0 +1,916 @@
+/*
+ * Canvas object components C1–C11 (Claude Design “Canvas Objects Spec” parts 1 and 2).
+ *
+ * Breakpoints follow the canvas pane width, never the viewport: wide ≥ 720, medium 480–719,
+ * narrow < 480 (same arrangement as phones). The pane host declares `canvas-pane`; each object
+ * surface declares `canvas-object`. Colors use semantic --c-* tokens only, so light and dark
+ * themes follow the active palette.
+ */
+
+/* ── C1 · object tab strip ─────────────────────────────────────── */
+.pane {
+  container: canvas-pane / inline-size;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface);
+}
+.strip {
+  container: canvas-pane / inline-size;
+  flex: none;
+  min-width: 0;
+}
+.panel {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel[hidden] {
+  display: none;
+}
+.panel:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: -2px;
+}
+.nav {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  min-width: 0;
+  background: var(--c-surface);
+  box-shadow: 0 0.5px 0 var(--c-separator);
+  position: relative;
+}
+.tabList {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.tabItem {
+  height: 32px;
+  min-width: 0;
+  max-width: 200px;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  position: relative;
+}
+.tabItem:hover {
+  background: var(--c-fill-1);
+}
+.tabItem[data-selected="true"] {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+.tab {
+  appearance: none;
+  height: 32px;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  cursor: pointer;
+}
+.tabItem:not(:has(.tabClose)) .tab {
+  padding-right: 10px;
+}
+.tabItem[data-selected="true"] .tab {
+  font-weight: 600;
+}
+.tab:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: -2px;
+}
+.tabIcon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--c-ink-3);
+}
+.tabItem[data-selected="true"] .tabIcon {
+  color: var(--c-ink-2);
+}
+.tabName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.marker {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+.markerDirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-warn);
+  flex: none;
+}
+.markerRunning {
+  color: var(--c-accent);
+}
+.markerAttention {
+  color: var(--c-warn);
+}
+.markerFailed {
+  color: var(--c-err);
+}
+/* Accessibility owner of the tabs (aria-owns); it renders nothing itself. */
+.tabListOwner {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.tabClose {
+  appearance: none;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+  opacity: 0;
+}
+.tabItem:hover .tabClose,
+.tabItem[data-selected="true"] .tabClose,
+.tabItem:focus-within .tabClose {
+  opacity: 1;
+}
+.tabClose:hover {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+.tabClose:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: -2px;
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .tabClose {
+    opacity: 1;
+    width: 44px;
+    height: 44px;
+    margin-right: -8px;
+  }
+}
+.navSpacer {
+  flex: 1;
+  min-width: 4px;
+}
+.navSeparator {
+  width: 0.5px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--c-separator);
+  flex: none;
+}
+.navButton {
+  appearance: none;
+  flex: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.iconButton {
+  appearance: none;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+.navButton:hover,
+.iconButton:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+.navButton:focus-visible,
+.iconButton:focus-visible,
+.switcher:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 1px;
+}
+.navButton[aria-expanded="true"],
+.iconButton[aria-expanded="true"] {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+@media (pointer: coarse) {
+  .navButton,
+  .iconButton {
+    min-width: 44px;
+    height: 44px;
+  }
+}
+/* Clips the off-screen measuring row so it never widens the page (no horizontal scroll at phone width). */
+.measureClip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.switcher {
+  appearance: none;
+  height: 32px;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+.switcher:hover {
+  background: var(--c-fill-1);
+}
+.switcherChevron {
+  flex: none;
+  color: var(--c-ink-3);
+}
+.countBadge {
+  flex: none;
+}
+/* Narrow object row: room for the toolbar actions that sit between the title switcher and the × (C2). */
+.toolbarReserve {
+  flex: none;
+  width: var(--canvas-toolbar-end, 0px);
+}
+.wideOnly {
+  display: contents;
+}
+.narrowOnly {
+  display: none;
+}
+@container canvas-pane (max-width: 479.98px) {
+  .wideOnly {
+    display: none;
+  }
+  .narrowOnly {
+    display: contents;
+  }
+}
+
+/* Menus opened from the strip (open menu, overflow, title switcher): message rows and two-line items. */
+.menuGroupTitle {
+  padding: 6px 8px 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-3);
+}
+.menuMessage {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 8px;
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+}
+.menuMessage[data-tone="error"] {
+  color: var(--c-err);
+}
+.menuItemIcon {
+  width: 18px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+.menuItemText {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+  white-space: normal;
+}
+.menuItemText small {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.menuItemTrailing {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+
+/* ── C3 · object surface ───────────────────────────────────────── */
+.surface {
+  container: canvas-object / inline-size;
+  --canvas-pad-block: 20px;
+  --canvas-pad-inline: 24px;
+  --canvas-gap: 20px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.bodyInner {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(760px + 2 * var(--canvas-pad-inline));
+  margin-inline: auto;
+  padding: var(--canvas-pad-block) var(--canvas-pad-inline) calc(var(--canvas-pad-block) + 4px);
+  display: grid;
+  gap: var(--canvas-gap);
+  align-content: start;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bodyInner[data-width="document"] {
+  max-width: calc(880px + 2 * var(--canvas-pad-inline));
+}
+.bodyInner p {
+  margin: 0;
+}
+@container canvas-object (max-width: 719.98px) {
+  .bodyInner {
+    --canvas-pad-block: 16px;
+    --canvas-pad-inline: 20px;
+    --canvas-gap: 16px;
+  }
+}
+@container canvas-object (max-width: 479.98px) {
+  .bodyInner {
+    --canvas-pad-inline: 16px;
+  }
+}
+
+/* ── C2 · object toolbar ───────────────────────────────────────── */
+.toolbar {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 16px;
+  min-width: 0;
+  background: var(--ui-material-bar, var(--c-bg));
+  -webkit-backdrop-filter: var(--ui-material-filter, none);
+  backdrop-filter: var(--ui-material-filter, none);
+  box-shadow: 0 0.5px 0 var(--c-separator);
+  position: relative;
+  z-index: 1;
+}
+.toolbarSpacer {
+  flex: 1;
+  min-width: 8px;
+}
+.toolbarStart {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbarEnd {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbarEnd:empty {
+  display: none;
+}
+/*
+ * Narrow canvases (< 480, phones): one object row (44) holds the title switcher, the toolbar's actions and “⋯”,
+ * and the ×. The toolbar row stays only when it still has status to show (spec: “对话 | 成果 · 2” + one
+ * object row, about 96px of navigation in total).
+ */
+@container canvas-pane (max-width: 479.98px) {
+  /* The pane is the actions' containing block, so they sit in its first row (the object row). The toolbar must
+     not establish a containing block of its own (no positioning or backdrop filter). */
+  .toolbar {
+    position: static;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .toolbarEnd {
+    position: absolute;
+    top: 0;
+    right: 36px;
+    height: 44px;
+    z-index: 2;
+  }
+  .narrowHidden {
+    display: none;
+  }
+  .toolbar:not(:has(.toolbarStart > :not(.toolbarTime, .narrowHidden))) {
+    height: 0;
+    padding: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+}
+@media (pointer: coarse) {
+  @container canvas-pane (max-width: 479.98px) {
+    .toolbarEnd {
+      right: 52px;
+    }
+  }
+}
+.toolbarMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.toolbarMeta[data-tone="warning"] {
+  color: var(--c-warn);
+}
+.toolbarMeta[data-tone="danger"] {
+  color: var(--c-err);
+}
+.toolbarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.toolbarActions:empty {
+  display: none;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.backButton {
+  max-width: 40%;
+}
+.backButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@container canvas-object (max-width: 719.98px) {
+  .collapsibleText {
+    display: none;
+  }
+  /* Doubled class: the shared button size rule (:root:root .settings-button--md) sets the inline padding. */
+  :global(:root:root) .collapsibleAction.collapsibleAction {
+    padding: 0;
+    width: var(--control-h-md, 28px);
+    justify-content: center;
+    background: transparent;
+  }
+  .collapsibleAction svg {
+    flex: none;
+  }
+}
+@container canvas-object (max-width: 479.98px) {
+  .toolbarTime {
+    display: none;
+  }
+}
+
+/* ── C4 · object header ────────────────────────────────────────── */
+.header {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-3);
+}
+.title {
+  margin: 0;
+  min-width: 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subtitle {
+  margin: 0;
+  font-size: 0.78125rem;
+  line-height: 1.5;
+  color: var(--c-ink-3);
+}
+
+/* ── C7 · change row ───────────────────────────────────────────── */
+.changeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 0.5px var(--c-separator);
+  min-width: 0;
+}
+.changeRow[data-selectable="true"] {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.changeRow[data-state="accepted"] {
+  background: var(--c-fill-1);
+}
+.changeRow[data-state="dismissed"] {
+  opacity: 0.6;
+}
+.changeRow[data-state="conflict"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-warn) 45%, transparent);
+}
+.changeRow:focus-within {
+  box-shadow: inset 0 0 0 0.5px var(--c-separator), 0 0 0 2px var(--c-focus);
+}
+.changeCheck {
+  grid-row: 1;
+  align-self: center;
+  margin: 0;
+}
+.changeLocation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.changeLocation > .changeSpacer {
+  flex: 1;
+}
+.changeRow:not([data-selectable="true"]) > .changeLocation {
+  grid-column: 1 / -1;
+}
+.changeLocationNote {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--c-ink-3);
+}
+.changeValues {
+  grid-column: -2 / -1;
+  display: grid;
+  /* The label column fits its longest label (Updated, Vorgeschlagen, Le vôtre) up to 40% of the row;
+     a fixed width broke Latin labels mid-word. */
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+}
+.changeValues dt {
+  /* Keeps the short column aligned for CJK labels. */
+  min-width: 44px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  /* Labels wrap only between words; the surface's overflow-wrap: anywhere is for values. */
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+}
+.changeValues dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.valueCurrent {
+  color: var(--c-ink-3);
+}
+.valueOld {
+  color: var(--c-ink-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--c-ink-3) 60%, transparent);
+}
+.valueNew {
+  color: var(--c-ink);
+}
+.valueEmpty {
+  color: var(--c-ink-4);
+}
+.valueClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.valueMore {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-accent-text);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.chip[data-change="added"] {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+}
+.chip[data-change="removed"] {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+  text-decoration: line-through;
+}
+.changeActions {
+  grid-column: -2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.inserted {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+  border-radius: 2px;
+}
+.deleted {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+  border-radius: 2px;
+  text-decoration: line-through;
+}
+
+/* ── C9 · object footer ────────────────────────────────────────── */
+.footer {
+  flex: none;
+  min-height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  min-width: 0;
+  background: var(--ui-material-bar, var(--c-bg));
+  -webkit-backdrop-filter: var(--ui-material-filter, none);
+  backdrop-filter: var(--ui-material-filter, none);
+  box-shadow: 0 -0.5px 0 var(--c-separator);
+}
+.footer:empty,
+.footerSlot:empty {
+  display: none;
+}
+.footerSlot {
+  display: contents;
+}
+.footerLeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.footerMessage {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.footerActions .footerMessage {
+  flex: 0 1 auto;
+}
+.footerMessage[data-tone="warning"] {
+  color: var(--c-warn);
+}
+.footerMessage[data-tone="danger"] {
+  color: var(--c-err);
+}
+.footerMessage[data-tone="strong"] {
+  color: var(--c-ink);
+}
+.footerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-inline-start: auto;
+}
+:global(:root:root) .footer :global(.settings-button--primary):is(:disabled, [aria-disabled="true"]) {
+  --ui-btn-bg: var(--c-fill-2);
+  --ui-btn-bg-hover: var(--c-fill-2);
+  --ui-btn-fg: var(--c-ink-3);
+  opacity: 1;
+}
+@container canvas-object (max-width: 479.98px) {
+  .footer {
+    display: grid;
+    gap: 8px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .footerActions {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 0;
+  }
+  /* Beats the shared button rule (:root:root :is(...), specificity 0,4,0), which keeps the 28 px control height. */
+  :global(:root:root) .footer .footerActions.footerActions > * {
+    flex: 1 1 0;
+    min-height: 44px;
+    height: auto;
+  }
+  :global(:root:root) .footer .footerActions.footerActions > .footerMessage {
+    flex: 1 1 100%;
+    min-height: 0;
+  }
+}
+
+/* ── C10 · state block ─────────────────────────────────────────── */
+.stateBlock {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  min-width: 0;
+}
+.stateIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+.stateIcon[data-tone="error"] {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+.stateIcon[data-tone="success"] {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+}
+.stateIcon[data-tone="progress"] {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+.stateTitle {
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.stateBody {
+  max-width: 320px;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+  color: var(--c-ink-3);
+  text-wrap: pretty;
+}
+.stateActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.stateNote {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+
+/* ── shared spinner (reduced motion keeps a still ring) ────────── */
+.spinner {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--c-fill-3);
+  border-top-color: var(--c-accent);
+  display: inline-block;
+  flex: none;
+  animation: canvasObjectSpin 0.8s linear infinite;
+}
+.spinner[data-size="large"] {
+  width: 20px;
+  height: 20px;
+}
+@keyframes canvasObjectSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--c-fill-3);
+  }
+}
+
+/* A status shown in the object body only on narrow canvases (the toolbar hides it there). */
+.narrowStatus {
+  display: none;
+}
+@container canvas-pane (max-width: 479.98px) {
+  .narrowStatus {
+    display: inline-flex;
+  }
+}

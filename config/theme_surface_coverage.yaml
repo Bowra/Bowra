@@ -1,0 +1,630 @@
+schema_version: 1
+completed_through: C3
+canonical_tokens:
+  background:
+    - --c-bg
+    - --bg
+  surface:
+    - --c-surface
+    - --surface
+  surface2:
+    - --c-surface-2
+    - --surface-2
+  surface3:
+    - --c-surface-3
+  line:
+    - --c-line
+    - --border
+  line2:
+    - --c-line-2
+    - --border-strong
+  ink:
+    - --c-ink
+    - --text
+  ink2:
+    - --c-ink-2
+  ink3:
+    - --c-ink-3
+    - --text-muted
+  ink4:
+    - --c-ink-4
+    - --text-subtle
+  accent:
+    - --c-accent
+  accentHover:
+    - --c-accent-hover
+  accentInk:
+    - --c-accent-ink
+  accentSoft:
+    - --c-accent-soft
+  accentTint:
+    - --c-accent-tint
+  focus:
+    - --c-focus
+  positive:
+    - --c-pos
+  positiveSoft:
+    - --c-pos-soft
+  warning:
+    - --c-warn
+  warningSoft:
+    - --c-warn-soft
+  error:
+    - --c-err
+  errorSoft:
+    - --c-err-soft
+  info:
+    - --c-info
+  infoSoft:
+    - --c-info-soft
+legacy_aliases:
+  --c-bg-2:
+    target: --c-surface-2
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-bg-3:
+    target: --c-surface-3
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-terra:
+    target: --c-accent
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-terra-soft:
+    target: --c-accent-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-terra-ink:
+    target: --c-accent-hover
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-mute:
+    target: --c-ink-3
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-mute-2:
+    target: --c-ink-4
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-muted:
+    target: --c-ink-3
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-muted-2:
+    target: --c-ink-4
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-danger:
+    target: --c-err
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-neg:
+    target: --c-err
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-neg-soft:
+    target: --c-err-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-red:
+    target: --c-err
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-red-soft:
+    target: --c-err-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-green:
+    target: --c-pos
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-green-soft:
+    target: --c-pos-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-green-ink:
+    target: --c-pos
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-ok-soft:
+    target: --c-pos-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-blue:
+    target: --c-info
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-blue-soft:
+    target: --c-info-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-blue-ink:
+    target: --c-info
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-orange:
+    target: --c-warn
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-cool:
+    target: --c-info
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-cool-soft:
+    target: --c-info-soft
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+  --c-cool-line:
+    target: --c-line
+    consumers:
+      - legacy_frontend
+    removal_batch: GA
+surfaces:
+  - id: shared_theme_primitives
+    routes: []
+    owners:
+      - bowhead_frontend
+      - bowhead_core
+    source_roots:
+      - packages/bowhead_frontend/components/brand-identity.tsx
+      - packages/bowhead_frontend/lib/brand-runtime.ts
+      - packages/bowhead_frontend/lib/theme-config.ts
+      - packages/bowhead_core/src/bowhead_core/theme_compiler.py
+    guard_roots:
+      - packages/bowhead_frontend/components/brand-identity.tsx
+      - packages/bowhead_frontend/lib/brand-runtime.ts
+    batch: C0
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries: []
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/brand-identity.test.tsx
+      - test:packages/bowhead_frontend/lib/brand-runtime.test.ts
+    exception: null
+  - id: agent_surfaces
+    routes:
+      - /agents
+      - /agents/**
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/agents
+      - packages/bowhead_frontend/components/agents
+      - packages/bowhead_frontend/styles/agent-marketplace.css
+    guard_roots:
+      - packages/bowhead_frontend/components/agents
+      - packages/bowhead_frontend/styles/agent-marketplace.css
+    forbidden_patterns:
+      - --am-
+    batch: C1
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries:
+      - provider_identity
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/agents/agent-marketplace.test.tsx
+      - test:packages/bowhead_frontend/components/agents/agent-management.test.tsx
+      - test:packages/bowhead_frontend/components/agents/agent-release-manager.test.tsx
+      - test:packages/bowhead_frontend/components/agents/agent-release-review.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/theme-agent-surfaces.spec.ts
+    exception: null
+  - id: authenticated_home
+    routes:
+      - /
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/page.tsx
+      - packages/bowhead_frontend/components/home
+      - packages/bowhead_frontend/components/canvas
+    guard_roots:
+      - packages/bowhead_frontend/app/(app)/page.tsx
+      - packages/bowhead_frontend/components/home
+      - packages/bowhead_frontend/components/canvas
+    forbidden_patterns:
+      - --c-cool
+      - rgba\(40,\s*33,\s*28
+      - "#b5443b"
+      - "#9a6700"
+    batch: C2
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries:
+      - chart
+      - external_iframe
+      - safe_html
+      - source_file
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/home/HomeWorkSurface.test.tsx
+      - test:packages/bowhead_frontend/components/canvas/section-revision-drawer.test.tsx
+      - test:packages/bowhead_frontend/components/canvas/safe-html-preview.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/theme-knowledge-surfaces.spec.ts
+      - e2e:packages/bowhead_frontend/e2e/theme-home-accent.spec.ts
+    exception: null
+  - id: knowledge_surfaces
+    routes:
+      - /knowledge
+      - /knowledge/**
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/knowledge
+      - packages/bowhead_frontend/components/knowledge
+    guard_roots:
+      - packages/bowhead_frontend/app/(app)/knowledge
+      - packages/bowhead_frontend/components/knowledge
+    forbidden_patterns:
+      - --c-terra
+      - --c-muted
+      - --c-mute
+      - --c-bg-2
+      - --c-blue
+      - --c-green
+      - --c-red
+      - --c-orange
+      - --c-inverse-
+    batch: C2
+    dimensions:
+      - color
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries:
+      - source_file
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/knowledge/kb-management.errors.test.tsx
+      - test:packages/bowhead_frontend/components/knowledge/kb-upload-modal.capability.test.tsx
+      - test:packages/bowhead_frontend/__tests__/components/knowledge-nav.test.tsx
+      - test:packages/bowhead_frontend/components/knowledge/matrix/template-manager.nav.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/theme-knowledge-surfaces.spec.ts
+    exception: null
+  - id: content_library_surfaces
+    routes:
+      - /files
+      - /help
+      - /library
+      - /reports
+      - /release-notes
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/files
+      - packages/bowhead_frontend/app/(app)/help
+      - packages/bowhead_frontend/app/(app)/library
+      - packages/bowhead_frontend/app/(app)/reports
+      - packages/bowhead_frontend/components/files
+      - packages/bowhead_frontend/components/help
+      - packages/bowhead_frontend/app/(app)/release-notes
+    guard_roots:
+      - packages/bowhead_frontend/app/(app)/files
+      - packages/bowhead_frontend/app/(app)/help
+      - packages/bowhead_frontend/app/(app)/library
+      - packages/bowhead_frontend/app/(app)/reports
+      - packages/bowhead_frontend/components/files
+      - packages/bowhead_frontend/components/help
+      - packages/bowhead_frontend/app/(app)/release-notes
+    forbidden_patterns:
+      - --c-terra
+      - --c-muted
+      - --c-mute
+      - --c-bg-2
+      - --c-blue
+      - --c-green
+      - --c-red
+      - --c-orange
+      - --c-inverse-
+    batch: C2
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries:
+      - source_file
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/app/(app)/reports/page.test.tsx
+      - test:packages/bowhead_frontend/app/(app)/reports/page.export-route.test.ts
+      - test:packages/bowhead_frontend/components/help/help-center-page.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/files-accessibility.spec.ts
+      - test:packages/bowhead_frontend/components/help/release-notes-page.test.tsx
+    exception: null
+  - id: legacy_admin
+    routes:
+      - /admin
+      - /admin/**
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/admin
+      - packages/bowhead_frontend/components/admin
+      - packages/bowhead_frontend/components/admin-shell.tsx
+    guard_roots:
+      - packages/bowhead_frontend/app/(app)/admin
+      - packages/bowhead_frontend/components/admin
+      - packages/bowhead_frontend/components/admin-shell.tsx
+    forbidden_patterns:
+      - --c-danger
+      - --c-neg
+      - --c-muted
+      - --c-mute
+      - --c-cool
+      - --c-bg-2
+      - --c-terra
+      - --c-orange
+    batch: C3
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries: []
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/app/(app)/admin/turns/snapshot-panel.test.tsx
+      - test:packages/bowhead_frontend/components/admin/credits/admin-credits-errors.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/admin-access-smoke.spec.ts
+      - e2e:packages/bowhead_frontend/e2e/admin-replay-smoke.spec.ts
+    exception: null
+  - id: authenticated_settings
+    routes:
+      - /capabilities
+      - /connections
+      - /empty-workspace
+      - /me/**
+      - /memory
+      - /onboarding/**
+      - /settings/**
+      - /setup
+      - /skills
+      - /space/**
+      - /team/**
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/app/(app)/capabilities
+      - packages/bowhead_frontend/app/(app)/connections
+      - packages/bowhead_frontend/app/(app)/empty-workspace
+      - packages/bowhead_frontend/app/(app)/me
+      - packages/bowhead_frontend/app/(app)/memory
+      - packages/bowhead_frontend/app/(app)/onboarding
+      - packages/bowhead_frontend/app/(app)/settings
+      - packages/bowhead_frontend/app/(app)/setup
+      - packages/bowhead_frontend/app/(app)/skills
+      - packages/bowhead_frontend/app/(app)/space
+      - packages/bowhead_frontend/app/(app)/team
+      - packages/bowhead_frontend/components/capabilities
+      - packages/bowhead_frontend/components/settings
+    guard_roots:
+      - packages/bowhead_frontend/app/(app)/settings
+      - packages/bowhead_frontend/app/(app)/connections
+      - packages/bowhead_frontend/app/(app)/skills
+      - packages/bowhead_frontend/components/capabilities
+      - packages/bowhead_frontend/components/settings
+    forbidden_patterns:
+      - --c-danger
+      - --c-neg
+      - --c-muted
+      - --c-mute
+      - --c-cool
+      - --c-bg-2
+      - --c-terra
+      - --c-orange
+    batch: C3
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries:
+      - provider_identity
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/settings/personal-appearance-settings.test.tsx
+      - test:packages/bowhead_frontend/components/settings/resource-usage.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/settings-smoke.spec.ts
+    exception: null
+  - id: public_auth
+    routes:
+      - /access-required
+      - /activate
+      - /forgot-password
+      - /invite
+      - /invite/**
+      - /login
+      - /register
+      - /reset-password
+    owners:
+      - bowhead_frontend
+      - bowhead_gateway
+    source_roots:
+      - packages/bowhead_frontend/app/(public)/access-required
+      - packages/bowhead_frontend/app/(public)/activate
+      - packages/bowhead_frontend/app/(public)/forgot-password
+      - packages/bowhead_frontend/app/(public)/invite
+      - packages/bowhead_frontend/app/(public)/login
+      - packages/bowhead_frontend/app/(public)/register
+      - packages/bowhead_frontend/app/(public)/reset-password
+      - packages/bowhead_frontend/components/auth-shell.tsx
+      - packages/bowhead_gateway/src/bowhead_gateway/static_localized.py
+    guard_roots:
+      - packages/bowhead_frontend/components/auth-shell.tsx
+    forbidden_patterns:
+      - --c-danger
+      - --c-neg
+      - --c-muted
+      - --c-mute
+      - --c-cool
+      - --c-bg-2
+      - --c-terra
+      - --c-orange
+    batch: C3
+    dimensions:
+      - color
+      - brand
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries: []
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/auth-shell.test.tsx
+      - test:packages/bowhead_frontend/components/theme-bootstrap.test.tsx
+      - test:packages/bowhead_gateway/tests/test_static_localized.py
+      - e2e:packages/bowhead_frontend/e2e/team-onboarding.spec.ts
+      - e2e:packages/bowhead_frontend/e2e/password-reset-link.spec.ts
+    exception: null
+  - id: canvas_visual_export
+    routes:
+      - /internal/canvas-export/**
+    owners:
+      - bowhead_frontend
+      - bowhead_gateway
+    source_roots:
+      - packages/bowhead_frontend/app/(public)/internal/canvas-export
+      - packages/bowhead_frontend/components/canvas/export-ui.tsx
+      - packages/bowhead_gateway/src/bowhead_gateway/routes/canvas.py
+    guard_roots:
+      - packages/bowhead_frontend/app/(public)/internal/canvas-export
+      - packages/bowhead_frontend/components/canvas/export-ui.tsx
+    forbidden_patterns:
+      - --c-danger
+      - --c-neg
+      - --c-muted
+      - --c-mute
+      - --c-cool
+      - --c-bg-2
+      - --c-terra
+      - --c-orange
+    batch: C3
+    dimensions:
+      - color
+      - brand
+      - typography
+    content_boundaries:
+      - chart
+      - safe_html
+      - source_file
+    status: verified
+    evidence:
+      - test:packages/bowhead_core/tests/test_print_theme.py
+      - test:packages/bowhead_core/tests/test_export_ir.py
+      - test:packages/bowhead_frontend/app/(public)/internal/canvas-export/visual/page.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/canvas-export-visual.spec.ts
+    exception: null
+  - id: global_overlays
+    routes: []
+    owners:
+      - bowhead_frontend
+    source_roots:
+      - packages/bowhead_frontend/components/confirm-dialog-host.tsx
+      - packages/bowhead_frontend/components/error-notice.tsx
+      - packages/bowhead_frontend/components/error-notice.module.css
+      - packages/bowhead_frontend/components/notification-center.tsx
+    guard_roots:
+      - packages/bowhead_frontend/components/confirm-dialog-host.tsx
+      - packages/bowhead_frontend/components/error-notice.tsx
+      - packages/bowhead_frontend/components/error-notice.module.css
+      - packages/bowhead_frontend/components/notification-center.tsx
+    forbidden_patterns:
+      - --c-danger
+      - --c-neg
+      - --c-muted
+      - --c-mute
+      - --c-cool
+      - --c-bg-2
+      - --c-terra
+      - --c-orange
+    batch: C3
+    dimensions:
+      - color
+      - typography
+      - type_scale
+      - density
+      - radius
+      - motion
+    content_boundaries: []
+    status: verified
+    evidence:
+      - test:packages/bowhead_frontend/components/ui/confirm-dialog.test.tsx
+      - test:packages/bowhead_frontend/components/error-notice.test.tsx
+      - e2e:packages/bowhead_frontend/e2e/notification-center.spec.ts
+    exception: null
+  - id: identity_email
+    routes: []
+    owners:
+      - bowhead_gateway
+    source_roots:
+      - packages/bowhead_gateway/src/bowhead_gateway/identity_email.py
+    guard_roots:
+      - packages/bowhead_gateway/src/bowhead_gateway/identity_email.py
+    batch: C3
+    dimensions:
+      - color
+      - brand
+      - typography
+    content_boundaries:
+      - email_client
+    status: verified
+    evidence:
+      - test:packages/bowhead_gateway/tests/test_identity_email.py
+    exception: null

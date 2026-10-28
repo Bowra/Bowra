@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-data-compliance",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "critical_sensitive_no_consent",
+      "query": "Biometric facial recognition deployed for access control, no documented single explicit consent obtained",
+      "expects": "risk_level contains 'CRITICAL' and violations include 'PIPL §28' and 'PIPL §29' with level 'critical'"
+    },
+    {
+      "id": "high_minimization_and_sdk",
+      "query": "App collects full SSN for account verification but stores only last 4 digits; embedded Google Analytics SDK without consent disclosure",
+      "expects": "violations include 'PIPL §6' (overly_broad) and 'PIPL §23' (SDK) both 'high' level"
+    },
+    {
+      "id": "medium_bundled_consent",
+      "query": "Sign-up form: 'I agree to all terms' checkbox bundles marketing + analytics + third-party sharing; user cannot opt out granularly",
+      "expects": "violations include 'PIPL §14' and 'PIPL §16' both 'high' level for bundled consent"
+    }
+  ]
+}

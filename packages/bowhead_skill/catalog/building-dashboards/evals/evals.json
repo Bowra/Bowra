@@ -1,0 +1,42 @@
+{
+  "skill_name": "building-dashboards",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我做一个结算合规监控看板，三层递进：总体合规率 → 按体系看分组合规 → 项目支出违规专项（项目支出要同时有请购+立项）. 数据在附件 ea.csv.",
+      "files": ["fixtures/ea.csv"],
+      "expected_behavior": [
+        "First tool call is python_sandbox (schema detection), NOT bi_query / datarc BI.",
+        "Subagent identifies key columns (体系, 支出分类, 请购ID, 立项项目ID) from schema output.",
+        "Layer 1 kpi_row section with ≥ 4 cells (total, 合规率, 重点管控占比, etc.).",
+        "Layer 2 canvas.add_chart with hint=rank showing 体系 合规率 ranking.",
+        "Layer 3 data_table shows ≥ 10 violation sample rows.",
+        "Layer 3 uses pandas mask to compute compliance, NOT the pre-existing 是否合规 column.",
+        "Final narrative ≥ 600 chars with 3 sections (总览/分组/规则) and ≥ 2 recommendations."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "做 2025 年全年销量监控看板，按品牌/品类分层看。",
+      "files": [],
+      "expected_behavior": [
+        "Routes to datarc BI (no attachment available, workspace has 销量 measure).",
+        "First 1-2 tool calls read the schema with bi_schema (measures / dimensions).",
+        "Layer 2 produces at least one rank chart (品牌 or 品类).",
+        "Layer 3 narrative explicitly notes 'no explicit business rule was given, skipping rule compliance layer'.",
+        "Contains monthly trend line chart (time-series SHOULD layer)."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "客户活跃度看板：近 30 天有登录且购买 ≥ 3 次算活跃，<=1 次算流失风险。数据在附件 user_activity.csv.",
+      "files": ["fixtures/user_activity.csv"],
+      "expected_behavior": [
+        "First tool is python_sandbox schema detection.",
+        "Layer 3 encodes rule correctly via pandas mask: (recent登录) AND (purchase_count ≥ 3 for 活跃; ≤ 1 for 流失风险).",
+        "Layer 3 data_table shows sample of both 活跃 and 流失风险 users.",
+        "Narrative quantifies: active N, churn risk N, and a recommendation targeting churn risk retention."
+      ]
+    }
+  ]
+}

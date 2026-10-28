@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "presetRevision": "2026.10.1",
+  "id": "analytical-neutral",
+  "labelKey": "analyticalNeutral",
+  "descriptionKey": "analyticalNeutralDesc",
+  "status": "active",
+  "extends": "product-base",
+  "fallbackPresetId": "product-base",
+  "capabilities": {
+    "coveredFamilies": ["comparison", "trend", "composition", "distribution", "relationship", "flow", "matrix"],
+    "requiredRendererFeatures": [],
+    "verifiedAccessibilityClaims": ["minimum-contrast"]
+  },
+  "tokens": {
+    "light": {
+      "palette": ["#3F5362", "#6B7D86", "#8D775E", "#596B55", "#8F6E72", "#2F3438"],
+      "sequential": { "from": "#EEF0F1", "to": "#3F5362" },
+      "diverging": { "neg": "#9B4E59", "mid": "#E2E3E1", "pos": "#49725B" }
+    },
+    "dark": {
+      "palette": ["#93A9B8", "#808A94", "#B9A58E", "#91966F", "#B49AA1", "#D5D8DA"],
+      "sequential": { "from": "#242A2E", "to": "#93A9B8" },
+      "diverging": { "neg": "#D59099", "mid": "#3B3E40", "pos": "#83B092" }
+    },
+    "geometry": { "lineWidth": 1.5, "pointRadius": 2, "barRadius": 1, "gridDensity": "standard" }
+  }
+}

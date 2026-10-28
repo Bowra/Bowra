@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "presetRevision": "2026.10.1",
+  "id": "clean-blue",
+  "labelKey": "cleanBlue",
+  "descriptionKey": "cleanBlueDesc",
+  "status": "active",
+  "extends": "product-base",
+  "fallbackPresetId": "product-base",
+  "capabilities": {
+    "coveredFamilies": ["comparison", "trend", "composition", "distribution", "relationship", "flow", "matrix"],
+    "requiredRendererFeatures": [],
+    "verifiedAccessibilityClaims": ["minimum-contrast"]
+  },
+  "tokens": {
+    "light": {
+      "palette": ["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"],
+      "sequential": { "from": "#EAF2FA", "to": "#2563A7" },
+      "diverging": { "neg": "#B44B56", "mid": "#E4EAF0", "pos": "#2F7F62" }
+    },
+    "dark": {
+      "palette": ["#74A9E1", "#66B5BC", "#ADBFE4", "#D69A68", "#A8B98C", "#D0D9E2"],
+      "sequential": { "from": "#182A3D", "to": "#74A9E1" },
+      "diverging": { "neg": "#E58C95", "mid": "#35414D", "pos": "#71C4A0" }
+    },
+    "geometry": { "lineWidth": 2, "pointRadius": 3, "barRadius": 6, "gridDensity": "quiet" }
+  }
+}

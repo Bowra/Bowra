@@ -1,0 +1,1465 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · chat workbench and report canvas batch 2: workbench appearance.
+ *
+ * Spec: Claude Design Workbench Spec (chat workbench controls). Only controls change: home proposals and work rows, running status band,
+ * completion summary, failure bar, step list and agent blocks, message actions, citation badge border,
+ * clarification/plan card shells, composer stop button,
+ * results-area divider / restore strip / mobile switching. Message bodies, report canvas, KPIs and chart internals stay
+ * unchanged (canvas appearance is batch 3).
+ *
+ * Every rule starts with :root:root, which adds (0,2,0) so these rules stay above the base styles they restyle (app/globals.css,
+ * styles/report-canvas.css, styles/ui-controls-legacy.css and the other base stylesheets). All colors use tokens, no literal color values;
+ * control font fixed at --font-control (personal appearance font applies only to content); no blur here (only floating functional surfaces get blur).
+ * Imported last by the authenticated layout. Contract: styles/ui-refresh-workbench.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Token: divider structural line (spec sep-strong: light ink 20%, dark 24%) ── */
+:root:root {
+  --c-separator-strong: color-mix(in srgb, var(--c-ink) 20%, transparent);
+}
+:root:root[data-theme="dark"] {
+  --c-separator-strong: color-mix(in srgb, var(--c-ink) 24%, transparent);
+}
+
+/* ═══ Running status band shell (Chat Cards Spec D1: the conversation card shell — r4, hairline border, no shadow, content surface).
+ *     The completion summary and the failure card are ChatCards (styles/ui-refresh-cards.css). ═══ */
+:root:root .bh-band {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+
+/* ── Running status band: retain three-row structure (PRD A3: constant height, user decision 2026-09-29), appearance only ──
+ * Disclosure bar 40 high (state icon + phase word + step N · elapsed time + expand arrow), followed by two history rows + current row;
+ * structure and text sources are unchanged. */
+:root:root .bh-band__bar {
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 6px 0 12px;
+  border: 0;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  background: transparent;
+  font-family: var(--font-control);
+  transition: background-color var(--dur-fast) linear;
+}
+/* Expanded disclosure bar is the last child: no bottom border (it would double the outer border) */
+:root:root .bh-band__bar.legacy-band-bar--expanded {
+  border-bottom: 0;
+}
+:root:root .bh-band__bar:hover {
+  background: var(--c-fill-1);
+}
+:root:root .bh-band__bar:active {
+  background: var(--c-fill-2);
+}
+:root:root .bh-band__bar:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+  border-radius: var(--r-3);
+}
+:root:root .bh-band__txt {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .bh-band__meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .bh-band__chev {
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-ink-3);
+}
+:root:root .bh-band__chev svg {
+  width: 14px;
+  height: 14px;
+}
+:root:root .bh-band__spin {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border-color: var(--c-fill-3);
+  border-top-color: var(--c-accent);
+}
+:root:root :is(.bh-band__retry, .bh-band__fail) {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* Two history rows + current row: system font, secondary color 12; completed check uses secondary color (completion is normal, not colored), failure / retry retain semantic colors */
+:root:root .bh-band__hist {
+  padding: 8px 12px 10px;
+  font-family: var(--font-control);
+}
+:root:root .bh-band__row {
+  font-size: var(--fs-sm);
+}
+:root:root .bh-band__glyph {
+  color: var(--c-ink-3);
+}
+:root:root .bh-band__rmeta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.bh-band__row.is-warn .bh-band__glyph, .bh-band__row.is-warn .bh-band__rmeta) {
+  color: var(--c-warn-ink);
+}
+:root:root :is(.bh-band__row.is-fail .bh-band__glyph, .bh-band__row.is-fail .bh-band__rmeta) {
+  color: var(--c-err);
+}
+:root:root .bh-band__row.is-active .bh-band__glyph {
+  color: var(--c-accent);
+}
+:root:root .bh-band__gbar {
+  background: var(--c-fill-2);
+}
+:root:root .bh-band__now {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .bh-band__act {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .bh-band__foot {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-band__foot-prose {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-band__foot-meta + .bh-band__foot-prose::before {
+  color: var(--c-ink-3);
+}
+/* Reduced motion: replace spinner with a static accent dot */
+@media (prefers-reduced-motion: reduce) {
+  :root:root .bh-band__spin {
+    width: 8px;
+    height: 8px;
+    flex-basis: 8px;
+    margin: 0 3px;
+    border: 0;
+    background: var(--c-accent);
+  }
+}
+:root:root[data-theme-motion="reduced"] .bh-band__spin {
+  width: 8px;
+  height: 8px;
+  flex-basis: 8px;
+  margin: 0 3px;
+  border: 0;
+  background: var(--c-accent);
+}
+
+/* ── In-step failure sentence (FailureAckCard, Chat Cards Spec §7: one sentence in the step row, not a card):
+ *    reason 13 body-text colour, hint 12 secondary colour; inset under the step icon column ── */
+:root:root .bh-step-failure {
+  padding: 6px 0 8px;
+}
+:root:root .bh-step-failure--inset {
+  padding-left: 28px;
+}
+:root:root .bh-step-failure__msg {
+  margin: 0;
+  font: 400 0.8125rem / 1.5 var(--font-control);
+  color: var(--c-ink);
+}
+:root:root .bh-step-failure__msg--hint {
+  margin-bottom: 8px;
+}
+:root:root .bh-step-failure__hint {
+  font: 400 var(--fs-sm) / 1.5 var(--font-control);
+  color: var(--c-ink-3);
+}
+
+/* ═══ Step list border: one row type (30 high), one icon column (16 wide), agent header 32, at most one indentation level ═══ */
+:root:root .bh-step-list .ag-trace {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root :is(.bh-step-list .ag-trace > .agb + .agb, .bh-step-list .ag-trace .cframe > .agb + .agb) {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+/* State icons: secondary check for done (completion is normal, not colored), accent for running, warning for partial completion, error for failed, ink-4 for not started */
+:root:root .bh-step-list .ag-trace .g {
+  width: 16px;
+  flex: 0 0 16px;
+  font-family: var(--font-control);
+}
+:root:root .bh-step-list .ag-trace .g-done {
+  color: var(--c-ink-3);
+}
+:root:root .bh-step-list .ag-trace .g-run {
+  color: var(--c-accent);
+}
+:root:root .bh-step-list .ag-trace .g-pend {
+  color: var(--c-ink-4);
+}
+/* Agent block header: one row 32 high (badge · name 600 · task 12 secondary color · elapsed time · state · arrow) */
+:root:root .bh-step-list .ag-trace .agb-head {
+  grid-template-columns: 20px auto minmax(0, 1fr) auto 16px 12px;
+  grid-template-rows: auto;
+  gap: 0 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 12px 4px 10px;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .bh-step-list .ag-trace .agb-head:hover {
+  background: var(--c-fill-1);
+}
+:root:root .bh-step-list .ag-trace .agb-head:focus-visible {
+  border-radius: var(--r-2);
+  outline-color: var(--c-focus, var(--c-accent));
+}
+:root:root .bh-step-list .ag-trace .agb-head > .ag-badge {
+  grid-row: 1;
+  align-self: center;
+}
+:root:root .bh-step-list .ag-trace .agb-name {
+  grid-column: 2;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  white-space: nowrap;
+}
+:root:root :is(.bh-step-list .ag-trace .agb-task, .bh-step-list .ag-trace .agb-head > span:not([class])) {
+  grid-column: 3;
+  grid-row: 1;
+}
+:root:root .bh-step-list .ag-trace .agb-task {
+  overflow: hidden;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .bh-step-list .ag-trace .agb-time {
+  grid-column: 4;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-step-list .ag-trace .agb-head > .g {
+  grid-column: 5;
+}
+:root:root .bh-step-list .ag-trace .agb-chev {
+  grid-column: 6;
+  grid-row: 1;
+  color: var(--c-ink-3);
+}
+:root:root .bh-step-list .ag-trace .agb-name .en {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root .bh-step-list .ag-trace .agb-summary {
+  padding: 0 12px 8px 38px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  letter-spacing: normal;
+}
+/* Block body no longer nests a second border: remove background and separator, indent steps 30 */
+:root:root .bh-step-list .ag-trace .agb-body {
+  padding: 0 6px 6px 30px;
+  border-top: 0;
+  background: transparent;
+}
+:root:root :is(.bh-step-list .ag-trace .agb-task-detail, .bh-step-list .ag-trace .agb-outcome-reason) {
+  margin: 2px 0 6px;
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+}
+:root:root :is(.bh-step-list .ag-trace .agb-task-detail span, .bh-step-list .ag-trace .agb-outcome-reason span) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  letter-spacing: normal;
+}
+:root:root :is(.bh-step-list .ag-trace .agb-task-detail p, .bh-step-list .ag-trace .agb-outcome-reason p) {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Fallback / failure explanation: semantic-color icon + reason, no fully colored background */
+:root:root :is(.bh-step-list .ag-trace .bail-note, .bh-step-list .ag-trace .fail-note) {
+  margin: 0 12px 8px 38px;
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Tool step row: 30 high, icon column 16, label 13, summary 12 secondary color, elapsed time 12 tabular numbers (system font) */
+:root:root .bh-step-list .ag-trace .stp {
+  border-top: 0;
+}
+:root:root .bh-step-list .ag-trace .stp-head {
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border-radius: var(--r-2);
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .bh-step-list .ag-trace .stp-head:hover {
+  background: var(--c-fill-1);
+}
+:root:root .bh-step-list .ag-trace .stp-head:focus-visible {
+  outline-color: var(--c-focus, var(--c-accent));
+}
+:root:root .bh-step-list .ag-trace .stp-head > .g {
+  margin-top: 0;
+}
+:root:root .bh-step-list .ag-trace .stp-tool {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+:root:root .bh-step-list .ag-trace .stp.is-pend .stp-tool {
+  color: var(--c-ink-3);
+}
+:root:root :is(.bh-step-list .ag-trace .stp-label, .bh-step-list .ag-trace .stp-sum, .bh-step-list .ag-trace .stp-time) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-step-list .ag-trace .stp-label::before {
+  color: var(--c-ink-4);
+}
+:root:root .bh-step-list .ag-trace .stp.is-run .stp-sum {
+  color: var(--c-ink-3);
+}
+:root:root .bh-step-list .ag-trace .stp-chev {
+  color: var(--c-ink-3);
+}
+:root:root .bh-step-list .ag-trace .stp-detail {
+  padding: 2px 6px 8px 30px;
+}
+/* Tool category eyebrow: minimum font size 11, system font, no uppercase */
+:root:root .kchip {
+  padding: 1px 5px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .kchip.is-skill {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+
+/* ═══ Message actions: 28-square icon buttons (touch 44), names in Tooltip and screen-reader labels; latest answer always shows actions ═══ */
+:root:root .bh-msg-actions {
+  gap: 2px;
+  min-height: 28px;
+  margin: 6px 0 2px;
+}
+:root:root .bh-msg-actions__btn {
+  position: relative;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root .bh-msg-actions__btn svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+:root:root .bh-msg-actions__btn:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .bh-msg-actions__btn:active {
+  background: var(--c-fill-2);
+}
+:root:root .bh-msg-actions__btn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+/* Names only for screen readers and Tooltip (button has aria-label) */
+:root:root .bh-msg-actions__btn > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* Thumbs-down given: the button stays in the accent ink while pressed; pressing again removes it */
+:root:root .bh-msg-actions__btn[aria-pressed="true"] {
+  color: var(--c-accent-text);
+}
+/* Thumbs-down dialog (answer-feedback-dialog.tsx, Claude Design L0-b): intro line, reasons as shared
+   checkboxes in two columns, comment, consent checkbox with the owner line */
+:root:root .bh-feedback-dialog {
+  display: grid;
+  gap: 16px;
+}
+:root:root .bh-feedback-dialog__intro {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-feedback-dialog__optional {
+  margin-left: 6px;
+  color: var(--c-ink-3);
+  font-weight: 400;
+}
+:root:root .bh-feedback-dialog__reasons {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+:root:root .bh-feedback-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+:root:root .bh-feedback-dialog__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  cursor: pointer;
+}
+:root:root .bh-feedback-dialog__option input {
+  flex: none;
+  margin: 2px 0 0;
+}
+:root:root .bh-feedback-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+:root:root .bh-feedback-dialog__consent small {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Copied state shows in place for 1.5 seconds (no Toast): button expands to check + text */
+:root:root .bh-msg-actions__btn[data-state="copied"] {
+  width: auto;
+  gap: 4px;
+  padding: 0 6px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-msg-actions__btn[data-state="copied"] > span {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+}
+:root:root .bh-msg-actions__btn[data-state="copied"] svg {
+  width: 14px;
+  height: 14px;
+}
+@media (hover: hover) and (pointer: fine) {
+  :root:root .bh-msg-actions[data-latest="1"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (pointer: coarse) {
+  :root:root .bh-msg-actions__btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ═══ Citation badge border (position, number and source card unchanged): system font with tabular numbers; restricted / invalid use border + strikethrough ═══ */
+:root:root .legacy-cite-chip {
+  padding: 1px 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.65625rem;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root .legacy-cite-chip:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .legacy-cite-chip:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+/* Stop relying on 0.55 opacity (numbers would fall below 3:1): transparent background, ink-3, hairline border, strikethrough */
+:root:root .legacy-cite-chip.is-denied {
+  opacity: 1;
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink-3);
+  text-decoration: line-through;
+}
+:root:root .legacy-cite-chip.is-denied:hover {
+  background: var(--c-fill-1);
+}
+
+/* ═══ Plan card shell (Chat Cards Spec D1: the conversation card shell — content surface, r4, hairline structural edge, no shadow;
+ *     awaiting approval / blocked uses the 1px warning edge; no solid colour block or left stripe). Plan content is unchanged. ═══ */
+:root:root .pcard {
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  background: var(--c-surface);
+  box-shadow: none;
+  font-family: var(--font-control);
+}
+:root:root :is(.pcard.is-proposed, .pcard.is-blocked) {
+  border: var(--card-edge-input);
+}
+
+/* ── Plan card shell (plan graph and step content unchanged) ── */
+:root:root .pc-head {
+  gap: 6px;
+  padding: 12px 14px 10px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.pc-head, .pcard.is-proposed .pc-head, .pcard.is-running .pc-head, .pcard.is-blocked .pc-head, .pcard.is-completed .pc-head) {
+  background: transparent;
+}
+/* Header: 12/600 semantic color (pending approval / blocked warning, running accent, done secondary) */
+:root:root .pc-eyebrow {
+  gap: 8px;
+  color: var(--c-warn-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .pcard.is-running .pc-eyebrow {
+  color: var(--c-accent-text);
+}
+:root:root .pcard.is-blocked .pc-eyebrow {
+  color: var(--c-warn-ink);
+}
+:root:root .pcard.is-completed .pc-eyebrow {
+  color: var(--c-ink-3);
+}
+:root:root .pc-eyebrow .gem {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: none;
+}
+:root:root .pc-modetag {
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root .pc-modetag b {
+  color: var(--c-accent-text);
+}
+:root:root .pc-modetag.legacy-pc-modetag--done {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+}
+:root:root .pc-title {
+  font-size: var(--fs-dialog-title);
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+:root:root .pc-title em {
+  color: var(--c-ink);
+}
+:root:root .pc-meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* Progress bar: 4 high, completed segment accent (completion is normal, no separate positive color) */
+:root:root .pc-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--c-fill-2);
+}
+:root:root .pc-bar i.done {
+  background: var(--c-accent);
+}
+:root:root .pc-bar i.todo {
+  background: var(--c-fill-2);
+}
+:root:root .pstep {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.prail .pstep:first-of-type, .pstep.is-final) {
+  border-top: none;
+}
+:root:root .pfoot {
+  gap: 8px;
+  margin-top: 4px;
+  padding: 12px 14px 14px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .pfoot-meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  letter-spacing: normal;
+}
+/* Footer buttons: 28 (touch 44), primary solid accent, others filled-background secondary */
+:root:root .pbtn {
+  gap: 6px;
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow: none;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .pbtn svg {
+  width: 14px;
+  height: 14px;
+}
+:root:root .pbtn.ghost {
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-weight: 500;
+}
+:root:root .pbtn.ghost:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .pbtn.primary {
+  box-shadow: none;
+  color: var(--c-accent-ink);
+}
+:root:root .pbtn.primary:active {
+  background: var(--c-accent-press);
+}
+:root:root .pbtn.pos {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+:root:root .pbtn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .pbtn:disabled {
+  opacity: 0.4;
+}
+:root:root .pnl {
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+}
+:root:root .pnl.focus {
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    0 0 0 2px var(--c-focus, var(--c-accent));
+}
+:root:root .pnl-tx {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .pnl-tx.typed {
+  color: var(--c-ink);
+}
+:root:root .pnl-send {
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+:root:root .pnl-send.on {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+
+/* ═══ Composer stop: neutral filled background + solid square + text (no accent, to avoid confusion with send) ═══ */
+:root:root .composer-v2 .v2-send-btn--cancel {
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .composer-v2 .v2-send-btn--cancel:hover:not(:disabled) {
+  background: var(--c-fill-3);
+  box-shadow: none;
+}
+/* Stopping…: disabled until the stop terminal state arrives, secondary text color */
+:root:root .composer-v2 .v2-send-btn--cancel:disabled {
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  opacity: 1;
+}
+
+/* ═══ Results-area divider: 1px structural line + 9px drag area, handle visible only on hover; 2px accent while dragging ═══
+ * SplitPane inline left centers the divider using width 14 (-7px); reduce to 9 here and shift right 2.5px to keep the line in place. */
+:root:root .v2-split-divider {
+  width: 9px;
+  margin-left: 2.5px;
+}
+:root:root .v2-split-divider-line {
+  left: 4px;
+  width: 1px;
+  background: var(--c-separator-strong);
+  opacity: 1;
+}
+:root:root .v2-split-divider-handle {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--c-ink-3);
+  box-shadow: none;
+  transform: none;
+}
+/* SplitPane adds .is-active on hover and drag: hover is ink-3 line + handle; only held dragging (:active, maintained during pointer capture) uses 2px accent */
+:root:root .v2-split-divider.is-active .v2-split-divider-line {
+  background: var(--c-ink-3);
+}
+:root:root .v2-split-divider.is-active .v2-split-divider-handle {
+  transform: none;
+  background: var(--c-ink-3);
+}
+:root:root .v2-split-divider.is-active:active .v2-split-divider-line {
+  left: 3.5px;
+  width: 2px;
+  background: var(--c-accent);
+}
+:root:root .v2-split-divider.is-active:active .v2-split-divider-handle {
+  background: var(--c-accent);
+}
+
+/* ═══ Canvas results alignment · split gutter: chat and results are two rounded cards with a pane-gap gutter between them;
+ * the divider lives in that gutter (gutter-wide hit area, card-high), so it never crosses a card edge, corner or the gutter
+ * above / below the cards, and every horizontal separator inside a card (composer dock top edge) ends at the card edge.
+ * At rest the gutter itself is the separation (no line); hover shows the ink-3 line + handle, dragging and keyboard focus the
+ * 2px accent line. Only the split state mounts the divider, so chat-only / canvas-maxed keep their single full card.
+ * SplitPane writes `left: boundary - 7px`; the margin re-centres the gutter-wide hit area on the boundary. ═══ */
+@media (min-width: 1024px) {
+  :root:root .v2-split-area:has(> .v2-split-divider) > .v2-split-chat > .v2-ws-left {
+    margin-right: calc(var(--theme-ws-pane-gap, 16px) / 2);
+    border-radius: var(--theme-ws-pane-radius, 18px);
+  }
+  :root:root .v2-split-area:has(> .v2-split-divider) > .v2-split-canvas > .v2-ws-right {
+    margin-left: calc(var(--theme-ws-pane-gap, 16px) / 2);
+    border-radius: var(--theme-ws-pane-radius, 18px);
+  }
+  :root:root .v2-split-area > .v2-split-divider {
+    top: var(--theme-ws-pane-gap, 16px);
+    bottom: var(--theme-ws-pane-gap, 16px);
+    width: var(--theme-ws-pane-gap, 16px);
+    margin-left: calc(7px - var(--theme-ws-pane-gap, 16px) / 2);
+  }
+  :root:root .v2-split-area > .v2-split-divider > .v2-split-divider-line {
+    left: calc(50% - 0.5px);
+    background: transparent;
+  }
+  :root:root .v2-split-area > .v2-split-divider.is-active > .v2-split-divider-line {
+    background: var(--c-ink-3);
+  }
+  :root:root .v2-split-area > .v2-split-divider.is-active:active > .v2-split-divider-line {
+    left: calc(50% - 1px);
+    width: 2px;
+    background: var(--c-accent);
+  }
+  :root:root .v2-split-area > .v2-split-divider:focus-visible > .v2-split-divider-line {
+    left: calc(50% - 1px);
+    width: 2px;
+    background: var(--c-focus, var(--c-accent));
+  }
+}
+
+/* ═══ Collapsed restore strip: 40 wide, icon only (name in screen-reader label and Tooltip), structural line on the right ═══ */
+:root:root .v2-ws-edge {
+  flex: 0 0 40px;
+  gap: 0;
+  padding-top: 8px;
+  background: var(--c-bg);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root .v2-ws-edge:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .v2-ws-edge:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .v2-ws-edge--chat {
+  border-right: var(--hairline) solid var(--c-separator-strong);
+}
+:root:root .v2-ws-edge-chevron {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-2);
+  font-size: 1rem;
+}
+:root:root .v2-ws-edge-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ═══ Mobile chat / results switching: segmented control 36 high (touch 44), text 14, no icons ═══ */
+@media (max-width: 1023.98px) {
+  :root:root .v2-ws-mobile-tabs {
+    padding: 0 12px 8px;
+    border-bottom: 0;
+    font-family: var(--font-control);
+  }
+  :root:root .v2-ws-mobile-tabs-pill {
+    flex: 1;
+  }
+  /* Specificity must beat the batch 2 segmented-control :is(… .f-tools .chips .chip) family (0,5,0): three classes plus prefix also give 0,5,0, so the later import wins */
+  :root:root .v2-ws-mobile-tabs .v2-ws-mobile-tabs-pill .v2-ws-mobile-tab {
+    flex: 1;
+    min-height: 32px;
+    font-size: 0.875rem;
+  }
+  :root:root .v2-ws-mobile-tab svg {
+    display: none;
+  }
+}
+/* Touch: each segment has a 44 touch target */
+@media (max-width: 1023.98px) and (pointer: coarse) {
+  :root:root .v2-ws-mobile-tabs .v2-ws-mobile-tabs-pill .v2-ws-mobile-tab {
+    min-height: 44px;
+  }
+}
+
+/* ═══ Home: header follows page spec (eyebrow 12 · title 22/700 system font); proposal cards are control cards (content surface, hairline,
+ *     icon ink-2, title 13/600, description 12), removing colored icon blocks and right arrow column; work rows become 48 high ═══ */
+:root:root .home-work-header {
+  gap: 32px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .home-work-kicker {
+  gap: 0;
+  margin-bottom: 4px;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .home-work-kicker::before {
+  content: none;
+}
+:root:root .home-work-header h1 {
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+:root:root .home-work-summary {
+  gap: 4px;
+  padding: 0;
+  border-left: 0;
+}
+:root:root .home-work-summary-label {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .home-work-summary-text {
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 500;
+  line-height: 1.4;
+}
+:root:root .home-work-summary-text strong {
+  color: var(--c-ink);
+}
+:root:root .home-work-updated {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .home-work-section-heading h2 {
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+:root:root .home-work-section-heading p {
+  margin-top: 4px;
+  font-size: var(--fs-md);
+}
+:root:root .home-work-proposals .home-work-section-heading {
+  margin-bottom: 12px;
+}
+/* Group title: 11/600 secondary color, no uppercase; the group awaiting your action uses warning color */
+:root:root .home-work-group-label {
+  gap: 8px;
+  padding: 12px 2px 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .home-work-group-label::after {
+  height: var(--hairline);
+  background: var(--c-separator);
+}
+:root:root .home-work-group-attention .home-work-group-label {
+  color: var(--c-warn-ink);
+}
+:root:root .home-work-group-label strong {
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+  letter-spacing: normal;
+}
+:root:root .home-work-group-attention .home-work-group-label strong {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+/* Work rows: remove card border and shadow, hover fill-1; state icon 16 ink-2 (no colored block), no right arrow */
+:root:root .home-work-rows {
+  gap: 2px;
+}
+:root:root .home-work-row {
+  min-height: 48px;
+  grid-template-areas: "icon copy meta";
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  column-gap: 10px;
+  row-gap: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-control);
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .home-work-row:hover {
+  border-color: transparent;
+  background: var(--c-fill-1);
+  box-shadow: none;
+}
+:root:root .home-work-row:active {
+  background: var(--c-fill-2);
+}
+:root:root .home-work-row:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .home-work-row > svg {
+  display: none;
+}
+:root:root :is(.home-work-row-icon, .home-work-engine-routine, .home-work-engine-matrix) {
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-ink-2);
+}
+:root:root .home-work-row-icon svg {
+  width: 16px;
+  height: 16px;
+}
+:root:root .home-work-row-copy {
+  gap: 2px;
+}
+:root:root .home-work-row-title {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: normal;
+}
+:root:root .home-work-row-detail {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Matrix progress below row text: progress bar and 4/10 complete on the same line */
+:root:root .home-work-progress {
+  flex-direction: row;
+  gap: 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .home-work-progress-track {
+  flex: 0 1 160px;
+}
+:root:root :is(.home-work-row-meta, .home-work-live) {
+  align-self: center;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+/* Running uses an accent dot, paused uses warning color */
+:root:root .home-work-live {
+  color: var(--c-accent-text);
+}
+:root:root .home-work-live-paused {
+  color: var(--c-warn-ink);
+}
+:root:root .home-work-live-cancelling {
+  color: var(--c-ink-3);
+}
+:root:root .home-work-progress-track {
+  height: 4px;
+  border: 0;
+  background: var(--c-fill-2);
+}
+:root:root .home-work-progress-fill {
+  background: var(--c-accent);
+}
+:root:root .home-work-clear {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Proposal cards: three horizontally on the single-column home (each at least 200, automatically two or one when they do not fit), gap 8 */
+:root:root .home-work-proposal-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 8px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .home-work-proposal {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-content: start;
+  align-items: start;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+  transition:
+    background-color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+:root:root .home-work-proposal:not(:disabled):hover {
+  background: var(--c-surface);
+  background-image: linear-gradient(var(--c-fill-1), var(--c-fill-1));
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator-strong);
+}
+:root:root .home-work-proposal:not(:disabled):active {
+  background-image: linear-gradient(var(--c-fill-2), var(--c-fill-2));
+}
+:root:root .home-work-proposal:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .home-work-proposal:disabled {
+  opacity: 0.4;
+}
+:root:root :is(.home-work-proposal-icon, .home-work-proposal:not(:disabled):hover .home-work-proposal-icon, .home-work-proposal:focus-visible .home-work-proposal-icon) {
+  width: 16px;
+  height: 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-ink-2);
+}
+:root:root .home-work-proposal-icon svg {
+  width: 16px;
+  height: 16px;
+}
+:root:root .home-work-proposal-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+:root:root .home-work-proposal-detail {
+  margin-top: 2px;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .home-work-proposal-action {
+  display: none;
+}
+:root:root :is(.home-work-proposal-note, .home-work-footer) {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .home-work-proposal-note {
+  gap: 6px;
+  margin: 10px 2px 0;
+}
+:root:root .home-work-proposal-note > svg {
+  flex-basis: 14px;
+  width: 14px;
+  height: 14px;
+}
+:root:root .home-work-footer {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+/* Work status unavailable / no space: control card, secondary buttons */
+:root:root .home-work-state {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .home-work-state-icon {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+}
+:root:root .home-work-state-icon-error {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+:root:root .home-work-state h2 {
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+:root:root .home-work-state p {
+  margin: 4px 0 14px;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .home-work-state button {
+  min-height: var(--control-h-md);
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.2;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.home-work-state button:hover, .home-work-state button:focus-visible) {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .home-work-state button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+}
+:root:root .home-work-state button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ═══ Single-column home: title → composer → proposal cards → work groups, max width 800, centered.
+ *     Page inserts the composer as a slot (home-work-composer-dock--inline); DOM order is focus and screen-reader order;
+ *     the two section headings are screen-reader only (groups have their own eyebrows). ═══ */
+:root:root .home-work-inner {
+  width: min(100%, calc(800px + 2 * var(--page-gutter)));
+  padding: 32px var(--page-gutter) 20px;
+}
+:root:root .home-work-header {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  justify-items: center;
+  padding-bottom: 0;
+  margin-bottom: 20px;
+  border-bottom: 0;
+  text-align: center;
+}
+:root:root .home-work-summary {
+  display: block;
+  text-align: center;
+}
+:root:root .home-work-summary-label {
+  display: none;
+}
+:root:root .home-work-summary-text {
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  line-height: 1.5;
+}
+:root:root .home-work-summary-text strong {
+  font-weight: 600;
+}
+:root:root .home-work-composer-slot {
+  margin-bottom: 16px;
+}
+/* Slotted composer is no longer a bottom dock: remove dock padding, top border and gradient background, with no soft-keyboard-height bottom spacer (it is above on the page, beyond keyboard obstruction) */
+:root:root .home-work-composer-dock.home-work-composer-dock--inline {
+  padding: 0;
+  border-top: 0;
+  background: none;
+}
+:root:root .home-work-layout {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 24px;
+}
+:root:root .home-work-proposals {
+  padding-top: 0;
+  border-top: 0;
+}
+:root:root .home-work-layout .home-work-section-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+:root:root .home-work-proposal-blocked {
+  margin: 8px 2px 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root .home-work-skeleton-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Batch 4a (workbench behavior): divider keyboard focus, new-content dot, drag-and-drop overlay.
+ * The drop target positioning class exists only while dragging.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Divider keyboard focus: same appearance as held dragging (2px focus-color line + handle), no separate outer border */
+:root:root .v2-split-divider:focus-visible {
+  outline: none;
+}
+:root:root .v2-split-divider:focus-visible .v2-split-divider-line {
+  left: 3.5px;
+  width: 2px;
+  background: var(--c-focus, var(--c-accent));
+}
+:root:root .v2-split-divider:focus-visible .v2-split-divider-handle {
+  background: var(--c-focus, var(--c-accent));
+}
+
+/* New results content: 7px accent dot (after mobile-tab text, below restore-strip icon) */
+:root:root .v2-ws-new-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+:root:root .v2-ws-mobile-tab .v2-ws-new-dot {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+:root:root .v2-ws-edge .v2-ws-new-dot {
+  margin-top: 6px;
+}
+
+/* Upload drop overlay: inside the chat column (target temporarily positioned only while dragging), inset 8, radius 14, 1.5px dashed border;
+ * accepted = accent + light accent background, rejected = error + light error background. No pointer reception; drag
+ * events still reach the chat column.
+ * Narrow home composer wrapper sets position: static !important; override it while dragging. */
+:root:root .bh-file-drop-host {
+  position: relative !important;
+}
+:root:root .bh-file-drop {
+  position: absolute;
+  inset: 8px;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border: 1.5px dashed var(--c-accent);
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--c-accent-soft) 88%, transparent);
+  pointer-events: none;
+  font-family: var(--font-control);
+}
+:root:root .bh-file-drop[data-state="reject"] {
+  border-color: var(--c-err);
+  background: color-mix(in srgb, var(--c-err-soft) 88%, transparent);
+}
+:root:root .bh-file-drop__card {
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+  text-align: center;
+}
+:root:root .bh-file-drop__title {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .bh-file-drop__hint {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root .bh-file-drop[data-state="reject"] .bh-file-drop__title {
+  color: var(--c-err);
+}
+
+/* ── P2 batch 2 (icons): small icons upscaled by CSS ──
+ * The Lucide stroke is written inline from the icon's width/height attributes (inline markers below 13px get the
+ * thinner 14-tier stroke, see components/icon-refresh.tsx). These icons have 10-12px attributes but CSS renders
+ * them at 13-42px, where the thin stroke looks washed out, so they use 1.5 for their rendered size:
+ * "all clear" check 12 -> 42, step summary CTA arrow 10 -> 13, menu item leading icons (e.g. the session rail
+ * delete item's Trash) 12 -> 16, destination hub card arrow 12 -> 14, home proposal arrow 12 -> 16. */
+:root:root .home-work-clear > svg.bh-icon,
+:root:root .ui-menu [role="menuitem"] > svg.bh-icon:first-child,
+:root:root .ui-menu [role="menuitemradio"] > svg.bh-icon:first-child,
+:root:root .ui-menu [role="menuitemcheckbox"] > svg.bh-icon:first-child,
+:root:root .ui-menu [role="option"] > svg.bh-icon:first-child,
+:root:root .home-work-proposal-action svg.bh-icon {
+  stroke-width: 1.5px !important;
+}
+
+/* ── P2 character icon batch ──
+ * Text and emoji characters used as icons render as Lucide glyphs through <CharIcon> (components/char-icon.tsx),
+ * sized 1em so they keep the character's font size; they sit on the text baseline like the character did.
+ * Characters drawn by CSS `content` switch to a Lucide mask filled with the text colour (stroke 2.5 of 24, about
+ * 1.2-1.5px at the 11-14px sizes they render at). The tokens hold the mask images (black is the mask, not a colour). */
+:root:root {
+  --glyph-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'%3E%3C/path%3E%3C/svg%3E");
+  --glyph-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'%3E%3C/path%3E%3C/svg%3E");
+  --glyph-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3C/svg%3E");
+}
+:root:root svg.bh-glyph {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+:root:root .results-explorer-compact-filters > summary::after {
+  content: "";
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  -webkit-mask: var(--glyph-chevron-down) center / contain no-repeat;
+  mask: var(--glyph-chevron-down) center / contain no-repeat;
+}
+/* The rule list has no other met / unmet text, so the mask keeps the character as CSS alternative text for
+ * assistive technology (`content: "" / "○"`). Engines without the alt-text syntax drop that declaration and keep
+ * the plain `content: ""` before it. */
+:root:root .profile-security-page .pwd-rules li::before {
+  content: "";
+  content: "" / "○";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  background: currentColor;
+  -webkit-mask: var(--glyph-circle) center / contain no-repeat;
+  mask: var(--glyph-circle) center / contain no-repeat;
+}
+:root:root .profile-security-page .pwd-rules li.ok::before {
+  content: "";
+  content: "" / "✓";
+  -webkit-mask-image: var(--glyph-check);
+  mask-image: var(--glyph-check);
+}
+
+/* Partial-answer footer with Continue (agent run limits; mockup "Agent Run Limits Spec Part 2" D2). */
+.bh-partial-footer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--c-warn-soft);
+  color: var(--c-ink);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.bh-partial-footer__icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--c-warn);
+}
+.bh-partial-footer__text {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.bh-partial-footer__text b {
+  font-weight: 650;
+}
+.bh-partial-footer__text span {
+  color: var(--c-warn-ink);
+}
+@media (max-width: 640px) {
+  .bh-partial-footer {
+    flex-wrap: wrap;
+  }
+  .bh-partial-footer .settings-button {
+    width: 100%;
+    min-height: 44px;
+  }
+}

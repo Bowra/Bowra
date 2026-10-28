@@ -1,0 +1,605 @@
+/* ════════════════════════════════════════════════════════════════
+   Plan card · dependency graph view (graph-mode batch 5)
+
+   Ported from docs/sprints/graph-mode/design/batch5/graph.css,
+   based on styles/plan-card.css (cream/terracotta v8 tokens + .pcard shell).
+   No new palette or fonts.
+
+   **The entire sheet is scoped under `.gwrap`** (`.pstep.is-hl` under `.pcard`) — this is a global
+   stylesheet, so bare class names can affect other components: the initial bare `.gcell` hit knowledge-base matrix cells
+   (each cell's class in `components/knowledge/matrix/matrix-grid.tsx` is exactly `gcell`),
+   changing them from horizontal to vertical layout. The class is now `.gnode-cell`, and the entire sheet is scoped.
+
+   Deviations from the design (ledger: docs/sprints/graph-mode/design-review-2026-08-04.md, batch 5 section):
+   ① Role colors use the active `--ag-*` family (the design's `--role-*` was deleted from this repo; see
+      plan-card.css L33-36); do not declare `--role-web` — web search is not a role, but a step's
+      needsWeb flag (the `.gn-web` badge).
+   ② Horizontal scrolling for ≥3 layers: each layer has a 240px minimum + `min-width:max-content` in the scrolling state
+      (only adding `overflow-x` squeezes the first layer to 15px before scrolling can occur); in that state, detail cards
+      also expand inline — `overflow-x:auto` makes `overflow-y` auto too, clipping
+      floating cards.
+   ③ The running shimmer uses background-position animation: no transform movement, so **no
+      clipping is needed**. (The initial `border-radius:inherit` claim of self-contained edges was wrong —
+      border-radius does not clip content; the design's `translateX(-100%)` start was also missing, so the shimmer actually
+      began at the node's center.)
+   ④ Graph↔list linked highlighting uses an inset outline rather than background: the latter overrides `.pstep.running-now` /
+      `.blocked-now` backgrounds, silently breaking the link on the row that needs it most.
+   ⑤ Tokens are declared under `.pcard`, not `:root` (following plan-card.css discipline).
+   ⑥ Verification copy reuses the list's existing `verify_*`, without a second set (otherwise the same card's graph says
+      partially satisfied while its list says partially achieved).
+
+   **Not ported** (outside this batch; recorded rather than silently missing): the design file's entire list-side additions section
+   (`.pstep-idx` / `.precover*` / `.plist-*` / `.pacc*`) — these rebuild list rows and recovery bars,
+   independently of the graph; batch 1's placeholder styles (plan-card.css L421 comment: batch 5 will use Claude
+   design to rebuild them) therefore remain. The list-side rebuild is a separate batch.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────────────────────────
+   Graph shell
+   ───────────────────────────────────────────── */
+.gwrap {
+  margin: 2px 4px 4px;
+  border-radius: var(--r-2, 12px);
+  background: var(--c-surface);
+}
+.gwrap .gtop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 7px;
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-4);
+}
+.gwrap .gtop-lb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-ink-2);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.gwrap .gtop-lb .gm {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--c-ink-4);
+}
+.pcard.is-running .gtop-lb .gm { background: var(--c-accent); }
+.pcard.is-blocked .gtop-lb .gm { background: var(--c-warn); }
+.pcard.is-completed .gtop-lb .gm { background: var(--c-pos); }
+.gwrap .gtop .sp { flex: 1; }
+.gwrap .gtop .mdot {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--c-line);
+  flex: none;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.gwrap .gtop-hint b { color: var(--c-ink-3); font-weight: 600; }
+.gwrap .gtop-btn {
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.03em;
+  color: var(--c-ink-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.14s var(--ease);
+}
+.gwrap .gtop-btn:hover,
+.gwrap .gtop-btn.on {
+  border-color: var(--c-accent-soft);
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+}
+.gwrap .gtop-fold {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--c-ink-4);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+  flex: none;
+}
+.gwrap .gtop-fold:hover { border-color: var(--c-line); color: var(--c-ink-2); }
+.gwrap.folded .gcanvas { display: none; }
+.gwrap.folded .gtop-fold svg { transform: rotate(-90deg); }
+
+.gwrap .gcanvas { position: relative; padding: 4px 12px 12px; }
+/* ★Staircase layout (design 1c, 2026-08-13): layers change from columns to rows, with dependencies expressed by the left
+   numbering column — removing all of the following together:
+     ·Horizontal scrolling (`.is-scroll` + `min-width:max-content` + scroll-snap)
+     ·Its accompanying inline detail-card expansion patch (`overflow-x:auto` also makes `overflow-y`
+       auto, clipping absolutely positioned `.gpop`; see CSS Overflow L3)
+     ·SVG edge layer `.gedges`
+   With vertical layout, the graph is no longer a scroll container; `.gpop` floats normally without any patch. */
+/* Design ↔ implementation class mapping (the translation gate requires traceability). The two-letter abbreviations in the design
+   were drafting shortcuts; the product convention is a `g*` prefix, so implementation renames them accordingly, recorded here:
+     Design .sw → .gsteps      Design .sr → .gstep-row    Design .sg → .gstep-gut
+     Design .sn → .gstep-ring  Design .sv → .gstep-link   Design .sb → .gstep-body
+     Design .sc → .gstep-cap
+   Source: Claude Design project 7803d69a, Plan Graph 1c Detail.dc.html, sections 2a-2e. */
+.gwrap .gsteps { display: flex; flex-direction: column; }
+.gwrap .gstep-row { display: flex; gap: 9px; }
+.gwrap .gstep-gut { flex: none; width: 22px; display: flex; flex-direction: column; align-items: center; }
+.gwrap .gstep-ring {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink-4);
+  font: 700 0.59375rem/1rem var(--f-ui, system-ui);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gwrap .gstep-ring.is-running { border-color: var(--c-accent); color: var(--c-accent); background: color-mix(in srgb, var(--c-accent) 8%, var(--c-surface)); }
+.gwrap .gstep-ring.is-done { border-color: var(--c-pos); color: var(--c-pos); }
+/* The connector expresses the condition of the baton passed from this layer to the next. Its four states also differ in shape (dashed vs solid),
+   not only color (brief ⑤-4 a11y: states must not be distinguished solely by color). */
+.gwrap .gstep-link { flex: 1; width: 2px; min-height: 10px; margin: 3px 0; border-radius: 2px; background: var(--c-line); }
+.gwrap .gstep-link.is-done { background: color-mix(in srgb, var(--c-pos) 45%, var(--c-line)); }
+.gwrap .gstep-link.is-running { background: linear-gradient(var(--c-accent), var(--c-line)); }
+.gwrap .gstep-link.is-broken { background: repeating-linear-gradient(var(--c-err) 0 3px, transparent 3px 6px); }
+.gwrap .gstep-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding-bottom: 12px; }
+.gwrap .gstep-cap { display: flex; align-items: center; gap: 6px; font: 600 0.65625rem/1.4 var(--f-ui, system-ui); color: var(--c-ink-4); }
+.gwrap .gstep-broke { color: var(--c-warn); font-weight: 600; }
+/* `.glayer` is now a modifier on `.gstep-body`, no longer a column. The column-era
+   `flex:1 1 240px; min-width:240px` must go — keeping it pushes nodes outside
+   a narrow 360px card, mirroring the overflow this change aims to fix. */
+.gwrap .glayer { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.gwrap .glayer.is-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.gwrap .gnode-cell { display: flex; flex-direction: column; }
+/* The original parallel vertical track (.is-par::before) was removed: the left numbering column's circles+connectors
+   express the same information more clearly; two adjacent vertical lines would compete. */
+
+/* ─────────────────────────────────────────────
+   Nodes
+   ───────────────────────────────────────────── */
+.gwrap .gnode {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 9px 0 7px;
+  border: 1px solid var(--c-line);
+  border-radius: 9px;
+  background: var(--c-surface);
+  cursor: pointer;
+  transition:
+    border-color 0.2s var(--ease),
+    background-color 0.28s var(--ease),
+    box-shadow 0.18s var(--ease),
+    opacity 0.2s var(--ease);
+}
+.gwrap .gnode:hover { box-shadow: var(--shadow-2); }
+.gwrap .gnode:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.gwrap .gn-ic {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.gwrap .gn-tx { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 5px; overflow: hidden; }
+.gwrap .gn-name {
+  font-size: 0.78125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  letter-spacing: -0.002em;
+  white-space: nowrap;
+}
+.gwrap .gn-topic {
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.gwrap .gn-topic::before { content: "· "; }
+.gwrap .gn-marks { flex: none; display: flex; align-items: center; gap: 5px; }
+/* Web search badge (deviation ③: a needsWeb flag, not a role identity color) */
+.gwrap .gn-web { flex: none; display: grid; place-items: center; color: var(--c-ink-4); }
+/* Verification badge — glyph only (full text in the detail card); separate from state colors to avoid confusion with failure */
+.gwrap .gn-vf {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--f-mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  flex: none;
+}
+.gwrap .gn-vf.ok { color: var(--c-pos); background: var(--c-pos-soft); }
+.gwrap .gn-vf.part { color: var(--c-ink-3); background: var(--c-surface-2); }
+.gwrap .gn-vf.unmet { color: var(--c-err); border: 1px solid var(--c-err-soft); background: var(--c-surface); }
+.gwrap .gn-vf.none { color: var(--c-ink-4); border: 1px dashed var(--c-line); background: transparent; }
+/* State glyph — shape first, color second */
+.gwrap .gn-st {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--c-ink-4);
+}
+/* Reuse plan-card.css keyframes pc-spin / pc-shimmer (the design calls them spin/shimmer;
+   this repo has no keyframes with those names, so copying them would silently disable animation). */
+.gwrap .gn-st .spin {
+  width: 11px;
+  height: 11px;
+  border: 1.6px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pc-spin 0.8s linear infinite;
+}
+.gwrap .gn-stamp {
+  flex: none;
+  font-family: var(--f-mono);
+  font-size: 0.53125rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border: 1px solid var(--c-accent-soft);
+  border-radius: var(--r-pill);
+  padding: 1px 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.gwrap .gn-stamp svg { width: 8px; height: 8px; }
+
+/* Eight node states */
+.gwrap .gnode.is-pending { background: var(--c-surface); border-color: var(--c-line); }
+.gwrap .gnode.is-pending .gn-name { color: var(--c-ink-2); }
+.gwrap .gnode.is-pending .gn-st { color: var(--c-ink-4); }
+.gwrap .gnode.is-running { border-color: var(--c-accent); background: var(--c-accent-tint); }
+.gwrap .gnode.is-running .gn-st { color: var(--c-accent); }
+/* Deviation ①: shimmer contains its own edges (border-radius:inherit); do **not** add overflow:hidden to .gnode
+   — that would clip the entire .gpop positioned outside the node. */
+/* ★Implementation review P2-A: the original `border-radius:inherit` claimed the shimmer contained its own edges —
+   border-radius **does not clip any content**, only rounding the element's own painted box; this repo's
+   `pc-shimmer` has only a to frame (translateX(100%)), starting at the element's current transform=identity,
+   so the shimmer starts at the node's center and slides right, unlike the design's sweep from the left across the whole node.
+   Use background-position animation: no transform movement, so **no clipping is needed**,
+   avoiding another overflow for edge containment (the exact P1-2 pitfall). */
+.gwrap .gnode.is-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.62), transparent);
+  background-size: 200% 100%;
+  background-position: 150% 0;
+  animation: pg-shimmer 1.6s linear infinite;
+}
+@keyframes pg-shimmer { to { background-position: -50% 0; } }
+.gwrap .gnode.is-done { border-color: var(--c-pos-soft); background: var(--c-pos-tint); }
+.gwrap .gnode.is-done .gn-st { color: var(--c-pos); }
+.gwrap .gnode.is-failed {
+  border-color: var(--c-err);
+  background: var(--c-err-tint);
+  box-shadow: 0 0 0 3px var(--c-err-tint);
+}
+.gwrap .gnode.is-failed .gn-st { color: var(--c-err); }
+.gwrap .gnode.is-failed .gn-name { color: var(--c-err); }
+.gwrap .gnode.is-blocked { border-color: var(--c-warn); background: var(--c-warn-tint); }
+.gwrap .gnode.is-blocked .gn-st { color: var(--c-warn); }
+.gwrap .gnode.is-skipped {
+  background: repeating-linear-gradient(45deg, var(--c-surface) 0 4px, var(--c-surface-2) 4px 8px);
+  border-color: var(--c-line);
+  opacity: 0.72;
+}
+.gwrap .gnode.is-skipped .gn-name {
+  color: var(--c-ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-ink-4);
+}
+.gwrap .gnode.is-skipped .gn-ic { filter: saturate(0.25); }
+.gwrap .gnode.is-superseded {
+  border-style: dashed;
+  border-color: var(--c-line);
+  background: transparent;
+  opacity: 0.55;
+  cursor: default;
+}
+.gwrap .gnode.is-superseded .gn-name {
+  color: var(--c-ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-ink-4);
+}
+.gwrap .gnode.is-superseded .gn-ic { filter: saturate(0.15); }
+/* proposed state: unchecked steps */
+.gwrap .gnode.is-off { border-style: dashed; opacity: 0.48; background: transparent; }
+.gwrap .gnode.is-off .gn-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--c-ink-4);
+  color: var(--c-ink-3);
+}
+/* Selection/hover echo linked to the list */
+.gwrap .gnode.is-linked { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-tint); }
+
+/* Ghost old-step annotation */
+.gwrap .gghost-note {
+  font-family: var(--f-mono);
+  font-size: 0.5625rem;
+  color: var(--c-ink-4);
+  letter-spacing: 0.03em;
+  margin: -3px 0 1px 2px;
+}
+.gwrap .gsup-slot { display: flex; flex-direction: column; gap: 3px; }
+
+/* Broken downstream annotation */
+.gwrap .gcause {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--f-mono);
+  font-size: 0.59375rem;
+  color: var(--c-warn);
+  letter-spacing: 0.02em;
+  margin-top: 4px;
+}
+.gwrap .gcause svg { width: 11px; height: 11px; flex: none; }
+
+/* ─────────────────────────────────────────────
+   Edges
+   ───────────────────────────────────────────── */
+.gwrap .ge { fill: none; stroke: var(--c-line); stroke-width: 1.5; stroke-linecap: round; }
+.gwrap .ge-head {
+  fill: none;
+  stroke: var(--c-line);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gwrap .ge.is-done,
+.gwrap .ge-head.is-done { stroke: var(--c-pos-soft); }
+.gwrap .ge.is-active,
+.gwrap .ge-head.is-active { stroke: var(--c-accent); stroke-width: 2; }
+.gwrap .ge.is-active { stroke-dasharray: 5 5; animation: gflow 1.1s linear infinite; }
+@keyframes gflow { to { stroke-dashoffset: -20; } }
+.gwrap .ge.is-broken,
+.gwrap .ge-head.is-broken { stroke: var(--c-err); stroke-width: 1.75; stroke-dasharray: 4 4; }
+.gwrap .gbreak circle { fill: var(--c-surface); stroke: var(--c-err); stroke-width: 1.5; }
+.gwrap .gbreak path { stroke: var(--c-err); stroke-width: 1.6; fill: none; stroke-linecap: round; }
+
+/* ─────────────────────────────────────────────
+   Node detail card (desktop hover / keyboard focus / tap)
+   ───────────────────────────────────────────── */
+.gwrap .gpop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 7px);
+  width: 288px;
+  z-index: 30;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2, 12px);
+  box-shadow: var(--shadow-float, var(--shadow-2));
+  padding: 11px 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease);
+  cursor: default;
+  text-align: left;
+}
+/* ★Implementation review P1-4/P1-B: previously `:focus-visible` — once focus enters a recovery button in the detail card,
+   the node loses focus-visible → the overlay immediately becomes visibility:hidden, making the button invisible and
+   unreachable by Tab (observed activeElement returning to body). Must use :focus-within. */
+.gwrap .gnode:hover .gpop,
+.gwrap .gnode:focus-within .gpop,
+.gwrap .gnode.is-open .gpop { opacity: 1; visibility: visible; transform: none; }
+.gwrap .gpop-h { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+.gwrap .gpop-h .nm { font-size: 0.78125rem; font-weight: 600; color: var(--c-ink); }
+.gwrap .gpop-h .sp { flex: 1; }
+.gwrap .gpop-goal { font-size: 0.75rem; color: var(--c-ink-2); line-height: 1.55; text-wrap: pretty; }
+.gwrap .gpop-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line-2);
+}
+.gwrap .gpop-k { font-family: var(--f-mono); font-size: 0.59375rem; color: var(--c-ink-4); letter-spacing: 0.05em; }
+.gwrap .gpop-acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--c-line-2);
+}
+.gwrap .gpop-note {
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  color: var(--c-warn);
+  line-height: 1.5;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line-2);
+}
+/* Nodes outside the first layer open detail cards to the left, avoiding card overflow */
+.gwrap .glayer.is-fan .gpop { left: auto; right: 0; }
+
+/* Verification pill (full-text state within the detail card) */
+.pcard .vpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.pcard .vpill.ok { color: var(--c-pos); background: var(--c-pos-soft); }
+.pcard .vpill.part { color: var(--c-ink-3); background: var(--c-surface-2); }
+.pcard .vpill.unmet { color: var(--c-err); background: var(--c-surface); border: 1px solid var(--c-err-soft); }
+.pcard .vpill.none { color: var(--c-ink-4); background: transparent; border: 1px dashed var(--c-line); }
+
+/* Recovery actions (within the detail card · same source and copy as the list recovery bar) */
+.gwrap .gact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.71875rem;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+.gwrap .gact svg { width: 12px; height: 12px; }
+.gwrap .gact.primary { background: var(--c-accent); border-color: transparent; color: #fff; }
+.gwrap .gact.primary:hover { background: var(--c-accent-hover); }
+.gwrap .gact.warn { border-color: var(--c-warn); color: var(--c-warn); }
+.gwrap .gact:hover:not(.primary) { border-color: var(--c-ink-3); color: var(--c-ink); }
+
+/* ─────────────────────────────────────────────
+   Mobile (container query · driven by card width, not viewport)
+   ───────────────────────────────────────────── */
+@container (max-width: 460px) {
+  .gwrap .gcanvas { padding: 2px 8px 10px; }
+  .gwrap .glayer { gap: 6px; }
+  .gwrap .glayer.is-grid { grid-template-columns: minmax(0, 1fr); }
+  /* ★Narrow-card nodes use two lines (design 2d): role name on one line, deliverable on a separate wrapping line.
+     The user's report of narrow horizontal space manifested as ellipsis truncating the deliverable on narrow cards
+     (device measurement: .gn-topic needed 179px but had only 173px) — two lines eliminate that truncation.
+     Wide cards retain one line: 840px is sufficient, with no need to trade height. */
+  .gwrap .gn-tx { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .gwrap .gn-topic { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.5; }
+  /* `· ` separates the **inline** layout (role name · deliverable on one line). With two lines it hangs at
+     the second line's start, reading like a list item rather than a separator — caught by device visual diff while all unit tests passed. */
+  .gwrap .gn-topic::before { content: none; }
+  .gwrap .gnode { min-height: 38px; }
+  /* Touch has no hover: details expand inline (tap → .is-open), no longer floating */
+  .gwrap .gpop {
+    position: static;
+    width: auto;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    box-shadow: none;
+    margin-top: 6px;
+    display: none;
+  }
+  .gwrap .glayer.is-fan .gpop { right: auto; }
+  .gwrap .gnode.is-open { flex-wrap: wrap; }
+  .gwrap .gnode.is-open .gpop {
+    display: block;
+    flex: 0 0 100%;
+    border-color: var(--c-line-2);
+    background: var(--c-surface-2);
+  }
+  .gwrap .gpop-acts .gact { min-height: 44px; padding: 0 13px; }
+}
+
+/* Graph ↔ list link: the selected step is echoed in the list */
+/* ★Implementation review P2-1: background highlighting overrode `.pstep.running-now` (same color) and
+   `.blocked-now` (warn background) — clicking a running node produced **no response** in its list row, silently breaking
+   the link on the row that needs it most. Use an inset outline channel that does not compete for background. */
+.pcard .pstep.is-hl {
+  box-shadow: inset 0 0 0 2px var(--c-accent);
+  border-radius: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gwrap .gnode.is-running::after { animation: none; opacity: 0; }
+  .gwrap .gnode.is-running { background: var(--c-accent-soft); }
+  .gwrap .ge.is-active { animation: none; stroke-dasharray: none; }
+  .gwrap .gn-st .spin { animation: none; }
+}
+
+/* ─────────────────────────────────────────────
+   List-side additions (the design graph.css second half; proper rebuild of batch 1 placeholders)
+   — The batch 1 comment in plan-card.css was precisely: batch 5 will use Claude design to rebuild them.
+   ───────────────────────────────────────────── */
+
+/* Acceptance criteria: individual mono entries, rather than one crowded body-text line (.pacc / .pacc-r / .mk) */
+.pcard .pacc { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.pcard .pacc-r {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.pcard .pacc-r .mk { flex: none; width: 11px; color: var(--c-ink-4); }
+.pcard .pacc-label {
+  font-family: var(--f-mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.05em;
+  color: var(--c-ink-4);
+  margin-top: 4px;
+}
+
+/* Graph / list areas each have a name, showing users two layers of expression in the same card */
+.pcard .plist-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  font-family: var(--f-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: var(--c-ink-4);
+  border-top: 1px solid var(--c-line-2);
+  margin-top: 4px;
+}
+.pcard .plist-hd b { color: var(--c-ink-2); font-weight: 600; }
+.pcard .plist-hd .sp { flex: 1; }
+
+/* Recovery bar failure state: the design assigns failed to err and blocked to warn (`.precover` /
+   `.precover.warn`). This box was already implemented as `.pblock` in batch 2 and reused by the `.previse`
+   preview panel; **keep class names, only add failure colors** (renaming would affect preview and existing regression anchors;
+   deviation ledger: design-review batch 5). Before this, failed and blocked were both amber, while the graph
+   already separated err/warn, giving the same step two colors on one card — the gap this addition closes. */
+.pcard .pblock.is-failed { border-color: var(--c-err-soft); background: var(--c-err-tint); }
+.pcard .pblock.is-failed .bi { color: var(--c-err); }
+.pcard .pblock.is-failed .pblock-tx b { color: var(--c-err); }
+
+/* Verification pill in list rows: `.pstep-main` is a flex column with default align-items:stretch,
+   so inline-flex pills stretch to the full row width (batch 1's placeholder badge had no background, hiding the issue). */
+.pcard .pstep .vpill { align-self: flex-start; margin-top: 4px; }

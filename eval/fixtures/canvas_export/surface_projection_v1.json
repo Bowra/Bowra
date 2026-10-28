@@ -1,0 +1,592 @@
+{
+  "title": "24-kind surface contract",
+  "projection_token": "sha256:f5f54ea0297d984112e542c895d4d8d209569909575e4420ed56566c9bbc3012",
+  "surface_token": "sha256:b34bbc9e73de5f60f5082467ac4a1498173c4284c42ab2215dac1ed5c8b2ef18",
+  "sections": [
+    {
+      "id": "sec_code",
+      "seq": 1,
+      "kind": "code_block",
+      "rev": 1,
+      "payload": {
+        "call_id": "call_1",
+        "lang": "python",
+        "code": "print(1)"
+      }
+    },
+    {
+      "id": "sec_chart",
+      "seq": 2,
+      "kind": "chart",
+      "rev": 2,
+      "payload": {
+        "anchor_heading": "Revenue",
+        "data_source": {
+          "artifact_id": "art_chart",
+          "workspace_id": "dw_primary"
+        },
+        "spec": {
+          "kind": "bar",
+          "title": "Revenue by region",
+          "row_count": 2,
+          "columns": [
+            {
+              "key": "region",
+              "header": "Region",
+              "type": "categorical",
+              "role": "x"
+            },
+            {
+              "key": "revenue",
+              "header": "Revenue",
+              "type": "numeric",
+              "role": "y",
+              "unit": "USD"
+            }
+          ],
+          "rows": [
+            {
+              "region": "APAC",
+              "revenue": 120.0,
+              "ZKey": 3.3333333333333335,
+              "中Key": 0.30000000000000004
+            },
+            {
+              "region": "EMEA",
+              "revenue": 90.0,
+              "ZKey": 2.5,
+              "中Key": 0.5
+            }
+          ],
+          "show_legend": false
+        }
+      }
+    },
+    {
+      "id": "sec_data",
+      "seq": 3,
+      "kind": "data_table",
+      "rev": 1,
+      "payload": {
+        "caption": "Data",
+        "columns": [
+          {
+            "key": "region",
+            "label": "Region"
+          }
+        ],
+        "rows": [
+          {
+            "region": "APAC"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_eyebrow",
+      "seq": 4,
+      "kind": "eyebrow",
+      "rev": 1,
+      "payload": {
+        "text": "Verified Intelligence"
+      }
+    },
+    {
+      "id": "sec_h1",
+      "seq": 5,
+      "kind": "h1",
+      "rev": 1,
+      "payload": {
+        "text": "Quarterly review"
+      }
+    },
+    {
+      "id": "sec_meta",
+      "seq": 6,
+      "kind": "meta",
+      "rev": 1,
+      "payload": {
+        "pills": [
+          "Q2"
+        ]
+      }
+    },
+    {
+      "id": "sec_kpi",
+      "seq": 7,
+      "kind": "kpi_row",
+      "rev": 1,
+      "payload": {
+        "cells": [
+          {
+            "label": "Revenue",
+            "value": 120
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_deck",
+      "seq": 8,
+      "kind": "deck",
+      "rev": 1,
+      "payload": {
+        "markdown": "Executive summary"
+      }
+    },
+    {
+      "id": "sec_section",
+      "seq": 9,
+      "kind": "section",
+      "rev": 1,
+      "payload": {
+        "label": "Part I",
+        "h2": "Overview",
+        "body": []
+      }
+    },
+    {
+      "id": "sec_narrative",
+      "seq": 10,
+      "kind": "narrative",
+      "rev": 3,
+      "payload": {
+        "markdown": "Revenue grew 12%."
+      }
+    },
+    {
+      "id": "sec_callout",
+      "seq": 13,
+      "kind": "callout",
+      "rev": 1,
+      "payload": {
+        "label": "Watch",
+        "markdown": "Margin pressure"
+      }
+    },
+    {
+      "id": "sec_next",
+      "seq": 14,
+      "kind": "next_list",
+      "rev": 1,
+      "payload": {
+        "items": [
+          {
+            "text": "Validate pricing"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_datarc",
+      "seq": 15,
+      "kind": "datarc_iframe",
+      "rev": 1,
+      "payload": {
+        "cardUrl": "https://example.invalid/card",
+        "title": "Datarc card"
+      }
+    },
+    {
+      "id": "sec_html",
+      "seq": 16,
+      "kind": "html_artifact",
+      "rev": 1,
+      "payload": {
+        "artifact_id": "art_html",
+        "title": "Interactive analysis",
+        "data": {
+          "value": 1
+        }
+      }
+    },
+    {
+      "id": "sec_external",
+      "seq": 17,
+      "kind": "external_iframe",
+      "rev": 1,
+      "payload": {
+        "url": "https://example.invalid",
+        "title": "External dashboard"
+      }
+    },
+    {
+      "id": "sec_image",
+      "seq": 18,
+      "kind": "image",
+      "rev": 1,
+      "payload": {
+        "artifact_id": "art_image",
+        "caption": "Store map"
+      }
+    },
+    {
+      "id": "sec_design",
+      "seq": 19,
+      "kind": "design",
+      "rev": 2,
+      "payload": {
+        "title": "Campaign",
+        "size_preset": "square",
+        "canvas_width": 1080,
+        "canvas_height": 1080,
+        "background": {
+          "type": "artifact",
+          "artifact_id": "art_bg"
+        },
+        "layers": []
+      }
+    },
+    {
+      "id": "sec_spec",
+      "seq": 20,
+      "kind": "spec_block",
+      "rev": 1,
+      "payload": {
+        "format": "graph",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "sec_sources",
+      "seq": 22,
+      "kind": "sources",
+      "rev": 1,
+      "payload": {
+        "label": "Sources",
+        "entries": [
+          {
+            "label": "Warehouse"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_insight",
+      "seq": 23,
+      "kind": "insight_card",
+      "rev": 1,
+      "payload": {
+        "title": "Growth accelerated",
+        "evidence": [
+          {
+            "kind": "chart",
+            "chart_section_id": "sec_chart"
+          },
+          {
+            "kind": "chart",
+            "chart_section_id": "sec_image"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_recommendations",
+      "seq": 24,
+      "kind": "recommendations",
+      "rev": 1,
+      "payload": {
+        "items": [
+          {
+            "priority": "P0",
+            "action": "Protect margin"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sec_orphan_chart",
+      "seq": 25,
+      "kind": "chart",
+      "rev": 1,
+      "payload": {
+        "spec": {
+          "kind": "line",
+          "title": "Orphan trend",
+          "row_count": 2,
+          "columns": [
+            {
+              "key": "period",
+              "header": "Period",
+              "type": "date",
+              "role": "x"
+            },
+            {
+              "key": "value",
+              "header": "Value",
+              "type": "numeric",
+              "role": "y"
+            }
+          ],
+          "rows": [
+            {
+              "period": "2026-06",
+              "value": 1
+            },
+            {
+              "period": "2026-07",
+              "value": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sec_hidden",
+      "seq": 26,
+      "kind": "narrative",
+      "rev": 1,
+      "hidden_for_chat_mode": true,
+      "payload": {
+        "markdown": "Chat-only"
+      }
+    },
+    {
+      "id": "sec_history",
+      "seq": 27,
+      "kind": "narrative",
+      "rev": 1,
+      "superseded": true,
+      "payload": {
+        "markdown": "Old report"
+      }
+    },
+    {
+      "id": "sec_quarantined",
+      "seq": 28,
+      "kind": "narrative",
+      "rev": 1,
+      "quarantined": true,
+      "payload": {
+        "markdown": "Untrusted number"
+      }
+    }
+  ],
+  "expected_entries": [
+    {
+      "section_id": "sec_eyebrow",
+      "section_rev": 1,
+      "order": 0,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "eyebrow",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_h1",
+      "section_rev": 1,
+      "order": 1,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "h1",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_meta",
+      "section_rev": 1,
+      "order": 2,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "meta",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_kpi",
+      "section_rev": 1,
+      "order": 3,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "kpi_row",
+      "parity_requirement": "typed_data"
+    },
+    {
+      "section_id": "sec_deck",
+      "section_rev": 1,
+      "order": 4,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "deck",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_section",
+      "section_rev": 1,
+      "order": 5,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "section",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_narrative",
+      "section_rev": 3,
+      "order": 6,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "narrative",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_callout",
+      "section_rev": 1,
+      "order": 7,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "callout",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_next",
+      "section_rev": 1,
+      "order": 8,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "next_list",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_datarc",
+      "section_rev": 1,
+      "order": 9,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "datarc_iframe",
+      "parity_requirement": "interaction_fallback"
+    },
+    {
+      "section_id": "sec_html",
+      "section_rev": 1,
+      "order": 10,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "html_artifact",
+      "parity_requirement": "interaction_fallback"
+    },
+    {
+      "section_id": "sec_external",
+      "section_rev": 1,
+      "order": 11,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "external_iframe",
+      "parity_requirement": "interaction_fallback"
+    },
+    {
+      "section_id": "sec_design",
+      "section_rev": 2,
+      "order": 12,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "design",
+      "parity_requirement": "exact_visual"
+    },
+    {
+      "section_id": "sec_spec",
+      "section_rev": 1,
+      "order": 13,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "spec_block",
+      "parity_requirement": "exact_visual"
+    },
+    {
+      "section_id": "sec_insight",
+      "section_rev": 1,
+      "order": 14,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "insight_card",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_chart",
+      "section_rev": 2,
+      "order": 15,
+      "placement": "report_embedded",
+      "parent_section_id": "sec_insight",
+      "effective_kind": "chart",
+      "parity_requirement": "exact_visual"
+    },
+    {
+      "section_id": "sec_image",
+      "section_rev": 1,
+      "order": 16,
+      "placement": "report_embedded",
+      "parent_section_id": "sec_insight",
+      "effective_kind": "image",
+      "parity_requirement": "exact_visual"
+    },
+    {
+      "section_id": "sec_recommendations",
+      "section_rev": 1,
+      "order": 17,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "recommendations",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_orphan_chart",
+      "section_rev": 1,
+      "order": 18,
+      "placement": "report_body",
+      "parent_section_id": null,
+      "effective_kind": "chart",
+      "parity_requirement": "exact_visual"
+    },
+    {
+      "section_id": "sec_sources",
+      "section_rev": 1,
+      "order": 19,
+      "placement": "sources",
+      "parent_section_id": null,
+      "effective_kind": "sources",
+      "parity_requirement": "semantic_content"
+    },
+    {
+      "section_id": "sec_data",
+      "section_rev": 1,
+      "order": 20,
+      "placement": "data_tab",
+      "parent_section_id": null,
+      "effective_kind": "data_table",
+      "parity_requirement": "typed_data"
+    },
+    {
+      "section_id": "sec_code",
+      "section_rev": 1,
+      "order": 21,
+      "placement": "code_tab",
+      "parent_section_id": null,
+      "effective_kind": "code_block",
+      "parity_requirement": "semantic_content"
+    }
+  ],
+  "expected_exclusions": [
+    {
+      "section_id": "sec_hidden",
+      "reason": "hidden_for_chat_mode"
+    },
+    {
+      "section_id": "sec_history",
+      "reason": "superseded_history"
+    },
+    {
+      "section_id": "sec_quarantined",
+      "reason": "quarantined_rejected"
+    }
+  ],
+  "expected_visual_input_sha256": {
+    "sec_design": "sha256:cf22c97dff6482c4eca8839797e3b0ce511ba880285630a85a785b38ef62aff3",
+    "sec_spec": "sha256:322a9a6ce29a5653b6670d0a1bd7e82cf2536c24372fb40e0e8398a11a0bfa83",
+    "sec_chart": "sha256:e34d7923ed2731e01d16d67cf25cff2c9272f2e7aa6177edb07fca4410a1bd92",
+    "sec_image": "sha256:16675e32f2eb945294ff1988337394fe6cb1d7b676d288f368bc1021510613a8",
+    "sec_orphan_chart": "sha256:c89bae6b3e216c7aabc2e88f31e43c1462ad8f77cdc7364a73ef8f84aadee495"
+  }
+}

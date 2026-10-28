@@ -1,0 +1,6502 @@
+/* ─────────────────────────────────────────────────────────────
+ * Legacy appearance: inline-style constants moved to classes (UI refresh batch 1)
+ *
+ * Base classes for controls that used inline styles; the interface rules in styles/ui-refresh*.css (starting with
+ * :root:root) restyle them. Declarations those rules always override have been deleted; what remains is still used.
+ * ───────────────────────────────────────────────────────────── */
+
+/* Composer model trigger: original inline styles moved to legacy layer for refresh overrides. */
+.composer-v2__model-trigger {
+  all: unset;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.composer-v2__model-trigger.is-unavailable {
+  cursor: not-allowed;
+}
+.composer-v2__model-chevron {
+  opacity: 0.6;
+}
+
+/* Space settings · members (components/settings/members.tsx) */
+.legacy-input-members {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+/* Team settings · tools (components/settings/tools/tools-manager.tsx) */
+.legacy-input-tools {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 11px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+/* Profile (components/settings/profile.tsx) */
+.legacy-input-profile {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-family: var(--font-v2-sans);
+  min-width: 180px;
+}
+
+/* System built-in agents (components/settings/builtin-subagents-section.tsx) */
+.legacy-input-builtin-subagents {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  font-size: 0.8125rem;
+  box-sizing: border-box;
+}
+
+/* Email service (components/settings/email-config.tsx) */
+.legacy-input-email {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+.legacy-input-email--select {
+  appearance: auto;
+}
+
+/* Space localization (components/settings/workspace-i18n.tsx) */
+.legacy-input-workspace-i18n {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-bg);
+  font-size: 0.8125rem;
+  font-family: var(--font-v2-sans);
+}
+
+/* Credits · user-table filters (components/admin/credits/users-table.tsx) */
+.legacy-input-credits-table {
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: var(--font-v2-sans);
+}
+
+/* Credits · grant / edit user dialogs (grant-credit-modal.tsx, edit-user-modal.tsx) */
+.legacy-input-credits-modal {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-family: var(--font-v2-mono);
+  background: var(--c-bg);
+  color: var(--c-ink);
+}
+
+/* Credits · team quota dialog (team-quota-modal.tsx) */
+.legacy-input-team-quota {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  color: var(--c-ink);
+  background: var(--c-bg);
+  font: var(--fs-sm) var(--font-v2-sans);
+}
+
+/* Credits dialog buttons (edit-user / grant-credit / period-reset / tier-defaults) */
+.credits-btn {
+  all: unset;
+  cursor: pointer;
+  padding: 6px 14px;
+  font-size: 0.8125rem;
+}
+.credits-btn--primary {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  border-radius: 6px;
+  font-weight: 500;
+}
+.credits-btn--secondary {
+  background: transparent;
+  color: var(--c-ink-3);
+}
+.credits-btn--danger {
+  background: var(--c-err);
+  color: var(--c-err-on);
+  border-radius: 6px;
+  font-weight: 500;
+}
+.credits-btn--danger:disabled {
+  opacity: 0.5;
+}
+
+/* Report editing buttons (components/canvas/edit-mode-toggle.tsx):
+ * edit report / done, exit editing, retry save */
+.report-edit-btn {
+  padding: 6px 14px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  cursor: pointer;
+  font-weight: 500;
+}
+.report-edit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.report-edit-btn--unavailable {
+  color: var(--c-ink-4);
+}
+.report-edit-btn--active {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+.report-edit-btn--retry {
+  margin-left: auto;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--c-err) 36%, var(--c-line));
+  border-radius: 4px;
+  background: var(--c-err-soft);
+  color: var(--c-err-ink);
+  cursor: pointer;
+  font-weight: inherit;
+}
+
+/* ── Batch 2: switches (original inline values copied verbatim; ui-refresh.css .ui-switch overrides them) ── */
+
+/* Scheduled tasks · enable / email switches (components/settings/scheduled.tsx original S.tog / S.togKnob) */
+.legacy-switch-sched {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--c-surface-3, var(--c-surface-2));
+  border: 1px solid var(--c-line);
+  cursor: pointer;
+  transition: all 160ms;
+  flex: none;
+  padding: 0;
+}
+.legacy-switch-sched.is-on-pos {
+  background: var(--c-pos);
+  border-color: var(--c-pos);
+}
+.legacy-switch-sched.is-on-accent {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.legacy-switch-sched-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-1);
+  transition: transform 160ms;
+}
+.legacy-switch-sched-knob.is-on {
+  transform: translateX(16px);
+}
+
+/* Team settings · tool enablement (components/settings/tools/tools-manager.tsx) */
+.legacy-switch-tools {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+  opacity: 1;
+  transition: background 160ms, border-color 160ms;
+}
+.legacy-switch-tools.is-on {
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent);
+}
+.legacy-switch-tools.is-inert {
+  cursor: default;
+}
+.legacy-switch-tools.is-disabled {
+  opacity: 0.5;
+}
+.legacy-switch-tools-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--c-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: left 170ms;
+}
+.legacy-switch-tools-knob.is-on {
+  left: 18px;
+  background: var(--c-accent-ink);
+}
+
+/* Feedback inbox · auto-organize switch (components/settings/feedback-inbox-content.tsx) */
+.legacy-switch-coach {
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  border: 1px solid var(--c-line);
+  padding: 0;
+  position: relative;
+  background: var(--c-surface-2);
+  cursor: pointer;
+  opacity: 1;
+}
+.legacy-switch-coach.is-on {
+  background: var(--c-accent);
+}
+.legacy-switch-coach.is-busy {
+  cursor: default;
+  opacity: 0.6;
+}
+.legacy-switch-coach-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--c-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: left 0.15s;
+}
+.legacy-switch-coach-knob.is-on {
+  left: 16px;
+}
+
+/* ── Batch 2: badges (original inline values copied verbatim; ui-refresh.css badge rules override them) ── */
+
+/* Scheduled tasks · state (components/settings/scheduled.tsx original S.badge / badgeActive / badgePaused / pip) */
+.legacy-badge-sched {
+  font-family: var(--font-v2-mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legacy-badge-sched.is-active {
+  color: var(--c-pos-ink);
+  background: var(--c-pos-soft);
+  border: 1px solid var(--c-pos-line);
+}
+.legacy-badge-sched.is-paused {
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+}
+.legacy-badge-sched-pip {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.legacy-badge-sched.is-active .legacy-badge-sched-pip {
+  background: var(--c-pos);
+}
+.legacy-badge-sched.is-paused .legacy-badge-sched-pip {
+  background: var(--c-ink-4);
+}
+
+/* Scheduled tasks · consecutive failures (original S.fail / S.failCrit) */
+.legacy-badge-sched-fail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border: 1px solid var(--c-warn-line);
+  border-radius: 999px;
+  padding: 2px 9px;
+  width: max-content;
+}
+.legacy-badge-sched-fail.is-crit {
+  color: var(--c-err-ink);
+  background: var(--c-err-soft);
+  border-color: var(--c-err-line);
+}
+
+/* Team settings · tools: scope chip/type badge (components/settings/tools/tools-manager.tsx) */
+.legacy-badge-tool-scope {
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 24%, var(--c-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-accent) 7%, var(--c-surface));
+  color: var(--c-ink-2);
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.legacy-badge-tool-kind {
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.legacy-badge-tool-kind.is-mcp {
+  color: var(--c-info);
+  border: 1px solid var(--c-info);
+  background: color-mix(in srgb, var(--c-info) 10%, transparent);
+}
+.legacy-badge-tool-kind.is-openapi {
+  color: var(--c-accent);
+  border: 1px solid var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+}
+
+/* ── UI refresh batch 3: overlays (menus, Toasts) original inline styles ───────────────
+ * Identical word for word to each file's original inline style; original onMouseEnter / onMouseLeave background changes
+ * become :hover. styles/ui-refresh.css .ui-menu / .rho-toast overrides them. */
+
+/* Composer model selection (components/chat/model-picker.tsx) */
+.legacy-menu-model {
+  box-sizing: border-box;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 0;
+  overflow: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+}
+.legacy-menu-model-stale {
+  color: #b54708;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--c-line);
+  margin-bottom: 4px;
+}
+.legacy-menu-model-item {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border-radius: 4px;
+  min-height: 44px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-family: var(--font-v2-mono);
+  background: transparent;
+  color: var(--c-ink-2);
+}
+.legacy-menu-model-item[data-active="true"] {
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+}
+.legacy-menu-model-item[data-hover-bg="true"]:not([data-active="true"]):hover {
+  background: var(--c-surface-2);
+}
+.legacy-menu-model-item--default {
+  margin-bottom: 4px;
+}
+.legacy-menu-model-mark {
+  width: 44px;
+  font-size: 0.625rem;
+}
+.legacy-menu-model-group {
+  margin-bottom: 4px;
+}
+.legacy-menu-model-group-title {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  padding: 4px 10px;
+  letter-spacing: 0.06em;
+  font-family: var(--font-v2-mono);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Provider names: legacy shows JS toUpperCase() version, original case shown only with refresh */
+.legacy-menu-model-provider-upper {
+  display: inline;
+}
+.legacy-menu-model-provider-name {
+  display: none;
+}
+.legacy-menu-model-tag {
+  font-size: 0.5rem;
+  padding: 0 4px;
+  border-radius: 2px;
+  border: 1px solid var(--c-line-2);
+  color: var(--c-ink-3);
+}
+
+/* Space switcher (components/space-picker.tsx) */
+.legacy-menu-space {
+  overflow: auto;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  padding: 6px;
+  font-family: var(--font-v2-sans, inherit);
+  font-size: 0.78125rem;
+}
+.legacy-menu-space-note {
+  padding: 8px 10px;
+  color: var(--c-ink-3);
+}
+.legacy-menu-space-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+  font-size: 0.75rem;
+  font-family: var(--font-v2-sans, inherit);
+}
+.legacy-menu-space-item {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border-radius: var(--r-1, 6px);
+  cursor: pointer;
+  background: transparent;
+  color: var(--c-ink);
+}
+.legacy-menu-space-item[data-active="true"],
+.legacy-menu-space-item:hover {
+  background: var(--c-surface-2);
+}
+.legacy-menu-space-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.legacy-menu-space-name {
+  font-weight: 400;
+}
+.legacy-menu-space-item[data-active="true"] .legacy-menu-space-name {
+  font-weight: 600;
+}
+.legacy-menu-space-id {
+  color: var(--c-ink-3);
+  font-size: 0.5625rem;
+  opacity: 0.55;
+}
+.legacy-menu-space-desc {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Credits user-table row ⋯ (components/admin/credits/users-table.tsx) */
+.legacy-menu-credits {
+  min-width: 200px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  text-align: left;
+}
+.legacy-menu-credits-item {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--c-ink-2);
+  opacity: 1;
+}
+.legacy-menu-credits-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--c-ink-3);
+  opacity: 0.5;
+}
+.legacy-menu-credits-item:not([aria-disabled="true"]):hover {
+  background: var(--c-surface-2);
+}
+
+/* Report selection-toolbar font / size / weight dropdowns (components/canvas/formatting-toolbar.tsx) */
+.legacy-menu-font {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 100px;
+  box-shadow: var(--rc-shadow-float);
+}
+.legacy-menu-font-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  text-align: left;
+  background: transparent;
+  color: var(--c-ink);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: var(--f-sans);
+}
+.legacy-menu-font-item[data-selected="true"] {
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+}
+
+/* Global Toast (components/chat/toast-container.tsx) */
+.legacy-toast-container {
+  position: fixed;
+  right: 1rem;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+.legacy-toast-region {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.legacy-toast {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--c-ink);
+  color: var(--c-bg);
+  padding: 10px 10px 10px 14px;
+  border-radius: 12px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(22, 19, 16, 0.14));
+  cursor: pointer;
+  user-select: none;
+}
+.legacy-toast--action {
+  cursor: default;
+}
+.legacy-toast-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+.rho-toast-info .legacy-toast-dot {
+  background: var(--c-cool);
+}
+.legacy-toast-count {
+  opacity: 0.72;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Batch 4: pages/tables. Original inline headers, tables and empty states moved verbatim to classes (base layer);
+ * styles/ui-refresh.css section 外观段第四批 .ui-page-* / .ui-table* / .ui-empty overrides them.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Space settings · space access (components/settings/members.tsx) */
+.legacy-members-page {
+  max-width: 880px;
+}
+.legacy-members-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.75rem;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+.legacy-members-subtitle {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  margin: 0 0 18px;
+}
+.legacy-members-subtitle--last {
+  margin-bottom: 0;
+}
+.legacy-members-section {
+  padding: 18px;
+  margin-top: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+}
+.legacy-members-section-title {
+  font-size: 0.75rem;
+  margin: 0 0 8px;
+  font-family: var(--font-v2-mono);
+}
+.legacy-members-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.legacy-members-cell {
+  padding: 8px;
+  border-bottom: 1px solid var(--c-line);
+  text-align: left;
+}
+
+/* Team settings · no-permission page (components/settings/access-boundary.tsx) */
+.legacy-access-boundary-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.75rem;
+  font-weight: 400;
+  margin: 0 0 8px;
+}
+
+/* Space settings · general (components/settings/space-general.tsx) */
+.legacy-space-general-head {
+  margin-bottom: 20px;
+}
+.legacy-space-general-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+.legacy-space-general-desc {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+}
+
+/* Team settings · reference retention (components/settings/reference-retention.tsx) */
+.legacy-retention-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.75rem;
+  font-weight: 400;
+  margin: 0 0 8px;
+}
+.legacy-retention-desc {
+  color: var(--c-ink-2);
+  line-height: 1.7;
+}
+
+/* Team settings · feedback inbox (components/settings/feedback-inbox-content.tsx) */
+.legacy-feedback-inbox-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 650;
+  color: var(--c-ink);
+}
+.legacy-feedback-inbox-desc {
+  margin: 8px 0 18px;
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.65;
+}
+
+/* Team settings · data sources (components/settings/datarc-connections.tsx) */
+.legacy-datarc-title {
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+.legacy-datarc-desc {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  margin: 0 0 24px;
+  max-width: 560px;
+  line-height: 1.6;
+}
+
+/* Personal settings · account (components/settings/profile.tsx) */
+.legacy-profile-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.75rem;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+.legacy-profile-desc {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  margin-bottom: 24px;
+}
+
+/* Personal settings · access requests (components/settings/access-requests-content.tsx) */
+.legacy-access-requests-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 650;
+  color: var(--c-ink);
+}
+.legacy-access-requests-desc {
+  margin: 8px 0 18px;
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.65;
+}
+
+/* Team settings · spaces (components/settings/team-spaces-admin.tsx) */
+.legacy-team-spaces-head {
+  margin-bottom: 20px;
+}
+.legacy-team-spaces-title {
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+.legacy-team-spaces-desc {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* Team settings · tools (components/settings/tools/tools-manager.tsx) */
+.legacy-tools-head {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.legacy-tools-title {
+  font-size: var(--fs-2xl);
+  margin: 0;
+  font-family: var(--font-v2-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.legacy-tools-desc {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+  margin-top: 6px;
+  line-height: 1.6;
+}
+
+/* Admin console · credits (app/(app)/admin/credits/page.tsx) */
+/* Original inline styles outranked .admin-config-page h1 / .admin-config-page__header p; classes must also outrank them */
+.admin-config-page h1.legacy-admin-credits-title {
+  font-family: var(--font-v2-serif);
+  font-size: 2rem;
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+.admin-config-page__header p.legacy-admin-credits-desc {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+/* Admin console · user credits (app/(app)/admin/credits/users/page.tsx) */
+/* As above: original inline styles outranked .admin-config-page h1 */
+.admin-config-page h1.legacy-credits-user-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.5rem;
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+
+/* Team settings · agents (app/(app)/team/settings/subagents/page.tsx) */
+.legacy-subagents-head {
+  margin-bottom: 16px;
+}
+.legacy-subagents-title {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.legacy-subagents-desc {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+/* Team settings · workflows (app/(app)/team/settings/workflows/page.tsx) */
+.legacy-workflows-head {
+  margin-bottom: 16px;
+}
+.legacy-workflows-title {
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0;
+}
+.legacy-workflows-desc {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+  margin-top: 6px;
+  line-height: 1.6;
+}
+
+/* Team settings · scheduled tasks (components/settings/scheduled.tsx original S.title / S.sub) */
+.legacy-scheduled-title {
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.2;
+}
+.legacy-scheduled-sub {
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 66ch;
+}
+
+/* Admin console · credits user table (components/admin/credits/users-table.tsx original tableStyle / tdStyle / Th / PageBtn) */
+.legacy-credits-users-frame {
+  overflow-x: auto;
+}
+.legacy-credits-users-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.legacy-credits-th {
+  padding: 8px 10px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--c-ink-3);
+  border-bottom: 1px solid var(--c-line);
+  font-family: var(--font-v2-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.legacy-credits-user-row {
+  border-bottom: 1px solid var(--c-line);
+  opacity: 1;
+}
+.legacy-credits-user-row.is-removed {
+  opacity: 0.55;
+}
+.legacy-credits-td {
+  padding: 8px 10px;
+  font-size: 0.8125rem;
+  vertical-align: top;
+}
+.legacy-credits-td--right {
+  text-align: right;
+}
+.legacy-credits-td--mono {
+  font-family: var(--font-v2-mono);
+  font-size: 0.8125rem;
+}
+.legacy-credits-td--meta {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+}
+.legacy-credits-td--rel {
+  position: relative;
+}
+.legacy-credits-pager {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.8125rem;
+}
+.legacy-credits-pager-summary {
+  align-self: center;
+  color: var(--c-ink-3);
+}
+.legacy-credits-pagebtn {
+  all: unset;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  border-radius: 4px;
+  opacity: 1;
+}
+.legacy-credits-pagebtn:disabled {
+  cursor: not-allowed;
+  color: var(--c-ink-3);
+  opacity: 0.5;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * UI refresh batch 5: overlays/business badges with strong custom visuals or inline styles (original inline values copied verbatim).
+ * styles/ui-refresh-surfaces.css overrides them.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Credits · edit user, grant credits, period reset, tier-default dialogs (edit-user-modal / grant-credit-modal /
+   period-reset-modal / tier-defaults original modalBackdrop / modalBox / modalTitle and section inline styles) */
+.legacy-credits-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--c-ink) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.legacy-credits-modal {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  color: var(--c-ink);
+}
+.legacy-credits-modal--edit {
+  max-width: 480px;
+}
+.legacy-credits-modal--reset {
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.legacy-credits-modal--tier {
+  padding: 20px;
+}
+.legacy-credits-modal-title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: var(--font-v2-serif);
+}
+.legacy-credits-modal-title--reset {
+  margin: 0 0 12px;
+}
+.legacy-credits-tier-title {
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.legacy-credits-modal-sub {
+  margin: 0 0 16px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-credits-modal-hint {
+  margin: 8px 0 14px;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+}
+.legacy-credits-modal-hint--reset {
+  line-height: 1.5;
+}
+.legacy-credits-modal-error {
+  color: var(--c-err);
+  font-size: 0.75rem;
+  margin: 8px 0;
+  padding: 6px 10px;
+  background: var(--c-err-soft);
+}
+.legacy-credits-modal-error--grant {
+  margin: 0 0 12px;
+}
+.legacy-credits-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.legacy-credits-modal-foot--spaced {
+  margin-top: 14px;
+}
+/* Period reset · mode switching (original ModeTab inline styles) */
+.legacy-credits-mode-tabs {
+  display: flex;
+  margin-bottom: 16px;
+}
+.legacy-credits-mode-tab {
+  all: unset;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.legacy-credits-mode-tab.is-active {
+  border-bottom: 2px solid var(--c-accent);
+}
+/* Tier-default input */
+.legacy-input-tier-default {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-family: var(--font-v2-mono);
+}
+/* Credits · team quota dialog (team-quota-modal.tsx original backdropStyle / panelStyle / title / buttonStyle) */
+.legacy-credits-quota-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--c-ink) 42%, transparent);
+}
+.legacy-credits-quota-modal {
+  width: min(480px, 100%);
+  padding: 22px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: 0 24px 70px rgba(22, 19, 16, 0.24);
+}
+.legacy-credits-quota-title {
+  margin: 0 0 18px;
+  font: 400 var(--fs-xl) var(--font-v2-serif);
+}
+.legacy-credits-quota-btn {
+  min-height: 40px;
+  padding: 8px 13px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  color: var(--c-ink);
+  background: var(--c-surface);
+  font: 600 var(--fs-sm) var(--font-v2-sans);
+  cursor: pointer;
+}
+.legacy-credits-quota-btn--primary {
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  opacity: 1;
+}
+.legacy-credits-quota-btn--primary:disabled {
+  opacity: 0.5;
+}
+
+/* Share dialog (components/share/share-dialog.tsx, share-ui.tsx original inline styles) */
+.legacy-share-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(22, 19, 16, 0.38);
+  display: flex;
+  justify-content: center;
+}
+.legacy-share-backdrop--center {
+  align-items: center;
+  padding: 20px;
+}
+.legacy-share-backdrop--end {
+  align-items: flex-end;
+  padding: 0;
+}
+.legacy-share-panel {
+  background: var(--c-surface);
+  border-radius: 18px;
+  border: 1px solid var(--c-line);
+  box-shadow:
+    0 18px 50px -12px rgba(22, 19, 16, 0.22),
+    0 4px 12px rgba(22, 19, 16, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.legacy-share-sheet {
+  background: var(--c-surface);
+  box-shadow: 0 -10px 36px rgba(22, 19, 16, 0.2);
+  padding: 8px 18px 18px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.legacy-share-grabber {
+  margin: 0 auto 12px;
+}
+.legacy-share-head {
+  padding: 20px 22px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.legacy-share-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+  margin-bottom: 7px;
+}
+.legacy-share-title {
+  font-size: 1.03125rem;
+  font-weight: 650;
+  color: var(--c-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legacy-share-close {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--c-ink-4);
+  display: grid;
+  place-items: center;
+}
+.legacy-share-sheet-eyebrow {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-share-sheet-title {
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--c-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.legacy-share-foot {
+  border-top: 1px solid var(--c-line-2);
+  padding: 13px 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  margin-left: -22px;
+  margin-right: -22px;
+}
+/* Revoke-access confirmation (backdrop covers only share dialog: inline absolute determines position) */
+.legacy-share-revoke-backdrop {
+  inset: 0;
+  background: rgba(22, 19, 16, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+.legacy-share-revoke-panel {
+  width: auto;
+}
+.legacy-share-revoke-panel.is-mobile {
+  width: 100%;
+}
+.legacy-share-revoke {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 13px;
+  box-shadow: 0 20px 60px rgba(22, 19, 16, 0.3);
+  width: 320px;
+  max-width: 330px;
+}
+.legacy-share-revoke.is-mobile {
+  border-radius: 16px;
+  padding: 20px 20px 16px;
+  width: 100%;
+}
+.legacy-share-revoke-title {
+  font-size: 0.84375rem;
+  font-weight: 650;
+  color: var(--c-ink);
+  margin-bottom: 5px;
+}
+.legacy-share-revoke.is-mobile .legacy-share-revoke-title {
+  font-size: 0.9375rem;
+  margin-bottom: 7px;
+}
+.legacy-share-revoke-body {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  line-height: 1.65;
+}
+.legacy-share-revoke.is-mobile .legacy-share-revoke-body {
+  font-size: 0.8125rem;
+}
+.legacy-share-revoke-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 13px;
+}
+.legacy-share-revoke.is-mobile .legacy-share-revoke-foot {
+  gap: 9px;
+  margin-top: 17px;
+}
+/* Share button ShBtn (height/font size passed by call sites through --sh-btn-h / --sh-btn-fs) */
+.legacy-share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--sh-btn-h);
+  padding: 0 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: var(--sh-btn-fs);
+  font-weight: 600;
+  font-family: inherit;
+  opacity: 1;
+}
+.legacy-share-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.legacy-share-btn--primary {
+  background: var(--c-accent);
+  color: #fff;
+  border: none;
+}
+.legacy-share-btn--ghost {
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  border: 1px solid var(--c-line);
+}
+.legacy-share-btn--quiet {
+  background: transparent;
+  color: var(--c-ink-3);
+  border: none;
+}
+.legacy-share-btn--danger {
+  background: var(--c-err);
+  color: var(--c-err-on);
+  border: none;
+}
+/* Share audience ShSegmented (height/font size via --sh-seg-h / --sh-seg-fs) */
+.legacy-share-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.legacy-share-seg-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  cursor: pointer;
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+  transition: all 0.15s ease;
+}
+.legacy-share-seg-item.is-locked {
+  opacity: 0.45;
+}
+.legacy-share-seg-item.is-static {
+  cursor: default;
+}
+
+/* Data sources · connection dialog (components/settings/datarc-connections.tsx original ModalShell / SourceTypeButton / Field / Input) */
+.legacy-datarc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--c-ink) 32%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+  overscroll-behavior: contain;
+}
+.legacy-datarc-modal {
+  width: min(520px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 20px;
+}
+.legacy-datarc-modal-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.125rem;
+  font-weight: 500;
+  margin: 0 0 16px;
+}
+.legacy-datarc-field-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.legacy-datarc-field-hint {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.legacy-input-datarc {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  font-size: 0.8125rem;
+  font-family: var(--font-v2-mono);
+  box-sizing: border-box;
+}
+
+/* Tools · create tool-source dialog (tools-manager.tsx original backdropStyle / panelStyle) */
+.legacy-tools-create-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--c-ink) 34%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 60;
+}
+.legacy-tools-create-panel {
+  width: 100%;
+  max-width: 560px;
+}
+/* Create-tool card (components/canvas/sections/create-tool-card.tsx original wrap / header / primary-secondary buttons / source labels) */
+.legacy-ctool-card {
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-float);
+}
+.legacy-ctool-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.legacy-ctool-title {
+  margin: 0;
+  font-size: 1.03125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  letter-spacing: -0.01em;
+}
+.legacy-ctool-confirm-badge {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.legacy-ctool-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+}
+.legacy-ctool-close {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: none;
+  background: transparent;
+  color: var(--c-ink-4);
+  cursor: pointer;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+.legacy-ctool-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.84375rem;
+  font-weight: 600;
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.legacy-ctool-btn--primary {
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border: none;
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+.legacy-ctool-btn--primary:disabled {
+  cursor: default;
+  background: var(--c-surface-3);
+  color: var(--c-ink-4);
+}
+.legacy-ctool-btn--wide {
+  padding: 10px 26px;
+}
+.legacy-ctool-btn--ghost {
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+}
+.legacy-ctool-source {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 9px 11px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+}
+.legacy-ctool-source-kind {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--c-info-ink);
+  background: var(--c-info-soft);
+  border: 1px solid var(--c-info-line);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.legacy-ctool-source-auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65625rem;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  border: 1px solid var(--c-accent-line);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+/* Preset connector source/auth labels (components/canvas/sections/preset-directory.tsx original KindPill / AuthPill) */
+.legacy-preset-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.59375rem;
+  font-weight: 600;
+  border-radius: 6px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.legacy-preset-kind {
+  letter-spacing: 0.02em;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  padding: 2px 6px 2px 5px;
+}
+.legacy-preset-auth {
+  padding: 2px 7px 2px 5px;
+}
+.legacy-preset-auth.is-oauth {
+  color: var(--c-info-ink);
+  background: var(--c-info-soft);
+  border: 1px solid var(--c-info-line);
+}
+.legacy-preset-auth.is-none {
+  color: var(--c-ink-4);
+  background: transparent;
+  border: 1px dashed var(--c-line);
+}
+.legacy-preset-auth.is-key {
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+}
+
+/* Scheduled tasks · run-state badges (scheduled.tsx RunRow original S.runBadge / S.pip and state-colored inline styles) */
+.legacy-badge-sched-run {
+  font-family: var(--font-v2-mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+}
+.legacy-badge-sched-run.is-running {
+  color: var(--c-info-ink);
+  background: var(--c-info-soft);
+  border: 1px solid var(--c-info-line);
+}
+.legacy-badge-sched-run.is-success {
+  color: var(--c-pos-ink);
+  background: var(--c-pos-soft);
+  border: 1px solid var(--c-pos-line);
+}
+.legacy-badge-sched-run.is-failed {
+  color: var(--c-err-ink);
+  background: var(--c-err-soft);
+  border: 1px solid var(--c-err-line);
+}
+.legacy-badge-sched-run.is-awaiting {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border: 1px solid var(--c-warn-line);
+}
+.legacy-badge-sched-run.is-muted {
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+}
+.legacy-badge-sched-run-pip {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.legacy-badge-sched-run.is-running .legacy-badge-sched-run-pip {
+  animation: routinePulse 1.4s ease-in-out infinite;
+}
+
+/* Knowledge-base upload · template dropdown (kb-upload-modal.tsx original inline styles) */
+.legacy-input-kb-upload-template {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 逐页验收 A： personal, team and space settings. Original inline styles moved verbatim to classes (base layer);
+ * styles/ui-refresh-pages-settings.css overrides them. styles/ui-refresh-pages-settings.test.ts anchors each value.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Team settings · reference retention (reference-retention.tsx) */
+.legacy-retention-form {
+  margin-top: 24px;
+}
+.legacy-input-retention {
+  max-width: 180px;
+  min-height: 44px;
+}
+.legacy-retention-effect {
+  color: var(--c-ink-2);
+  line-height: 1.7;
+}
+.legacy-retention-reload {
+  margin-top: 12px;
+  min-height: 44px;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 逐页验收 B: admin console (access control, approvals, replay, credits). Original inline styles moved verbatim to classes (base layer);
+ * state-colored inline values become state modifiers (values unchanged). styles/ui-refresh-pages-admin.test.ts anchors each value.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Admin console · access control (app/(app)/admin/access/page.tsx original compactInput / actionButton) */
+.legacy-access-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  padding: 7px 9px;
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+.legacy-access-btn {
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-ink);
+  color: var(--c-bg);
+  padding: 7px 12px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Admin console · approvals (app/(app)/admin/approvals/page.tsx) */
+.legacy-approvals-fallback {
+  padding: 40px;
+}
+.legacy-approvals-count {
+  color: var(--c-warn);
+  font-size: 1.125rem;
+}
+.legacy-approvals-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.legacy-approvals-error {
+  border-color: var(--c-err-line);
+  background: var(--c-err-soft);
+}
+.legacy-approvals-empty {
+  color: var(--text-muted);
+  padding: 24px 0;
+}
+.legacy-approval-card--pending {
+  border-left-color: var(--c-warn);
+}
+.legacy-approval-card--rejected {
+  border-left-color: var(--c-err);
+}
+.legacy-approval-card--done {
+  border-left-color: var(--c-pos);
+}
+.legacy-approval-status {
+  margin-left: auto;
+}
+.legacy-approval-reason {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+.legacy-approval-args {
+  font-size: 0.75rem;
+  max-height: 400px;
+  overflow: auto;
+}
+.legacy-approval-args.is-collapsed {
+  max-height: 100px;
+}
+.legacy-approval-result {
+  font-size: 0.75rem;
+  max-height: 200px;
+  overflow: auto;
+}
+.legacy-approval-decided {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+/* Risk-level badges (original RiskBadge inline styles and level-colored palette) */
+.legacy-risk-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-family: var(--font-v2-mono, var(--font-mono));
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.legacy-risk-badge.is-high {
+  background: var(--c-err-soft);
+  color: var(--c-err-ink);
+  border: 1px solid var(--c-err-line);
+}
+.legacy-risk-badge.is-medium {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+  border: 1px solid var(--c-warn-line);
+}
+.legacy-risk-badge.is-low {
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  border: 1px solid var(--c-line);
+}
+
+/* Admin console · replay (app/(app)/admin/turns/page.tsx) */
+/* At narrow width 320, view-latest was pushed out of toolbar: allow toolbar wrap, input shrink below 120 before wrapping, no button shrink
+ * (bug fix active in both appearances; wide layout unchanged). */
+.legacy-turns-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.legacy-turns-toolbar > button {
+  flex: none;
+  white-space: nowrap;
+}
+.legacy-turns-filter {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-turns-error {
+  border-color: var(--c-err-line);
+  background: var(--c-err-soft);
+}
+.legacy-turns-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 12px;
+}
+.legacy-turns-ids {
+  max-height: 600px;
+  overflow: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-turns-id {
+  cursor: pointer;
+  font-size: 0.75rem;
+  background: transparent;
+}
+.legacy-turns-muted {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.legacy-turns-events {
+  max-height: 600px;
+  overflow: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-turns-hint {
+  padding: 20px;
+  color: var(--text-muted);
+}
+.legacy-turns-table {
+  width: 100%;
+}
+.legacy-turns-th {
+  text-align: left;
+}
+.legacy-turns-state {
+  padding: 20px;
+  color: var(--text-muted);
+}
+.legacy-turns-td {
+  vertical-align: top;
+}
+.legacy-turns-payload {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.legacy-turns-snapshot {
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-turns-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+}
+.legacy-turns-summary {
+  cursor: pointer;
+}
+.legacy-turns-content {
+  margin: 6px 0 0 0;
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow: auto;
+}
+
+/* Admin console · credits header buttons (admin/credits/page.tsx, users/page.tsx original btn, csv-download-button.tsx) */
+.legacy-credits-head-actions {
+  display: flex;
+  gap: 8px;
+}
+.legacy-credits-head-btn {
+  padding: 6px 14px;
+  font-size: 0.8125rem;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+/* Period reset: dim when unauthorized per original inline style (other header buttons originally had no disabled style) */
+.legacy-credits-head-btn--dim-disabled:disabled {
+  cursor: not-allowed;
+}
+.legacy-credits-csv {
+  position: relative;
+}
+.legacy-credits-csv-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  min-width: 200px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+}
+.legacy-credits-csv-item {
+  display: block;
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Admin console · user-credit details (app/(app)/admin/credits/users/page.tsx) */
+.legacy-credits-user-fallback {
+  padding: 40px;
+}
+.legacy-credits-back {
+  all: unset;
+  cursor: pointer;
+  margin-bottom: 16px;
+  color: var(--c-accent);
+  font-size: 0.8125rem;
+}
+.legacy-credits-user-error {
+  padding: 16px;
+  color: var(--c-err);
+  background: var(--c-err-soft);
+  border-radius: 6px;
+}
+.legacy-credits-user-head {
+  padding: 20px;
+  margin-bottom: 16px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.legacy-credits-user-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.legacy-credits-user-name {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.legacy-credits-user-balance {
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+  font-family: var(--font-v2-mono);
+}
+.legacy-credits-user-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Credits cards/section headers (summary-card / tier-defaults / users-table original cardStyle / SectionHeader / sectionHeader) */
+.legacy-credits-card {
+  padding: 20px;
+  margin-bottom: 16px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+}
+.legacy-credits-section-title {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--c-ink-3);
+  margin: 0 0 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-v2-mono);
+}
+
+/* Credits · tier defaults (components/admin/credits/tier-defaults.tsx) */
+.legacy-credits-tier-skeleton {
+  height: 32px;
+  background: var(--c-surface-2);
+  border-radius: 4px;
+}
+.legacy-credits-tier-skeleton--first {
+  margin-bottom: 8px;
+}
+.legacy-credits-tier-hint {
+  margin-top: 12px;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.legacy-credits-tier-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--c-line);
+}
+.legacy-credits-tier-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.legacy-credits-tier-label {
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.625rem;
+  font-family: var(--font-v2-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+}
+.legacy-credits-tier-value {
+  font-family: var(--font-v2-mono);
+  font-size: 0.875rem;
+}
+.legacy-credits-tier-edit {
+  all: unset;
+  cursor: pointer;
+  color: var(--c-accent);
+  font-size: 0.75rem;
+}
+.legacy-credits-tier-error {
+  color: var(--c-err);
+  font-size: 0.75rem;
+  margin-top: 6px;
+}
+
+/* Credits · summary card (components/admin/credits/summary-card.tsx) */
+.legacy-credits-summary-error {
+  color: var(--c-err);
+  font-size: 0.8125rem;
+}
+.legacy-credits-summary-retry {
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.legacy-credits-summary-empty {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.legacy-credits-stats {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-bottom: 20px;
+}
+/* Original Stat color: absent uses --c-ink values, --c-accent progress; usage-dependent colors become is-* modifiers */
+.legacy-credits-stat.is-err {
+  --legacy-credits-stat-tone: var(--c-err);
+}
+.legacy-credits-stat.is-warn {
+  --legacy-credits-stat-tone: var(--c-warn);
+}
+.legacy-credits-stat.is-accent {
+  --legacy-credits-stat-tone: var(--c-accent);
+}
+.legacy-credits-label {
+  font-size: 0.6875rem;
+  font-family: var(--font-v2-mono);
+  color: var(--c-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.legacy-credits-stat-label {
+  margin-bottom: 4px;
+}
+.legacy-credits-stat-value {
+  font-size: 1.375rem;
+  font-weight: 500;
+  color: var(--legacy-credits-stat-tone, var(--c-ink));
+  font-family: var(--font-v2-mono);
+}
+.legacy-credits-stat-sub {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  margin-top: 2px;
+}
+.legacy-credits-stat-track {
+  margin-top: 6px;
+  height: 4px;
+  background: var(--c-surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.legacy-credits-stat-bar {
+  height: 100%;
+  background: var(--legacy-credits-stat-tone, var(--c-accent));
+  transition: width 200ms;
+}
+.legacy-credits-skeleton-stripe {
+  height: 60px;
+  margin-bottom: 12px;
+  background: linear-gradient(90deg, var(--c-surface-2) 0%, color-mix(in srgb, var(--c-surface-2) 70%, transparent) 50%, var(--c-surface-2) 100%);
+  background-size: 200% 100%;
+  animation: v2-skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+.legacy-credits-views {
+  border-top: 1px solid var(--c-line);
+  padding-top: 16px;
+}
+.legacy-credits-views-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.legacy-credits-view-select {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-bg);
+  color: inherit;
+  font-family: var(--font-v2-sans);
+}
+.legacy-credits-dash {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.legacy-credits-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.legacy-credits-list-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-line);
+  font-size: 0.8125rem;
+}
+.legacy-credits-list-item--center {
+  align-items: center;
+}
+.legacy-credits-list-meta {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+.legacy-credits-mono {
+  font-family: var(--font-v2-mono);
+}
+.legacy-credits-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legacy-credits-min0 {
+  min-width: 0;
+}
+.legacy-credits-attn-item {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--c-line);
+  font-size: 0.8125rem;
+}
+.legacy-credits-attn-subject-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.legacy-credits-attn-sub {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+.legacy-credits-attn-reason {
+  color: var(--c-ink-2);
+}
+.legacy-credits-attn-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+/* Attention severity (original SeverityBadge and user-table AttentionCell severity-colored inline styles) */
+.legacy-credits-severity {
+  padding: 1px 6px;
+  font-size: 0.625rem;
+  line-height: 1rem;
+  font-family: var(--font-v2-mono);
+  color: var(--legacy-credits-severity);
+  background: color-mix(in srgb, var(--legacy-credits-severity) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--legacy-credits-severity) 24%, transparent);
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.legacy-credits-severity.is-critical {
+  --legacy-credits-severity: var(--c-err);
+}
+.legacy-credits-severity.is-warning {
+  --legacy-credits-severity: var(--c-warn);
+}
+.legacy-credits-severity.is-info {
+  --legacy-credits-severity: var(--c-accent);
+}
+/* User-table cell version originally did not uppercase */
+.legacy-credits-severity--cell {
+  text-transform: none;
+}
+.legacy-credits-attn-btn {
+  all: unset;
+  padding: 4px 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  opacity: 1;
+}
+.legacy-credits-attn-btn.is-primary {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+.legacy-credits-attn-btn:disabled {
+  color: var(--c-ink-3);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.legacy-credits-dismiss-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--c-ink-1);
+}
+.legacy-credits-dismiss-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-credits-dismiss-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--c-surface-2);
+  color: var(--c-ink-1);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+.legacy-credits-dismiss-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Credits · user table (components/admin/credits/users-table.tsx) */
+.legacy-credits-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.legacy-credits-search {
+  width: 220px;
+}
+.legacy-credits-removed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+.legacy-credits-error-banner {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--c-err);
+  background: var(--c-err-soft);
+  font-size: 0.75rem;
+}
+.legacy-credits-state {
+  text-align: center;
+}
+.legacy-credits-state--loading {
+  padding: 16px;
+  color: var(--c-ink-3);
+}
+.legacy-credits-state--error {
+  padding: 16px;
+  color: var(--c-err);
+}
+.legacy-credits-state--empty {
+  padding: 24px;
+  color: var(--c-ink-3);
+}
+.legacy-credits-th--left {
+  text-align: left;
+}
+.legacy-credits-th--right {
+  text-align: right;
+}
+.legacy-credits-th--center {
+  text-align: center;
+}
+.legacy-credits-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.legacy-credits-email {
+  font-family: var(--font-v2-mono);
+  font-size: 0.8125rem;
+}
+.legacy-credits-display-name {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  margin-top: 2px;
+}
+.legacy-credits-tag {
+  font-family: var(--font-v2-mono);
+  border-radius: 3px;
+}
+.legacy-credits-tag--removed {
+  padding: 1px 6px;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+}
+.legacy-credits-tag--admin {
+  padding: 1px 6px;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+}
+/* User-credit detail header version: larger, not bold, no letter-spacing */
+.legacy-credits-tag--removed.legacy-credits-tag--head {
+  padding: 2px 8px;
+  font-size: 0.625rem;
+  font-weight: inherit;
+  letter-spacing: inherit;
+}
+.legacy-credits-tier {
+  padding: 2px 8px;
+  font-size: 0.625rem;
+  font-family: var(--font-v2-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+  border-radius: 3px;
+}
+.legacy-credits-tier.is-ultra {
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+}
+.legacy-credits-balance {
+  font-family: var(--font-v2-mono);
+  font-size: 0.8125rem;
+}
+.legacy-credits-balance-low {
+  color: var(--c-err);
+}
+.legacy-credits-balance-quota {
+  color: var(--c-ink-3);
+}
+.legacy-credits-balance-track {
+  margin-top: 2px;
+  height: 3px;
+  width: 80px;
+  margin-left: auto;
+  background: var(--c-surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.legacy-credits-balance-bar {
+  height: 100%;
+  background: var(--c-accent);
+}
+.legacy-credits-balance-bar.is-low {
+  background: var(--c-err);
+}
+.legacy-credits-more {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 10px;
+  color: var(--c-ink-3);
+  font-size: 0.875rem;
+}
+.legacy-credits-attn-cell {
+  min-width: 190px;
+}
+.legacy-credits-attn-cell-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.legacy-credits-attn-policy {
+  font-size: 0.6875rem;
+  color: var(--c-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.legacy-credits-attn-flags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.legacy-credits-attn-flag {
+  padding: 1px 5px;
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-credits-attn-go {
+  all: unset;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  cursor: pointer;
+  font-size: 0.6875rem;
+}
+.legacy-credits-attn-go:disabled {
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  cursor: not-allowed;
+}
+
+/* Credits · user ledger (components/admin/credits/ledger-table.tsx; headers, state rows/pagination match user table, reuse classes) */
+.legacy-credits-ledger-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.legacy-credits-ledger-title {
+  margin: 0;
+}
+.legacy-credits-ledger-filter {
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  background: var(--c-bg);
+  color: inherit;
+}
+.legacy-credits-ledger-frame {
+  overflow-x: auto;
+}
+.legacy-credits-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.legacy-credits-ledger-row {
+  border-bottom: 1px solid var(--c-line);
+}
+.legacy-credits-ledger-td {
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.legacy-credits-ledger-td--right {
+  text-align: right;
+}
+.legacy-credits-ledger-meta {
+  font-size: 0.6875rem;
+  font-family: var(--font-v2-mono);
+  color: var(--c-ink-3);
+}
+.legacy-credits-ledger-delta {
+  font-family: var(--font-v2-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--c-ink);
+}
+.legacy-credits-ledger-delta.is-positive {
+  color: var(--c-pos);
+}
+/* Ledger type (original typeColor type-colored inline styles) */
+.legacy-credits-ledger-type {
+  padding: 2px 6px;
+  font-size: 0.625rem;
+  font-family: var(--font-v2-mono);
+  color: var(--legacy-credits-ledger-type);
+  background: color-mix(in srgb, var(--legacy-credits-ledger-type) 12%, transparent);
+  border-radius: 3px;
+}
+.legacy-credits-ledger-type.is-turn {
+  --legacy-credits-ledger-type: var(--c-accent);
+}
+.legacy-credits-ledger-type.is-grant {
+  --legacy-credits-ledger-type: var(--c-pos);
+}
+.legacy-credits-ledger-type.is-set {
+  --legacy-credits-ledger-type: var(--c-warn);
+}
+.legacy-credits-ledger-type.is-muted {
+  --legacy-credits-ledger-type: var(--c-ink-3);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 逐页验收 B: main feature pages (report library, agent management). Original inline styles moved verbatim to classes (base layer);
+ * styles/ui-refresh-pages-main.css overrides them. styles/ui-refresh-pages-main.test.ts anchors each value.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* Report library · download menu anchor */
+.legacy-reports-download {
+  position: relative;
+  display: inline-flex;
+}
+/* Report library · shared with me */
+.legacy-reports-shared {
+  margin-top: 36px;
+}
+.legacy-reports-shared-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.legacy-reports-shared-title {
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--c-ink);
+}
+.legacy-reports-shared-count {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+.legacy-reports-shared-spacer {
+  flex: 1;
+}
+.legacy-reports-shared-hint {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+}
+.legacy-reports-shared-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.legacy-reports-shared-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 12px 16px;
+  text-decoration: none;
+  color: inherit;
+}
+.legacy-reports-shared-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 9px;
+  background: var(--c-surface-2);
+  color: var(--c-ink-3);
+  display: grid;
+  place-items: center;
+}
+.legacy-reports-shared-text {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-reports-shared-name {
+  font-size: 0.84375rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.legacy-reports-shared-meta {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  margin-top: 2px;
+}
+/* Report library · also-delete-chat in delete confirmation */
+.legacy-reports-delete-session {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 14px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--c-ink-2);
+}
+.legacy-reports-delete-session-check {
+  margin-top: 2px;
+}
+.legacy-reports-delete-session-hint {
+  display: block;
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+
+/* Agent management · draft source row, legacy-editing explanation (agent-management.tsx, agent-management-route.tsx) */
+.legacy-am-muted-block {
+  display: block;
+  color: var(--c-ink-3);
+}
+.legacy-am-legacy-editor-intro {
+  color: var(--c-ink-3);
+  margin-bottom: 18px;
+}
+
+/* Knowledge base · loading, no accessible space, no space selected (app/(app)/knowledge/page.tsx) */
+.legacy-kb-page-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--c-ink-3);
+}
+.legacy-kb-space-access {
+  max-width: 560px;
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+.legacy-kb-space-access-title {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+.legacy-kb-space-access-detail {
+  margin: 0 auto 18px;
+  color: var(--c-ink-3);
+  line-height: 1.6;
+}
+.legacy-kb-space-access-refresh {
+  margin-left: 0;
+}
+.legacy-kb-space-access-refresh.is-after-request {
+  margin-left: 10px;
+}
+.legacy-kb-space-select {
+  padding: 24px;
+  text-align: center;
+}
+.legacy-kb-space-select-hint {
+  color: var(--c-ink-3);
+}
+
+
+/* @section accept-a:personal —— page-by-page acceptance A · personal settings: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Personal settings · account (components/settings/profile.tsx) */
+.legacy-profile-row {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.legacy-profile-label {
+  width: 110px;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  font-family: var(--font-v2-mono);
+}
+.legacy-profile-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.legacy-profile-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.legacy-profile-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.625rem;
+  font-family: var(--font-v2-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.legacy-profile-badge--ok {
+  color: var(--c-pos, var(--c-accent));
+  background: var(--c-pos-soft, var(--c-accent-tint));
+}
+.legacy-profile-badge--warn {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+}
+.legacy-profile-badge--accent {
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+}
+.legacy-profile-badge--neutral {
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+}
+
+/* Personal settings · export (components/settings/export.tsx) */
+.legacy-export-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+.legacy-export-desc {
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  margin: 0 0 24px;
+}
+.legacy-export-section {
+  margin-bottom: 24px;
+}
+.legacy-export-heading {
+  font-family: var(--font-v2-serif);
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+.legacy-export-hint {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+.legacy-export-method {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+/* Personal settings · access requests (components/settings/access-requests-content.tsx) */
+.legacy-acr-empty {
+  text-align: center;
+}
+.legacy-acr-list {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-acr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.legacy-acr-label {
+  color: var(--c-ink);
+}
+.legacy-acr-spacer {
+  flex: 1;
+}
+.legacy-acr-meta {
+  color: var(--c-ink-3);
+}
+.legacy-acr-name {
+  color: var(--c-ink-2);
+}
+.legacy-acr-message {
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+  margin-top: 8px;
+  line-height: 1.6;
+  padding: 9px 12px;
+}
+.legacy-acr-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+
+/* @section accept-a:people —— page-by-page acceptance A · team/members, space settings: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Team settings · spaces (components/settings/team-spaces-admin.tsx) */
+.legacy-tsa-section-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.legacy-tsa-section-hint {
+  margin: 4px 0 12px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.legacy-tsa-aligned {
+  height: 40px;
+  min-height: 40px;
+  white-space: nowrap;
+}
+.legacy-tsa-list-head {
+  margin-bottom: 12px;
+}
+.legacy-tsa-retry {
+  margin-top: 8px;
+}
+.legacy-tsa-list {
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-surface);
+  overflow: hidden;
+}
+.legacy-tsa-row {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--c-line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.legacy-tsa-row-main {
+  min-width: 0;
+}
+.legacy-tsa-row-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.legacy-tsa-row-status {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+.legacy-tsa-row-counts {
+  color: var(--c-ink-2);
+  font-size: 0.6875rem;
+  margin-top: 4px;
+}
+.legacy-tsa-row-note {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  margin-top: 4px;
+}
+.legacy-tsa-empty {
+  padding: 20px;
+  color: var(--c-ink-3);
+}
+
+/* Space settings · space access (components/settings/members.tsx): add-member row */
+.legacy-members-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+/* Space settings · general · localization (components/settings/workspace-i18n.tsx) */
+.legacy-ws-i18n {
+  margin-top: 32px;
+}
+.legacy-ws-i18n-title {
+  font-family: var(--font-v2-serif);
+  font-size: 1.125rem;
+  font-weight: 400;
+  margin: 0 0 4px;
+}
+.legacy-ws-i18n-subtitle {
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  margin: 0 0 16px;
+}
+.legacy-ws-i18n-current {
+  margin-bottom: 16px;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+}
+.legacy-ws-i18n-current-name {
+  margin-left: 8px;
+  font-family: var(--font-v2-mono);
+}
+.legacy-ws-i18n-card {
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-surface);
+  padding: 16px;
+}
+.legacy-ws-i18n-saved {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  margin-top: 4px;
+}
+.legacy-ws-i18n-field {
+  margin-bottom: 16px;
+}
+.legacy-ws-i18n-label {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  margin-bottom: 4px;
+  font-family: var(--font-v2-mono);
+}
+.legacy-ws-i18n-hint {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* @section accept-a:integ —— page-by-page acceptance A · integration/security: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Team settings · email: read-failure retry block (components/settings/email-config.tsx, original inline styles ported verbatim) */
+.legacy-email-load-failed {
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  background: var(--c-surface);
+}
+
+/* @section accept-a:models —— page-by-page acceptance A · models: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Team settings · models (components/settings/models.tsx). Original inline styles had highest priority; .mset-prefixed here and
+ * imported after styles/models-settings.css to outrank .mset rules on same elements (checked each same-named property for higher priority). */
+/* Add-connection primary button in no-connections empty state: style={{ marginTop: 6 }} */
+.mset .legacy-mset-empty-cta {
+  margin-top: 6px;
+}
+/* Image/search model call-method chip: style={{ textTransform: "none" }} (outranks .mset .proto-chip mono-uppercase base) */
+.mset .proto-chip.legacy-mset-proto-plain {
+  text-transform: none;
+}
+/* Inverted down arrow in fallback-chain move-up button: style={{ display: "inline-flex", transform: "rotate(180deg)" }} */
+.mset .legacy-mset-rot180 {
+  display: inline-flex;
+  transform: rotate(180deg);
+}
+/* Hard notice for knowledge-base vector-model change: style={{ marginTop: 2 }} (outranks .mset .guard margin-top:10px) */
+.mset .guard.legacy-mset-guard-tight {
+  margin-top: 2px;
+}
+/* Image generation/web search effect description: style={{ paddingLeft: 2 }} */
+.mset .sel-effect.legacy-mset-effect-indent {
+  padding-left: 2px;
+}
+/* Connection-form outer fieldset: style={{ border: 0, margin: 0, minInlineSize: 0 }} */
+.mset fieldset.connect-body.legacy-mset-connect-fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+/* Neutral explanation for image-only/search-only connections: style={{ color, background, borderColor }} (outranks .mset .unver-note amber) */
+.mset .unver-note.legacy-mset-unver-neutral {
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+}
+
+/* @section accept-a:ai —— page-by-page acceptance A · AI/data: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Team settings · data sources (components/settings/datarc-connections.tsx) */
+.legacy-ai-ds-root {
+  max-width: 720px;
+}
+.legacy-ai-ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.legacy-ai-ds-archived {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-ds-h2 {
+  font-size: 0.9375rem;
+  margin: 0 0 10px;
+}
+.legacy-ai-ds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.legacy-ai-ds-empty {
+  padding: 20px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  border: 1px dashed var(--c-line-2);
+  border-radius: 8px;
+  text-align: center;
+}
+.legacy-ai-ds-card {
+  padding: 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-surface);
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  opacity: 1;
+}
+.legacy-ai-ds-card.is-archived {
+  opacity: 0.6;
+}
+.legacy-ai-ds-card-mark {
+  margin-top: 2px;
+}
+.legacy-ai-ds-card-body {
+  min-width: 0;
+}
+.legacy-ai-ds-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.legacy-ai-ds-card-name {
+  font-family: var(--font-v2-serif);
+  font-size: 1rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.legacy-ai-ds-status {
+  padding: 1px 8px;
+  font-size: 0.625rem;
+  font-family: var(--font-v2-mono);
+  color: var(--c-ink-3);
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+}
+.legacy-ai-ds-status.is-active {
+  color: var(--c-accent);
+  border-color: var(--c-accent-soft);
+}
+.legacy-ai-ds-card-meta {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  margin-bottom: 4px;
+}
+.legacy-ai-mono {
+  font-family: var(--font-v2-mono);
+}
+.legacy-ai-ds-card-url {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+  font-family: var(--font-v2-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Shared ai-group pieces */
+.legacy-ai-flex1 {
+  flex: 1;
+}
+.legacy-ai-min0 {
+  min-width: 0;
+}
+.legacy-ai-mb12 {
+  margin-bottom: 12px;
+}
+.legacy-ai-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Original tools-manager.tsx iconBtn constant */
+.legacy-ai-icon-btn {
+  width: 29px;
+  height: 29px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.legacy-ai-icon-btn.is-danger {
+  color: var(--c-err);
+}
+
+/* Team settings · tools (components/settings/tools/tools-manager.tsx) */
+.legacy-ai-tools-root {
+  max-width: 900px;
+  margin: 0 auto;
+  font-family: var(--font-v2-sans);
+  color: var(--c-ink);
+}
+.legacy-ai-tools-auth {
+  font-size: 0.65625rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-tools-auth.is-set {
+  font-weight: 500;
+  color: var(--c-ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legacy-ai-tools-card {
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 160ms;
+}
+.legacy-ai-tools-card.is-failed {
+  border-color: var(--c-err);
+}
+.legacy-ai-tools-card.is-off {
+  opacity: 0.55;
+}
+.legacy-ai-tools-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 15px 16px;
+}
+.legacy-ai-tools-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.legacy-ai-tools-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.legacy-ai-tools-card-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-ai-tools-pill {
+  font-size: 0.625rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.legacy-ai-tools-pill.is-accent {
+  color: var(--c-accent);
+  border: 1px solid var(--c-accent);
+}
+.legacy-ai-tools-pill.is-danger {
+  color: var(--c-err);
+  background: var(--c-err-soft);
+}
+.legacy-ai-tools-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-tools-card-url {
+  font-family: var(--font-v2-mono);
+  font-size: 0.71875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 340px;
+}
+.legacy-ai-tools-validate {
+  margin-top: 2px;
+}
+.legacy-ai-tools-vstate {
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-tools-vstate.is-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-ai-tools-vstate.is-err {
+  color: var(--c-err);
+}
+.legacy-ai-tools-vstate.is-warn {
+  color: var(--c-warn);
+}
+.legacy-ai-tools-vstate.is-ok {
+  color: var(--c-accent);
+}
+.legacy-ai-tools-card-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+}
+.legacy-ai-tools-avail {
+  align-self: stretch;
+  min-width: 72px;
+  padding-left: 12px;
+  border-left: 1px solid var(--c-line);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+}
+.legacy-ai-tools-avail-label {
+  font-size: 0.625rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-icon-btn.legacy-ai-tools-expand {
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  transform: none;
+  transition: transform 200ms;
+}
+.legacy-ai-icon-btn.legacy-ai-tools-expand.is-expanded {
+  transform: rotate(90deg);
+}
+.legacy-ai-tools-ops {
+  border-top: 1px solid var(--c-line);
+  background: var(--c-bg);
+  padding: 11px 16px;
+}
+.legacy-ai-tools-ops-label {
+  font-family: var(--font-v2-mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-ink-3);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.legacy-ai-tools-op {
+  font-family: var(--font-v2-mono);
+  font-size: 0.6875rem;
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+.legacy-ai-tools-op.is-button {
+  cursor: pointer;
+}
+.legacy-ai-tools-op.is-match {
+  border-color: var(--c-accent);
+}
+.legacy-ai-tools-ops-empty {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-ai-tools-builtin {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 1;
+}
+.legacy-ai-tools-builtin.is-off {
+  opacity: 0.55;
+}
+.legacy-ai-tools-builtin-desc {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+.legacy-ai-tools-builtin-desc.is-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.legacy-ai-tools-picker-option {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.legacy-ai-tools-picker-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.legacy-ai-tools-picker-desc {
+  display: block;
+}
+.legacy-ai-tools-search {
+  position: relative;
+  margin-bottom: 14px;
+}
+.legacy-ai-tools-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--c-ink-3);
+  pointer-events: none;
+}
+.legacy-ai-tools-search-input {
+  padding-left: 36px;
+}
+.legacy-ai-tools-nomatch {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  padding: 8px 2px;
+}
+.legacy-ai-tools-caps {
+  margin-top: 28px;
+}
+.legacy-ai-tools-caps-title {
+  font-size: var(--fs-lg);
+  margin: 0;
+  font-family: var(--font-v2-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.legacy-ai-tools-caps-desc {
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+  margin-top: 6px;
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+.legacy-ai-tools-cap-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.legacy-ai-tools-cap-cat {
+  font-size: 0.71875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--c-ink-3);
+  margin-bottom: 8px;
+}
+.legacy-ai-tools-cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.legacy-ai-tools-cap {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+}
+.legacy-ai-tools-cap-sigil {
+  font-size: 0.9375rem;
+  line-height: 1.35;
+}
+.legacy-ai-tools-cap-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-ai-tools-cap-blurb {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+.legacy-ai-tools-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  text-align: center;
+  padding: 56px 28px;
+  border: 1px dashed var(--c-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+}
+.legacy-ai-tools-empty-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.legacy-ai-tools-empty-sub {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  max-width: 44ch;
+  line-height: 1.6;
+}
+
+/* Team settings · system built-in agents (app/(app)/team/settings/subagents/page.tsx, components/settings/builtin-subagents-section.tsx) */
+.legacy-ai-sa-root {
+  font-family: var(--font-v2-sans);
+  color: var(--c-ink);
+}
+.legacy-ai-sa-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.legacy-ai-sa-count {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-sa-empty {
+  border: 1px dashed var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 52px 30px;
+  text-align: center;
+}
+.legacy-ai-sa-empty-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-ai-sa-empty-body {
+  margin: 8px auto 0;
+  max-width: 400px;
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.65;
+}
+.legacy-ai-sa-chip {
+  font-size: 0.65625rem;
+  font-weight: 600;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 5px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+.legacy-ai-sa-chip.is-changed {
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border-color: var(--c-accent-line);
+}
+.legacy-ai-sa-chip.is-muted {
+  color: var(--c-ink-4);
+}
+.legacy-ai-sa-card {
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 16px 18px;
+  opacity: 1;
+}
+.legacy-ai-sa-card.is-off {
+  opacity: 0.62;
+}
+.legacy-ai-sa-chips {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.legacy-ai-sa-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+.legacy-ai-sa-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-ai-sa-id {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-sa-desc {
+  margin: 7px 0 0;
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  line-height: 1.55;
+}
+.legacy-ai-sa-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-line-2, var(--c-line));
+  flex-wrap: wrap;
+}
+.legacy-ai-sa-meta {
+  font-size: 0.65625rem;
+  color: var(--c-ink-4);
+}
+
+/* Team settings · team processes (app/(app)/team/settings/workflows/page.tsx; parts matching built-in-agent cards reuse legacy-ai-sa-*) */
+.legacy-ai-mt8 {
+  margin-top: 8px;
+}
+.legacy-ai-sa-toolbar.is-wrap {
+  flex-wrap: wrap;
+}
+.legacy-ai-sa-title-row.is-tight {
+  margin-top: 8px;
+}
+.legacy-ai-sa-name.is-approval {
+  font-size: 0.96875rem;
+}
+.legacy-ai-sa-desc.is-tight {
+  margin: 6px 0 0;
+}
+.legacy-ai-wf-state {
+  font-size: 0.65625rem;
+  font-weight: 600;
+  border: 1px solid;
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.legacy-ai-wf-state.is-warn {
+  color: #7a5e1c;
+  background: var(--c-warn-soft);
+  border-color: #e7d49a;
+}
+.legacy-ai-wf-state.is-danger {
+  color: #8c2233;
+  background: var(--c-err-soft);
+  border-color: #ecc6cc;
+}
+.legacy-ai-wf-approval {
+  border: 1px solid var(--c-warn, #d9a441);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 14px 18px;
+}
+.legacy-ai-wf-risk {
+  font-size: 0.65625rem;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.legacy-ai-wf-by {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-wf-preview {
+  margin-top: 10px;
+}
+.legacy-ai-wf-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--c-accent, var(--c-ink-2));
+}
+.legacy-ai-wf-preview-loading {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-wf-pre {
+  margin-top: 8px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.legacy-ai-wf-decide {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+.legacy-ai-wf-hint {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-wf-shared {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-ai-wf-off {
+  font-size: 0.65625rem;
+  font-weight: 600;
+  color: var(--c-ink-4);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.legacy-ai-wf-empty {
+  border: 1px dashed var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 52px 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.legacy-ai-wf-empty-body {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.65;
+  max-width: 380px;
+}
+.legacy-ai-wf-accent {
+  color: var(--c-accent, var(--c-ink-2));
+}
+.legacy-ai-wf-approvals {
+  margin-bottom: 22px;
+}
+.legacy-ai-wf-h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  margin: 0 0 10px;
+}
+
+/* Team settings · scheduled tasks (components/settings/scheduled.tsx original inline / S.head, S.eyebrow, S.count, S.btnPri, S.routine, S.rRow, S.sep,
+ * S.expandBtn, S.mCard, S.history, S.historyHead, S.empty, S.emptyIco) */
+.legacy-ai-sched-root {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1080px;
+}
+.legacy-ai-sched-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+.legacy-ai-sched-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.legacy-ai-sched-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.65625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+}
+.legacy-ai-sched-title-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex-wrap: wrap;
+}
+.legacy-ai-sched-count {
+  font-family: var(--font-v2-mono);
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  padding: 3px 11px;
+  letter-spacing: 0.02em;
+}
+.legacy-ai-sched-count-n {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+.legacy-ai-sched-btnpri {
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex: none;
+}
+.legacy-ai-sched-btnpri.is-disabled {
+  background: var(--c-surface-3, var(--c-surface-2));
+  color: var(--c-ink-4);
+  cursor: not-allowed;
+}
+.legacy-ai-sched-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.legacy-ai-sched-routine {
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.legacy-ai-sched-routine.is-paused {
+  background: var(--c-surface-2);
+}
+.legacy-ai-sched-rrow {
+  grid-template-columns: 1.7fr 1.1fr 1.2fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 15px 17px;
+}
+.legacy-ai-sched-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--c-line);
+  margin: 0 3px;
+}
+.legacy-ai-sched-expand {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--c-ink-4);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.legacy-ai-sched-chev {
+  display: grid;
+  place-items: center;
+  transform: none;
+  transition: transform 200ms;
+}
+.legacy-ai-sched-chev.is-open {
+  transform: rotate(180deg);
+}
+.legacy-ai-sched-mcard {
+  padding: 14px;
+  flex-direction: column;
+  gap: 11px;
+}
+.legacy-ai-sched-history {
+  border-top: 1px solid var(--c-line-2);
+  background: var(--c-bg);
+  padding: 6px 17px 14px;
+}
+.legacy-ai-sched-history-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0 8px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+}
+.legacy-ai-sched-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  padding: 64px 30px;
+  border: 1px dashed var(--c-line);
+  border-radius: 18px;
+  background: var(--c-surface);
+}
+.legacy-ai-sched-empty-ico {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--c-accent-tint);
+  border: 1px solid var(--c-accent-soft);
+  display: grid;
+  place-items: center;
+  color: var(--c-accent);
+}
+.legacy-ai-sched-empty-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-ai-sched-empty-body {
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  line-height: 1.6;
+  max-width: 42ch;
+}
+
+/* @section accept-a:look —— page-by-page acceptance A · appearance/everyday: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* Team settings · feedback inbox (feedback-inbox-content.tsx).
+ * Originally inline; repeat selector class to raise specificity one tier, avoiding generic shell element rules (button,
+ * pre, label, ul) — those could not beat inline styles. */
+.legacy-fbi-page.legacy-fbi-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 4px 4px 60px;
+}
+.legacy-fbi-coach.legacy-fbi-coach {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: -6px 0 14px;
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+}
+.legacy-fbi-spacer.legacy-fbi-spacer {
+  flex: 1;
+}
+.legacy-fbi-coach-label.legacy-fbi-coach-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.legacy-fbi-coach-label.legacy-fbi-coach-label.is-busy {
+  cursor: default;
+}
+.legacy-fbi-coach-err.legacy-fbi-coach-err {
+  color: var(--c-err);
+}
+/* Dashed frame shared by loading/empty states */
+.legacy-fbi-empty.legacy-fbi-empty {
+  border: 1px dashed var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 34px 18px;
+  text-align: center;
+  color: var(--c-ink-4);
+  font-size: 0.8125rem;
+}
+.legacy-fbi-list.legacy-fbi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.legacy-fbi-row.legacy-fbi-row {
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+  padding: 15px 17px;
+}
+.legacy-fbi-row.legacy-fbi-row.is-open {
+  border-color: var(--c-accent);
+}
+.legacy-fbi-row-head.legacy-fbi-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.legacy-fbi-kind.legacy-fbi-kind {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.legacy-fbi-target.legacy-fbi-target {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-fbi-flag.legacy-fbi-flag {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+/* Recurrence/background case chips: same text/border color, selected by tone */
+.legacy-fbi-chip.legacy-fbi-chip {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+  border: 1px solid var(--c-ink-4);
+  border-radius: 5px;
+  padding: 1px 7px;
+  opacity: 0.9;
+}
+.legacy-fbi-chip.legacy-fbi-chip.is-warn {
+  color: var(--c-warn);
+  border-color: var(--c-warn);
+}
+.legacy-fbi-chip.legacy-fbi-chip.is-info {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.legacy-fbi-expires.legacy-fbi-expires {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+}
+.legacy-fbi-text.legacy-fbi-text {
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+.legacy-fbi-meta.legacy-fbi-meta {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.legacy-fbi-toggle.legacy-fbi-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--c-accent);
+  cursor: pointer;
+  font-size: 0.78125rem;
+}
+.legacy-fbi-mt10.legacy-fbi-mt10 {
+  margin-top: 10px;
+}
+.legacy-fbi-mt8.legacy-fbi-mt8 {
+  margin-top: 8px;
+}
+.legacy-fbi-actions.legacy-fbi-actions {
+  margin-top: 13px;
+}
+.legacy-fbi-reject.legacy-fbi-reject,
+.legacy-fbi-prefill.legacy-fbi-prefill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legacy-fbi-btnrow.legacy-fbi-btnrow {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.legacy-fbi-btnrow.legacy-fbi-btnrow.is-wrap {
+  flex-wrap: wrap;
+}
+.legacy-fbi-reroute.legacy-fbi-reroute {
+  margin-top: 10px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.legacy-fbi-reroute-title.legacy-fbi-reroute-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-fbi-reroute-reason.legacy-fbi-reroute-reason {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.legacy-fbi-reroute-hint.legacy-fbi-reroute-hint {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+  margin-top: 4px;
+}
+.legacy-fbi-pre.legacy-fbi-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.78125rem;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+}
+.legacy-fbi-detail-loading.legacy-fbi-detail-loading {
+  font-size: 0.78125rem;
+  color: var(--c-ink-4);
+}
+.legacy-fbi-detail.legacy-fbi-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.legacy-fbi-label.legacy-fbi-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--c-ink-4);
+  text-transform: uppercase;
+}
+.legacy-fbi-rubric.legacy-fbi-rubric {
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+  line-height: 1.6;
+  background: var(--c-surface-2);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-top: 6px;
+}
+.legacy-fbi-evidence.legacy-fbi-evidence {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.legacy-fbi-evidence-item.legacy-fbi-evidence-item {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  line-height: 1.55;
+}
+.legacy-fbi-contrib.legacy-fbi-contrib {
+  color: var(--c-ink-2);
+}
+.legacy-fbi-evidence-more.legacy-fbi-evidence-more {
+  font-size: 0.78125rem;
+  color: var(--c-ink-4);
+}
+.legacy-fbi-sources.legacy-fbi-sources {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+  margin-top: 6px;
+}
+.legacy-fbi-note.legacy-fbi-note {
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * Chat workbench/report canvas · batch 1: workbench control inline styles moved to legacy classes
+ * (originally identical to the inline values; batch 2 interface rules in styles/ui-refresh-workbench.css restyle them).
+ * Equivalent canvas control classes in
+ * styles/report-canvas.css, plan cards in styles/plan-card.css.
+ * ───────────────────────────────────────────────────────────── */
+
+/* Citation badges (ArtifactChip in components/chat/step-list/LeadNarrative.tsx): inline superscript, no line-height increase */
+.legacy-cite-chip {
+  display: inline;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 0.42em;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+/* KB citation document icon: chip and source-card title tiers */
+.legacy-kb-doc-icon {
+  display: inline-block;
+  box-sizing: border-box;
+  flex: none;
+}
+.legacy-kb-doc-icon--chip {
+  width: 7px;
+  height: 8px;
+  border: 1.2px solid currentColor;
+  border-radius: 1px;
+  margin-right: 2px;
+  vertical-align: -0.05em;
+}
+.legacy-kb-doc-icon--title {
+  width: 10px;
+  height: 12px;
+  border: 1.4px solid currentColor;
+  border-radius: 1.5px;
+  margin-right: 0;
+  vertical-align: -0.1em;
+}
+
+/* Running band (components/chat/step-list/RunningBand.tsx): expanded disclosure has no bottom border, arrow up; first skeleton row */
+.bh-band__chev.legacy-band-chev--expanded {
+  transform: rotate(180deg);
+}
+.bh-band__gbar.legacy-band-gbar--lead {
+  width: 20px;
+}
+
+/* Flexible step-row spacer (Step.tsx). Agent header (AgentBlock.tsx) spacer span stays inline:
+ * globals.css `.agb-head > span:not([class])` places this classless span in grid row two; adding a class changes layout. */
+.legacy-flex-spacer {
+  flex: 1;
+}
+
+/* Composer Tab completion ghost/hint (components/chat/v2-composer.tsx) */
+.legacy-composer-ghost {
+  color: var(--c-ink-3, #999);
+  opacity: 0.55;
+  font-style: italic;
+}
+.legacy-composer-ghost-hint {
+  color: var(--c-ink-3, #999);
+  font-size: 0.85em;
+  margin-left: 6px;
+  font-style: normal;
+}
+.legacy-composer-ghost-hint--cycle {
+  opacity: 0.5;
+}
+.legacy-composer-ghost-hint--tab {
+  opacity: 0.45;
+}
+
+/* Dropdown arrow in results-area export button (components/chat-workbench.tsx) */
+.legacy-ws-export-caret {
+  opacity: 0.55;
+}
+
+/* @section tail:files —— acceptance finish · files/skills pages: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* First files-page loading skeleton: leading icon/trailing metadata slots (middle width varies by row number, remains inline) */
+.legacy-files-sk-icon {
+  width: 16px;
+}
+.legacy-files-sk-meta {
+  width: 54px;
+  margin-left: auto;
+}
+
+/* Pending-upload retry/cancel always visible: outrank .f-acts opacity:0 (hover/focus rules already 1) */
+.f-acts.legacy-files-acts--pinned {
+  opacity: 1;
+}
+
+/* Hidden upload input (upload-file button triggers its click) */
+.legacy-files-upload-input {
+  display: none;
+}
+
+/* Add-to-KB dialog header text column, skeleton while team scope loads */
+.legacy-files-dialog-headtext {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-files-skelline--scope {
+  width: 120px;
+}
+
+/* Skills-page my-skills empty group header: no collapse button, default cursor */
+.legacy-skills-group-head--static {
+  cursor: default;
+}
+
+/* @section tail:states —— acceptance finish · miscellaneous state pages: legacy classes ported verbatim from inline styles (no prefix). */
+
+/* No-space onboarding (app/(app)/empty-workspace/page.tsx) */
+.legacy-ews {
+  max-width: 520px;
+  margin: 10vh auto;
+  padding: 24px;
+}
+.legacy-ews-title {
+  font-size: 1.375rem;
+  margin-bottom: 6px;
+}
+.legacy-ews-subtitle {
+  color: var(--c-ink-3, #888);
+  font-size: 0.875rem;
+  margin-bottom: 24px;
+}
+.legacy-ews-join {
+  margin-bottom: 28px;
+}
+.legacy-ews-heading {
+  font-size: 0.9375rem;
+  margin-bottom: 10px;
+}
+.legacy-ews-loading {
+  font-size: 0.8125rem;
+}
+.legacy-ews-empty {
+  font-size: 0.8125rem;
+  color: var(--c-ink-3, #888);
+}
+.legacy-ews-invites {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legacy-ews-invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--c-line, #e5e7eb);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.legacy-ews-invite-name {
+  font-size: 0.875rem;
+}
+.legacy-ews-invite-role {
+  font-size: 0.75rem;
+  color: var(--c-ink-3, #888);
+}
+.legacy-ews-create {
+  display: flex;
+  gap: 8px;
+}
+.legacy-ews-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line, #e5e7eb);
+  font-size: 0.875rem;
+}
+.legacy-ews-error {
+  color: var(--c-err, #dc2626);
+  font-size: 0.8125rem;
+  margin-top: 16px;
+}
+
+/* Settings-page no permission (components/settings/access-boundary.tsx): frame width and gap between two buttons */
+.legacy-access-boundary {
+  max-width: 560px;
+}
+.legacy-access-boundary-action {
+  margin-top: 12px;
+}
+.legacy-access-boundary-action--next {
+  margin-left: 8px;
+}
+
+/* Team settings shell identity checking / read failure / access denied (components/settings/settings-shell.tsx) */
+.legacy-settings-gate {
+  color: var(--c-ink-2);
+}
+
+/* @section tail:settings —— acceptance finish · outside acceptance A: inline styles moved after Notice / Field support className. */
+
+/* Export/email notice spacing (components/settings/export.tsx, email-config.tsx) */
+.legacy-notice--mt12 {
+  margin-top: 12px;
+}
+.legacy-notice--mb10 {
+  margin-bottom: 10px;
+}
+
+/* Space access: select-space/add-member fields (components/settings/members.tsx) */
+.legacy-space-members-workspace-field {
+  max-width: 420px;
+}
+.legacy-space-members-candidate-field {
+  flex: 1 1 260px;
+}
+
+/* @section style-tail:tools —— style finish · tool-page dialog/drawer interiors: legacy classes ported verbatim from inline styles (no prefix).
+ * components/settings/tools/tools-manager.tsx: Datarc key-scope panel, edit source, built-in tool selection, Tavily /
+ * Datarc configuration, disable/delete impacts. */
+.legacy-tools-scope-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.legacy-tools-scope-headmain {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.legacy-tools-scope-headtext {
+  min-width: 0;
+}
+.legacy-tools-scope-title {
+  display: block;
+  color: var(--c-ink);
+}
+.legacy-tools-inline-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-tools-scope-status-text {
+  margin: 0;
+}
+.legacy-tools-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.legacy-tools-scope-ws-summary {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.legacy-tools-scope-ws-list {
+  padding: 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.legacy-tools-scope-ws-more {
+  margin: 9px 0 0;
+}
+.legacy-tools-scope-meta {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+.legacy-tools-scope-meta-value {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.legacy-tools-edit-oauth-note {
+  margin: 0;
+  line-height: 1.5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-tools-edit-rotate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.legacy-tools-edit-creds-note {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+.legacy-tools-edit-rotate-fields {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-tools-input-mono {
+  font-family: var(--font-v2-mono);
+}
+.legacy-tools-dialog-lead {
+  margin-top: 0;
+  color: var(--c-ink-2);
+  line-height: 1.6;
+}
+.legacy-tools-picker-list {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-tools-dialog-note {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-tools-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.legacy-tools-impact {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-tools-impact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+.legacy-tools-impact-none {
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+}
+.legacy-tools-impact-note {
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  line-height: 1.6;
+}
+/* State-dependent inline values become modifiers (checked against each original condition: verified, index % 2, index >= 2) */
+.legacy-tools-scope-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.legacy-tools-scope-mark {
+  flex: 0 0 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.legacy-tools-scope-status {
+  display: block;
+  margin-top: 2px;
+}
+.legacy-tools-impact-cell {
+  text-align: center;
+}
+
+/* components/settings/tools/source-refresh-dialog.tsx: MCP tool-list refresh preview */
+.legacy-tools-refresh {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.legacy-tools-refresh-loading,
+.legacy-tools-refresh-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+}
+.legacy-tools-refresh-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legacy-tools-refresh-section.is-warning {
+  padding: 12px;
+  background: color-mix(in srgb, var(--c-err) 6%, var(--c-surface));
+}
+.legacy-tools-refresh-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-tools-refresh-section.is-warning .legacy-tools-refresh-heading {
+  color: var(--c-err-ink);
+}
+.legacy-tools-refresh-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-ai-tools-op.is-removed {
+  text-decoration: line-through;
+  color: var(--c-ink-3);
+}
+.legacy-tools-refresh-note {
+  margin: 0;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.legacy-tools-refresh-note.is-warn {
+  color: var(--c-warn-ink);
+}
+.legacy-tools-refresh-changed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-tools-refresh-changed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.legacy-tools-refresh-changed-meta {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-tools-notice-action {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+}
+
+/* components/settings/tools/source-tool-selection-dialog.tsx: Choose Tools for an existing MCP source */
+.legacy-tools-choose-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-ink-3);
+}
+.legacy-tools-choose-search .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-tools-choose-count {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-tools-choose-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-tools-choose-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+}
+.legacy-tools-choose-row.is-on {
+  border-color: var(--c-accent-line);
+  background: var(--c-accent-tint);
+}
+.legacy-tools-choose-row input[type="checkbox"] {
+  flex: none;
+  margin-top: 2px;
+}
+.legacy-tools-choose-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.legacy-tools-choose-name {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78125rem;
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+.legacy-tools-choose-desc {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.legacy-tools-choose-badge {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-family: var(--font-sans, inherit);
+  font-size: 0.65625rem;
+  font-weight: 600;
+}
+.legacy-tools-choose-badge.is-new {
+  border: 1px solid var(--c-accent-line);
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+}
+.legacy-tools-choose-badge.is-write {
+  border: 1px solid var(--c-warn-line);
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+}
+
+
+/* components/settings/tools/powerbi-tool-section.tsx: Power BI connection rows (disabled opacity 0.55), editing and DAX-template dialogs */
+.legacy-tools-pbi-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 1;
+}
+.legacy-tools-pbi-row.is-off {
+  opacity: 0.55;
+}
+.legacy-tools-pbi-main {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-tools-pbi-note {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-tools-pbi-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.legacy-tools-pbi-template-dax {
+  overflow: auto;
+}
+
+/* components/settings/tools/google-workspace-tool-section.tsx: Google Workspace capability bundles and consent-screen scopes */
+.legacy-ai-tools-google-mark {
+  flex: none;
+}
+.legacy-tools-google-bundle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+}
+.legacy-tools-google-bundle > span {
+  display: grid;
+  gap: 2px;
+}
+/* The Google row carries three buttons and a switch: let them wrap on narrow screens. */
+.legacy-ai-tools-builtin--wrap {
+  flex-wrap: wrap;
+}
+.legacy-tools-google-scopes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* @section style-tail:spaces —— style finish · team spaces: original create-space field/admin-dialog inline styles (components/settings/team-spaces-admin.tsx). */
+.legacy-tsa-admins-hint {
+  margin-top: 0;
+}
+.legacy-tsa-admins-add {
+  display: flex;
+}
+.legacy-tsa-admins-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.legacy-tsa-admins-name {
+  min-width: 0;
+}
+
+/* @section style-tail:usage —— style finish · usage-location drawer/summary (components/settings/resource-usage.tsx; tools, skills and skills drawer share): legacy classes ported verbatim from inline styles. */
+.legacy-usage-loading {
+  padding: 16px 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+.legacy-usage-error {
+  padding: 12px;
+}
+.legacy-usage-retry {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.legacy-usage-details {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-usage-partial {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+.legacy-usage-partial-icon {
+  flex: none;
+  margin-top: 2px;
+}
+.legacy-usage-empty {
+  padding: 8px 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+.legacy-usage-group-head {
+  display: flex;
+  align-items: center;
+}
+.legacy-usage-group-count {
+  font-weight: 400;
+}
+.legacy-usage-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-usage-row-name {
+  display: block;
+  color: var(--c-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legacy-usage-row-kind {
+  display: block;
+  margin-top: 2px;
+}
+.legacy-usage-row {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.legacy-usage-note {
+  color: var(--c-ink-4);
+  font-size: 0.71875rem;
+}
+.legacy-usage-note-actual {
+  color: var(--c-ink-4);
+  font-size: 0.71875rem;
+  line-height: 1.5;
+}
+.legacy-usage-drawer-head {
+  display: flex;
+  gap: 12px;
+}
+.legacy-usage-drawer-headtext {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-usage-drawer-title {
+  margin: 0;
+}
+.legacy-usage-drawer-close {
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.legacy-usage-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+}
+/* Usage-location summary (tool/skill cards): original quietButton expansion + completeness colors (partial --c-warn) */
+.legacy-usage-summary {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--c-ink-3);
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.legacy-usage-summary.is-partial {
+  color: var(--c-warn);
+}
+/* Readiness: original readinessColor() four branches */
+.legacy-usage-readiness {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-ink-4);
+  white-space: nowrap;
+}
+.legacy-usage-readiness.is-ready {
+  color: var(--c-pos);
+}
+.legacy-usage-readiness.is-unavailable {
+  color: var(--c-err);
+}
+.legacy-usage-readiness.is-degraded {
+  color: var(--c-warn);
+}
+.legacy-usage-readiness-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-ink-4);
+}
+.legacy-usage-readiness.is-ready .legacy-usage-readiness-dot {
+  background: var(--c-pos);
+}
+.legacy-usage-readiness.is-unavailable .legacy-usage-readiness-dot {
+  background: var(--c-err);
+}
+.legacy-usage-readiness.is-degraded .legacy-usage-readiness-dot {
+  background: var(--c-warn);
+}
+/* Drawer shell (original DialogShell backdropStyle / panelStyle) */
+.legacy-usage-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  justify-content: flex-end;
+}
+.legacy-usage-drawer {
+  width: 480px;
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* @section style-tail:scheduled —— style finish · scheduled tasks (components/settings/scheduled.tsx): legacy classes ported verbatim from S table/inline styles.
+ * Drawer (create/edit, same form embedded in chat), task rows, run history, empty skeleton; S entry names directly
+ * become class names (legacy-sched-<entry>, multiple entries concatenated). */
+.legacy-sched-bound-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  line-height: 1.4;
+}
+.legacy-sched-bound-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  font-weight: 500;
+  color: var(--c-ink-2);
+}
+.legacy-sched-bound-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  color: var(--c-ink-4);
+}
+.legacy-sched-pause-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 17px;
+  border-top: 1px solid var(--c-warn-line);
+  background: var(--c-warn-soft);
+  font-size: 0.78125rem;
+  color: var(--c-warn-ink);
+  line-height: 1.5;
+}
+.legacy-sched-pause-act {
+  flex: none;
+  font-family: var(--font-v2-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-surface);
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-sched-r-query {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legacy-sched-r-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.legacy-sched-meta-ln {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  min-width: 0;
+}
+.legacy-sched-meta-ic {
+  flex: none;
+  color: var(--c-ink-4);
+  display: grid;
+  place-items: center;
+}
+.legacy-sched-mono {
+  font-family: var(--font-v2-mono);
+  font-feature-settings: "tnum" 1;
+}
+.legacy-sched-meta-ln-meta-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  min-width: 0;
+}
+.legacy-sched-r-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: end;
+}
+.legacy-sched-run-empty {
+  font-size: 0.75rem;
+  color: var(--c-ink-4);
+  padding: 8px 2px;
+}
+.legacy-sched-run {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+  background: var(--c-surface);
+  margin-top: 7px;
+}
+.legacy-sched-run-act-run-act-muted {
+  justify-self: end;
+  font-family: var(--font-v2-sans);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  color: var(--c-ink-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  border-color: var(--c-line);
+}
+.legacy-sched-run-act {
+  justify-self: end;
+  font-family: var(--font-v2-sans);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-surface);
+  border: 1px solid var(--c-accent-soft);
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+.legacy-sched-scrim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--c-ink) 28%, transparent);
+  backdrop-filter: blur(1px);
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+}
+.legacy-sched-drawer {
+  width: 480px;
+  max-width: 100%;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-3);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--c-line);
+  height: 100%;
+}
+.legacy-sched-dr-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--c-line);
+}
+.legacy-sched-dr-eyebrow {
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+  margin-bottom: 3px;
+}
+.legacy-sched-dr-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.legacy-sched-dr-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.legacy-sched-inp {
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.legacy-sched-inp-textarea {
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  line-height: 1.6;
+  min-height: 74px;
+}
+.legacy-sched-bound-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  margin-top: 9px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line-2);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.legacy-sched-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+}
+.legacy-sched-subpick {
+  display: flex;
+  gap: 9px;
+  margin-top: 9px;
+  padding: 11px 13px;
+  background: var(--c-surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+}
+.legacy-sched-seg-lab {
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+  margin-bottom: 7px;
+}
+.legacy-sched-manual-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 11px 13px;
+  margin-top: 9px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line-2);
+  border-radius: 8px;
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  line-height: 1.45;
+}
+.legacy-sched-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  padding: 9px 12px;
+  background: var(--c-pos-soft);
+  border: 1px solid var(--c-pos-line);
+  border-radius: 8px;
+  margin-top: 9px;
+}
+.legacy-sched-adv {
+  margin-top: 9px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--c-surface);
+}
+.legacy-sched-adv-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: var(--font-v2-sans);
+}
+.legacy-sched-adv-body {
+  padding: 0 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legacy-sched-cron-err {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.71875rem;
+  color: var(--c-err);
+  font-weight: 500;
+}
+.legacy-sched-help {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  line-height: 1.45;
+}
+.legacy-sched-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-surface);
+  min-height: 42px;
+  align-items: center;
+}
+.legacy-sched-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-v2-mono);
+  font-size: 0.71875rem;
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  padding: 4px 6px 4px 11px;
+}
+.legacy-sched-chip-x {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--c-ink-4);
+  cursor: pointer;
+}
+.legacy-sched-chip-inp {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  background: none;
+  font-family: var(--font-v2-mono);
+  font-size: 0.71875rem;
+  color: var(--c-ink);
+  padding: 5px;
+  outline: none;
+}
+.legacy-sched-notify-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 13px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-surface-2);
+  margin-top: 9px;
+}
+.legacy-sched-dr-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 22px;
+  border-top: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+}
+.legacy-sched-btn-ghost {
+  font-family: var(--font-v2-sans);
+  font-size: 0.78125rem;
+  font-weight: 500;
+  color: var(--c-ink-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 9px 12px;
+  border-radius: 8px;
+}
+.legacy-sched-foot-hint {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legacy-sched-radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+.legacy-sched-err-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 54px 30px;
+  border: 1px solid var(--c-err-line);
+  border-radius: 18px;
+  background: var(--c-err-soft);
+}
+.legacy-sched-pause-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--c-warn-ink);
+}
+.legacy-sched-pause-text {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-sched-row-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.legacy-sched-row-name-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.legacy-sched-mrow-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.legacy-sched-mrow-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.legacy-sched-mrow-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--c-line-2);
+}
+.legacy-sched-grow {
+  flex: 1;
+}
+.legacy-sched-run-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.legacy-sched-run-line {
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+}
+.legacy-sched-run-time {
+  font-family: var(--font-v2-mono);
+  font-feature-settings: "tnum" 1;
+  color: var(--c-ink-3);
+}
+.legacy-sched-dr-headtext {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-sched-note-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--c-ink-4);
+}
+.legacy-sched-bound-text {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-sched-strong {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-sched-bound-by {
+  margin-left: 8px;
+}
+.legacy-sched-bound-missing {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-warn-ink);
+}
+.legacy-sched-bound-clear {
+  font-family: var(--font-v2-sans);
+  font-size: 0.78125rem;
+  font-weight: 500;
+  color: var(--c-ink-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  flex: none;
+}
+.legacy-sched-subpick-stack {
+  display: flex;
+  gap: 11px;
+  margin-top: 9px;
+  padding: 11px 13px;
+  background: var(--c-surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--c-line-2);
+  flex-direction: column;
+}
+.legacy-sched-weekdays {
+  display: flex;
+  gap: 5px;
+}
+.legacy-sched-readout-icon {
+  color: var(--c-pos);
+  flex: none;
+}
+.legacy-sched-flex-none {
+  flex: none;
+}
+.legacy-sched-rcards {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.legacy-sched-help-err {
+  font-size: 0.71875rem;
+  color: var(--c-err);
+  line-height: 1.45;
+}
+.legacy-sched-notify-name {
+  font-size: 0.78125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-sched-notify-desc {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-sched-field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.legacy-sched-field-label {
+  font-size: 0.78125rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+.legacy-sched-field-option {
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-sched-field-counter {
+  margin-left: auto;
+  font-family: var(--font-v2-mono);
+  font-size: 0.65625rem;
+  color: var(--c-ink-4);
+}
+.legacy-sched-select-wrap {
+  position: relative;
+}
+.legacy-sched-select-chev {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--c-ink-4);
+  pointer-events: none;
+  display: grid;
+}
+.legacy-sched-rcard-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.legacy-sched-rcard-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.legacy-sched-rcard-desc {
+  display: block;
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.legacy-sched-divider {
+  height: 1px;
+  background: var(--c-line-2);
+}
+/* State-dependent inline values become modifiers (each branch checked against original condition; S entries expanded verbatim, key order matching original object spread) */
+/* Leading state dot: paused --c-ink-4, otherwise --c-pos; mobile-card version adds margin-top 6 */
+.legacy-sched-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-pos);
+}
+.legacy-sched-dot--m {
+  margin-top: 6px;
+}
+.legacy-sched-dot.is-paused {
+  background: var(--c-ink-4);
+}
+/* Task name (S.rName, with S.dim when paused); mobile-card adds flex 1, min-width 0, line-height 1.3 */
+.legacy-sched-r-name {
+  font-size: 0.90625rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legacy-sched-r-name--m {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.legacy-sched-r-name.is-dim {
+  color: var(--c-ink-4);
+}
+/* Metadata row (S.metaLn): paused text --c-ink-4 */
+.legacy-sched-meta-ln.is-dim {
+  color: var(--c-ink-4);
+}
+/* Schedule presets (S.presetBtn / presetBtnOn) and icon colors */
+.legacy-sched-preset-btn {
+  font-family: var(--font-v2-sans);
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 9px 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.legacy-sched-preset-btn.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--c-accent);
+}
+.legacy-sched-preset-icon {
+  color: var(--c-ink-4);
+}
+.legacy-sched-preset-icon.is-on {
+  color: var(--c-accent);
+}
+/* Weekly: weekday buttons (S.weekdayBtn / weekdayBtnOn) */
+.legacy-sched-weekday-btn {
+  flex: 1;
+  font-family: var(--font-v2-sans);
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  padding: 7px 0;
+  cursor: pointer;
+}
+.legacy-sched-weekday-btn.is-on {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+/* Custom cron: expand arrow/input (S.inp + S.inpMono, S.inpErr on error) */
+.legacy-sched-adv-chev {
+  margin-left: auto;
+  color: var(--c-ink-4);
+  transform: none;
+  transition: transform 200ms;
+  display: grid;
+  place-items: center;
+}
+.legacy-sched-adv-chev.is-open {
+  transform: rotate(180deg);
+}
+.legacy-sched-inp-mono {
+  font-family: var(--font-v2-mono);
+  font-size: 0.78125rem;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.legacy-sched-inp-mono.is-err {
+  border-color: var(--c-err);
+  box-shadow: 0 0 0 3px var(--c-err-soft);
+}
+/* Footer save (S.btnPri, S.btnPriDisabled when unavailable) */
+.legacy-sched-btn-pri {
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex: none;
+}
+.legacy-sched-btn-pri.is-disabled {
+  background: var(--c-surface-3, var(--c-surface-2));
+  color: var(--c-ink-4);
+  cursor: not-allowed;
+}
+/* Icon buttons (S.iconBtn; hover classes from JS state, three values match original hoverStyle; disabled opacity 0.5) */
+.legacy-sched-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--c-ink-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 130ms;
+  opacity: 1;
+}
+.legacy-sched-icon-btn.is-hover-danger {
+  color: var(--c-err);
+  background: var(--c-err-soft);
+  border-color: var(--c-err-line);
+}
+.legacy-sched-icon-btn.is-hover-run {
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border-color: var(--c-accent-soft);
+}
+.legacy-sched-icon-btn.is-hover {
+  color: var(--c-ink);
+  background: var(--c-surface-2);
+  border-color: var(--c-line);
+}
+.legacy-sched-icon-btn.is-disabled {
+  opacity: 0.5;
+}
+/* Form field wrapper (position:relative in copilot field state) */
+.legacy-sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.legacy-sched-field.is-ai {
+  position: relative;
+}
+/* Dropdown (S.select; disabled opacity 0.6, not-allowed) */
+.legacy-sched-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  font-family: var(--font-v2-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 10px 32px 10px 12px;
+  box-sizing: border-box;
+  opacity: 1;
+  cursor: pointer;
+}
+.legacy-sched-select.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+/* Execution-mode radio cards (S.rcard / rcardOn, S.radio / radioOn, S.pill and selection color) */
+.legacy-sched-rcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--c-surface);
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-v2-sans);
+}
+.legacy-sched-rcard.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-tint);
+  box-shadow: 0 0 0 1px var(--c-accent);
+}
+.legacy-sched-radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--c-line);
+  margin-top: 1px;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.legacy-sched-radio.is-on {
+  border-color: var(--c-accent);
+}
+.legacy-sched-pill {
+  font-family: var(--font-v2-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--c-ink-4);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.legacy-sched-pill.is-on {
+  color: var(--c-accent);
+  border-color: var(--c-accent-soft);
+}
+
+/* @section style-tail:skills —— style finish · skill drawer (components/skill-drawer.tsx) team state/copy bar/evaluation-count note: legacy classes ported verbatim from inline styles.
+ * Evaluation-count note originally used inline padding-bottom to beat .sset .drawer-note padding; use compound selector
+ * (0,2,0, imported after skills-settings.css). */
+.legacy-skill-drawer-team {
+  padding: 10px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.legacy-skill-drawer-team-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.legacy-skill-drawer-team-label {
+  font-weight: 600;
+}
+.legacy-skill-drawer-grow {
+  flex: 1;
+}
+.legacy-skill-drawer-team-reason {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+}
+.legacy-skill-drawer-team-conflict {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.drawer-note.legacy-skill-drawer-evals-note {
+  padding-bottom: 10px;
+}
+/* Canvas-hosted editor section: may shrink inside the Canvas flex column (formerly inline min-width: 0). */
+.sset.legacy-skill-drawer-hosted {
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  gap: 16px;
+}
+/* Hosted instructions field (D10): a labelled ordinary text area, not the monospace file view. */
+.sset.legacy-skill-drawer-hosted .legacy-skill-drawer-body-field {
+  display: grid;
+  gap: 6px;
+}
+.sset.legacy-skill-drawer-hosted textarea.legacy-skill-drawer-body {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  font-family: var(--f-sans);
+}
+/* The Canvas body already supplies the object padding and reading width. */
+.sset.legacy-skill-drawer-hosted .drawer-body {
+  padding: 0;
+  overflow: visible;
+}
+/* Team skill review state: danger for rejected / update_rejected, otherwise --c-ink-2 */
+.legacy-skill-drawer-team-state {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+.legacy-skill-drawer-team-state.is-rejected {
+  color: var(--c-err, #b3261e);
+}
+
+/* @section style-tail:settings-dialogs —— style finish · data source (create Datarc connection / change key), built-in agent settings dialogs: legacy classes ported verbatim from inline styles.
+ * components/settings/datarc-connections.tsx, components/settings/builtin-subagents-section.tsx. */
+.legacy-datarc-modal-form {
+  display: flex;
+  flex-direction: column;
+}
+.legacy-datarc-modal-choice {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.legacy-datarc-modal-choice-hint {
+  line-height: 1.5;
+}
+.legacy-datarc-modal-option {
+  display: block;
+  font-size: 0.75rem;
+  margin-bottom: 8px;
+}
+.legacy-datarc-modal-option-hint {
+  display: block;
+}
+.legacy-datarc-modal-option-last {
+  display: block;
+  font-size: 0.75rem;
+}
+.legacy-datarc-modal-actions-split {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 16px;
+}
+.legacy-datarc-modal-actions-group {
+  display: flex;
+  gap: 8px;
+}
+.legacy-datarc-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.legacy-bsa-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.legacy-bsa-skills {
+  max-height: 176px;
+  overflow-y: auto;
+}
+.legacy-bsa-skill {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.legacy-bsa-skills-loading {
+  padding: 8px 10px;
+}
+.legacy-bsa-skill-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* @section style-tail:credits —— style finish · credits dialogs (period-reset preview, team quota, grant/edit user credits): legacy classes ported verbatim from inline styles. */
+.legacy-credits-reset-skeleton {
+  height: 80px;
+  margin-bottom: 12px;
+}
+.legacy-credits-reset-cooldown {
+  padding: 12px;
+  background: var(--c-warn-soft);
+  font-size: 0.8125rem;
+  margin-bottom: 12px;
+  color: var(--c-warn);
+}
+.legacy-credits-reset-preview {
+  margin-bottom: 12px;
+}
+.legacy-credits-reset-affected {
+  margin-bottom: 8px;
+}
+.legacy-credits-reset-overrides {
+  background: var(--c-warn-soft);
+  margin-bottom: 8px;
+}
+.legacy-credits-reset-overrides-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.legacy-credits-reset-overrides-more {
+  color: var(--c-ink-3);
+}
+
+.legacy-credits-quota-textarea {
+  resize: vertical;
+}
+.legacy-credits-quota-error {
+  color: var(--c-err);
+}
+.legacy-credits-quota-field {
+  display: grid;
+}
+
+.legacy-credits-grant-field {
+  margin-bottom: 12px;
+}
+.legacy-credits-field-label {
+  display: block;
+}
+
+.legacy-credits-edit-overdraft {
+  margin-top: 4px;
+  color: var(--c-warn);
+}
+.legacy-credits-edit-field {
+  margin-bottom: 14px;
+}
+.legacy-credits-edit-check-input {
+  margin-right: 6px;
+}
+.legacy-credits-edit-check-hint {
+  margin-left: 22px;
+}
+
+/* Edit-user-credit checkbox: disabled not-allowed, opacity 0.6 */
+.legacy-credits-edit-check {
+  display: block;
+  cursor: pointer;
+  opacity: 1;
+}
+.legacy-credits-edit-check.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+
+/* @section style-tail:share —— style finish · share-dialog body (components/share/share-dialog.tsx, share-ui.tsx): legacy classes ported verbatim from inline styles.
+ * Shell (backdrop/panel/header/footer, revoke confirmation, avatars, segments, buttons) ported in batch 5
+ * (legacy-share-*); here roster, search, read-only explanation/tags.
+ * Avatar/button dimensions vary by call site (CSS variables or size values), remain inline. */
+.legacy-share-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+  text-decoration: none;
+  font-weight: 600;
+}
+.legacy-share-flex-none {
+  flex: 0 0 auto;
+}
+.legacy-share-grow {
+  flex: 1;
+}
+.legacy-share-roster-kept {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.legacy-share-roster-kept-icon {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+.legacy-share-search-row {
+  margin: 14px 0 0;
+}
+.legacy-share-roster-empty {
+  margin: 14px 0 6px;
+  padding: 6px 0 14px;
+}
+.legacy-share-roster {
+  margin-top: 16px;
+}
+.legacy-share-roster-head {
+  display: flex;
+  align-items: baseline;
+  padding: 0 12px;
+  margin-bottom: 4px;
+}
+.legacy-share-roster-perm {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+.legacy-share-roster-rows {
+  margin: 0 -6px;
+}
+.legacy-share-row-name {
+  color: var(--c-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.legacy-share-row-group-note {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  padding: 0 12px 6px 53px;
+  margin-top: -2px;
+}
+.legacy-share-search {
+  position: relative;
+}
+.legacy-share-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+.legacy-share-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.legacy-share-suggest-more {
+  padding: 8px 10px;
+  font-size: 0.78125rem;
+  text-align: center;
+}
+.legacy-share-suggest-name {
+  color: var(--c-ink);
+}
+.legacy-share-suggest-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.legacy-share-ro-audience {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.legacy-share-ro-audience-label {
+  font-size: 0.8125rem;
+  color: var(--c-ink-2);
+}
+.legacy-share-ro-audience-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-share-ro-access-label {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.legacy-share-ro-access-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.legacy-share-ro-access-main {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-share-ro-access-name {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-share-ro-access-by {
+  font-size: 0.71875rem;
+  margin-top: 1px;
+}
+.legacy-share-ro-note {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+  line-height: 1.6;
+  padding: 0 2px;
+}
+.legacy-share-head-main {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-share-head-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.legacy-share-type-mark {
+  display: grid;
+  place-items: center;
+}
+.legacy-share-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.legacy-share-foot-note {
+  font-size: 0.71875rem;
+  color: var(--c-ink-4);
+}
+
+/* State-dependent inline values become modifiers (mobile / hover / focus conditions, each branch checked against original ternary) */
+.legacy-share-state-err {
+  padding: 16px 22px 20px;
+  color: var(--c-err);
+  font-size: 0.8125rem;
+}
+.legacy-share-state-err.is-mobile {
+  padding: 8px 2px 16px;
+}
+.legacy-share-state-loading {
+  padding: 24px 22px;
+  font-size: 0.8125rem;
+  text-align: center;
+}
+.legacy-share-state-loading.is-mobile {
+  padding: 20px 2px;
+}
+.legacy-share-body {
+  padding: 16px 22px 8px;
+}
+.legacy-share-body.is-mobile {
+  padding: 0;
+}
+.legacy-share-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: transparent;
+}
+.legacy-share-row-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.legacy-share-row-remove.is-visible {
+  visibility: visible;
+}
+.legacy-share-search-box {
+  display: flex;
+  align-items: center;
+}
+.legacy-share-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+.legacy-share-ro-body {
+  padding: 16px 22px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.legacy-share-ro-body.is-mobile {
+  padding: 0;
+}
+
+/* components/share/share-ui.tsx: type/fixed-permission tags (small 11 / 2.5px 9px), audience placeholder (tint light accent background) */
+.legacy-share-type-tag {
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.legacy-share-perm-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 0.71875rem;
+  border-radius: 999px;
+}
+.legacy-share-perm-tag.is-small {
+  font-size: 0.6875rem;
+}
+.legacy-share-quiet {
+  padding: 26px 0 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.legacy-share-quiet-mark {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+}
+.legacy-share-quiet-title {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.legacy-share-quiet-sub {
+  font-size: 0.78125rem;
+  max-width: 360px;
+}
+
+/* @section p2b5:kb-wizard —— P2 batch 5 · extraction-table wizard (components/knowledge/extraction-template-wizard.tsx): the former inline
+ * styles moved verbatim to classes when the wizard became a DialogShell (accessibility fix, both appearances). No prefix. */
+.kt-wizard-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kt-wizard-panel {
+  max-width: 760px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.kt-wizard-error {
+  margin-bottom: 12px;
+}
+.kt-wizard-field {
+  display: block;
+  margin-bottom: 12px;
+}
+.kt-wizard-field--last {
+  margin-bottom: 16px;
+}
+.kt-wizard-label {
+  display: block;
+}
+.kt-wizard-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--c-line-2);
+  border-radius: 4px;
+  box-sizing: border-box;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+.kt-wizard-textarea {
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+.kt-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.kt-wizard-actions--end {
+  margin-top: 12px;
+}
+.kt-wizard-btn {
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--c-line-2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kt-wizard-btn-primary {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kt-wizard-btn-primary.is-loading {
+  cursor: wait;
+}
+.kt-wizard-btn-primary.is-dim {
+  opacity: 0.6;
+}
+.kt-wizard-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.kt-wizard-checkbox {
+  accent-color: var(--c-accent);
+}
+.kt-wizard-fields-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.kt-wizard-add {
+  padding: 4px 10px;
+  background: var(--c-surface-3);
+  border: 1px solid var(--c-line-2);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.kt-wizard-add:disabled {
+  cursor: not-allowed;
+}
+.kt-wizard-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 2fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.kt-wizard-cell {
+  padding: 6px;
+  border: 1px solid var(--c-line-2);
+  border-radius: 4px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+.kt-wizard-flags {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.kt-wizard-flag {
+  display: flex;
+}
+.kt-wizard-del {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+/* @section p2b5:kb-preview —— P2 batch 5 · knowledge base file preview (components/knowledge/kb-preview.tsx): the former inline
+ * backdrop, panel, header and state styles moved verbatim to classes. No prefix. */
+.kb-preview-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kb-preview-panel {
+  width: min(96vw, 1100px);
+  height: min(94vh, 900px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kb-preview-panel.is-compact {
+  height: auto;
+}
+.kb-preview-head {
+  display: flex;
+  align-items: center;
+}
+.kb-preview-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kb-preview-close {
+  background: transparent;
+  border: 0;
+  margin-left: auto;
+  cursor: pointer;
+}
+.kb-preview-body {
+  flex: 1;
+  overflow: auto;
+}
+.kb-preview-state {
+  padding: 16px;
+  color: var(--c-ink-3);
+}
+.kb-preview-pdf {
+  height: 100%;
+  overflow: auto;
+  background: var(--c-bg);
+}
+.kb-preview-pages {
+  padding: 8px 16px;
+}
+.kb-preview-more {
+  text-align: center;
+  padding: 16px;
+}
+.kb-preview-docx {
+  padding: 24px;
+}
+.kb-preview-docx-warnings {
+  margin-top: 12px;
+  color: var(--c-ink-3);
+}
+.kb-preview-docx-warnings ul {
+  margin-top: 4px;
+}
+.kb-preview-md {
+  padding: 20px;
+}
+
+/* @section p2b5:kb-dialogs —— P2 batch 5 · knowledge base dialog bodies (upload, change scope, run confirmation, save as template,
+ * team template copy): the former inline styles moved verbatim to classes. Overrides of family classes are compound selectors so
+ * they still win over the component stylesheets loaded later (kb-upload-modal.css, matrix.css). No prefix. */
+.kb-up-filecard-text,
+.kb-up-scope-text {
+  min-width: 0;
+}
+.kb-up-head-text {
+  flex: 1;
+}
+.kb-up-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.kb-up-template {
+  display: block;
+  font-size: 0.8125rem;
+}
+.kb-up-template-label {
+  margin-bottom: 4px;
+}
+.kb-up-optional {
+  color: var(--c-ink-3);
+  font-weight: 400;
+}
+.kb-up-template-hint {
+  color: var(--c-ink-3);
+  display: block;
+  font-size: 0.6875rem;
+  margin-top: 2px;
+}
+.kb-up-llm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kb-up-llm-hint {
+  color: var(--c-ink-3);
+  display: block;
+  font-size: 0.6875rem;
+}
+.kb-bundle {
+  margin-bottom: 12px;
+}
+.kb-bundle-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.kb-bundle-count {
+  color: var(--c-ink-2);
+}
+.kb-bundle-count.is-ok {
+  color: var(--c-pos-ink);
+}
+.kb-bundle-spacer {
+  flex: 1;
+}
+.kb-bundle-pct {
+  font-variant-numeric: tabular-nums;
+}
+.kb-bundle-list {
+  margin-top: 14px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.kb-ftype.kb-bundle-ftype {
+  width: max(20px, 2.6em);
+  height: max(20px, 2.6em);
+  font-size: 0.46875rem;
+}
+.kb-retry-inline.kb-bundle-retry {
+  margin-left: 8px;
+}
+.kb-scope-card-text {
+  flex: 1;
+}
+.kb-scope-subj {
+  color: var(--c-ink);
+}
+.kb-scope-to {
+  color: var(--c-accent-hover);
+}
+.kb-modal-body.kb-scope-progress {
+  text-align: center;
+}
+.kb-scope-progress-spin {
+  color: var(--c-accent);
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: center;
+}
+.kb-scope-failed {
+  margin-top: 12px;
+}
+.kb-pop-label.kb-scope-failed-label {
+  padding: 0 0 6px;
+}
+.kb-modal-body.mx-grad-busy {
+  pointer-events: none;
+  opacity: 0.7;
+}
+.mx-flabel.mx-flabel--first {
+  margin-top: 0;
+}
+.mx-inp.is-invalid,
+.mx-inp.is-invalid:focus {
+  border-color: var(--c-err);
+}
+.mx-fielderr.mx-fielderr--6 {
+  margin-top: 6px;
+}
+.mx-fielderr.mx-fielderr--7 {
+  margin-top: 7px;
+}
+.mx-moderow.mx-moderow--spaced {
+  margin-top: 16px;
+}
+.mx-warnbar.mx-warnbar--grad {
+  margin: 0 0 14px;
+}
+.mx-estimate.mx-estimate--note {
+  padding-top: 0;
+}
+.otpl-body-lead.otpl-body-note {
+  margin-top: 10px;
+  color: var(--c-ink-3);
+}
+.otpl-body-lead.otpl-body-lead--spaced {
+  margin-bottom: 14px;
+}
+.kb-modal.kb-otpl-collision {
+  max-width: 440px;
+}
+.otpl-copy-hint {
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+  margin-top: 7px;
+}
+.mx-quote-unlocated {
+  color: var(--c-ink-3);
+}
+
+/* @section p2b5:kb-matrix-menus —— P2 batch 5 · matrix run and column-header menus became shared menus in both appearances
+ * (accessibility fix, components/knowledge/matrix/column-menu.tsx): the former inline minimum widths. No prefix. */
+.kb-pop.kb-mx-menu--run {
+  min-width: 268px;
+}
+.kb-pop.kb-mx-menu--col {
+  min-width: 176px;
+}
+
+/* Question-mark help popover (components/ui/help-popover.tsx; component spec "Help Popover Spec", decision 21).
+ * Both appearances; the refreshed appearance swaps the surface for the menu material in styles/ui-refresh.css. */
+.ui-help-popover {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.ui-help-popover__trigger {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+}
+.ui-help-popover__trigger:hover {
+  background: var(--c-fill-2);
+}
+.ui-help-popover__trigger[data-open] {
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+}
+@media (pointer: coarse) {
+  .ui-help-popover__trigger {
+    width: 44px;
+    height: 44px;
+    margin: -10px;
+  }
+}
+.ui-help-popover__surface {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 32px));
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-float);
+  color: var(--c-ink-2);
+  font-size: 0.78125rem;
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+}
+.ui-help-popover__title {
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.ui-help-popover__body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}

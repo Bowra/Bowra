@@ -1,0 +1,108 @@
+{
+  "contract": "agent-change-apply-operations/v1",
+  "cases": [
+    {
+      "name": "replace_existing_string",
+      "document": { "definition": { "system_prompt": "Answer briefly.", "model": "qwen" } },
+      "operations": [{ "op": "replace", "path": "/definition/system_prompt", "value": "Lead with the conclusion." }],
+      "expected": { "definition": { "system_prompt": "Lead with the conclusion.", "model": "qwen" } }
+    },
+    {
+      "name": "add_new_member",
+      "document": { "definition": { "system_prompt": "A" } },
+      "operations": [{ "op": "add", "path": "/definition/max_iterations", "value": 8 }],
+      "expected": { "definition": { "system_prompt": "A", "max_iterations": 8 } }
+    },
+    {
+      "name": "add_overwrites_existing_member",
+      "document": { "definition": { "tool_refs": ["a"] } },
+      "operations": [{ "op": "add", "path": "/definition/tool_refs", "value": ["a", "b"] }],
+      "expected": { "definition": { "tool_refs": ["a", "b"] } }
+    },
+    {
+      "name": "add_creates_missing_parents",
+      "document": { "definition": {} },
+      "operations": [{ "op": "add", "path": "/listing/en-US/name", "value": "Revenue Analyst" }],
+      "expected": { "definition": {}, "listing": { "en-US": { "name": "Revenue Analyst" } } }
+    },
+    {
+      "name": "remove_member",
+      "document": { "definition": { "system_prompt": "A", "output_schema": { "type": "object" } } },
+      "operations": [{ "op": "remove", "path": "/definition/output_schema" }],
+      "expected": { "definition": { "system_prompt": "A" } }
+    },
+    {
+      "name": "operations_apply_in_order",
+      "document": { "definition": { "system_prompt": "A" } },
+      "operations": [
+        { "op": "replace", "path": "/definition/system_prompt", "value": "B" },
+        { "op": "add", "path": "/definition/model", "value": "deepseek" },
+        { "op": "replace", "path": "/definition/system_prompt", "value": "C" }
+      ],
+      "expected": { "definition": { "system_prompt": "C", "model": "deepseek" } }
+    },
+    {
+      "name": "escaped_pointer_segments",
+      "document": { "definition": { "headers": { "a/b": "1", "c~d": "2" } } },
+      "operations": [
+        { "op": "replace", "path": "/definition/headers/a~1b", "value": "x" },
+        { "op": "remove", "path": "/definition/headers/c~0d" }
+      ],
+      "expected": { "definition": { "headers": { "a/b": "x" } } }
+    },
+    {
+      "name": "replace_with_null_and_nested_value",
+      "document": { "definition": { "output_schema": { "type": "object" }, "model": "qwen" } },
+      "operations": [
+        { "op": "replace", "path": "/definition/model", "value": null },
+        { "op": "replace", "path": "/definition/output_schema", "value": { "type": "object", "required": ["answer"] } }
+      ],
+      "expected": { "definition": { "output_schema": { "type": "object", "required": ["answer"] }, "model": null } }
+    },
+    {
+      "name": "replace_missing_member_fails",
+      "document": { "definition": {} },
+      "operations": [{ "op": "replace", "path": "/definition/system_prompt", "value": "A" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "remove_missing_member_fails",
+      "document": { "definition": {} },
+      "operations": [{ "op": "remove", "path": "/definition/system_prompt" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "replace_under_missing_parent_fails",
+      "document": { "definition": {} },
+      "operations": [{ "op": "replace", "path": "/listing/en-US/name", "value": "A" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "array_index_is_not_supported",
+      "document": { "definition": { "tool_refs": ["a", "b"] } },
+      "operations": [{ "op": "replace", "path": "/definition/tool_refs/0", "value": "c" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "pointer_without_leading_slash_fails",
+      "document": { "definition": { "model": "qwen" } },
+      "operations": [{ "op": "replace", "path": "definition/model", "value": "x" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "pointer_with_trailing_slash_fails",
+      "document": { "definition": { "model": "qwen" } },
+      "operations": [{ "op": "add", "path": "/definition/", "value": "x" }],
+      "error": "agent_change_proposal_invalid_patch"
+    },
+    {
+      "name": "failure_after_earlier_success_still_fails",
+      "document": { "definition": { "model": "qwen" } },
+      "operations": [
+        { "op": "replace", "path": "/definition/model", "value": "deepseek" },
+        { "op": "remove", "path": "/definition/system_prompt" }
+      ],
+      "error": "agent_change_proposal_invalid_patch"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-cohort-retention",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "case_1_quick_churn",
+      "query": "{\"cohorts\": [{\"cohort_month\": \"2025-01\", \"new_users\": 10000, \"retained_m1\": 1500, \"retained_m3\": 900, \"retained_m6\": 500, \"retained_m12\": 100, \"arpu\": 50}]}",
+      "expects": "M1 留存 < 20% 红色警报：快进快出 + 加速衰减信号 + high level flag"
+    },
+    {
+      "id": "case_2_healthy_retention",
+      "query": "{\"cohorts\": [{\"cohort_month\": \"2025-01\", \"new_users\": 5000, \"retained_m1\": 2500, \"retained_m3\": 2000, \"retained_m6\": 1800, \"retained_m12\": 1500, \"arpu\": 100, \"mrr_start\": 250000, \"mrr_end\": 270000}]}",
+      "expects": "M1 留存 50% 健康 + 平缓衰减 + NDR > 100% 收入增长良好"
+    },
+    {
+      "id": "case_3_cohort_variance",
+      "query": "{\"cohorts\": [{\"cohort_month\": \"2024-11\", \"new_users\": 8000, \"retained_m1\": 3200, \"retained_m3\": 2400, \"arpu\": 75}, {\"cohort_month\": \"2025-01\", \"new_users\": 6000, \"retained_m1\": 1200, \"retained_m3\": 800, \"arpu\": 75}]}",
+      "expects": "多 cohort M1 差异 40% - 20% = 20pp 显著 + 获取质量恶化信号"
+    }
+  ]
+}

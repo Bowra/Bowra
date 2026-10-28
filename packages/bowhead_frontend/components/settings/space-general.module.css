@@ -1,0 +1,50 @@
+/* Keep standalone page spacing independent of conditional save and status elements. */
+:root:root .page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+:root:root .page > :global(.ui-page-head) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0;
+}
+
+.headingCopy {
+  min-width: 0;
+}
+
+:root:root .page > :global(.ui-page-head) > button {
+  flex-shrink: 0;
+}
+
+:root:root .page > :global(.ui-group) {
+  margin: 0;
+}
+
+:root:root .page :global(.ui-space-general-group) textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+:root:root .page :global(.ui-space-general-group) :global(.settings-field):has(textarea) {
+  align-items: start;
+}
+
+@media (max-width: 767.98px) {
+  :root:root .page > :global(.ui-page-head) {
+    flex-direction: column;
+    gap: 16px;
+  }
+}
+
+/* Canvas sections retain the object body's section spacing. */
+.hostedStack {
+  display: grid;
+  gap: var(--canvas-gap, 20px);
+  min-width: 0;
+}

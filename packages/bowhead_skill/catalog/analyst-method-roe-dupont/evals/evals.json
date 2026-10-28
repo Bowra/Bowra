@@ -1,0 +1,89 @@
+{
+  "skill": "analyst-method-roe-dupont",
+  "version": "1.1.0",
+  "cases": [
+    {
+      "id": "case_1_strong_organic_roe",
+      "query": "公司 A: NI=100, Rev=1000, TA=800, Equity=200, EBIT=150, Tax=0.25, IC=200, WACC=0.08, Interest=10",
+      "expects": "ROE 50%, ROA 12.5%, equity multiplier 4, EBIT margin 15%, ROIC 56.25%, and EVA 96.5. Distinguish operating return from leverage and state the balance-sheet convention.",
+      "inputs": {
+        "net_income": 100,
+        "revenue": 1000,
+        "total_assets": 800,
+        "equity": 200,
+        "ebit": 150,
+        "tax_rate": 0.25,
+        "invested_capital": 200,
+        "wacc": 0.08,
+        "interest_expense": 10
+      },
+      "expected_metrics": {
+        "roe": 0.5,
+        "roa": 0.125,
+        "equity_multiplier": 4,
+        "roic": 0.5625,
+        "eva": 96.5
+      }
+    },
+    {
+      "id": "case_2_roic_below_wacc",
+      "query": "公司 B: NI=80, Rev=1000, TA=1000, Equity=400, EBIT=100, Tax=0.25, IC=1200, WACC=0.11, Interest=20",
+      "expects": "ROE 20%, ROA 8%, equity multiplier 2.5, ROIC 6.25% below WACC 11%, and EVA -57. High accounting ROE does not establish economic value creation.",
+      "inputs": {
+        "net_income": 80,
+        "revenue": 1000,
+        "total_assets": 1000,
+        "equity": 400,
+        "ebit": 100,
+        "tax_rate": 0.25,
+        "invested_capital": 1200,
+        "wacc": 0.11,
+        "interest_expense": 20
+      },
+      "expected_metrics": {
+        "roe": 0.2,
+        "roa": 0.08,
+        "equity_multiplier": 2.5,
+        "roic": 0.0625,
+        "eva": -57
+      }
+    },
+    {
+      "id": "case_3_low_tax_burden",
+      "query": "公司 C: NI=120, Rev=1000, TA=600, Equity=200, EBIT=160, Tax=0.25, IC=250, WACC=0.09, Interest=5",
+      "expects": "ROE 60%, inferred effective tax rate 22.58%, ROIC 48%, and EVA 97.5. The figures alone do not establish deferred-tax benefits or a tax holiday.",
+      "inputs": {
+        "net_income": 120,
+        "revenue": 1000,
+        "total_assets": 600,
+        "equity": 200,
+        "ebit": 160,
+        "tax_rate": 0.25,
+        "invested_capital": 250,
+        "wacc": 0.09,
+        "interest_expense": 5
+      },
+      "expected_metrics": {
+        "roe": 0.6,
+        "roic": 0.48,
+        "effective_tax_rate": 0.2258,
+        "eva": 97.5
+      }
+    },
+    {
+      "id": "readonly_missing_equity",
+      "query": "Use the selected DuPont method. Revenue is 200, net income is 20 and average assets are 100. Ask for the missing input before completing ROE.",
+      "expects": "Request average equity through the existing question card. After the answer 50, continue the original task and show 20/200=10%, 200/100=2x, 100/50=2x, and ROE=40%. Do not invent equity or rerun a completed read."
+    },
+    {
+      "id": "readonly_zero_equity",
+      "query": "Explain three-factor DuPont for revenue 200, net income 20, average assets 100 and average equity 0.",
+      "expects": "Margin is 10% and asset turnover is 2x; equity multiplier and ROE are undefined. Do not divide by zero or report zero ROE."
+    },
+    {
+      "id": "readonly_wacc_sensitivity",
+      "query": "NOPAT is 75, invested capital is 1200 and WACC is 11%. Show the effect of a 100 basis point increase in WACC with other inputs fixed.",
+      "expects": "Initial EVA is -57; new WACC is 12% and EVA is -69. Accounting ROE is not directly changed by this WACC-only scenario."
+    }
+  ]
+}

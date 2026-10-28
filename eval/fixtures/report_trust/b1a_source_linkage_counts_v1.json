@@ -1,0 +1,65 @@
+{
+  "contract": "source-linkage-presentation/B1a-v1",
+  "cases": [
+    {
+      "name": "000_hidden",
+      "input": { "verified": 0, "unverified": 0, "sources": 0, "verified_pct": 100 },
+      "expected": { "citation_count": 0, "figure_review_count": 0, "source_count": 0, "visible": false }
+    },
+    {
+      "name": "100_citations",
+      "input": { "verified": 2, "unverified": 0, "sources": 0 },
+      "expected": { "citation_count": 2, "figure_review_count": 0, "source_count": 0, "visible": true }
+    },
+    {
+      "name": "010_review",
+      "input": { "verified": 0, "unverified": 3, "sources": 0 },
+      "expected": { "citation_count": 0, "figure_review_count": 3, "source_count": 0, "visible": true }
+    },
+    {
+      "name": "001_sources",
+      "input": { "verified": 0, "unverified": 0, "sources": 4 },
+      "expected": { "citation_count": 0, "figure_review_count": 0, "source_count": 4, "visible": true }
+    },
+    {
+      "name": "110",
+      "input": { "verified": 2, "unverified": 1, "sources": 0 },
+      "expected": { "citation_count": 2, "figure_review_count": 1, "source_count": 0, "visible": true }
+    },
+    {
+      "name": "101",
+      "input": { "verified": 2, "unverified": 0, "sources": 2 },
+      "expected": { "citation_count": 2, "figure_review_count": 0, "source_count": 2, "visible": true }
+    },
+    {
+      "name": "011",
+      "input": { "verified": 0, "unverified": 1, "sources": 2 },
+      "expected": { "citation_count": 0, "figure_review_count": 1, "source_count": 2, "visible": true }
+    },
+    {
+      "name": "111",
+      "input": { "verified": 2, "unverified": 1, "sources": 2, "verified_pct": 67 },
+      "expected": { "citation_count": 2, "figure_review_count": 1, "source_count": 2, "visible": true }
+    },
+    {
+      "name": "integer_valued_float_and_negative_zero",
+      "input": { "verified": 1.0, "unverified": -0.0, "sources": 2.0 },
+      "expected": { "citation_count": 1, "figure_review_count": 0, "source_count": 2, "visible": true }
+    },
+    {
+      "name": "partial_malformed",
+      "input": { "verified": "2", "unverified": 1, "sources": -3, "verified_pct": 100 },
+      "expected": { "citation_count": null, "figure_review_count": 1, "source_count": null, "visible": true }
+    },
+    {
+      "name": "bool_fraction_and_unsafe",
+      "input": { "verified": true, "unverified": 1.5, "sources": 9007199254740992 },
+      "expected": { "citation_count": null, "figure_review_count": null, "source_count": null, "visible": false }
+    },
+    {
+      "name": "pct_only_is_ignored",
+      "input": { "verified_pct": 100 },
+      "expected": { "citation_count": null, "figure_review_count": null, "source_count": null, "visible": false }
+    }
+  ]
+}

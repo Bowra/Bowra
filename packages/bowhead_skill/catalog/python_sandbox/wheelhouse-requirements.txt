@@ -1,0 +1,31 @@
+# pptx-from-template M2 (wheelhouse) — long-tail sandbox deps (Tier 1).
+#
+# This is the list of Python packages that a skill may declare via SKILL.md
+# `sandbox_requirements:` and have installed AT INVOKE TIME from a read-only,
+# network-free, hash-locked local wheelhouse (`pip --no-index --find-links
+# --require-hashes`). The point: adding one long-tail package never requires
+# rebuilding/re-shipping the ~1 GB sandbox image, and `--network=none` is NEVER
+# relaxed (M2 Layer 3 / no-Tier-2 model).
+#
+# Tier 0 vs Tier 1:
+#   - Tier 0 = baked into the image (science + office stack, lxml/defusedxml,
+#     python-pptx, the pptx helper scripts). Importable immediately, zero install
+#     cost. Edit the Dockerfile for these. DO NOT list Tier 0 packages here.
+#   - Tier 1 = this file. Rare / heavy / not-every-deck deps (e.g. `prophet`,
+#     `cmdstanpy`). Listed here → resolved + hash-locked into requirements.lock →
+#     pip-downloaded into the wheelhouse → installed offline on demand.
+#
+# HOW TO ADD A LONG-TAIL DEP (Dockerfile-equivalent review gate — supply chain):
+#   1. add the package (optionally `pkg==X`) below
+#   2. run:  bash deploy/scripts/build-sandbox-wheelhouse.sh
+#      → regenerates requirements.lock (hash-pinned) + the flat wheelhouse/ dir
+#   3. REVIEW the requirements.lock diff (every added transitive wheel + sha256)
+#   4. ship the wheelhouse only (ship-to-remote.sh, NOT a full image rebuild)
+#   5. a skill can now declare `sandbox_requirements: [<pkg>]` — only packages
+#      present in the locked hash set are ever installed (anything else fails
+#      closed: dropped + error recorded, never reaches the network).
+#
+# CURRENTLY EMPTY: no skill declares wheelhouse deps yet — the pptx path uses the
+# baked python-pptx (Tier 0). build-sandbox-wheelhouse.sh therefore emits an empty
+# wheelhouse + empty requirements.lock, and the runtime install lane is a no-op.
+# Add the FIRST long-tail dep below this line.

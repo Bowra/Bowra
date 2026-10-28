@@ -1,0 +1,65 @@
+/*
+ * Google file card (Canvas Objects Spec part 2 §11): the ChatCard shell comes from styles/ui-refresh-cards.css;
+ * this module only lays out the content area — view switch, snapshot, live preview frame. Tokens only.
+ */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+.hint {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  overflow-wrap: anywhere;
+}
+.snapshot {
+  box-sizing: border-box;
+  max-height: 420px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font: var(--card-body);
+  color: var(--c-ink);
+}
+.snapshot > :first-child {
+  margin-top: 0;
+}
+.snapshot > :last-child {
+  margin-bottom: 0;
+}
+.table {
+  border-collapse: collapse;
+  font: var(--card-meta);
+  font-variant-numeric: tabular-nums;
+}
+.table td {
+  padding: 4px 8px;
+  border: var(--hairline) solid var(--c-separator-strong);
+  white-space: nowrap;
+}
+/* Live preview: 4:3, never taller than 420 */
+.frame {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 420px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+.snapshot ul,
+.snapshot ol {
+  padding-inline-start: 20px;
+}
+.snapshot ul {
+  list-style: disc;
+}
+.snapshot ol {
+  list-style: decimal;
+}

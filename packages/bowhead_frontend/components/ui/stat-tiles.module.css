@@ -1,0 +1,77 @@
+/* Stat tiles (Chart Embed Spec D6): one hairline band on the content surface, tiles split by hairlines,
+ * main value 28 / 600 tabular. Structure matches the KPI truncation design 1c (label / main / secondary). */
+.band {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  /* Block margins only: hosts own the inline placement (e.g. centred page columns). */
+  margin-block: 0;
+  background: var(--c-surface);
+  border-radius: var(--r-4, 12px);
+  box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator);
+}
+.tile {
+  min-width: 0;
+  padding: 18px 20px;
+  /* Query container for the main-value fit fallback (`--stat-ems`, same rule as report KPI cards). */
+  container-type: inline-size;
+}
+.tile + .tile {
+  border-left: var(--hairline, 0.5px) solid var(--c-separator);
+}
+.label {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--c-ink-3);
+}
+.value {
+  margin: 4px 0 2px;
+  font-family: var(--font-v2-sans);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--c-ink);
+  font-size: min(1.75rem, calc(100cqi / var(--stat-ems, 1)));
+}
+/* ≥ one million: every digit on a monospace line under the magnitude. */
+.exact {
+  margin: 0;
+  font: 0.6875rem var(--font-v2-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink-3);
+  overflow-wrap: anywhere;
+}
+.note,
+.link {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.note {
+  color: var(--c-ink-3);
+  padding-block: 2px;
+}
+.link a {
+  font-size: var(--fs-sm);
+}
+.link svg {
+  flex: 0 0 auto;
+}
+@media (max-width: 760px) {
+  .band {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tile {
+    padding: 16px;
+  }
+  .tile:nth-child(odd) {
+    border-left: 0;
+  }
+  .tile:nth-child(n + 3) {
+    border-top: var(--hairline, 0.5px) solid var(--c-separator);
+  }
+}

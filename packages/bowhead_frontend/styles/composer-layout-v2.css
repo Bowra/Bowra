@@ -1,0 +1,654 @@
+[data-composer-layout-v2] {
+  box-sizing: border-box;
+  container-type: inline-size;
+  --composer-input-font-size: 0.90625rem;
+  --composer-input-inset-y: var(--theme-composer-textarea-y, 14px);
+  --composer-input-inset-x: var(--theme-composer-textarea-x, 16px);
+  --composer-input-padding: var(--composer-input-inset-y) var(--composer-input-inset-x);
+  --composer-input-min-height: 72px;
+}
+
+[data-composer-layout-v2][data-composer-surface="home"] {
+  --composer-input-min-height: 112px;
+}
+
+[data-composer-layout-v2] textarea {
+  box-sizing: border-box;
+  min-height: var(--composer-input-min-height);
+  max-height: 180px;
+}
+
+.composer-v2__autocomplete-overlay {
+  position: absolute;
+  inset: 0;
+  padding: var(--composer-input-padding);
+  font: 400 var(--composer-input-font-size)/1.55 var(--font-v2-sans);
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  color: transparent;
+  overflow: hidden;
+}
+
+@media (pointer: coarse) {
+  [data-composer-layout-v2] {
+    --composer-input-font-size: max(1rem, 16px);
+  }
+}
+
+.composer-v2__toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+}
+
+.composer-v2.is-preparing .composer-v2__tools {
+  pointer-events: none;
+  opacity: 0.58;
+}
+
+.composer-v2__tools {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: visible;
+}
+
+.composer-v2__actions {
+  position: relative;
+  display: flex;
+  flex: none;
+  justify-self: end;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer-v2__tooltip {
+  position: fixed;
+  z-index: 10030;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--c-surface);
+  background: var(--c-ink);
+  box-shadow: 0 6px 22px rgba(24, 19, 15, 0.2);
+  font: 500 0.6875rem/1.35 var(--font-v2-sans);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 120ms var(--ease-v2), transform 120ms var(--ease-v2);
+}
+
+.composer-v2__model-wrap > .composer-v2__tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 0;
+}
+
+.composer-v2__actions > .composer-v2__tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+}
+
+.composer-v2__model-wrap:has(.composer-v2__model-trigger:is(:hover, :focus-visible)) > .composer-v2__tooltip,
+.composer-v2__actions:has(.v2-send-btn:is(:hover, :focus-visible)) > .composer-v2__tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.composer-v2__model-wrap,
+.composer-v2__model-trigger {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composer-v2__model-wrap {
+  flex: 1 1 0;
+  width: min(320px, 100%);
+  max-width: min(320px, 100%);
+  overflow: visible;
+}
+
+[data-composer-layout-v2][data-layout-mode="comfortable"] .composer-v2__model-wrap {
+  flex: 0 1 auto;
+  width: auto;
+}
+
+.composer-v2__model-trigger {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.composer-v2__model-trigger-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-v2__tool-button,
+.composer-v2__planning {
+  box-sizing: border-box;
+  min-width: 40px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  font: 600 0.71875rem var(--font-v2-sans);
+  white-space: nowrap;
+}
+
+.composer-v2__tool-button {
+  flex: none;
+  padding: 0;
+  font-weight: 400;
+}
+
+.composer-v2__tool-button:hover,
+.composer-v2__planning:hover {
+  color: var(--c-ink);
+  background: var(--c-surface-2);
+}
+
+.composer-v2__tool-button.is-active,
+.composer-v2__planning.is-active {
+  color: var(--c-accent);
+  border-color: color-mix(in srgb, var(--c-accent) 24%, var(--c-line));
+  background: var(--c-accent-tint);
+}
+
+/* ★Three-state selector (Claude Design 8b6a92a0, Planning Three-state Selector, 1c).
+   `off` is gray, **not red**: a legitimate user choice, not an error, degradation or warning;
+   symmetric with accent's explicitly enabled state. Reserve red for terminal failures (design §3). */
+.composer-v2__planning.is-muted {
+  color: var(--c-ink-4);
+  border-color: var(--c-line);
+  background: var(--c-surface-2);
+}
+.composer-v2__planning-wrap { position: relative; display: inline-flex; }
+.composer-v2__planning-cv { opacity: 0.5; margin-left: -1px; display: inline-flex; }
+
+.composer-v2__planning-menu {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-float, 0 12px 32px -10px rgb(0 0 0 / 22%));
+  padding: 5px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.composer-v2__planning-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.composer-v2__planning-item:hover { background: var(--c-surface-2); }
+.composer-v2__planning-item.is-on { background: var(--c-accent-tint); }
+.composer-v2__planning-item-ic { flex: 0 0 16px; margin-top: 1px; color: var(--c-ink-4); display: inline-flex; }
+.composer-v2__planning-item.is-on .composer-v2__planning-item-ic { color: var(--c-accent); }
+.composer-v2__planning-item-tx { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.composer-v2__planning-item-tx .n { font-size: 0.78125rem; font-weight: 600; color: var(--c-ink); }
+.composer-v2__planning-item.is-on .composer-v2__planning-item-tx .n { color: var(--c-accent); }
+.composer-v2__planning-item-tx .d { font-size: 0.6875rem; line-height: 1.45; color: var(--c-ink-3); text-wrap: pretty; }
+.composer-v2__planning-item-ck { margin-left: auto; flex: 0 0 14px; color: var(--c-accent); display: inline-flex; }
+
+[data-composer-layout-v2] :is(button, textarea):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+[data-composer-layout-v2]:has(:is(textarea, .tiptap):focus-visible) {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+.composer-v2__model-menu-item:focus-visible {
+  outline: 2px solid var(--c-accent) !important;
+  outline-offset: -2px;
+}
+
+[data-composer-layout-v2] .v2-send-btn {
+  width: 40px;
+  height: 40px;
+}
+
+.composer-v2__send-spinner {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: composer-v2-send-spin 700ms linear infinite;
+}
+
+@keyframes composer-v2-send-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+[data-composer-layout-v2] .v2-send-btn--cancel {
+  width: auto;
+  min-width: 40px;
+  height: 40px;
+}
+
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__toolbar,
+[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__toolbar {
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__tool-button,
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning,
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
+[data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn:not(.v2-send-btn--cancel),
+[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__tool-button,
+[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger,
+[data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn {
+  min-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+}
+
+[data-composer-layout-v2][data-layout-mode="compact"] .v2-send-btn--cancel {
+  width: auto;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+}
+
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__model-trigger,
+[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__model-trigger {
+  width: 100%;
+}
+
+/* ★compact / ultra: reduce to a 44×44 icon trigger, **remaining in the toolbar**.
+   Currently a narrow column + auto/off removes the control from the toolbar into the ＋ panel;
+   DEFAULT_SPLIT_RATIO is still 0.4, so opening canvas makes the left column compact: this is no edge case. */
+[data-composer-layout-v2][data-layout-mode="compact"] .composer-v2__planning.is-compact,
+[data-composer-layout-v2][data-layout-mode="ultra"] .composer-v2__planning.is-compact {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+[data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel span:last-child {
+  display: none;
+}
+
+[data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel {
+  width: 44px;
+  padding: 0;
+}
+
+.composer-v2__sheet-backdrop {
+  position: fixed;
+  top: var(--bh-visual-viewport-top, 0px);
+  right: 0;
+  bottom: var(--bh-visual-viewport-bottom, 0px);
+  left: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--c-ink) 32%, transparent);
+}
+
+.composer-v2__sheet {
+  width: min(100%, 520px);
+  max-height: calc(100dvh - 16px - var(--bh-visual-viewport-top, 0px) - var(--bh-visual-viewport-bottom, 0px) - env(safe-area-inset-bottom));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  color: var(--c-ink);
+}
+
+.composer-v2__sheet-head {
+  min-height: 44px;
+  padding: 0 4px 4px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-v2__sheet-head button {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--c-ink-3);
+  font-size: 1.375rem;
+}
+
+.composer-v2__sheet-row {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  text-align: left;
+}
+
+.composer-v2__sheet-row--planning {
+  padding: 4px;
+}
+
+.composer-v2__sheet-row--planning .composer-v2__planning {
+  min-height: 44px;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-v2__tooltip {
+    transition: none;
+  }
+
+  .composer-v2__send-spinner {
+    animation: none;
+  }
+}
+
+.home-work-composer-inner [data-composer-layout-v2] {
+  max-width: 960px !important;
+  margin-inline: auto;
+}
+.composer-recovery-notice {
+  width: min(840px, calc(100% - 40px));
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--c-accent, #ad3d1f) 28%, transparent);
+  border-radius: 12px;
+  background: var(--c-surface, #fff);
+  color: var(--c-ink, #302b27);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.home-work-composer-inner .composer-recovery-notice {
+  width: min(960px, calc(100% - 16px));
+}
+
+.composer-recovery-notice__copy {
+  min-width: 0;
+}
+
+.composer-recovery-notice__copy strong {
+  display: block;
+  font-weight: 650;
+}
+
+.composer-recovery-notice__copy p {
+  margin: 2px 0 0;
+  color: var(--c-ink-2, #665f56);
+}
+
+.composer-recovery-notice__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-recovery-notice__actions button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--c-line, #ddd);
+  border-radius: 8px;
+  background: var(--c-surface, #fff);
+  color: var(--c-ink, #302b27);
+  font: 650 0.8125rem var(--font-v2-sans);
+  cursor: pointer;
+}
+
+.composer-recovery-notice__actions button:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.composer-recovery-notice__actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.composer-recovery-notice__actions button:focus-visible {
+  outline: 2px solid var(--c-accent, #ad3d1f);
+  outline-offset: 2px;
+}
+
+@media (max-width: 680px) {
+  .composer-recovery-notice {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .composer-recovery-notice__actions button {
+    flex: 1 1 auto;
+  }
+}
+
+.composer-recovery-notice__copy p.composer-recovery-notice__error {
+  margin: 0;
+  color: var(--c-danger, #b42318);
+}
+
+.reference-follow-up-queue {
+  width: min(840px, calc(100% - 40px));
+  min-width: 0;
+  margin: 8px auto;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line, #ddd);
+  border-radius: 12px;
+  background: var(--c-bg, #fff);
+  color: var(--c-ink, #2f2a24);
+  font: 500 0.8125rem/1.45 var(--font-v2-sans);
+}
+
+.reference-follow-up-queue__header,
+.reference-follow-up-queue__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reference-follow-up-queue button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--c-line, #ddd);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-accent, #ad3d1f);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.reference-follow-up-queue button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.reference-follow-up-queue__items {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reference-follow-up-queue__item {
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line, #ddd);
+}
+
+.reference-follow-up-queue__content {
+  min-width: 0;
+}
+
+.reference-follow-up-queue__content > p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.reference-follow-up-queue__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  color: var(--c-ink-2, #665f56);
+  font-size: 0.75rem;
+}
+
+.reference-follow-up-queue__error {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--c-danger, #b42318);
+}
+
+.composer-reference-preview {
+  margin: 8px 16px;
+  padding: 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  color: var(--c-ink);
+  background: var(--c-surface-2);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.composer-reference-preview__note { color: var(--c-ink-3); margin: 0 0 8px; }
+.composer-reference-preview__disclosure > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+}
+.composer-reference-preview__disclosure[open] > summary { margin-bottom: 8px; }
+.composer-reference-preview__document { white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
+.composer-reference-preview__reference { border-radius: 4px; background: var(--c-accent-tint); }
+.composer-reference-preview details { margin-top: 8px; }
+.composer-reference-preview summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.composer-reference-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; }
+.composer-reference-preview .composer-v2__draft-warning-actions { flex-wrap: wrap; }
+.composer-reference-preview .composer-v2__draft-warning-actions button { min-height: 44px; }
+.composer-reference-transfer-warning .composer-v2__draft-warning-actions button { min-height: 44px; }
+
+.composer-v2__draft-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 16px 6px;
+  color: var(--c-danger, #b42318);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.composer-v2__draft-warning-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.composer-v2__draft-warning-actions button {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-v2__draft-warning-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 430px) {
+  .composer-v2__draft-warning {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 430px) {
+  .composer-recovery-notice {
+    width: calc(100% - 28px);
+  }
+
+  .reference-follow-up-queue {
+    width: calc(100% - 28px);
+  }
+
+  .reference-follow-up-queue__item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .reference-follow-up-queue__item > button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+/* Screen-reader-only live region for attachment state changes. */
+.composer-v2__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+/* Chat: unsaved edits in a hosted Coach editor blocked a send ("Save and continue", C6-e). */
+.v2-banner--actions { margin: 8px 16px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-radius: 10px; background: var(--c-warn-soft, var(--c-fill-1)); color: var(--c-ink); font-size: 0.8125rem; }
+.v2-banner--actions > span:first-child { flex: 1; min-width: 12rem; }
+.v2-banner-actions { display: flex; gap: 8px; }
+.v2-banner-actions button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--c-surface); color: var(--c-ink); font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); }
+.v2-banner-actions .v2-banner-primary { background: var(--c-accent); color: var(--c-accent-ink, #fff); box-shadow: none; }
+.v2-banner-actions button:disabled { opacity: 0.6; cursor: default; }
+
+/* Chat: receipt row for Coach's write to an Agent draft (C1, C6). */
+.coach-change-receipt { margin: 10px 0 4px; padding: 10px 12px; display: grid; gap: 2px; max-width: 520px; border-radius: 10px; background: var(--c-surface); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); font-size: 0.8125rem; }
+.coach-change-receipt-head { display: flex; align-items: center; gap: 6px; }
+.coach-change-receipt[data-state="written"] .coach-change-receipt-head > svg { color: var(--c-pos-ink); }
+.coach-change-receipt-head > strong { flex: 1; min-width: 0; font-weight: 600; }
+.coach-change-receipt-head > button { padding: 0; border: 0; background: none; color: var(--c-accent); font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.coach-change-receipt > small { color: var(--c-ink-3); font-size: 0.75rem; }
+.coach-change-receipt > small:empty { display: none; }

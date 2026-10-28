@@ -1,0 +1,320 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "observed_annotations",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "Saved monthly observations",
+      "rows": [
+        {
+          "month": "2026-03",
+          "revenue": 12.12345
+        },
+        {
+          "month": "2026-01",
+          "revenue": -5
+        },
+        {
+          "month": "2026-02"
+        },
+        {
+          "month": "2026-04",
+          "revenue": 1.2345e-05
+        }
+      ],
+      "data_artifact_id": "art_52d4d39b0b7f",
+      "row_count": 4,
+      "columns": [
+        {
+          "key": "month",
+          "header": "month",
+          "type": "date",
+          "y_axis_id": 0
+        },
+        {
+          "key": "revenue",
+          "header": "revenue",
+          "type": "numeric",
+          "y_axis_id": 0
+        }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "percent_stack": false,
+      "fallback_kind": "table",
+      "source_meta": {
+        "id": "source-ref-v1:UhsAgHDNzsK-Sz57tmYINwLZxzZOaXGWYtLD0HcKvps",
+        "source_alias": "source-ref-v1:UhsAgHDNzsK-Sz57tmYINwLZxzZOaXGWYtLD0HcKvps",
+        "access_state": "linked_accessible",
+        "generic_type": "generated_artifact",
+        "safe_query": "Revenue trend"
+      },
+      "_infer_reason": "force_kind=line",
+      "auto_charted": false,
+      "views": [
+        {
+          "id": "trend",
+          "kind": "chart",
+          "spec": {
+            "kind": "line",
+            "title": "Revenue trend",
+            "rows": [
+              {
+                "month": "2026-03",
+                "revenue": 12.12345
+              },
+              {
+                "month": "2026-01",
+                "revenue": -5
+              },
+              {
+                "month": "2026-02"
+              },
+              {
+                "month": "2026-04",
+                "revenue": 1.2345e-05
+              }
+            ],
+            "data_artifact_id": "art_52d4d39b0b7f",
+            "row_count": 4,
+            "columns": [
+              {
+                "key": "month",
+                "header": "month",
+                "type": "date",
+                "y_axis_id": 0
+              },
+              {
+                "key": "revenue",
+                "header": "revenue",
+                "type": "numeric",
+                "y_axis_id": 0
+              }
+            ],
+            "limit_rows": 30,
+            "secondary_axis": false,
+            "show_legend": true,
+            "percent_stack": false,
+            "fallback_kind": "table",
+            "_infer_reason": "force_kind=line",
+            "auto_charted": false
+          }
+        },
+        {
+          "id": "detail",
+          "kind": "chart",
+          "spec": {
+            "kind": "table",
+            "title": "Original observations",
+            "rows": [
+              {
+                "month": "2026-03",
+                "revenue": 12.12345,
+                "cost": 5
+              },
+              {
+                "month": "2026-01",
+                "revenue": -5,
+                "cost": 2
+              },
+              {
+                "month": "2026-02",
+                "cost": 3
+              },
+              {
+                "month": "2026-04",
+                "revenue": 1.2345e-05,
+                "cost": 4
+              }
+            ],
+            "data_artifact_id": "art_52d4d39b0b7f",
+            "row_count": 4,
+            "columns": [
+              {
+                "key": "month",
+                "header": "month",
+                "type": "date",
+                "y_axis_id": 0
+              },
+              {
+                "key": "revenue",
+                "header": "revenue",
+                "type": "numeric",
+                "y_axis_id": 0
+              },
+              {
+                "key": "cost",
+                "header": "cost",
+                "type": "numeric",
+                "y_axis_id": 0
+              }
+            ],
+            "limit_rows": 30,
+            "secondary_axis": false,
+            "show_legend": true,
+            "percent_stack": false,
+            "fallback_kind": "table",
+            "_infer_reason": "force_kind=table",
+            "auto_charted": false
+          }
+        }
+      ],
+      "layout": {
+        "type": "split",
+        "children": [
+          {
+            "view": "trend"
+          },
+          {
+            "view": "detail"
+          }
+        ]
+      },
+      "presentation_plan": {
+        "version": 1,
+        "dataset": {
+          "artifact_id": "source-ref-v1:UhsAgHDNzsK-Sz57tmYINwLZxzZOaXGWYtLD0HcKvps",
+          "content_digest": "1563b80c362c93d7cf0263dc57c4261a9f735f101123ea68db52a396daca90d2",
+          "schema_digest": "f79cebd145bbb7394f4379dbfa6e6667aa9cc720daebc8550f53aa24ed555b86",
+          "availability": "available"
+        },
+        "evidence_notes": [
+          {
+            "id": "revenue_definition",
+            "measure_keys": [
+              "revenue"
+            ],
+            "excerpt": "Revenue includes returns.",
+            "locator": "Definition",
+            "source_ref": {
+              "id": "source-ref-v1:JH_Cwwc40igmeuIoM4p7YziU76Cz3fmr0_IA-g1cZWE",
+              "source_alias": "source-ref-v1:JH_Cwwc40igmeuIoM4p7YziU76Cz3fmr0_IA-g1cZWE",
+              "access_state": "linked_accessible",
+              "generic_type": "generated_artifact",
+              "safe_label": "definition.txt"
+            },
+            "verified_content_digest": "19966c401cbff290be81df01bffea745400db7f03162665f1d04bf6351e5ea89",
+            "availability": "available"
+          }
+        ],
+        "text_dependencies": {
+          "/title": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/views/0/spec/title": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/views/1/spec/title": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/presentation_plan/guide_steps/0/title": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/presentation_plan/guide_steps/1/title": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/presentation_plan/annotations/0/label": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/presentation_plan/annotations/1/label": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          },
+          "/presentation_plan/annotations/2/label": {
+            "note_ids": [
+              "revenue_definition"
+            ],
+            "dataset": true
+          }
+        },
+        "interactions": [
+          {
+            "preset": "guided_steps"
+          }
+        ],
+        "guide_steps": [
+          {
+            "title": "Observed point",
+            "view_id": "trend",
+            "annotation_id": "observed"
+          },
+          {
+            "title": "Missing value",
+            "view_id": "detail",
+            "annotation_id": "missing"
+          }
+        ],
+        "annotations": [
+          {
+            "id": "observed",
+            "view_id": "trend",
+            "binding_id": "time.e2f7f19d1321",
+            "kind": "point",
+            "measure_key": "revenue",
+            "tuple": [
+              "2026-03"
+            ],
+            "label": "Observed revenue",
+            "observation_keys": [
+              "month"
+            ],
+            "encoding": "line",
+            "availability": "available"
+          },
+          {
+            "id": "missing",
+            "view_id": "detail",
+            "binding_id": "time.e2f7f19d1321",
+            "kind": "point",
+            "measure_key": "revenue",
+            "tuple": [
+              "2026-02"
+            ],
+            "label": "Missing observation",
+            "observation_keys": [
+              "month"
+            ],
+            "encoding": "table",
+            "availability": "available"
+          },
+          {
+            "id": "period",
+            "view_id": "trend",
+            "binding_id": "time.e2f7f19d1321",
+            "kind": "interval",
+            "measure_key": "revenue",
+            "lower": "2026-01",
+            "upper": "2026-04",
+            "label": "Supplied period",
+            "observation_keys": [
+              "month"
+            ],
+            "encoding": "line",
+            "availability": "available"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,1370 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · page-by-page acceptance B: main feature pages (report library, resource library and
+ * capability-center landing pages, knowledge base,
+ * files, skills, agent marketplace / management / details / version publishing).
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles; each page's original stylesheet and
+ * the classes in styles/ui-controls-legacy.css section 逐页验收 B are the base layer underneath.
+ * Imported last by the authenticated layout, after ui-refresh-pages-admin.css. Contract: styles/ui-refresh-pages-main.test.ts.
+ *
+ * Headers follow Page Layout Spec's four fixed header parts: eyebrow 12 --c-ink-4 regular text · title 22/700 · one-line description 13 --c-ink-3
+ * (maximum width 560) · primary action on the right; all originally serif 24–68px page and section titles use the system font:
+ * section and group titles share a style (16/650, page-by-page acceptance A's .ui-group-title), card subtitles are 15/650.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ Page titles (22/700, matching h1.ui-page-title): agent management, details, version publishing and review ═══ */
+:root:root :is(.am-detail-copy h1, .am-release-hero h1, .am-review-hero h1) {
+  max-width: none;
+  margin: 2px 0 0;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+/* Header descriptions (matching .ui-page-desc) */
+:root:root .am-detail-copy > p {
+  max-width: 560px;
+  margin: 4px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+/* The detail page's large avatar (190 square) shrinks with the title, no longer overpowering the 22 title; its column narrows and aligns to the top */
+:root:root .am-detail-hero {
+  margin: 32px auto 40px;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+:root:root .am-detail-mark {
+  width: 96px;
+  height: 96px;
+  padding: 12px;
+  border-radius: var(--r-4);
+  font-size: 1.25rem;
+}
+
+/* ═══ Section titles (16/650, matching group titles) ═══ */
+:root:root
+  :is(
+    .am-section-heading h2,
+    .am-detail-section-heading h2,
+    .am-trust-panel h2,
+    .am-role-preferences > header h2,
+    .am-release-inbox h2,
+    .am-release-section h2,
+    .am-release-publish-card h2,
+    .am-release-task-heading h2,
+    .am-release-history > header h2,
+    .am-localization-header h2,
+    .am-taxonomy-header h2,
+    .am-tag-governance h2,
+    .am-review-card h2,
+    .am-review-decision-card h2,
+    .am-empty h3,
+    .am-empty h1
+  ) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+/* Section descriptions: 13 --c-ink-3, left-aligned */
+:root:root .am-section-heading > p {
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  text-align: left;
+}
+:root:root .am-section-heading {
+  align-items: flex-end;
+}
+
+/* ═══ Card subtitles (15/650) and serif numbers (font change only) ═══ */
+:root:root
+  :is(
+    .am-localization-source h3,
+    .am-taxonomy-grid legend,
+    .am-taxonomy-tags legend
+  ) {
+  font-family: var(--font-control);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: normal;
+}
+:root:root
+  :is(.am-release-primary-grid strong, .am-release-version strong, .am-review-facts dd) {
+  font-family: var(--font-control);
+  font-weight: 650;
+}
+
+/* ═══ Eyebrows (above headers and sections): 12 --c-ink-4 regular text, replacing uppercase mono accent text ═══ */
+:root:root
+  :is(
+    .am-section-heading span,
+    .am-detail-section-heading > span,
+    .am-trust-panel > span,
+    .am-role-preferences > header span,
+    .am-management-context span,
+    .am-release-inbox > header span,
+    .am-release-history > header > span,
+    .am-review-card > header > span,
+    .am-review-decision-card > span,
+    .am-release-hero p,
+    .am-review-hero p,
+    .am-release-publish-card > span,
+    .am-release-task-heading > span,
+    .am-localization-header > div:first-child > span,
+    .am-taxonomy-header > div > span,
+    .am-tag-governance > header > div:first-child > span
+  ) {
+  margin-bottom: 0;
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+/* Toolbar under the tabs: search · Category menu button · filters · count (count trails on the right) */
+:root:root .am-toolbar {
+  width: 100%;
+  margin: 0 0 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .am-toolbar .am-search {
+  width: auto;
+  flex: 0 1 360px;
+  min-width: 200px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+}
+:root:root .am-toolbar .am-search:focus-within {
+  box-shadow: 0 0 0 2px var(--c-focus, var(--c-accent));
+}
+:root:root .am-toolbar .am-search svg {
+  width: 14px;
+  height: 14px;
+}
+:root:root .am-toolbar .am-search input {
+  font-size: var(--fs-md);
+}
+:root:root .am-toolbar .am-search kbd {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root .am-toolbar .am-filter-trigger {
+  min-height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+:root:root .am-toolbar .am-filter-trigger:hover {
+  background: var(--c-fill-3);
+  box-shadow: none;
+}
+:root:root .am-toolbar .am-filter-trigger[data-active="true"] {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .am-toolbar .am-filter-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+:root:root .am-toolbar .am-filter-trigger b {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 500;
+}
+:root:root .am-toolbar .am-filter-trigger b::before {
+  content: "· ";
+}
+:root:root .am-toolbar-count {
+  margin: 0 0 0 auto;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Marketplace cards (polish spec §1 mock): a 36px mark beside name and source, the purpose full width below, no
+   fixed tall minimum. */
+:root:root .am-card {
+  min-height: 0;
+  contain-intrinsic-size: auto 200px;
+}
+:root:root .am-card .am-card-main {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+}
+:root:root .am-card .am-card-copy {
+  display: contents;
+}
+:root:root .am-card .am-artwork {
+  grid-row: 1 / span 2;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--r-3);
+  background: var(--c-accent-soft);
+}
+:root:root .am-card .am-artwork :is(i, b) {
+  display: none;
+}
+:root:root .am-card .am-artwork span {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--c-accent-text);
+  font: 600 0.75rem / 1 var(--font-control);
+  letter-spacing: 0;
+}
+:root:root .am-card :is(.am-card-title-row, .am-developer) {
+  grid-column: 2;
+}
+:root:root .am-card .am-card-title-row h3 {
+  margin: 0;
+}
+:root:root .am-card .am-summary {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+:root:root .am-catalog-heading {
+  padding-top: 24px;
+}
+
+/* Card actions: one button per card — Hire is the card's primary, details secondary (polish spec §1) */
+:root:root .am-card-footer .settings-button {
+  flex: none;
+}
+
+/* Role preferences (spec 2b): no numbering, one notice for the block, badge + short status on each card */
+:root:root .am-role-preferences-info {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .am-role-preferences-info svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--c-accent);
+}
+:root:root .am-role-preference-heading {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+:root:root .am-role-preference-heading h3 {
+  margin: 0;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .am-role-preference-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+:root:root .am-role-preference-badge[data-tone="warning"] {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}
+:root:root .am-role-preference-badge[data-tone="positive"] {
+  background: var(--c-pos-soft);
+  color: var(--c-pos-ink);
+}
+:root:root .am-role-preference-status {
+  margin: 6px 0 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+:root:root .am-role-preference-controls {
+  margin-top: 10px;
+}
+:root:root .am-role-preference-controls .ui-filter-menu-button {
+  max-width: 100%;
+}
+
+@media (max-width: 767.98px) {
+  :root:root .am-toolbar .am-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 36px;
+  }
+  :root:root .am-toolbar .am-search kbd,
+  :root:root .am-toolbar-count {
+    display: none;
+  }
+  :root:root .am-toolbar .am-filter-trigger {
+    width: auto;
+    min-height: 36px;
+    border-radius: var(--r-2);
+  }
+  /* Phone cards: single column, description in the detail page, Hire full width at 44; a hired card is just its link */
+  :root:root .am-card {
+    contain-intrinsic-size: auto 160px;
+  }
+  :root:root .am-card .am-summary {
+    display: none;
+  }
+  :root:root .am-card-footer:not(:has(.am-hire-button)) {
+    display: none;
+  }
+  :root:root .am-card-footer .am-hire-button.settings-button {
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+  }
+  :root:root .am-card-footer:has(.am-hire-button) .am-risk {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  :root:root .am-detail-hero {
+    margin: 20px auto 32px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  :root:root .am-detail-mark {
+    width: 72px;
+    height: 72px;
+    border-radius: var(--r-3);
+    font-size: 1rem;
+  }
+}
+
+/* ═══ Report library: remove the header separator (header → content 24); right-align card-row ⋯ actions ═══ */
+/* Report library toolbar (polish spec 2f): search, then "Space: All ⌄" and "Sort: … ⌄" menu buttons sized to
+   their content, then the empty-report toggle. */
+:root:root .reports-library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .reports-library-controls .reports-search {
+  flex: 1 1 260px;
+}
+:root:root .reports-library-controls .ui-filter-menu-button {
+  flex: 0 1 auto;
+}
+@media (max-width: 767.98px) {
+  :root:root .reports-library-controls .reports-search {
+    flex-basis: 100%;
+  }
+}
+:root:root .reports-row-phone-more {
+  display: none;
+}
+:root:root .reports-row-space-group {
+  display: inline-flex;
+  min-width: 0;
+  gap: inherit;
+}
+:root:root .reports-row-phone-audience {
+  display: none;
+}
+/* In a row the status control follows the metadata instead of pushing to the far edge (the date column owns it) */
+:root:root .reports-row .reports-card-meta .rc-status-control {
+  margin-left: 0;
+}
+@media (max-width: 767.98px) {
+  /* Phones (polish spec §4): 56px rows, the date joins the second line, a single ⋯ always shown at 44 */
+  :root:root .reports-row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    padding: 6px 4px 6px 12px;
+  }
+  :root:root .reports-row :is(.reports-row-time, .reports-card-actions) {
+    display: none;
+  }
+  :root:root .reports-row-phone-time {
+    display: inline-flex;
+    gap: 6px;
+  }
+  :root:root .reports-row :is(.reports-row-space-group, .reports-row-audience) {
+    display: none;
+  }
+  :root:root .reports-row-phone-audience {
+    display: inline-flex;
+    margin-left: 2px;
+  }
+  :root:root .reports-row-phone-more {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+  }
+}
+:root:root .reports-card-actions .reports-card-more {
+  margin-left: auto;
+}
+
+/* @section tail:files —— page-by-page acceptance finish · files and skills pages (Page Layout Spec section 4 page-level states; controls use the system font). */
+
+/* Files page empty / no matches / read failure: title 14/600, description 12.5 --c-ink-3, system font; buttons retain the files-page button family */
+:root:root .f-state {
+  gap: 12px;
+  font-family: var(--font-control);
+}
+:root:root .f-state p {
+  max-width: 320px;
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .f-state p b {
+  margin-bottom: 4px;
+  font-size: 0.875rem;
+}
+/* Files-page description rows and runtime-data hint: 12.5 --c-ink-3 system font */
+:root:root :is(.f-lede, .f-hint) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+/* Skills-page group count (启用 3/5): original mono 11 → system font 12 with tabular numbers */
+:root:root .sset .sgroup-head .gcount {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* @section tail:states —— page-by-page acceptance finish · miscellaneous state pages (Page Layout Spec's page-level empty / loading / error states: replace only the content area;
+ * empty: one icon, clear explanation, one next step; error: explain clearly, offer retry, no solid red block; no permission: explain who can act). */
+
+/* No-space onboarding: header 22/700 · 13 --c-ink-3; one group for each of two paths, 16/650 group titles outside cards, hairline cards and row separators */
+:root:root .ui-ews {
+  max-width: 560px;
+  padding: 0 var(--page-gutter);
+  font-family: var(--font-control);
+}
+:root:root .ui-ews > .ui-page-desc {
+  margin-bottom: 32px;
+}
+:root:root .ui-ews-group + .ui-ews-group {
+  margin-top: 32px;
+}
+:root:root .ui-ews-group {
+  margin-bottom: 0;
+}
+:root:root .ui-ews-group-title {
+  margin: 0 0 8px;
+  color: var(--c-ink);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .ui-ews-card {
+  display: block;
+  overflow: hidden;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-ews-row {
+  min-height: 52px;
+  gap: 12px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 0;
+}
+:root:root .ui-ews-row + .ui-ews-row {
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ui-ews-row-text {
+  min-width: 0;
+}
+:root:root .ui-ews-row-title {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-ews-row-sub {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* No pending invitations: one explanation line inside a card (same location as when invitations exist), rather than bare text */
+:root:root .ui-ews-note {
+  padding: 14px 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+:root:root .ui-ews-create {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+}
+:root:root .ui-ews-create > .ui-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+:root:root .ui-ews-error {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+  font-size: 0.78125rem;
+}
+
+/* Route-segment error boundary (app/(app)/error.tsx): remove decorative gradients, left red stripe and large shadow; hairline card;
+ * recovery-mode eyebrow becomes regular 12 --c-ink-4 (no uppercase mono red text); title 22/700; buttons join the button
+ * family (primary + secondary) */
+:root:root .ui-boundary-shell {
+  background: var(--c-bg);
+  font-family: var(--font-control);
+}
+:root:root .ui-boundary-card {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-boundary-rail {
+  display: none;
+}
+:root:root .ui-boundary-recovery-label {
+  margin-bottom: 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .ui-boundary-title {
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+:root:root .ui-boundary-message {
+  margin-top: 6px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .ui-boundary-actions {
+  margin-top: 20px;
+}
+:root:root :is(.ui-boundary-primary-action, .ui-boundary-secondary-action) {
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.2;
+}
+:root:root .ui-boundary-primary-action {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+:root:root .ui-boundary-primary-action:hover {
+  background: var(--c-accent-hover);
+  filter: none;
+}
+:root:root .ui-boundary-secondary-action {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .ui-boundary-secondary-action:hover {
+  background: var(--c-fill-3);
+}
+:root:root :is(.ui-boundary-primary-action, .ui-boundary-secondary-action):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* Admin console loading / no permission / read failure (components/shell/AdminRouteState.tsx): hairline card; system-font title 15/600 (previously serif);
+ * no permission is not an error — neutral icon background; only read failure uses error colors */
+:root:root .admin-route-state__card {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .admin-route-state__mark {
+  margin-bottom: 10px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+}
+:root:root .admin-route-state.is-forbidden .admin-route-state__mark {
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+/* Read failure is still an error: the base rule above (0,3,0) overrides globals.css error colors; restore original values here */
+:root:root .admin-route-state.is-error .admin-route-state__mark {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+:root:root .admin-route-state h1 {
+  margin-bottom: 6px;
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 600;
+  line-height: 1.4;
+}
+:root:root .admin-route-state p {
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  line-height: 1.5;
+}
+
+/* Settings-page no permission (components/settings/access-boundary.tsx): page title already uses .ui-page-title;
+ * explain who can act with a neutral notice (no solid red error bar), with 16 between button and explanation */
+:root:root .ui-access-state .ui-access-state-body {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .ui-access-state .settings-button {
+  margin-top: 16px;
+}
+
+/* Team settings shell access denied / read failure (components/settings/settings-shell.tsx): replace only the content area,
+ * with one centered hairline state card (same shape as empty state), explaining who can access; identity checking is
+ * just one secondary-color text line */
+:root:root .ui-settings-gate:not(.ui-settings-gate--checking) {
+  margin-top: 8px;
+  padding: 22px 16px;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  text-align: center;
+}
+:root:root .ui-settings-gate > p {
+  margin: 0 0 12px;
+}
+:root:root .ui-settings-gate--checking {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+
+/* @section tail:help —— page-by-page acceptance finish · help center (components/help/help-center-page.tsx, hook classes ui-help-*).
+ * Navigation, home introduction, headers and cards are controls: system font, hairlines, no uppercase, gradients or
+ * shadows; article body (Markdown-rendered headings, paragraphs,
+ * tables, code) is content and stays unchanged. */
+:root:root .ui-help-page {
+  font-family: var(--font-control);
+}
+:root:root .ui-help-sidebar {
+  border-right: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-help-sidebar-intro {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-help-bookmark {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .ui-help-eyebrow {
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+:root:root .ui-help-nav-group h2 {
+  color: var(--c-ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root :is(.ui-help-home-link, .ui-help-nav-item) {
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink);
+}
+:root:root :is(.ui-help-home-link, .ui-help-nav-item) span {
+  font-weight: 500;
+}
+:root:root :is(.ui-help-home-link, .ui-help-nav-item) small {
+  color: var(--c-ink-3);
+}
+:root:root :is(.ui-help-home-link, .ui-help-nav-item):hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+/* Current item: filled background and bold (same as settings navigation), replacing accent-colored text */
+:root:root :is(.ui-help-home-link, .ui-help-nav-item).ui-help-nav-item-active {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root :is(.ui-help-home-link, .ui-help-nav-item).ui-help-nav-item-active span {
+  font-weight: 600;
+}
+@media (max-width: 920px) {
+  :root:root :is(.ui-help-home-link, .ui-help-nav-item) {
+    box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  }
+}
+/* Article header: group eyebrow 12 --c-ink-4 regular text; article title uses page-title 22/700 system font (body remains content) */
+:root:root .ui-help-article-meta {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+:root:root .ui-help-article > h1 {
+  margin-bottom: 8px;
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+:root:root .ui-help-article > h1 + p {
+  max-width: 880px;
+  margin-bottom: 24px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+/* Help home introduction: content-surface hairline card, no gradient or shadow; title 22/700, description 13 --c-ink-3; primary action is a solid primary button */
+:root:root .ui-help-home-hero {
+  margin-bottom: 40px;
+  padding: 28px 32px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-help-home-eyebrow {
+  margin-bottom: 4px;
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+:root:root .ui-help-home-hero h1 {
+  margin-bottom: 6px;
+  font-family: var(--font-control);
+  font-size: var(--fs-page-title);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+/* The H1 repeats the top-bar title (Help Center); the former headline stays as a 16/500 tagline below it */
+:root:root .ui-help-home-tagline {
+  margin: 0 0 6px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+:root:root .ui-help-hero-copy > p:last-of-type {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .ui-help-hero-action {
+  gap: 6px;
+  min-height: var(--control-h-md);
+  margin-top: 16px;
+  padding: 0 12px;
+  border-radius: var(--r-2);
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-help-hero-action:hover {
+  background: var(--c-accent-hover);
+  opacity: 1;
+  transform: none;
+}
+:root:root .ui-help-hero-path {
+  border-left: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-help-hero-path > p {
+  margin-bottom: 8px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .ui-help-path-step {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-help-path-step span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-help-path-step p {
+  font-weight: 500;
+}
+@media (max-width: 920px) {
+  :root:root .ui-help-hero-path {
+    border-top: var(--hairline) solid var(--c-separator);
+    border-left: 0;
+  }
+}
+/* Section titles: regular 12 --c-ink-4 eyebrow above, title 16/650 (previously serif 25–34) */
+:root:root .ui-help-home-section {
+  margin-bottom: 32px;
+}
+:root:root .ui-help-section-heading {
+  display: block;
+  margin-bottom: 8px;
+}
+:root:root .ui-help-section-heading p {
+  margin-bottom: 2px;
+  color: var(--c-ink-4);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+/* The module's .article h2 (article section divider and top margin) has equal specificity and comes later, overriding .sectionHeading h2 resets — home section titles
+ * gain a line and 54 of extra space above; clear them here */
+:root:root .ui-help-section-heading h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+/* Goal and map cards: content-surface hairline cards, hover fill-1, no lift; icons ink-2 (no accent-colored circular blocks) */
+:root:root .ui-help-goal-card {
+  min-height: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-help-goal-card:hover {
+  background: var(--c-fill-1);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator-strong, var(--c-separator));
+  transform: none;
+}
+:root:root .ui-help-goal-card > svg {
+  color: var(--c-ink-3);
+}
+:root:root .ui-help-goal-icon {
+  width: 28px;
+  height: 28px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .ui-help-goal-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .ui-help-map-grid {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .ui-help-map-card {
+  min-height: 0;
+  padding: 16px;
+  border-right: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-help-map-card:last-child {
+  border-right: 0;
+}
+:root:root .ui-help-map-card svg {
+  color: var(--c-ink-2);
+}
+:root:root .ui-help-map-card span {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+:root:root .ui-help-map-card:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+@media (max-width: 920px) {
+  :root:root .ui-help-map-card:nth-child(2) {
+    border-right: 0;
+  }
+  :root:root .ui-help-map-card:nth-child(-n + 2) {
+    border-bottom: var(--hairline) solid var(--c-separator);
+  }
+}
+@media (max-width: 560px) {
+  :root:root .ui-help-home-hero {
+    padding: 20px 16px;
+  }
+  :root:root .ui-help-home-hero h1 {
+    font-size: var(--fs-page-title);
+  }
+  :root:root .ui-help-map-card,
+  :root:root .ui-help-map-card:nth-child(2) {
+    border-right: 0;
+    border-bottom: var(--hairline) solid var(--c-separator);
+  }
+  :root:root .ui-help-map-card:last-child {
+    border-bottom: 0;
+  }
+}
+
+/* @section tail:settings —— page-by-page acceptance finish · not covered by acceptance A: OpenAPI keys' nested cards.
+ * The outer key-list card loses border and padding, keeping only its title row; each key is a content-surface hairline
+ * card. Other OpenAPI card borders become hairlines. */
+:root:root .team-openapi-card {
+  border: 0;
+  border-radius: var(--r-4);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .team-openapi-card:has(> .team-openapi-key-grid) {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .team-openapi-card:has(> .team-openapi-key-grid) > .team-openapi-card__heading {
+  margin-bottom: 8px;
+}
+:root:root .team-openapi-key-card {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+
+/* @section style-tail:agents —— style finish · agent-page cards (marketplace, management, details, version publishing and review).
+ * Spec: Component Spec's header / management table and empty / loading / error cards and blocks (content surface --c-surface, --r-4, 0.5px hairline,
+ * no shadow), Page Layout Spec's group cards and fields (labels 12/600 --c-ink-2, controls 28 high). Agent-specific visuals retain only avatar
+ * color blocks (name-derived gradients are data) and semantic colors; unify the rest: remove hover lift and large
+ * shadows, replace serif and uppercase mono eyebrows with system font,
+ * raise 9–10px text to 11–11.5 (spec minimum font size 11). Secondary card blocks (trust panels, evaluation statistic cells, review fact cells,
+ * risk and safety descriptions, copied-source cards) use filled background --c-fill-1, --r-3, without separate borders. */
+
+/* ── Primary cards: content surface + hairline + --r-4, no shadow or lift ── */
+:root:root
+  :is(
+    .am-card,
+    .am-featured-card,
+    .am-role-preference-card,
+    .am-management-row,
+    .am-release-section,
+    .am-release-advanced,
+    .am-release-publish-card,
+    .am-review-card,
+    .am-review-decision-card,
+    .am-tool-connection-card
+  ) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+  transform: none;
+}
+/* Clickable marketplace cards: hover only changes border color and adds a control shadow, no lift; keyboard focus ring */
+:root:root :is(.am-card, .am-featured-card):hover {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+  transform: none;
+}
+:root:root a.am-featured-card:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Selected tool connection: accent border + light accent background (the original data-selected rule is overridden by unified cards above; restore the state here) */
+:root:root .am-tool-connection-card[data-selected="true"] {
+  background: var(--c-accent-soft);
+  box-shadow: 0 0 0 1px var(--c-accent);
+}
+:root:root .am-tool-connection-card > details {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Marketplace card interiors ── */
+:root:root .am-card {
+  padding: 16px;
+}
+:root:root :is(.am-card h3, .am-featured-card h3, .am-management-identity h2) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root :is(.am-featured-card > div:last-child > span) {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root :is(.am-featured-card p, .am-featured-developer) {
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.55;
+}
+:root:root .am-card-footer {
+  padding-top: 12px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+
+/* ── Management: one row card per hired agent; avatar color block shrinks to 44, --r-3 ── */
+:root:root .am-management-list {
+  gap: 8px;
+}
+:root:root .am-management-row {
+  min-height: 72px;
+  padding: 12px 16px;
+  gap: 16px;
+}
+:root:root .am-management-row .am-management-mark {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  padding: 7px;
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .am-management-identity h2 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.am-management-identity p, .am-management-identity small) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .am-resumable-drafts a {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-accent-text);
+  font-size: 0.78125rem;
+}
+:root:root .am-resumable-drafts a:is(:hover, :focus-visible) {
+  background: var(--c-fill-1);
+  text-decoration: none;
+}
+:root:root .am-resumable-drafts a:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* ── Details: capabilities, enablement hints, trust panels, quality evidence ── */
+:root:root .am-capability-list {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .am-capability-list article {
+  padding: 16px 0;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .am-capability-list h3 {
+  font-family: var(--font-control);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+:root:root .am-capability-list p {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.6;
+}
+:root:root :is(.am-capability-contract span, .am-capability-contract code) {
+  padding: 2px 6px;
+  font-size: 0.6875rem;
+}
+:root:root .am-activation-panel {
+  border: 0;
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+}
+:root:root .am-activation-panel[data-state="unavailable"] {
+  background: var(--c-fill-1);
+}
+:root:root .am-activation-panel[data-state="unavailable"] > span {
+  font-family: var(--font-control);
+}
+:root:root .am-activation-panel button {
+  min-height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .am-activation-panel button:hover:not(:disabled) {
+  background: var(--c-fill-3);
+}
+/* Secondary blocks: filled background, --r-3, no border */
+:root:root
+  :is(
+    .am-trust-panel,
+    .am-fork-policy-card,
+    .am-fork-lineage-card,
+    .am-quality-evidence-grid > article,
+    .am-quality-empty,
+    .am-review-eval-suites > div,
+    .am-review-facts > div,
+    .am-review-change-grid > div,
+    .am-review-risk,
+    .am-review-safety
+  ) {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .am-trust-panel {
+  padding: 20px;
+  font-family: var(--font-control);
+}
+:root:root .am-trust-panel dl > div {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .am-trust-panel dd {
+  font-weight: 600;
+}
+/* Retain warning semantics: review-change risks and high-risk blocks still use a light danger background */
+:root:root .am-review-change-grid > div[data-tone="warning"],
+:root:root .am-review-risk:is([data-risk="high"], [data-risk="unknown"], [data-risk="destructive"]) {
+  background: var(--c-err-soft);
+}
+:root:root .am-review-risk[data-risk="medium"],
+:root:root .am-review-safety[data-status="review_required"] {
+  background: var(--c-warn-soft);
+}
+:root:root .am-review-safety[data-status="blocked"] {
+  background: var(--c-err-soft);
+}
+:root:root .am-quality-evidence-grid > article[data-state="valid"] {
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-pos);
+}
+:root:root .am-quality-evidence {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .am-quality-evidence-grid article span {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: none;
+}
+:root:root :is(.am-quality-evidence-grid article dt, .am-quality-evidence-grid article > small, .am-quality-evidence > small, .am-quality-empty p) {
+  font-size: 0.71875rem;
+}
+:root:root :is(.am-quality-evidence-grid article dd, .am-quality-evidence-grid article em) {
+  font-weight: 600;
+}
+
+/* ── Version publishing and review: card padding, form fields (labels 12/600, controls 28 high / multiline from 64), small text raised to 11.5 ── */
+:root:root :is(.am-release-section) {
+  padding: 20px;
+}
+:root:root :is(.am-review-card, .am-review-decision-card, .am-release-publish-card) {
+  padding: 18px;
+}
+:root:root .am-release-advanced {
+  padding: 12px 18px;
+}
+:root:root .am-release-advanced summary {
+  min-height: var(--control-h-lg);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .am-release-section > header > span {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+:root:root
+  :is(
+    .am-release-section label > span,
+    .am-release-advanced label > span,
+    .am-release-publish-card label > span,
+    .am-review-decision-card label > span,
+    .am-release-directory > label > span
+  ) {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root
+  :is(
+    .am-release-section input:not([type="checkbox"]):not([type="radio"]),
+    .am-release-section select,
+    .am-release-section textarea,
+    .am-release-advanced textarea,
+    .am-release-publish-card textarea,
+    .am-review-decision-card select,
+    .am-release-directory > label input
+  ) {
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+/* Single-line controls 28 high; multiline from 64 (disjoint groups, written separately so :is() maximum specificity does not override each other) */
+:root:root
+  :is(
+    .am-release-section input:not([type="checkbox"]):not([type="radio"]),
+    .am-release-section select,
+    .am-review-decision-card select,
+    .am-release-directory > label input
+  ) {
+  min-height: var(--control-h-md);
+  padding: 4px 9px;
+}
+:root:root :is(.am-release-section textarea, .am-release-advanced textarea, .am-release-publish-card textarea) {
+  min-height: 64px;
+  padding: 6px 9px;
+  line-height: 1.5;
+}
+:root:root
+  :is(
+    .am-release-section input:not([type="checkbox"]):not([type="radio"]),
+    .am-release-section select,
+    .am-release-section textarea,
+    .am-release-advanced textarea,
+    .am-release-publish-card textarea,
+    .am-review-decision-card select,
+    .am-release-directory > label input
+  ):focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root
+  :is(
+    .am-release-section label > small,
+    .am-release-advanced > p,
+    .am-release-publish-card li,
+    .am-release-publish-card > small,
+    .am-release-publish-card > p,
+    .am-review-facts dt,
+    .am-review-boundary,
+    .am-review-risk p,
+    .am-review-safety small,
+    .am-review-decision-card > small,
+    .am-review-eval-suites span,
+    .am-review-eval-suites small,
+    .am-fork-lineage-card dl > div,
+    .am-fork-policy-card p,
+    .am-fork-lineage-card p,
+    .am-tool-connection-card label small,
+    .am-tool-connection-card > details summary
+  ) {
+  font-size: 0.71875rem;
+}
+/* Mono only for IDs and paths (content), font size at least 11 */
+:root:root :is(.am-review-facts dd small) {
+  font-size: 0.6875rem;
+}
+:root:root :is(.am-release-publish-card li)::before {
+  width: 20px;
+  height: 20px;
+  background: var(--c-fill-2);
+  font-size: 0.6875rem;
+}
+:root:root :is(.am-release-publish-card li)[data-done="true"]::before {
+  background: var(--c-pos);
+}
+:root:root .am-fork-lineage-card h3 {
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  letter-spacing: normal;
+}
+:root:root .am-fork-lineage-card dd {
+  font-weight: 600;
+}
+:root:root .am-tool-connection-card label em {
+  color: var(--c-accent-text);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .am-tool-connection-card label strong {
+  font-size: var(--fs-md);
+}
+

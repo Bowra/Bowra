@@ -1,0 +1,299 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "table_trends",
+  "payload": {
+    "spec": {
+      "kind": "scatter",
+      "title": "Prepared monthly relationships",
+      "rows": [
+        {
+          "month": "2026-03",
+          "revenue": 12.123456,
+          "cost": 5
+        },
+        {
+          "month": "2026-01",
+          "revenue": -5,
+          "cost": 2
+        },
+        {
+          "month": "2026-01",
+          "cost": 3
+        },
+        {
+          "month": "2026-02",
+          "revenue": 1.2345e-05,
+          "cost": 4
+        },
+        {
+          "month": "2026-02",
+          "revenue": 2,
+          "cost": 7
+        }
+      ],
+      "data_artifact_id": "art_5108610fd6e0",
+      "row_count": 5,
+      "columns": [
+        {
+          "key": "month",
+          "header": "month",
+          "type": "date",
+          "y_axis_id": 0
+        },
+        {
+          "key": "revenue",
+          "header": "revenue",
+          "type": "numeric",
+          "y_axis_id": 0
+        },
+        {
+          "key": "cost",
+          "header": "cost",
+          "type": "numeric",
+          "y_axis_id": 0
+        }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "percent_stack": false,
+      "fallback_kind": "table",
+      "source_meta": {
+        "id": "source-ref-v1:Q309i_tYao69U3_Jw0dKvnV4KwAElCiMEkjvIPR4mR0",
+        "source_alias": "source-ref-v1:Q309i_tYao69U3_Jw0dKvnV4KwAElCiMEkjvIPR4mR0",
+        "access_state": "linked_accessible",
+        "generic_type": "generated_artifact",
+        "safe_query": "Revenue and cost"
+      },
+      "_infer_reason": "force_kind=scatter",
+      "auto_charted": false,
+      "views": [
+        {
+          "id": "relationship",
+          "kind": "chart",
+          "spec": {
+            "kind": "scatter",
+            "title": "Revenue and cost",
+            "rows": [
+              {
+                "month": "2026-03",
+                "revenue": 12.123456,
+                "cost": 5
+              },
+              {
+                "month": "2026-01",
+                "revenue": -5,
+                "cost": 2
+              },
+              {
+                "month": "2026-01",
+                "cost": 3
+              },
+              {
+                "month": "2026-02",
+                "revenue": 1.2345e-05,
+                "cost": 4
+              },
+              {
+                "month": "2026-02",
+                "revenue": 2,
+                "cost": 7
+              }
+            ],
+            "data_artifact_id": "art_5108610fd6e0",
+            "row_count": 5,
+            "columns": [
+              {
+                "key": "month",
+                "header": "month",
+                "type": "date",
+                "y_axis_id": 0
+              },
+              {
+                "key": "revenue",
+                "header": "revenue",
+                "type": "numeric",
+                "y_axis_id": 0
+              },
+              {
+                "key": "cost",
+                "header": "cost",
+                "type": "numeric",
+                "y_axis_id": 0
+              }
+            ],
+            "limit_rows": 30,
+            "secondary_axis": false,
+            "show_legend": true,
+            "percent_stack": false,
+            "fallback_kind": "table",
+            "_infer_reason": "force_kind=scatter",
+            "auto_charted": false
+          }
+        },
+        {
+          "id": "detail",
+          "kind": "chart",
+          "spec": {
+            "kind": "table",
+            "title": "Original observations",
+            "rows": [
+              {
+                "month": "2026-03",
+                "region": "A",
+                "revenue": 12.123456,
+                "cost": 5
+              },
+              {
+                "month": "2026-01",
+                "region": "B",
+                "revenue": -5,
+                "cost": 2
+              },
+              {
+                "month": "2026-01",
+                "region": "A",
+                "cost": 3
+              },
+              {
+                "month": "2026-02",
+                "region": "B",
+                "revenue": 1.2345e-05,
+                "cost": 4
+              },
+              {
+                "month": "2026-02",
+                "region": "A",
+                "revenue": 2,
+                "cost": 7
+              }
+            ],
+            "data_artifact_id": "art_5108610fd6e0",
+            "row_count": 5,
+            "columns": [
+              {
+                "key": "month",
+                "header": "month",
+                "type": "date",
+                "y_axis_id": 0
+              },
+              {
+                "key": "region",
+                "header": "region",
+                "type": "categorical",
+                "y_axis_id": 0
+              },
+              {
+                "key": "revenue",
+                "header": "revenue",
+                "type": "numeric",
+                "y_axis_id": 0
+              },
+              {
+                "key": "cost",
+                "header": "cost",
+                "type": "numeric",
+                "y_axis_id": 0
+              }
+            ],
+            "limit_rows": 30,
+            "secondary_axis": false,
+            "show_legend": true,
+            "percent_stack": false,
+            "fallback_kind": "table",
+            "_infer_reason": "force_kind=table",
+            "auto_charted": false
+          }
+        }
+      ],
+      "layout": {
+        "type": "stack",
+        "children": [
+          {
+            "view": "relationship"
+          },
+          {
+            "view": "detail"
+          }
+        ]
+      },
+      "presentation_plan": {
+        "version": 2,
+        "dataset": {
+          "artifact_id": "source-ref-v1:Q309i_tYao69U3_Jw0dKvnV4KwAElCiMEkjvIPR4mR0",
+          "content_digest": "38aef65704a57fd92eb7497bc76458b766500ece079eebf96dcb22f38d989a2d",
+          "schema_digest": "6202fac655d139f065f717bd71505f52afe691f774e0fb1dd7cacc2aae72776b",
+          "availability": "available"
+        },
+        "evidence_notes": [],
+        "text_dependencies": {
+          "/title": {
+            "note_ids": [],
+            "dataset": true
+          },
+          "/views/0/spec/title": {
+            "note_ids": [],
+            "dataset": true
+          },
+          "/views/1/spec/title": {
+            "note_ids": [],
+            "dataset": true
+          }
+        },
+        "table_trends": [
+          {
+            "view_id": "detail",
+            "binding_id": "frame.81c64cd7d9c4",
+            "measure_key": "revenue",
+            "binding": {
+              "kind": "frame",
+              "dimension_keys": [
+                "region"
+              ],
+              "observation_keys": [
+                "month",
+                "region"
+              ],
+              "measure_keys": [
+                "revenue",
+                "cost"
+              ],
+              "time_key": "month",
+              "entity_keys": [
+                "region"
+              ],
+              "order": "date",
+              "frame_keys": [
+                "2026-01",
+                "2026-02",
+                "2026-03"
+              ],
+              "entity_values": [
+                "A",
+                "B"
+              ],
+              "axis_domains": {
+                "detail": null
+              },
+              "eligible_views": [
+                "detail"
+              ],
+              "coverage": {
+                "artifact_rows": {
+                  "available": 5,
+                  "total": 5
+                },
+                "views": {
+                  "detail": {
+                    "retained_rows": 5
+                  }
+                }
+              }
+            },
+            "availability": "available"
+          }
+        ]
+      }
+    }
+  }
+}

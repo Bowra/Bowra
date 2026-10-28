@@ -1,0 +1,473 @@
+/* ════════════════════════════════════════════════════════════════
+   Bowhead — Planning Mode · M1 plan card
+   Verbatim translation of Claude Design handoff
+   (planning-mode/Planning Mode.html · planning.css/planning.js).
+   Reuses cream/terracotta v8 tokens from globals.css (--c-*) — no new palette.
+
+   Two deltas vs the design board CSS:
+   1. The board's missing vars (fonts / ease / *-tint / shadow-2) are NOT in
+      globals.css, so they're (re)declared here additively — same values as
+      the design. Plus the 5 agent role identity colors (new, oklch).
+   2. The board expressed mobile via `.frame.is-mobile X`. The real card lives
+      in the chat column, so `.pcard` keeps `container-type:inline-size` and
+      mobile rules become `@container` queries keyed on the card's own width.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Plan-feature-scoped tokens — NOT :root. CTO review P1: a bare :root block
+   here (imported last) clobbered report-canvas.css's theme-aware `--f-*`
+   mapping AND gave workflow-solidify an unintended `--shadow-2` — both with the
+   planning flags OFF (OFF must = zero change). Scoping to the plan-feature root
+   classes keeps these tokens off the global cascade. Fonts map to the theme
+   tokens (with the design literals as fallback) so the card follows the active
+   typography profile instead of forcing Inter. */
+.pcard, .pmode, .pmode-hint, .plan-mode-row, .m-report {
+  /* surfaces / shadows globals.css doesn't define */
+  --c-pos-tint: #f1f6ec;
+  --c-warn-tint: #fbf5e6;
+  --c-err-tint: #fbeef0;
+  --shadow-2: 0 2px 8px rgba(22, 19, 16, .06), 0 1px 2px rgba(22, 19, 16, .04);
+  --f-sans: var(--font-v2-sans, 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans SC', sans-serif);
+  --f-serif: var(--font-v2-serif, 'Source Serif 4', 'Songti SC', 'Iowan Old Style', Georgia, serif);
+  --f-mono: var(--font-v2-mono, 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace);
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  /* agent identity colours reconciled to the 10-agent pal-a --ag-* model
+     (P4b); see components/chat/plan-card/roles.ts. The legacy 5-role
+     --role-* tokens were removed (roleForAgent now returns --ag-* + a
+     color-mix tint, so plan card == trace colour). */
+}
+/* Dark mode: the three *-tint values above are light literals, making completed, failed / blocked graph nodes and card headers glaringly light
+   (workbench batch 4a fix, active in both appearances). Blend semantic color with the content surface by theme; leave light values unchanged.
+   Mix only 7%: small secondary node text (.gn-topic, ink-3) must achieve ≥4.5:1 on this fill (the blue product default reaches 4.55–4.65; 8% gives 4.46). */
+[data-theme="dark"] :is(.pcard, .pmode, .pmode-hint, .plan-mode-row, .m-report) {
+  --c-pos-tint: color-mix(in srgb, var(--c-pos) 7%, var(--c-surface));
+  --c-warn-tint: color-mix(in srgb, var(--c-warn) 7%, var(--c-surface));
+  --c-err-tint: color-mix(in srgb, var(--c-err) 7%, var(--c-surface));
+}
+
+/* square icon buttons: kill UA button padding so grid-centering is true */
+.pstep-chk, .pstep-ctl, .pnl-send, .pcomp-add, .pcomp-send { padding: 0; line-height: 0 }
+
+/* ════════════════════════════════════════════════════════════════
+   PLAN CARD
+   ════════════════════════════════════════════════════════════════ */
+.pcard {
+  align-self: stretch; background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-2); container-type: inline-size;
+  font-family: var(--f-sans);
+}
+.pcard.is-proposed { border-color: var(--c-accent-soft) }
+.pcard.is-blocked { border-color: var(--c-warn-soft) }
+
+/* header band */
+.pc-head {
+  display: flex; flex-direction: column; gap: 9px; padding: 14px 18px 13px;
+  border-bottom: 1px solid var(--c-line-2); background: var(--c-surface-2)
+}
+.pcard.is-proposed .pc-head { background: var(--c-accent-tint) }
+.pcard.is-running .pc-head { background: var(--c-surface-2) }
+.pcard.is-blocked .pc-head { background: var(--c-warn-tint) }
+.pcard.is-completed .pc-head { background: var(--c-pos-tint) }
+.pc-toprow { display: flex; align-items: center; gap: 10px }
+.pc-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px; font-family: var(--f-mono);
+  font-size: 0.6875rem; font-weight: 600; letter-spacing: .05em; color: var(--c-accent); flex: none
+}
+.pcard.is-running .pc-eyebrow { color: var(--c-ink-3) }
+.pcard.is-blocked .pc-eyebrow { color: var(--c-warn) }
+.pcard.is-completed .pc-eyebrow { color: var(--c-pos) }
+.pc-eyebrow .gem { width: 8px; height: 8px; border-radius: 2px; transform: rotate(45deg); background: currentColor; flex: none }
+.pc-sp { flex: 1 }
+.pc-modetag {
+  display: inline-flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 0.625rem;
+  color: var(--c-ink-3); background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-pill);
+  padding: 2px 9px; flex: none
+}
+.pc-modetag b { color: var(--c-accent); font-weight: 600 }
+.pc-title { font-size: 1rem; font-weight: 600; color: var(--c-ink); letter-spacing: -.004em; line-height: 1.35; margin: 0 }
+.pc-title em { font-style: normal; color: var(--c-accent-hover) }
+.pc-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--f-mono);
+  font-size: 0.65625rem; color: var(--c-ink-4)
+}
+.pc-meta .mdot { width: 3px; height: 3px; border-radius: 50%; background: var(--c-ink-4); flex: none }
+.pc-meta b { color: var(--c-ink-2); font-weight: 600 }
+
+/* running progress meter */
+.pc-progress { display: flex; align-items: center; gap: 10px; margin-top: 2px }
+.pc-bar { flex: 1; height: 6px; border-radius: 4px; background: var(--c-surface-3); overflow: hidden; display: flex; gap: 2px }
+/* Feishu 07.06 #8: flex:1 divides width equally among N segments; otherwise empty <i> collapses to zero width, showing only the gray track */
+.pc-bar i { display: block; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 2px }
+.pc-bar i.done { background: var(--c-pos) }
+.pc-bar i.run { background: var(--c-accent); position: relative; overflow: hidden }
+.pc-bar i.run::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+  animation: pc-shimmer 1.5s linear infinite
+}
+.pc-bar i.block { background: var(--c-warn) }
+/* Batch 3 (review R2-F8): failed no longer uses the not-started color */
+.pc-bar i.fail { background: var(--c-danger, #d4544f) }
+.pc-bar i.todo { background: var(--c-surface-3) }
+.pc-bar i.skip { background: repeating-linear-gradient(45deg, var(--c-surface-3), var(--c-surface-3) 3px, var(--c-line) 3px, var(--c-line) 6px) }
+@keyframes pc-shimmer { to { transform: translateX(100%) } }
+
+/* chat-ux-2026-08 plan integration batch: remove all .prun-* with RunningDetail
+   (graph + list carry state; disclosure outside the card carries execution details; see the corresponding PlanCard.tsx comment). */
+
+/* body */
+.pc-body { padding: 8px 14px 6px }
+
+/* ─── parallel rail ─── */
+.prail { position: relative; margin: 8px 0 8px 6px; padding-left: 18px }
+.prail::before {
+  content: ""; position: absolute; left: 3px; top: 14px; bottom: 10px; width: 3px;
+  border-radius: 2px; background: var(--c-accent); opacity: .5
+}
+.prail-tab {
+  display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 2px -2px;
+  font-family: var(--f-mono); font-size: 0.625rem; letter-spacing: .04em; color: var(--c-accent); font-weight: 600
+}
+.prail-tab .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--c-accent) }
+
+/* join indicator between rail and final step */
+.pjoin {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 4px 6px;
+  font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-ink-4); letter-spacing: .03em
+}
+.pjoin .jline { flex: none; color: var(--c-ink-4); display: inline-flex }
+.pjoin b { color: var(--c-ink-3); font-weight: 600 }
+
+/* ─── step row ─── */
+.pstep { display: flex; gap: 11px; padding: 11px 4px; border-top: 1px solid var(--c-line-2); position: relative }
+.prail .pstep:first-of-type, .pstep.is-final { border-top: none }
+.pstep.is-final { padding: 12px 6px }
+
+/* include checkbox (editable) */
+.pstep-chk {
+  flex: none; width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--c-ink-4);
+  background: var(--c-surface); display: grid; place-items: center; margin-top: 5px; cursor: pointer;
+  transition: background-color .14s var(--ease), border-color .14s var(--ease); color: #fff
+}
+.pstep-chk svg { opacity: 0; transform: scale(.5); transition: opacity .14s var(--ease), transform .14s var(--ease) }
+.pstep-chk.on { background: var(--c-accent); border-color: var(--c-accent) }
+.pstep-chk.on svg { opacity: 1; transform: scale(1) }
+
+/* role icon chip */
+.pstep-ic { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; margin-top: 1px }
+
+.pstep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px }
+.pstep-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.pstep-name { font-size: 0.84375rem; font-weight: 600; color: var(--c-ink); letter-spacing: -.002em }
+.pstep-deliv {
+  display: inline-flex; align-items: center; gap: 4px; font-family: var(--f-mono); font-size: 0.625rem;
+  color: var(--c-ink-3); background: var(--c-surface-2); border-radius: 5px; padding: 1px 7px; white-space: nowrap; flex: none
+}
+.pstep-deliv .dk { color: var(--c-ink-4) }
+.pstep-goal { font-size: 0.78125rem; color: var(--c-ink-3); line-height: 1.5; text-wrap: pretty }
+.pstep-metarow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 1px }
+
+/* small meta badges */
+.pbadge {
+  display: inline-flex; align-items: center; gap: 4px; font-family: var(--f-mono); font-size: 0.625rem;
+  letter-spacing: .01em; border-radius: var(--r-pill); padding: 2px 8px; border: 1px solid var(--c-line);
+  color: var(--c-ink-4); background: var(--c-surface)
+}
+.pbadge svg { width: 11px; height: 11px; flex: none }
+.pbadge.dep { color: var(--c-ink-3) }
+.pbadge.corpus-ok { color: var(--c-ink-3); border-color: var(--c-line) }
+.pbadge.corpus-ok .ck { color: var(--c-pos) }
+.pbadge.corpus-miss { color: var(--c-err); border-color: var(--c-err-soft); background: var(--c-err-tint); font-weight: 600 }
+/* planning-mode-audit WP-7: proposal-phase feasibility badges (needs_context/no_corpus) */
+.pbadge.warn { color: var(--c-warn, #9a6b00); border-color: var(--c-warn-soft, #e8d9ae); background: var(--c-warn-tint); font-weight: 600 }
+
+/* step tail — controls + status */
+.pstep-tail { flex: none; display: flex; align-items: flex-start; gap: 4px; margin-top: 2px }
+.pstep-ctl {
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent; background: transparent;
+  color: var(--c-ink-4); cursor: pointer; display: grid; place-items: center; transition: color .14s var(--ease), background-color .14s var(--ease), border-color .14s var(--ease)
+}
+.pstep-ctl:hover { border-color: var(--c-line); color: var(--c-ink-2); background: var(--c-surface) }
+.pstep-ctl.del:hover { border-color: var(--c-err-soft); color: var(--c-err); background: var(--c-err-tint) }
+.pstep-ctl.grab { cursor: grab }
+
+/* status pill (running/blocked/completed) */
+.pp {
+  display: inline-flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 0.65625rem; font-weight: 600;
+  border-radius: var(--r-pill); padding: 3px 10px 3px 8px; white-space: nowrap
+}
+.pp svg { width: 12px; height: 12px; flex: none }
+.pp.todo { color: var(--c-ink-4); background: var(--c-surface-2) }
+.pp.run { color: var(--c-accent); background: var(--c-accent-soft) }
+.pp.done { color: var(--c-pos); background: var(--c-pos-soft) }
+.pp.failed { color: var(--c-err); background: var(--c-err-soft) }
+.pp.blocked { color: var(--c-warn); background: var(--c-warn-soft) }
+.pp.skip { color: var(--c-ink-4); background: var(--c-surface-2) }
+.pp .spin {
+  width: 11px; height: 11px; border: 1.6px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: pc-spin .8s linear infinite
+}
+@keyframes pc-spin { to { transform: rotate(360deg) } }
+
+/* row state modifiers */
+.pstep.off { opacity: .5 }
+.pstep.off .pstep-name { text-decoration: line-through; text-decoration-color: var(--c-ink-4) }
+.pstep.running-now { background: var(--c-accent-tint) }
+.pstep.blocked-now { background: var(--c-warn-tint) }
+.pstep.dragging { background: var(--c-accent-tint); box-shadow: var(--shadow-2); border-radius: 10px; border-top-color: transparent }
+
+/* inline goal editor (editing state — M2) */
+.pgoal-edit {
+  border: 1.5px solid var(--c-accent); border-radius: 8px; background: var(--c-surface);
+  padding: 7px 9px; font-family: var(--f-sans); font-size: 0.78125rem; color: var(--c-ink); line-height: 1.5;
+  box-shadow: 0 0 0 3px rgba(176, 74, 42, .14); position: relative
+}
+.pgoal-edit .car {
+  display: inline-block; width: 1.5px; height: 1.05em; background: var(--c-accent);
+  vertical-align: -2px; margin-left: 1px; animation: pc-blink 1s steps(1) infinite
+}
+@keyframes pc-blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+.pgoal-edit .editmeta { position: absolute; right: 8px; bottom: -18px; font-family: var(--f-mono); font-size: 0.59375rem; color: var(--c-ink-4) }
+
+/* needs-corpus inline warning block (proposed) */
+.pwarn {
+  display: flex; align-items: flex-start; gap: 9px; margin: 2px 0 4px 41px; padding: 9px 12px;
+  border-radius: 9px; background: var(--c-err-tint); border: 1px solid var(--c-err-soft)
+}
+.pwarn .wi { flex: none; color: var(--c-err); margin-top: 1px }
+.pwarn-tx { flex: 1; font-size: 0.75rem; color: var(--c-ink-2); line-height: 1.45 }
+.pwarn-tx b { color: var(--c-err); font-weight: 600 }
+.pwarn-act {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 0.71875rem; font-weight: 600;
+  padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--c-err); background: var(--c-surface);
+  color: var(--c-err); cursor: pointer; white-space: nowrap
+}
+.pwarn-act:hover { background: var(--c-err); color: #fff }
+
+/* AI-proposed new step (editing — M2) */
+.pstep.ghost { border: 1px dashed var(--c-accent); border-radius: 10px; margin: 6px 2px; background: var(--c-accent-tint); border-top: 1px dashed var(--c-accent) }
+.pstep.ghost .pstep-name { color: var(--c-accent-hover) }
+.ghost-tag {
+  font-family: var(--f-mono); font-size: 0.5625rem; letter-spacing: .05em; color: var(--c-accent);
+  border: 1px solid var(--c-accent-soft); background: var(--c-surface); border-radius: var(--r-pill); padding: 1px 7px; font-weight: 600
+}
+
+/* Batch 3: revise/replan preview panel (reuse pblock's inline visual language) */
+.previse { margin: 8px 0 8px 41px; padding: 10px 12px; border: 1px dashed var(--c-accent-soft); border-radius: 10px; background: var(--c-surface); display: flex; flex-direction: column; gap: 8px }
+.previse .prv-title { font-size: 0.75rem; display: flex; align-items: center; gap: 8px }
+.previse .prv-diff { color: var(--c-text-3); font-size: 0.6875rem }
+.previse .prv-row { display: flex; align-items: center; gap: 8px; font-size: 0.78125rem }
+.previse .prv-obj { flex: 1; min-width: 0 }
+.previse .prv-crit { margin: 0; padding-left: 18px; font-size: 0.71875rem; color: var(--c-text-2) }
+.previse .prv-warn { font-size: 0.71875rem; color: var(--c-warn); border: 1px solid var(--c-warn-soft, var(--c-line)); border-radius: 8px; padding: 5px 8px }
+
+/* completed-step output peek */
+.ppeek { margin: 0 0 8px 41px; border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; background: var(--c-surface) }
+.ppeek-h {
+  display: flex; align-items: center; gap: 7px; padding: 7px 11px; background: var(--c-surface-2);
+  border-bottom: 1px solid var(--c-line-2); font-size: 0.6875rem; color: var(--c-ink-3); font-weight: 600
+}
+.ppeek-h .sp { flex: 1 }
+.ppeek-h .vlink { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-accent); display: inline-flex; align-items: center; gap: 3px }
+.ppeek-b { padding: 9px 11px }
+.ppeek table { width: 100%; border-collapse: collapse; font-family: var(--f-mono); font-size: 0.6875rem }
+.ppeek th { text-align: left; font-weight: 500; color: var(--c-ink-4); padding: 3px 8px 5px 0; border-bottom: 1px solid var(--c-line-2) }
+.ppeek td { padding: 4px 8px 4px 0; color: var(--c-ink-2); border-bottom: 1px solid var(--c-line-2) }
+.ppeek td.r, .ppeek th.r { text-align: right }
+.ppeek td.neg { color: var(--c-err) }
+
+/* ─── blocked detail block ─── */
+.pblock { margin: 0 2px 8px 41px; border: 1px solid var(--c-warn-soft); border-radius: 10px; background: var(--c-warn-tint); overflow: hidden }
+.pblock-r { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px }
+.pblock-r .bi { flex: none; color: var(--c-warn); margin-top: 1px }
+.pblock-tx { flex: 1; font-size: 0.78125rem; color: var(--c-ink-2); line-height: 1.5 }
+.pblock-tx b { color: var(--c-ink); font-weight: 600 }
+.pblock-tx .why { font-family: var(--f-mono); font-size: 0.65625rem; color: var(--c-warn); margin-top: 3px; display: block }
+.pblock-acts { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 13px 12px 13px }
+.bact {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; padding: 7px 13px;
+  border-radius: var(--r-pill); cursor: pointer; border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
+}
+.bact svg { width: 13px; height: 13px }
+.bact.primary { background: var(--c-accent); border-color: transparent; color: #fff }
+.bact.primary:hover { background: var(--c-accent-hover) }
+.bact.warn { border-color: var(--c-warn); color: var(--c-warn) }
+.bact:hover:not(.primary) { border-color: var(--c-ink-3); color: var(--c-ink) }
+.bact:disabled { opacity: .55; cursor: default }
+.pblock-scope { font-family: var(--f-mono); font-size: 0.59375rem; color: var(--c-ink-4); padding: 0 13px 11px; line-height: 1.4 }
+
+/* ─── NL modify input (M2) ─── */
+.pnl {
+  margin: 8px 14px 4px; display: flex; align-items: center; gap: 9px; padding: 9px 11px;
+  border: 1px solid var(--c-line); border-radius: 11px; background: var(--c-surface)
+}
+.pnl.focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(176, 74, 42, .13) }
+.pnl .pen { flex: none; color: var(--c-ink-4) }
+.pnl .pen.on { color: var(--c-accent) }
+.pnl-tx { flex: 1; font-size: 0.78125rem; color: var(--c-ink-4); min-width: 0 }
+.pnl-tx.typed { color: var(--c-ink) }
+.pnl-tx .car {
+  display: inline-block; width: 1.5px; height: 1.05em; background: var(--c-accent);
+  vertical-align: -2px; margin-left: 1px; animation: pc-blink 1s steps(1) infinite
+}
+.pnl-send {
+  flex: none; width: 28px; height: 28px; border-radius: 8px; border: none; cursor: pointer;
+  display: grid; place-items: center; background: var(--c-surface-2); color: var(--c-ink-4)
+}
+.pnl-send.on { background: var(--c-accent); color: #fff }
+/* ④b (bug 0708): amend input feedback — grey the input + send while an amend is
+   in flight, and spin the send glyph. `busy` (=amendBusy) spans the REST call
+   that produces the new plan, so this covers exactly "until the new plan lands". */
+.pnl-tx:disabled { opacity: .55; cursor: not-allowed }
+.pnl-send:disabled { opacity: .55; cursor: not-allowed }
+.pnl-send .spin {
+  width: 13px; height: 13px; border: 1.6px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: pc-spin .8s linear infinite
+}
+
+/* ─── card footer ─── */
+.pfoot {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 13px 18px 15px;
+  border-top: 1px solid var(--c-line-2); margin-top: 6px
+}
+.pfoot-meta { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-ink-4); letter-spacing: .03em }
+.pfoot-meta code { color: var(--c-ink-3) }
+.pfoot-sp { flex: 1; min-width: 6px }
+.pbtn {
+  display: inline-flex; align-items: center; gap: 7px; font-family: var(--f-sans); font-size: 0.8125rem; font-weight: 600;
+  padding: 9px 18px; border-radius: var(--r-1); cursor: pointer; transition: color .15s var(--ease), background-color .15s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease); white-space: nowrap;
+  border: none; background: none
+}
+.pbtn svg { width: 15px; height: 15px }
+.pbtn.ghost { border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-3) }
+.pbtn.ghost:hover { border-color: var(--c-ink-3); color: var(--c-ink) }
+.pbtn.primary { border: none; background: var(--c-accent); color: #fff; box-shadow: var(--shadow-1) }
+.pbtn.primary:hover { background: var(--c-accent-hover) }
+.pbtn.pos { border: none; background: var(--c-pos); color: #fff }
+.pbtn:disabled { opacity: .55; cursor: default }
+
+/* ─── mode selector (segmented switch, lives in the composer toolbar) ─── */
+.pmode { display: inline-flex; background: var(--c-surface-2); border-radius: 9px; padding: 2px; gap: 2px; flex: none }
+.pmode button {
+  font-family: var(--f-sans); font-size: 0.71875rem; font-weight: 600; padding: 4px 11px; border-radius: 7px;
+  border: none; background: transparent; color: var(--c-ink-4); cursor: pointer; display: inline-flex; align-items: center; gap: 5px
+}
+.pmode button svg { width: 12px; height: 12px }
+.pmode button.on { background: var(--c-surface); color: var(--c-accent); box-shadow: var(--shadow-1) }
+.pmode-hint { font-family: var(--f-mono); font-size: 0.59375rem; color: var(--c-ink-4); line-height: 1.35 }
+.pmode-hint b { color: var(--c-ink-3); font-weight: 600 }
+.plan-mode-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+
+/* mobile completed report-open affordance */
+.m-report { margin-top: 10px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-surface); overflow: hidden; box-shadow: var(--shadow-1) }
+.m-report .rh { display: flex; align-items: center; gap: 9px; padding: 11px 13px }
+.m-report .ric { width: 30px; height: 30px; border-radius: 8px; background: var(--c-accent-tint); color: var(--c-accent); display: grid; place-items: center; flex: none }
+.m-report .rt { flex: 1; min-width: 0 }
+.m-report .rt .t { font-size: 0.8125rem; font-weight: 600; color: var(--c-ink); line-height: 1.3 }
+.m-report .rt .s { font-family: var(--f-mono); font-size: 0.625rem; color: var(--c-ink-4); margin-top: 2px }
+.m-report .open {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 0.71875rem; font-weight: 600;
+  color: var(--c-accent); background: var(--c-accent-tint); border: 1px solid var(--c-accent-soft);
+  border-radius: var(--r-pill); padding: 5px 11px
+}
+
+/* ─── A (editable) form-control resets + amend preview bar ─── */
+textarea.pgoal-edit { width: 100%; resize: vertical; min-height: 2.4em; outline: none; font-family: var(--f-sans) }
+.pstep-goal.editable { cursor: text }
+.pstep-goal.editable:hover { background: var(--c-surface-2); border-radius: 5px }
+input.pnl-tx { border: none; background: transparent; outline: none; font-family: var(--f-sans); padding: 0 }
+.pstep[draggable="true"] { cursor: default }
+.pstep.dragover { box-shadow: inset 0 2px 0 var(--c-accent) }
+.pamend {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 14px 0; padding: 9px 12px;
+  border-radius: 10px; background: var(--c-accent-tint); border: 1px solid var(--c-accent-soft)
+}
+.pamend .pa-tx { flex: 1; font-size: 0.75rem; color: var(--c-ink-2); min-width: 120px }
+.pamend .pa-tx b { color: var(--c-accent-hover); font-weight: 600 }
+.pamend .pa-btn {
+  font-family: var(--f-sans); font-size: 0.75rem; font-weight: 600; padding: 6px 13px; border-radius: var(--r-1);
+  cursor: pointer; white-space: nowrap; border: 1px solid var(--c-line); background: var(--c-surface); color: var(--c-ink-2)
+}
+.pamend .pa-btn.confirm { border: none; background: var(--c-accent); color: #fff }
+
+/* ════════════════════════════════════════════════════════════════
+   narrow-card adaptation (board's `.frame.is-mobile X` rules, ported to
+   container queries — keyed on the card's own inline width)
+   ════════════════════════════════════════════════════════════════ */
+@container (max-width: 460px) {
+  .pcard { border-radius: 15px }
+  .pc-head { padding: 13px 14px 12px }
+  .pc-body { padding: 6px 10px 4px }
+  .prail { margin-left: 2px; padding-left: 14px }
+  .pstep { gap: 9px; padding: 10px 2px }
+  .pstep-ic { width: 28px; height: 28px }
+  .pwarn { margin-left: 0 }
+  .ppeek { margin-left: 0 }
+  .pblock { margin-left: 0 }
+  .pnl { margin: 8px 10px 4px }
+  .pfoot { padding: 12px 14px 14px }
+  .pfoot .pbtn { flex: 1; justify-content: center }
+}
+
+/* graph-mode batch 1 acceptance-criteria rows + verification-badge placeholders were replaced by batch 5's list-side additions
+   (`.pacc` / `.vpill`, see styles/plan-graph.css); placeholder variables `--c-ok`/`--c-danger`
+   were never defined in this repo and always used fallbacks; remove both with the placeholder styles. */
+
+/* ════════════════════════════════════════════════════════════════
+   Planning fall-through notice (.pfallback)
+
+   Explain before the answer when users **explicitly** choose planning but receive no plan card. Previously this path
+   was completely silent: the backend fell through to ordinary Lead, which often followed user wording with Markdown
+   Execution Plan prose, without a card, approval or execution, misleading users into thinking it was scheduled.
+
+   ⚠ This box renders **outside** `.pcard` (the no-card case), so use only
+   globals.css :root-level tokens. `--c-warn-tint` is declared only in `.pcard`/`.ccp`;
+   using it here repeats batch 5's trap of undefined `--c-ok`/`--c-danger` always relying on
+   fallbacks. Use only --c-warn / --c-warn-soft / --c-ink / --c-line,
+   all four with both light and dark values at :root.
+   ════════════════════════════════════════════════════════════════ */
+.pfallback {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 0 10px;
+  padding: 10px 13px;
+  border: 1px solid var(--c-warn);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--c-warn-soft);
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.pfallback-t { font-size: 0.8125rem; font-weight: 600 }
+.pfallback-b { opacity: 0.9 }
+.pfallback-h { font-size: 0.75rem; opacity: 0.7 }
+
+/* ─────────────────────────────────────────────────────────────
+ * Chat workbench and report canvas · batch 1: move plan-card inline styles into legacy classes
+ * (values match the original inline styles verbatim, active in both appearances). Kept with the other
+ * plan-card rules.
+ * ───────────────────────────────────────────────────────────── */
+.legacy-pc-grow {
+  flex: 1;
+}
+/* Completed with a report delivered: use positive color for the Report Generated badge */
+.pc-modetag.legacy-pc-modetag--done {
+  color: var(--c-pos);
+  border-color: var(--c-pos-soft);
+}
+.pc-meta.legacy-pc-meta--fixed {
+  flex: none;
+}
+/* Completed-state verification coverage: unverified secondary; partial / skipped warning; unmet danger */
+.legacy-pc-verify--none {
+  color: var(--c-ink-4);
+}
+.legacy-pc-verify--warn {
+  color: var(--c-warn);
+  font-weight: 600;
+}
+.legacy-pc-verify--danger {
+  color: var(--c-danger);
+  font-weight: 600;
+}

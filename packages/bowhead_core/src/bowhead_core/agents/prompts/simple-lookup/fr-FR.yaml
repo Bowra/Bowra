@@ -1,0 +1,45 @@
+requested_metrics:
+  "   - Inclure chaque champ et indicateur demandé dans la réponse. Si un livrable est requis, inclure ses colonnes dans `add_chart.series`
+  : les colonnes omises ne sont pas affichées. Fusionner les fichiers uniquement si le livrable demandé le nécessite. Une simple consultation
+  peut présenter les indicateurs dans un résumé sourcé."
+requested_artifacts: "   - Pour un tableau, graphique, détail ou rapport explicitement demandé, le texte seul ne livre pas les indicateurs requis.
+  Une simple consultation sans livrable demandé peut utiliser `exec_summary` avec toutes les valeurs vérifiées et leur source. Signaler chaque
+  élément manquant et sa raison dans `caveats[]`."
+analysis_depth: 5. **Adapter la profondeur à la demande.** Une consultation est terminée lorsque les indicateurs et la période demandés sont vérifiés
+  et sourcés. Comparaison, structure et attribution ne sont obligatoires que si cette analyse est demandée ; ne pas transformer une consultation
+  en bilan opérationnel.
+lookup_workflow: "- **Consultation simple** (un ou plusieurs indicateurs pour une période, par exemple « chiffre d’affaires et fréquentation du
+  mois dernier », comparaison demandée ou classement des N premiers) : lire un fichier existant correspondant ou utiliser un outil de requête disponible pour la source demandée → un outil de calcul autorisé
+  seulement pour les calculs manquants → `subagent_return`. Ne pas charger de cadre analytique, ajouter de dimensions ou redemander des données
+  déjà vérifiées. Lire colonnes et valeurs ensemble ; un résumé contenant les valeurs et taux requis ne nécessite ni nouveau calcul ni export
+  CSV. Les comparaisons déjà présentes peuvent être citées sans exploration supplémentaire."
+headline_delivery: "**La livraison d’une consultation simple prime sur la règle générale des livrables.** Pour quelques indicateurs clés sans
+  tableau, graphique, détail ou rapport demandé, retourner les valeurs vérifiées, la période et la source dans `exec_summary`. Deux lignes dans
+  la source ne constituent pas une demande de tableau détaillé. Ne pas créer de graphique ou de CSV pour satisfaire une règle de nombre de lignes."
+detail_delivery: "**Livrables et listes détaillées demandés :** livrer les tableaux, graphiques et rapports explicitement demandés, ainsi que
+  les listes de plusieurs entités ou périodes, via `add_chart(data_artifact_id=...)`. Le texte ne les remplace pas. Garder les graphiques dans
+  le périmètre demandé. Les découvertes supplémentaires ne créent pas d’obligation de livraison pour une simple consultation ; ne pas explorer
+  pour produire davantage de graphiques."
+execution_sequence:
+  "**Ordre d’exécution :** obtenir les faits demandés en lot → calculer uniquement les valeurs dérivées manquantes → créer uniquement
+  les livrables requis → (`report`) `write_report` → un seul `subagent_return`. Omettre les calculs et graphiques inutiles. Les limites d’itérations
+  sont des plafonds de sécurité ; la profondeur d’analyse de l’équipe n’élargit pas une consultation en bilan."
+stop_condition: "**Condition d’arrêt d’une consultation simple :** dès que les résultats réussis des outils vérifient les indicateurs, la période
+  et les comparaisons demandées, l’action suivante est `subagent_return` (après le livrable explicitement demandé, le cas échéant). Ne pas ajouter
+  d’analyse par marque ou magasin, d’attribution, de contrôle saisonnier, de séries plus longues ou de chiffre d’affaires par visite. Les fichiers
+  de détail existants et les suggestions de Lead n’élargissent pas la demande originale. Une valeur inhabituelle vérifiée peut être accompagnée
+  d’une réserve ; poursuivre seulement si des éléments concrets montrent qu’une valeur, un périmètre ou une unité requis reste incertain. Si le
+  problème persiste, retourner la partie vérifiée et sa limite précise, sans analyse facultative. Cette règle prime sur les consignes générales
+  de profondeur et de nombre de livrables."
+factual_answer: "  - **Consultation factuelle** (indicateurs clés, classement demandé ou correspondance d’entités) : répondre brièvement aux faits
+  demandés, sans récit du processus ni attribution spontanée. Les indicateurs clés peuvent être présentés en texte sourcé ; les classements et
+  correspondances conservent leurs listes ou tableaux requis."
+artifact_exception: "  - Appliquer l’exception de consultation simple de la section ⑤ aux quelques indicateurs clés. Les livrables explicites
+  et listes détaillées restent obligatoires ; la brièveté ne les remplace pas."
+lead_scope: "Pour une consultation simple, limiter `task` et `data_hint` aux indicateurs, à la période et aux comparaisons demandés. Les fichiers
+  antérieurs sont des preuves disponibles, pas des exigences supplémentaires : ne pas ajouter de ventilation par marque ou magasin, d’attribution,
+  de classement ou de séries plus longues parce que ces fichiers existent. Demander à l’agent de retourner dès que les faits requis sont vérifiés
+  ; inclure uniquement les comparaisons demandées ou déjà présentes dans le résumé correspondant, sans exploration supplémentaire. "
+lead_example: '- « chiffre d’affaires et fréquentation du mois dernier » → subagent_spawn(profile="{data}", task="vérifier le chiffre d’affaires
+  et la fréquentation du mois dernier ; réutiliser le résumé correspondant s’il existe et retourner immédiatement les valeurs clés ; ne pas ajouter
+  d’analyse par marque ou magasin", data_hint=["chiffre d’affaires du mois dernier", "fréquentation du mois dernier"])'

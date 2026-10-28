@@ -1,0 +1,24 @@
+{
+  "contract": "presentation-locale/B1a-v1",
+  "canonical_cases": [
+    { "input": "zh-Hant-TW", "expected": "zh-CN" },
+    { "input": "EN_gb", "expected": "en-US" },
+    { "input": " zh ", "expected": "zh-CN" },
+    { "input": "en", "expected": "en-US" },
+    { "input": "de-AT", "expected": "de-DE" },
+    { "input": "fr-FR", "expected": "fr-FR" },
+    { "input": "fr_CA", "expected": "fr-FR" },
+    { "input": "ja-JP", "expected": null },
+    { "input": "en--US", "expected": null },
+    { "input": "", "expected": null },
+    { "input": 3, "expected": null },
+    { "input": null, "expected": null }
+  ],
+  "resolve_cases": [
+    { "candidates": ["ja-JP", "EN_gb", "zh-CN"], "expected": "en-US" },
+    { "candidates": ["fr-FR", "EN_gb", "zh-CN"], "expected": "fr-FR" },
+    { "candidates": ["en--US", "zh-Hant"], "expected": "zh-CN" },
+    { "candidates": [null, "", "ja-JP"], "expected": "en-US" },
+    { "candidates": [], "expected": "en-US" }
+  ]
+}

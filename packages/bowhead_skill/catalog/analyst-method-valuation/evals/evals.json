@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-valuation",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "stable_company_pe_check",
+      "query": "Software company with stable 25% annual growth, P/E 24x, historical median 20x, WACC 8.5%, terminal g 2.8%, EV $2B, terminal value $1.2B (60% of EV). Business type: growth. Comps median P/E: 18x, current earnings $80M.",
+      "expects": "Should recommend PS or PEG method (growth company) not pure P/E; should NOT flag terminal_growth < WACC (2.8% < 8.5% OK); should flag terminal value proportion at 60% as acceptable; should note current P/E 24x vs comps median 18x as premium (possibly justified by growth or quality)"
+    },
+    {
+      "id": "cyclical_pe_trap",
+      "query": "Steel manufacturer, current P/E 6x (looks cheap), current EBIT margin 18%, historical median EBIT margin 12%, historical median P/E 8x, cyclical business type. No forward estimates. EV/EBITDA 4.5x vs historical median 5.2x.",
+      "expects": "Should flag HIGH: cyclical low P/E trap detected (current 6x < hist median 8x BUT earnings +50% above median → at cycle peak); should recommend using normalized/mid-cycle EBITDA not current period; should NOT recommend straight P/E application for cyclical at peak"
+    },
+    {
+      "id": "dcf_assumption_discipline",
+      "query": "DCF analysis: WACC 7.0%, terminal growth 3.2%, EV $5B, terminal value $3.8B. Gap spread = 370bps, terminal proportion 76%. Data: comparable multiples [12.3, 13.5, 14.1, 15.2, 16.8], current P/E 13.5x. Business type: stable.",
+      "expects": "Should flag MEDIUM: terminal value 76% > 70% threshold (over-reliant on terminal); should check 3.2% < 7.0% OK (no high flag on g<WACC); should flag 370bps spread as healthy (>100bps); should note current multiple 13.5x at median of comps; verdict should say 'self-consistent but terminal-heavy'"
+    }
+  ]
+}

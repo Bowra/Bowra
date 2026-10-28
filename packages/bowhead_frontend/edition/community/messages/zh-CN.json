@@ -1,0 +1,89 @@
+{
+  "team_onboarding": {
+    "items": {
+      "license_active": {
+        "title": "实例已就绪",
+        "action": "查看初始化",
+        "impact": "使用团队前先完成首位所有者初始化。"
+      }
+    },
+    "reasons": {
+      "license_active": "社区实例已初始化，无需商业许可证或用户数配额。",
+      "suspended": "当前团队已暂停。",
+      "license_state_unavailable": "无法确定安装健康状态。",
+      "kb_not_licensed": "当前团队的知识库不可用。"
+    }
+  },
+  "settings": {
+    "appearance": {
+      "viewTeamAppearance": "管理团队图表样式"
+    },
+    "members": {
+      "err_seat_full": "当前无法执行此操作。请检查团队权限，或联系管理员。",
+      "err_over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "err_needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+      "err_license_invalid": "无法验证安装状态。请联系系统管理员。",
+      "err_entitlement_unavailable": "当前服务不可用。请稍后重试，或联系系统管理员。"
+    },
+    "people": {
+      "err_seat_full": "当前无法执行此操作。请检查团队权限，或联系管理员。",
+      "err_over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "err_needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+      "err_license_invalid": "无法验证安装状态。请联系系统管理员。"
+    },
+    "datarc": {
+      "errors": {
+        "entitlement_unavailable": "当前服务不可用。请稍后重试，或联系系统管理员。",
+        "over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+        "needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+        "tamper": "无法验证安装状态。请联系系统管理员。"
+      }
+    },
+    "scheduled": {
+      "errors": {
+        "feature_unlicensed": "当前团队无法使用此功能。请联系系统管理员。",
+        "over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+        "needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+        "tamper": "无法验证安装状态。请联系系统管理员。"
+      }
+    },
+    "integrations": {
+      "email_err_readonly": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "email_err_entitlement_unavailable": "当前服务不可用。请稍后重试，或联系系统管理员。"
+    },
+    "models": {
+      "errors": {
+        "err_readonly": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。"
+      }
+    },
+    "subagents": {
+      "draft_locked_mcp": "当前团队无法使用此功能。请联系系统管理员。"
+    },
+    "tabs": {
+      "team-appearance": "图表样式"
+    }
+  },
+  "auth": {
+    "error": {
+      "oauth_over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "oauth_needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+      "oauth_tamper": "无法验证安装状态。请联系系统管理员。"
+    }
+  },
+  "admin": {
+    "credits": {
+      "err_over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "err_needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+      "err_license_invalid": "无法验证安装状态。请联系系统管理员。",
+      "err_entitlement_unavailable": "当前服务不可用。请稍后重试，或联系系统管理员。",
+      "err_feature_unlicensed": "当前团队无法使用此功能。请联系系统管理员。",
+      "err_managed_by_license": "当前无法执行此操作。请检查团队权限，或联系管理员。"
+    },
+    "members_promote": {
+      "err_over_grace": "当前团队已暂停或处于只读状态。请联系系统管理员后再进行修改。",
+      "err_needs_license": "请先完成安装初始化，再继续操作。如需帮助，请联系系统管理员。",
+      "err_license_invalid": "无法验证安装状态。请联系系统管理员。",
+      "err_entitlement_unavailable": "当前服务不可用。请稍后重试，或联系系统管理员。"
+    }
+  }
+}

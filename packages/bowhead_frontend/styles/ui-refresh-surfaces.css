@@ -1,0 +1,2482 @@
+/* ─────────────────────────────────────────────────────────────
+ * Interface appearance batch 5: interfaces listed in batches 1–4 as having strong custom visuals or inline styles, not covered.
+ *
+ * Spec: Claude Design Bowhead component specs · Apple direction, Component / Menus / Narrow / Misc Spec;
+ * mappings, reasons for retaining custom visuals and deviations: docs/design/组件统一-技术设计.md section 外观段第五批.
+ *
+ * Same conventions as batches 1–4 (anchored by styles/ui-refresh-surfaces.test.ts):
+ *   - Every rule starts with :root:root, which keeps (0,2,0) over the base styles;
+ *   - Colors use only tokens (var(--c-*) etc.), no literal color values;
+ *   - Imported only by authenticated (app) layout after ui-refresh.css, not by public layout;
+ *   - Base classes ported from inline styles are in styles/ui-controls-legacy.css (batch 5 section); declarations these rules override are deleted there.
+ * Appearance only: no behavior or layering changes (z-index and mounting unchanged; see technical design section 图层).
+ * ───────────────────────────────────────────────────────────── */
+
+/* ── token ── */
+:root:root {
+  /* Narrow-screen bottom-sheet top radius (Narrow Spec: bottom sheet · top radius 16) */
+  --sheet-radius: 16px;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 1. Dialogs and panels: solid surface, radius r4, overlay shadow, system font (decision 2; Component Spec dialogs / confirmations)
+ * Families: agent marketplace .am-dialog / .am-fork-dialog / more filters .am-filter-sheet, result preview .artifact-viewer-modal-panel,
+ * chart inspection .rc-inspect-panel, model discovery .discovery-picker and verification .verification-selector,
+ * knowledge-base upload .kb-upload, reference parameters .reference-parameter-panel, five credits dialogs, share dialog
+ * and revoke-access confirmation,
+ * data-source connection dialogs, cards within the tools create-source dialog.
+ * ═════════════════════════════════════════════════════════════ */
+:root:root
+  :is(
+    .am-dialog,
+    .am-fork-dialog,
+    .am-filter-sheet,
+    .artifact-viewer-modal-panel,
+    .rc-inspect-panel,
+    .discovery-picker,
+    .verification-selector,
+    .reference-parameter-panel,
+    .legacy-credits-modal,
+    .legacy-credits-quota-modal,
+    .legacy-share-panel,
+    .legacy-share-sheet,
+    .legacy-share-revoke,
+    .legacy-datarc-modal
+  ) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+/* Only single classes in the family: :is() takes maximum specificity; compound selectors raise the entire rule and override later narrow-screen rules.
+   The two compound families (knowledge-base upload .kb-upload.md, cards in tool-create dialog) get a separate rule with identical values. */
+:root:root .kb-upload.md,
+:root:root .legacy-tools-create-panel .legacy-ctool-card {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+/* Credits dialogs' hardcoded minimum widths (420 / 380 / 480 / 360): do not exceed the mobile viewport */
+:root:root .legacy-credits-modal--edit {
+  min-width: min(420px, calc(100vw - 32px));
+}
+:root:root .legacy-credits-modal--grant {
+  min-width: min(380px, calc(100vw - 32px));
+}
+:root:root .legacy-credits-modal--reset {
+  min-width: min(480px, calc(100vw - 32px));
+}
+:root:root .legacy-credits-modal--tier {
+  min-width: min(360px, calc(100vw - 32px));
+}
+/* Narrow screens: existing bottom sheets (fork agent, knowledge-base upload, sharing) get top radius 16; existing fullscreen panels (more filters, model discovery / verification,
+   chart inspection) retain square corners */
+@media (max-width: 640px) {
+  :root:root :is(.am-fork-dialog, .kb-upload.md) {
+    border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+  }
+  :root:root .am-filter-sheet,
+  :root:root .discovery-picker,
+  :root:root .verification-selector,
+  :root:root .rc-inspect-panel {
+    border-radius: 0;
+  }
+}
+:root:root .legacy-share-sheet {
+  border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+}
+:root:root .legacy-share-grabber {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--c-fill-3);
+}
+/* Revoke-access confirmation backdrop covers only the share dialog: radius follows the panel */
+:root:root .legacy-share-revoke-backdrop {
+  border-radius: var(--r-4);
+}
+:root:root .legacy-share-revoke-backdrop.is-mobile {
+  border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+}
+:root:root .legacy-share-revoke {
+  padding: 18px 18px 14px;
+}
+
+/* ── Backdrops: unified --c-scrim, no blur ── */
+:root:root
+  :is(
+    .am-dialog-backdrop,
+    .am-filter-sheet-backdrop,
+    .am-fork-scrim,
+    .artifact-viewer-modal-scrim,
+    .legacy-credits-modal-backdrop,
+    .legacy-credits-quota-backdrop,
+    .legacy-share-backdrop,
+    .legacy-share-revoke-backdrop,
+    .legacy-datarc-modal-backdrop,
+    .legacy-tools-create-backdrop,
+    .v2-mobile-drawer-scrim,
+    .unified-sidebar-scrim
+  ) {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ── Titles: 15/650, system font (previously mostly serif 16–32px) ── */
+:root:root
+  :is(
+    .am-dialog h2,
+    .am-fork-dialog h2,
+    .am-filter-sheet h2,
+    .artifact-viewer-modal .artifact-viewer-title strong,
+    .rc-inspect-title,
+    .discovery-head h2,
+    .verification-selector-head h2,
+    .kb-upload .md-hd h3,
+    .reference-parameter-panel h2,
+    .legacy-credits-modal-title,
+    .legacy-credits-tier-title,
+    .legacy-credits-quota-title,
+    .legacy-share-title,
+    .legacy-share-sheet-title,
+    .legacy-share-revoke-title,
+    .legacy-datarc-modal-title,
+    .legacy-ctool-title
+  ) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+:root:root :is(.am-filter-sheet h2, .am-fork-dialog h2) {
+  margin-top: 0;
+}
+/* ── Eyebrows: formerly accent mono uppercase (10–11px/800), now 12px secondary regular text (matching batch 4 header eyebrows) ── */
+:root:root
+  :is(
+    .am-dialog > span,
+    .am-fork-dialog > header span,
+    .am-filter-sheet > header span,
+    .discovery-head span,
+    .verification-selector-head > div > span,
+    .legacy-share-eyebrow,
+    .legacy-share-sheet-eyebrow
+  ) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* ── Descriptions: 13px secondary color, line height 1.55 ── */
+:root:root
+  :is(
+    .am-dialog > p,
+    .am-fork-intro,
+    .discovery-head p,
+    .verification-selector-head p,
+    .kb-upload .md-hd .sub,
+    .reference-parameter-panel header > p:last-child,
+    .legacy-credits-modal-sub,
+    .legacy-share-revoke-body,
+    .legacy-ctool-subtitle
+  ) {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+/* ── Header / toolbar / footer separators become hairlines; remove light footer background ── */
+:root:root
+  :is(
+    .am-filter-sheet > header,
+    .artifact-viewer-modal .artifact-viewer-head,
+    .rc-inspect-head,
+    .rc-inspect-ctrls,
+    .discovery-head,
+    .verification-selector-head,
+    .v2-mobile-drawer-head
+  ) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root
+  :is(
+    .am-filter-sheet > footer,
+    .rc-inspect-foot,
+    .discovery-foot,
+    .verification-selector-foot,
+    .kb-upload .md-ft,
+    .reference-parameter-panel footer,
+    .legacy-share-foot,
+    .v2-mobile-drawer-foot
+  ) {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root
+  :is(.discovery-foot, .verification-selector-foot, .kb-upload .md-ft, .rc-inspect-ctrls) {
+  background: transparent;
+}
+:root:root .artifact-viewer-modal .artifact-viewer-head {
+  padding: 12px 12px 12px 18px;
+  background: var(--c-surface);
+}
+:root:root .artifact-viewer-modal .artifact-viewer-title span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+:root:root .artifact-viewer-modal .artifact-viewer-tools {
+  border-left: var(--hairline) solid var(--c-separator);
+}
+/* Footer: right-aligned, gap 8 (more-filters footer retains clear / apply at opposite ends) */
+:root:root
+  :is(
+    .am-dialog footer,
+    .am-fork-dialog > footer,
+    .reference-parameter-panel footer,
+    .legacy-share-revoke-foot,
+    .legacy-credits-modal-foot
+  ) {
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* Agent disablement impact list: hairlines */
+:root:root .am-dialog ul {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .am-dialog li {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+/* Tighten padding per spec: 18 / 18 / 14 (only families with previously generous 28 / 24 / 22) */
+:root:root :is(.am-dialog, .legacy-credits-modal, .legacy-credits-quota-modal) {
+  padding: 18px 18px 14px;
+}
+:root:root .am-fork-dialog {
+  padding: 18px 18px 14px;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 2. Custom buttons in these dialogs: same variants as batch 1 (primary / secondary / ghost / danger / icon)
+ * Declare variants with --ui-btn-* variables; rules below read them for shape and state. Variant rules concatenate family and variant lists
+ * (:is(family):is(variant)), always outranking shape rules that list only families.
+ * ═════════════════════════════════════════════════════════════ */
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .artifact-viewer-modal .artifact-viewer-actions a,
+    .artifact-viewer-modal .artifact-viewer-actions button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ) {
+  --ui-btn-bg: var(--c-fill-2);
+  --ui-btn-bg-hover: var(--c-fill-3);
+  --ui-btn-bg-press: var(--c-fill-3);
+  --ui-btn-fg: var(--c-ink);
+  --ui-btn-weight: 500;
+  --ui-btn-press-shadow: var(--shadow-press);
+  --ui-btn-press-filter: none;
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: auto;
+  min-height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--ui-btn-bg);
+  color: var(--ui-btn-fg);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: var(--ui-btn-weight);
+  line-height: var(--lh-tight);
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  filter: none;
+  opacity: 1;
+  transform: none;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear,
+    box-shadow var(--dur-fast) linear;
+}
+/* Primary buttons */
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ):is(
+    .am-action-primary,
+    .am-filter-apply,
+    .is-primary,
+    .reference-parameter-panel__apply,
+    .legacy-credits-quota-btn--primary,
+    .legacy-share-btn--primary,
+    .legacy-ctool-btn--primary
+  ) {
+  --ui-btn-bg: var(--c-accent);
+  --ui-btn-bg-hover: var(--c-accent-hover);
+  --ui-btn-bg-press: var(--c-accent-press);
+  --ui-btn-fg: var(--c-accent-ink);
+  --ui-btn-weight: 600;
+  --ui-btn-press-shadow: none;
+}
+/* Ghost buttons */
+:root:root :is(.legacy-share-btn):is(.legacy-share-btn--quiet) {
+  --ui-btn-bg: transparent;
+  --ui-btn-bg-hover: var(--c-fill-1);
+  --ui-btn-bg-press: var(--c-fill-2);
+  --ui-btn-fg: var(--c-accent);
+  --ui-btn-press-shadow: none;
+}
+/* Danger buttons: both are confirmation actions in dialog footers (click executes directly); solid red per decision 23 */
+:root:root
+  :is(.am-dialog footer button, .legacy-share-btn):is(.am-danger-confirm, .legacy-share-btn--danger) {
+  --ui-btn-bg: var(--c-err);
+  --ui-btn-bg-hover: var(--c-err-hover);
+  --ui-btn-bg-press: var(--c-err);
+  --ui-btn-fg: var(--c-err-on);
+  --ui-btn-weight: 600;
+  --ui-btn-press-shadow: none;
+  --ui-btn-press-filter: brightness(0.92);
+}
+/* The primary action beside result-object ⋯ previously had !important accent border: refresh uses secondary button + accent text (--c-accent-text outside material guarantees 4.5:1) */
+:root:root .artifact-viewer-modal .artifact-viewer-actions .result-object-action-primary {
+  border-color: transparent !important;
+  color: var(--c-accent-text) !important;
+  font-weight: 600 !important;
+}
+/* States */
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .artifact-viewer-modal .artifact-viewer-actions a,
+    .artifact-viewer-modal .artifact-viewer-actions button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--ui-btn-bg-hover);
+  border-color: transparent;
+  color: var(--ui-btn-fg);
+  text-decoration: none;
+}
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .artifact-viewer-modal .artifact-viewer-actions a,
+    .artifact-viewer-modal .artifact-viewer-actions button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ):active:not(:disabled, [aria-disabled="true"]) {
+  background: var(--ui-btn-bg-press);
+  box-shadow: var(--ui-btn-press-shadow);
+  filter: var(--ui-btn-press-filter);
+}
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .artifact-viewer-modal .artifact-viewer-actions a,
+    .artifact-viewer-modal .artifact-viewer-actions button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  box-shadow: none;
+}
+:root:root
+  :is(
+    .am-dialog footer button,
+    .am-fork-dialog > footer button,
+    .am-filter-sheet > footer button,
+    .artifact-viewer-modal .artifact-viewer-actions a,
+    .artifact-viewer-modal .artifact-viewer-actions button,
+    .rc-inspect-panel .v2-chart-action-btn,
+    .reference-parameter-panel footer button,
+    .legacy-credits-quota-btn,
+    .legacy-share-btn,
+    .legacy-ctool-btn
+  ):is(:disabled, [aria-disabled="true"]) {
+  background: var(--ui-btn-bg);
+  color: var(--ui-btn-fg);
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+/* Touch: 44 high, radius r3, 15px (matching batch 1) */
+@media (pointer: coarse) {
+  :root:root
+    :is(
+      .am-dialog footer button,
+      .am-fork-dialog > footer button,
+      .am-filter-sheet > footer button,
+      .artifact-viewer-modal .artifact-viewer-actions a,
+      .artifact-viewer-modal .artifact-viewer-actions button,
+      .rc-inspect-panel .v2-chart-action-btn,
+      .reference-parameter-panel footer button,
+      .legacy-credits-quota-btn,
+      .legacy-share-btn,
+      .legacy-ctool-btn
+    ) {
+    padding: 0 18px;
+    border-radius: var(--r-3);
+    font-size: 0.9375rem;
+  }
+}
+
+/* ── Icon buttons (close): square control height, transparent background, secondary icon, filled hover ── */
+:root:root
+  :is(
+    .am-filter-close,
+    .am-fork-dialog > header > button,
+    .rc-inspect-close,
+    .kb-upload .kb-x,
+    .legacy-share-close,
+    .legacy-ctool-close,
+    .v2-mobile-drawer-close
+  ) {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--control-h-md);
+  min-width: 0;
+  height: var(--control-h-md);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.9375rem;
+  line-height: 1;
+  cursor: pointer;
+}
+:root:root
+  :is(
+    .am-filter-close,
+    .am-fork-dialog > header > button,
+    .rc-inspect-close,
+    .kb-upload .kb-x,
+    .legacy-share-close,
+    .legacy-ctool-close,
+    .v2-mobile-drawer-close
+  ):hover:not(:disabled) {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root
+  :is(
+    .am-filter-close,
+    .am-fork-dialog > header > button,
+    .rc-inspect-close,
+    .kb-upload .kb-x,
+    .legacy-share-close,
+    .legacy-ctool-close,
+    .v2-mobile-drawer-close
+  ):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .am-filter-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 3. Other panel controls
+ * ═════════════════════════════════════════════════════════════ */
+
+/* More filters: options styled as filter chips (Misc Spec filter bar, same as batch 2 .am-filter-group: 28 high, r2, filled background,
+   selected light accent background); group titles 12/600 */
+:root:root .am-filter-sheet legend {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+:root:root .am-filter-sheet .am-filter-options button {
+  box-sizing: border-box;
+  min-height: var(--control-h-md);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-weight: 500;
+}
+:root:root .am-filter-sheet .am-filter-options button:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .am-filter-sheet .am-filter-options button[aria-checked="true"] {
+  background: var(--c-accent-soft);
+  box-shadow: none;
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+:root:root .am-filter-sheet .am-filter-options button small {
+  color: inherit;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  opacity: 1;
+}
+
+/* Chart inspection: dropdowns and series toggles in control bar */
+:root:root .rc-inspect-chip {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+:root:root .rc-inspect-chip select {
+  min-height: var(--control-h-sm);
+  border: var(--hairline) solid var(--c-control-line);
+  border-radius: var(--r-1);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+:root:root .rc-inspect-series {
+  box-sizing: border-box;
+  min-height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+:root:root .rc-inspect-foot {
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Model discovery / verification: filled search box (batch 1 search spec), hairline list border/separators, hover/selection matching batch 4 tables */
+:root:root .discovery-search {
+  height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+}
+:root:root .discovery-search:focus-within {
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root .discovery-search input {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .discovery-list {
+  border: var(--hairline) solid var(--c-separator);
+  border-radius: var(--r-3);
+}
+:root:root .discovery-row {
+  border-top-color: var(--c-separator);
+  border-top-width: var(--hairline);
+}
+:root:root .verification-selector-list {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .verification-selector-row {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.discovery-row, .verification-selector-row):hover:not(:disabled) {
+  background: var(--row-hover-bg);
+  box-shadow: none;
+}
+:root:root :is(.discovery-row.selected, .verification-selector-row.is-selected) {
+  background: var(--c-accent-tint);
+  box-shadow: none;
+}
+/* Hover/selected rows raise auxiliary --c-ink-4 one tier to --c-ink-3 (same as batch 4 table rows), row text ≥4.5:1 */
+:root:root
+  :is(.discovery-row:hover, .discovery-row.selected, .verification-selector-row:hover, .verification-selector-row.is-selected) {
+  --c-ink-4: var(--c-ink-3);
+}
+/* Model page has its own dark-mode ink colors (hardcoded on .mset); auxiliary --c-ink-4 is only 4.48 on content surface; preset connector descriptions in create-tool cards use
+   --c-ink-4 over --c-surface-2 cards (4.1–4.3). Raise auxiliary text to --c-ink-3 in both panels */
+:root:root :is(.discovery-picker, .verification-selector, .legacy-ctool-card) {
+  --c-ink-4: var(--c-ink-3);
+}
+:root:root :is(.verification-selector-model small, .verification-selector-purpose small) {
+  font-size: 0.6875rem;
+}
+:root:root :is(.discovery-foot, .verification-selector-foot) > span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+
+/* Reference parameter panel: fields follow batch 1 inputs (control height, r2, 0.5px control border) */
+:root:root .reference-parameter-field :is(input, textarea, select) {
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  border: var(--hairline) solid var(--c-control-line);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .reference-parameter-field textarea {
+  min-height: 64px;
+  padding: 6px 9px;
+  line-height: 1.5;
+}
+:root:root .reference-parameter-field label {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+:root:root .reference-parameter-field__actions button {
+  min-height: var(--control-h-sm);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+
+/* Period-reset dialog mode switching: underline tabs (batch 2 .ui-tabs--underline spec) */
+:root:root .legacy-credits-mode-tabs {
+  gap: 20px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-credits-mode-tab {
+  padding: 8px 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  border-bottom: 2px solid transparent;
+}
+:root:root .legacy-credits-mode-tab.is-active {
+  color: var(--c-ink);
+  font-weight: 600;
+  border-bottom-color: var(--c-accent);
+}
+:root:root .legacy-credits-mode-tab:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .legacy-credits-modal-error {
+  border-radius: var(--r-2);
+}
+
+/* Share audience: segmented control (batch 2 .ui-segmented spec: fill2 container, padding 2px, r2; selected --c-segment-on + fine shadow, 600) */
+:root:root .legacy-share-seg {
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+}
+:root:root .legacy-share-seg-item {
+  height: calc(var(--control-h-md) - 4px);
+  border-radius: var(--r-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-weight: 500;
+}
+:root:root .legacy-share-seg-item.is-on {
+  background: var(--c-segment-on);
+  box-shadow: var(--shadow-segment-on);
+  color: var(--c-ink);
+  font-weight: 600;
+}
+
+/* Share-roster member avatars: neutral background, secondary initials (same as batch 2 member table); self uses accent (decision 22, matching member-table avatars).
+   Name-derived colors (--sh-avatar-bg) apply only in legacy appearance */
+:root:root .legacy-share-avatar {
+  background: var(--c-fill-3);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-avatar.is-self {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+}
+
+/* Data sources: type cards use radio-card borders, labels/hints follow Field, inputs remain mono (addresses, keys) */
+:root:root .legacy-datarc-field-label {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+:root:root .legacy-datarc-field-hint {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .ui-input.legacy-input-datarc {
+  font-family: var(--font-v2-mono);
+}
+
+/* Create-tool card: header description and confirmation-required badge */
+:root:root .legacy-ctool-head {
+  padding: 16px 12px 12px 18px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+
+/* Personal appearance confirmation is in its own CSS Module (components/settings/personal-appearance-settings.module.css) */
+
+/* ═════════════════════════════════════════════════════════════
+ * 4. Navigation drawers (mobile session drawer, expanded sidebar overlay): only panel material, radii, header and rows change
+ * Solid surface (drawers are solid, decision 2), r4 corners on opening side, overlay shadow; sidebar itself and
+ * navigation structure belong to P2, unchanged.
+ * ═════════════════════════════════════════════════════════════ */
+:root:root .v2-mobile-drawer {
+  border-radius: 0 var(--r-4) var(--r-4) 0;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+:root:root .unified-sidebar.is-overlay .unified-sidebar-expanded {
+  border-right: 0;
+  border-radius: 0 var(--r-4) var(--r-4) 0;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+:root:root .v2-mobile-drawer-foot {
+  background: var(--c-surface);
+}
+:root:root .v2-mobile-drawer .unified-drawer-nav {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+/* The search field, the "Work" label and the session list share the navigation rows' 14px inset, so nothing in the
+ * drawer touches its edge (116: the search box sat at x 0, Narrow Spec drawer padding). */
+:root:root .v2-mobile-drawer-rail :is(.unified-work-search, .unified-sidebar-section-label, .unified-work-list) {
+  margin-inline: 14px;
+}
+/* Group headings: drawn like menu group headings (11/600, secondary colour, system font, no monospace
+ * uppercase). Empty and status lines are regular 12px text (styles/ui-refresh-chrome.css, P2 batch 3). */
+:root:root
+  :is(.v2-mobile-drawer, .unified-sidebar.is-overlay .unified-sidebar-expanded)
+  :is(.unified-sidebar-section-label, .unified-work-group h3) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* Rows: system font */
+:root:root
+  :is(.v2-mobile-drawer, .unified-sidebar.is-overlay .unified-sidebar-expanded)
+  :is(.unified-work-title, .unified-drawer-nav-item, .unified-drawer-subnav-item, .unified-sidebar-nav-item, .unified-sidebar-subnav-item) {
+  font-family: var(--font-control);
+}
+/* Session rows, navigation rows, selection and hover in these panels follow the persistent sidebar since
+ * P2 batch 3 (neutral fill-2 + 600 selection, fill-1 hover): styles/ui-refresh-chrome.css. */
+
+/* ═════════════════════════════════════════════════════════════
+ * 5. @ reference completion list (Menus Spec section 4): control-layer material, radius 12, padding 6; group titles 11/600;
+ * rows 32 (touch 44), two-line items minimum 44; highlight = full accent row (matching batch 3 menus). Focus remains in
+ * input (aria-activedescendant),
+ * highlight expressed by data-active, behavior unchanged.
+ * ═════════════════════════════════════════════════════════════ */
+:root:root .composer-reference-menu {
+  box-sizing: border-box;
+  padding: 6px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  animation: ui-overlay-in var(--dur-menu, 120ms) var(--ease-standard);
+}
+:root:root :is(.composer-reference-menu__heading, .composer-reference-menu__group) {
+  padding: 6px 10px 2px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+:root:root .composer-reference-menu .app-floating-menu-item {
+  box-sizing: border-box;
+  min-height: var(--menu-item-h);
+  padding: 5px 10px 5px 6px;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  outline: none;
+}
+/* Two-line items (name + description) minimum 44 */
+:root:root .composer-reference-menu__option:has(.composer-reference-menu__summary, .composer-reference-menu__source, .composer-reference-menu__reason) {
+  min-height: 44px;
+}
+/* No separate hover background: pointer movement assigns highlight (data-active) to this row */
+:root:root .composer-reference-menu .app-floating-menu-item:hover:not([data-active="true"]) {
+  background: transparent;
+}
+/* Leading marker slot 18: @ and / characters share the action-menu icon column */
+:root:root .composer-reference-menu__icon {
+  flex: 0 0 18px;
+  width: 18px;
+  color: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: center;
+}
+:root:root .composer-reference-menu__name {
+  font-weight: 500;
+  line-height: 1.35;
+}
+:root:root :is(.composer-reference-menu__summary, .composer-reference-menu__source, .composer-reference-menu__reason) {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+:root:root .composer-reference-menu__copy {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name source" "summary summary";
+  align-items: start;
+  gap: 1px;
+  column-gap: 8px;
+}
+:root:root .composer-reference-menu__name {
+  grid-area: name;
+}
+:root:root .composer-reference-menu__source {
+  grid-area: source;
+  max-width: 9rem;
+  text-align: end;
+}
+:root:root .composer-reference-menu__summary {
+  grid-area: summary;
+  -webkit-line-clamp: 1;
+}
+:root:root .composer-reference-menu__reason {
+  grid-column: 1 / -1;
+}
+/* Highlight: full accent row, inverted text/description */
+:root:root .composer-reference-menu__option[data-active="true"] {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  outline: none;
+}
+:root:root
+  .composer-reference-menu__option[data-active="true"]
+  :is(.composer-reference-menu__icon, .composer-reference-menu__summary, .composer-reference-menu__source, .composer-reference-menu__reason, kbd) {
+  color: var(--c-accent-ink);
+}
+/* Unavailable items: entire row secondary color; arrow navigation can land on them (to announce reason), with filled background for position and text raised to --c-ink-2 (fill over material,
+   --c-ink-3 below 4.5:1 in dark mode), no accent (Enter does not execute) */
+:root:root .composer-reference-menu__option[aria-disabled="true"] {
+  color: var(--c-ink-3);
+}
+:root:root .composer-reference-menu__option[aria-disabled="true"][data-active="true"] {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root
+  .composer-reference-menu__option[aria-disabled="true"][data-active="true"]
+  :is(.composer-reference-menu__icon, .composer-reference-menu__summary, .composer-reference-menu__source, .composer-reference-menu__reason, kbd) {
+  color: var(--c-ink-2);
+}
+:root:root .composer-reference-menu__action kbd {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.75rem;
+}
+/* Empty results, loading, error: 12.5 secondary color, 14 top/bottom */
+:root:root .composer-reference-menu__message {
+  padding: 14px 10px;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+}
+:root:root .composer-reference-menu__group-label {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+}
+:root:root .composer-reference-menu__actions {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+
+/* Composer reference chip (ProseMirror node, appearance only): accent text 500 (Menus Spec section 4 composer example @星舰) */
+:root:root .composer-reference-preview__reference {
+  padding: 0 2px;
+  color: var(--c-accent-text);
+  font-weight: 500;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * 6. Business badges and chips: batch 2 badge shape (20 high / small 18, 11.5px/600, pill radius, system font),
+ * each family sets --ui-badge-bg / --ui-badge-fg / --ui-badge-ring (token values only), same six tones as batch 2.
+ * ═════════════════════════════════════════════════════════════ */
+:root:root
+  :is(
+    .v2-agent-pill,
+    .pbadge,
+    :where(.pcard) .vpill,
+    .rc-badge,
+    .intent-badge,
+    :where(.mx-chips) .chip,
+    .legacy-badge-sched-run,
+    .legacy-ctool-confirm-badge,
+    .legacy-ctool-source-kind,
+    .legacy-ctool-source-auth,
+    .legacy-preset-pill
+  ) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  height: auto;
+  min-height: var(--ui-badge-h, 20px);
+  max-width: 100%;
+  margin-top: 0;
+  padding: 0 var(--ui-badge-px, 8px);
+  border: 0;
+  border-radius: 999px;
+  background: var(--ui-badge-bg, var(--c-fill-2));
+  box-shadow: var(--ui-badge-ring, none);
+  color: var(--ui-badge-fg, var(--c-ink-2));
+  font-family: var(--font-control);
+  font-size: var(--ui-badge-fs, 0.71875rem);
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+/* Small: 18 high, 11px, horizontal 6px */
+:root:root
+  :where(
+    .pbadge,
+    .pcard .vpill,
+    .mx-chips .chip,
+    .legacy-ctool-confirm-badge,
+    .legacy-ctool-source-kind,
+    .legacy-ctool-source-auth,
+    .legacy-preset-pill
+  ) {
+  --ui-badge-h: 18px;
+  --ui-badge-px: 6px;
+  --ui-badge-fs: 0.6875rem;
+}
+:root:root
+  :is(.pbadge, :where(.pcard) .vpill, .rc-badge, .legacy-ctool-source-auth, .legacy-preset-pill)
+  svg {
+  width: 12px;
+  height: 12px;
+  color: currentColor;
+}
+/* Badge dots repeat the state: remove them (same as batch 2); retain agent-status pill dots (running pulse is the only dynamic cue) */
+:root:root .legacy-badge-sched-run-pip {
+  display: none;
+}
+
+/* Tone · neutral (family default) */
+:root:root
+  :where(
+    .v2-agent-pill,
+    .rc-badge.neutral,
+    .pcard .vpill.part,
+    .intent-badge,
+    .intent-badge.lookup,
+    .intent-badge.ambiguous,
+    .intent-badge.comparison,
+    .mx-chips .chip,
+    .legacy-badge-sched-run.is-muted,
+    .legacy-ctool-confirm-badge,
+    .legacy-preset-kind.is-rest
+  ) {
+  --ui-badge-bg: var(--c-fill-2);
+  --ui-badge-fg: var(--c-ink-2);
+  --ui-badge-ring: none;
+}
+/* Tone · outlined */
+:root:root
+  :where(.pbadge, .pbadge.dep, .pbadge.corpus-ok, .pcard .vpill.none, .legacy-ctool-source-auth, .legacy-preset-auth) {
+  --ui-badge-bg: transparent;
+  --ui-badge-fg: var(--c-ink-3);
+  --ui-badge-ring: inset 0 0 0 0.5px var(--c-control-line);
+}
+/* Tone · accent (running, AI-generated, MCP type) */
+:root:root
+  :where(
+    .v2-agent-pill.running,
+    .rc-badge.ai,
+    .intent-badge.trend,
+    .intent-badge.compute,
+    .legacy-badge-sched-run.is-running,
+    .legacy-ctool-source-kind,
+    .legacy-preset-kind.is-mcp
+  ) {
+  --ui-badge-bg: var(--c-accent-soft);
+  --ui-badge-fg: var(--c-accent-text);
+  --ui-badge-ring: none;
+}
+/* Tone · success */
+:root:root
+  :where(
+    .rc-badge.conf-high,
+    .pcard .vpill.ok,
+    .intent-badge.report,
+    .legacy-badge-sched-run.is-success
+  ) {
+  --ui-badge-bg: var(--c-pos-soft);
+  --ui-badge-fg: var(--c-pos-ink);
+  --ui-badge-ring: none;
+}
+/* Tone · pending verification */
+:root:root
+  :where(.rc-badge.conf-med, .rc-badge.amber, .pbadge.warn, .intent-badge.modeling, .legacy-badge-sched-run.is-awaiting) {
+  --ui-badge-bg: var(--c-warn-soft);
+  --ui-badge-fg: var(--c-warn-ink);
+  --ui-badge-ring: none;
+}
+/* Tone · danger */
+:root:root
+  :where(.pbadge.corpus-miss, .pcard .vpill.unmet, .intent-badge.causal, .legacy-badge-sched-run.is-failed) {
+  --ui-badge-bg: var(--c-err-soft);
+  --ui-badge-fg: var(--c-err-ink);
+  --ui-badge-ring: none;
+}
+/* Intent badges (also status badges on approval/chat-turn pages): map original colors to six tones (causal → danger, modeling → pending verification,
+   report → success, trend/calculation → accent, others neutral); remove dots that repeat badge backgrounds (same as batch 2) */
+:root:root .intent-badge {
+  cursor: help;
+}
+:root:root .intent-badge .ib-dot {
+  display: none;
+}
+
+/* Knowledge-base matrix: value chips and column-state counts */
+:root:root :is(.mx-chipval, .mx-more) {
+  box-sizing: border-box;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 500;
+}
+:root:root .mx-more {
+  color: var(--c-ink-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .mx-cbadge .num {
+  box-sizing: border-box;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.125rem;
+}
+:root:root .mx-cbadge .num.gray {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .mx-cbadge .num.red {
+  background: var(--c-err-soft);
+  color: var(--c-err-ink);
+}
+:root:root .mx-cbadge .runcount {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Failure filter: selected chip (26 high, r2), danger tone */
+:root:root .mx-fchip {
+  height: 26px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-err-soft);
+  color: var(--c-err-ink);
+  font-family: var(--font-control);
+  font-weight: 600;
+}
+/* Option-editor labels: filled chips; AI suggestions retain dashed border (means pending confirmation) */
+:root:root .mx-tag {
+  border-color: transparent;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+}
+:root:root .mx-tag.ai {
+  border-color: var(--c-control-line);
+}
+:root:root .mx-tag.dup {
+  border-color: var(--c-err);
+}
+:root:root .mx-tag .aitag {
+  border-radius: 999px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* Result-preview worksheet tabs: underline tabs (batch 2 .ui-tabs--underline spec: 13px, selected body-text color 600 + 2px accent underline,
+   list bottom hairline); worksheet names are data, remain unwrapped */
+:root:root .artifact-sheet-tabs {
+  gap: 20px;
+  padding: 0 12px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .artifact-sheet-tabs button {
+  min-height: 0;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .artifact-sheet-tabs button:hover {
+  color: var(--c-ink);
+}
+:root:root .artifact-sheet-tabs button.active {
+  border-color: transparent;
+  border-bottom-color: var(--c-accent);
+  background: transparent;
+  color: var(--c-ink);
+  font-weight: 600;
+}
+@media (pointer: coarse) {
+  :root:root .artifact-sheet-tabs button {
+    min-height: var(--control-h-touch);
+  }
+}
+
+
+
+/* @section style-tail:dialogs —— style finish: dialog/drawer interiors (original inline styles moved to legacy appearance classes; see
+ * styles/ui-controls-legacy.css style-tail:*). Spec: Component Spec dialogs / confirmations and inputs / Field,
+ * Page Layout Spec section 3 form alignment (stacked dialog fields, field gap 12, labels 12/600 --c-ink-2,
+ * hints beneath controls 11.5 --c-ink-4), Narrow Spec drawers. Shells (solid background, radius, title 15/650, footer) unified in batch 3;
+ * only body here: descriptions, group blocks, selection cards, inline lists and form spacing. Mapping/decisions: technical design section 样式尾巴. */
+
+/* ── General: dialog body field gap 12 (previously 14), entry forms stacked vertically ── */
+:root:root .settings-dialog:not(.settings-dialog--drawer) > .settings-dialog__body {
+  gap: 12px;
+}
+/* Body lead: matches descriptions (13 --c-ink-2), no independent paragraph spacing */
+:root:root :is(.legacy-tools-dialog-lead, .legacy-tsa-admins-hint) {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+/* Additional notes: 12 --c-ink-3 */
+:root:root :is(.legacy-tools-dialog-note, .legacy-tools-pbi-note, .legacy-tools-edit-creds-note) {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+/* Body errors: separated by field gap, no extra margins */
+:root:root .legacy-tools-dialog-error {
+  margin: 0;
+}
+/* Actions at body end (Tavily / Datarc / Power BI settings): same as footer — right-aligned, gap 8, 16 above */
+:root:root :is(.legacy-tools-dialog-actions, .legacy-tools-pbi-actions) {
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ── Tools · select built-in tool: selection cards (content surface, hairline, --r-3, filled hover, keyboard focus ring) ── */
+:root:root .legacy-tools-picker-search {
+  margin: 0;
+}
+:root:root .legacy-tools-picker-list {
+  gap: 8px;
+}
+:root:root .legacy-ai-tools-picker-option {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .legacy-ai-tools-picker-option:hover {
+  background: var(--c-fill-1);
+}
+:root:root .legacy-ai-tools-picker-option:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .legacy-ai-tools-picker-option strong {
+  font-weight: 600;
+}
+:root:root .legacy-ai-tools-picker-desc {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+:root:root .legacy-tools-picker-empty {
+  padding: 16px 0;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  text-align: center;
+}
+
+/* ── Tools · edit source: credential group blocks become filled background, --r-3, no border ── */
+:root:root .legacy-tools-edit-box {
+  margin-top: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .legacy-tools-edit-rotate {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-tools-edit-creds-note {
+  margin-top: 6px;
+}
+:root:root .legacy-tools-edit-oauth-note {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-tools-edit-rotate-fields {
+  margin-top: 12px;
+  gap: 12px;
+}
+
+/* ── Tools · Datarc key scope: hairline group blocks, labels 11/600, hairline separators, sans serif ── */
+/* Restore overflow:visible: mobile bottom-sheet body is a fixed-height grid, whose overflow:hidden cells shrink;
+   expanding the workspace list clipped the final last-check-time row (2026-09-30 measurement: 413 content in height 364) */
+:root:root .legacy-tools-scope {
+  margin-bottom: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+}
+:root:root .legacy-tools-scope-head {
+  padding: 10px 12px;
+}
+:root:root .legacy-tools-scope-head.is-verified {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-tools-scope-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+:root:root .legacy-tools-scope-mark.is-verified {
+  background: var(--c-pos-soft);
+  color: var(--c-pos);
+}
+:root:root .legacy-tools-scope-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .legacy-tools-scope-status {
+  font-size: 0.71875rem;
+  color: var(--c-ink-3);
+}
+:root:root .legacy-tools-scope-status.is-verified {
+  color: var(--c-pos);
+}
+:root:root .legacy-tools-scope-status-text {
+  padding: 10px 12px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root .legacy-tools-scope-body {
+  padding: 12px;
+}
+:root:root .legacy-tools-scope-grid {
+  gap: 12px;
+}
+:root:root .legacy-tools-scope-label {
+  margin-bottom: 6px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+:root:root .legacy-tools-scope-ws {
+  margin-top: 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-tools-scope-ws-summary {
+  min-height: var(--control-h-md);
+  padding: 6px 10px;
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .legacy-tools-scope-ws-summary:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .legacy-tools-scope-ws-list {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-tools-scope-ws-more {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .legacy-tools-scope-meta {
+  margin-top: 12px;
+  border-top: var(--hairline) solid var(--c-separator);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-tools-scope-meta-term {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .legacy-tools-scope-meta-value {
+  color: var(--c-ink-2);
+}
+:root:root .legacy-tools-scope-empty {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+
+/* ── Tools · disable / delete impact (confirmation body): four cells use hairlines, --r-3 ── */
+:root:root .legacy-tools-impact {
+  gap: 10px;
+}
+:root:root .legacy-tools-impact-grid {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-tools-impact-cell {
+  padding: 10px 8px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-tools-impact-cell.is-col2 {
+  border-left: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-tools-impact-cell.is-row2 {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root :is(.legacy-tools-impact-none, .legacy-tools-impact-note) {
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+/* ── Tools · MCP tool-list refresh preview: warning group uses hairline + --r-3 like the impact grid ── */
+:root:root .legacy-tools-refresh-section.is-warning {
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-err-line);
+}
+:root:root :is(.legacy-tools-refresh-loading, .legacy-tools-refresh-empty) {
+  font-size: var(--fs-md);
+}
+:root:root .legacy-tools-refresh-note {
+  font-size: var(--fs-sm);
+}
+
+/* ── Tools · Power BI: connection rows share the built-in tool card; DAX templates separated by hairlines, DAX is content (retain mono) ── */
+:root:root .legacy-tools-pbi-row {
+  margin-bottom: 8px;
+  padding: 12px 12px 12px 16px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .legacy-tools-pbi-row strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .legacy-tools-pbi-meta {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-tools-pbi-template {
+  padding: 10px 0;
+  border-top: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-tools-pbi-template-dax {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* ── Usage-location drawer (shared by tools/skills): same shell as other drawers; header 15/650 + close 28, rows minimum 44 ── */
+:root:root .legacy-usage-drawer-backdrop {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root:root .legacy-usage-drawer {
+  border: 0;
+  border-radius: var(--r-4) 0 0 var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+@media (max-width: 720px) {
+  :root:root .legacy-usage-drawer {
+    border-radius: 0;
+  }
+}
+:root:root .legacy-usage-drawer-head {
+  align-items: center;
+  padding: 16px 12px 12px 18px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-usage-drawer-eyebrow {
+  margin-bottom: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-usage-drawer-title {
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  line-height: 1.35;
+}
+:root:root .legacy-usage-drawer-close {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .legacy-usage-drawer-close:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .legacy-usage-drawer-close:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .legacy-usage-drawer-body {
+  padding: 16px 18px 24px;
+}
+:root:root .legacy-usage-details {
+  gap: 16px;
+  font-family: var(--font-control);
+}
+:root:root .legacy-usage-partial {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-usage-partial-icon {
+  color: var(--c-warn);
+}
+:root:root .legacy-usage-error {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-usage-retry {
+  margin-top: 6px;
+  color: var(--c-accent-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+:root:root .legacy-usage-retry:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root :is(.legacy-usage-loading, .legacy-usage-empty) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-usage-group-head {
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .legacy-usage-group-count {
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-usage-group-list {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-usage-row {
+  min-height: 44px;
+  padding: 6px 2px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root button.legacy-usage-row:hover {
+  background: var(--c-fill-1);
+}
+:root:root button.legacy-usage-row:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .legacy-usage-row-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .legacy-usage-row-kind {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root :is(.legacy-usage-note, .legacy-usage-note-actual) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Readiness retains semantic colors (success / warning / danger), font 11.5 */
+:root:root .legacy-usage-readiness {
+  font-size: 0.71875rem;
+}
+:root:root .legacy-usage-summary {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root button.legacy-usage-summary:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* ── Space · administrators dialog: existing admin list uses hairline groups, rows minimum 44 ── */
+:root:root .legacy-tsa-admins-add {
+  gap: 8px;
+}
+:root:root .legacy-tsa-admins-list {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  overflow: hidden;
+}
+:root:root .legacy-tsa-admins-row {
+  min-height: 44px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-tsa-admins-row:last-child {
+  border-bottom: 0;
+}
+
+/* ── Scheduled-task drawer (.routine-drawer; same form embedded in chat excluded, retains original appearance) ──
+ * Same shell as other drawers (solid, left --r-4, overlay shadow, scrim --c-scrim); header only title 15/650 and close 28
+ * (eyebrow repeats title, hidden); labels 12/600, hints 11.5; inputs/dropdowns control-spec height 28;
+ * group notes become filled background, --r-3, no border; presets/execution modes use selection cards (selected accent
+ * border + light accent background); footer right-aligned, buttons 28. */
+:root:root .routine-drawer-scrim.legacy-sched-scrim {
+  background: var(--c-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root:root .routine-drawer.legacy-sched-drawer {
+  border-left: 0;
+  border-radius: var(--r-4) 0 0 var(--r-4);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+@media (max-width: 640px) {
+  :root:root .routine-drawer.legacy-sched-drawer {
+    border-radius: 0;
+  }
+}
+:root:root .routine-drawer .legacy-sched-dr-head {
+  gap: 8px;
+  padding: 16px 12px 12px 18px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .routine-drawer .legacy-sched-dr-eyebrow {
+  display: none;
+}
+:root:root .routine-drawer .legacy-sched-dr-title {
+  color: var(--c-ink);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+:root:root .routine-drawer .legacy-sched-dr-head .legacy-sched-icon-btn {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .routine-drawer .legacy-sched-dr-head .legacy-sched-icon-btn.is-hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .routine-drawer :is(.legacy-sched-icon-btn, .legacy-sched-preset-btn, .legacy-sched-weekday-btn, .legacy-sched-rcard, .legacy-sched-adv-head, .legacy-sched-btn-ghost, .legacy-sched-bound-clear, .legacy-sched-btn-pri):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .routine-drawer .legacy-sched-dr-body {
+  padding: 16px 18px;
+  gap: 16px;
+}
+/* Fields: labels 12/600 --c-ink-2, option descriptions/counts 11.5 --c-ink-4 (tabular numbers, not mono font), hints 11.5 */
+:root:root .routine-drawer .legacy-sched-field {
+  gap: 6px;
+}
+:root:root .routine-drawer .legacy-sched-field-label {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .routine-drawer :is(.legacy-sched-field-option, .legacy-sched-field-counter) {
+  color: var(--c-ink-4);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .routine-drawer :is(.legacy-sched-help, .legacy-sched-help-err) {
+  font-size: 0.71875rem;
+  line-height: 1.45;
+}
+:root:root .routine-drawer .legacy-sched-divider {
+  height: var(--hairline);
+  background: var(--c-separator);
+}
+/* Inputs, multiline, cron and dropdowns: 28 high, --r-2, 0.5px inset border; focus 1px accent + 3px halo */
+:root:root .routine-drawer :is(.legacy-sched-inp, .legacy-sched-inp-textarea, .legacy-sched-inp-mono, .legacy-sched-select) {
+  min-height: var(--control-h-md);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  outline: none;
+}
+:root:root .routine-drawer .legacy-sched-inp-textarea {
+  min-height: 64px;
+  padding: 6px 9px;
+  line-height: 1.5;
+}
+:root:root .routine-drawer .legacy-sched-inp-mono {
+  font-family: var(--font-v2-mono);
+}
+:root:root .routine-drawer .legacy-sched-select {
+  padding-right: 28px;
+  border: var(--hairline) solid var(--c-control-line);
+  box-shadow: var(--shadow-control-drop);
+  font-weight: 400;
+}
+:root:root .routine-drawer :is(.legacy-sched-inp, .legacy-sched-inp-textarea, .legacy-sched-inp-mono):focus {
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root .routine-drawer .legacy-sched-select:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
+}
+:root:root .routine-drawer .legacy-sched-inp-mono.is-err {
+  box-shadow:
+    inset 0 0 0 1px var(--c-err),
+    0 0 0 3px var(--c-err-soft);
+}
+:root:root .routine-drawer .legacy-sched-select.is-disabled {
+  background: var(--c-fill-1);
+  color: var(--c-ink-4);
+  opacity: 1;
+}
+:root:root .routine-drawer .legacy-sched-select-chev {
+  right: 9px;
+  color: var(--c-ink-3);
+}
+/* Schedule presets: selection cards (control border, --r-2), selected accent border + light accent background */
+:root:root .routine-drawer .legacy-sched-preset-grid {
+  gap: 8px;
+}
+:root:root .routine-drawer .legacy-sched-preset-btn {
+  min-height: 52px;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  gap: 4px;
+}
+:root:root .routine-drawer .legacy-sched-preset-btn.is-on {
+  background: var(--c-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+:root:root .routine-drawer .legacy-sched-preset-icon {
+  color: var(--c-ink-3);
+}
+:root:root .routine-drawer .legacy-sched-preset-icon.is-on {
+  color: var(--c-accent-text);
+}
+/* Group notes (time / weekday, manual notes, bound-process display, email delivery): filled background, --r-3, no border */
+:root:root
+  .routine-drawer
+  :is(.legacy-sched-subpick, .legacy-sched-subpick-stack, .legacy-sched-manual-note, .legacy-sched-bound-note, .legacy-sched-notify-row) {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .routine-drawer :is(.legacy-sched-manual-note, .legacy-sched-bound-note) {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root .routine-drawer .legacy-sched-note-icon {
+  color: var(--c-ink-3);
+}
+:root:root .routine-drawer .legacy-sched-seg-lab {
+  margin-bottom: 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .routine-drawer .legacy-sched-weekdays {
+  gap: 4px;
+}
+:root:root .routine-drawer .legacy-sched-weekday-btn {
+  min-height: var(--control-h-md);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .routine-drawer .legacy-sched-weekday-btn.is-on {
+  background: var(--c-accent);
+  box-shadow: none;
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+/* Automatic-run confirmation bar: light success background, --r-3, no border */
+:root:root .routine-drawer .legacy-sched-readout {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-pos-soft);
+  color: var(--c-ink);
+  font-size: var(--fs-sm);
+}
+/* Custom cron: expandable group (hairline, --r-3) */
+:root:root .routine-drawer .legacy-sched-adv {
+  margin-top: 8px;
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .routine-drawer .legacy-sched-adv-head {
+  min-height: var(--control-h-lg);
+  padding: 0 12px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .routine-drawer .legacy-sched-adv-body {
+  padding: 0 12px 12px;
+}
+/* Execution mode: radio cards (control border, --r-3); radio circle 16, selected 5px accent inner ring (Component Spec selection controls) */
+:root:root .routine-drawer .legacy-sched-rcards {
+  gap: 8px;
+}
+:root:root .routine-drawer .legacy-sched-rcard {
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  font-family: var(--font-control);
+}
+:root:root .routine-drawer .legacy-sched-rcard.is-on {
+  background: var(--c-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+}
+:root:root .routine-drawer .legacy-sched-radio {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 0;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1px var(--c-control-line);
+}
+:root:root .routine-drawer .legacy-sched-radio.is-on {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+:root:root .routine-drawer .legacy-sched-radio-dot {
+  display: none;
+}
+:root:root .routine-drawer .legacy-sched-rcard-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .routine-drawer .legacy-sched-rcard-desc {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+/* Mode labels: replace mono uppercase with small filled badges */
+:root:root .routine-drawer .legacy-sched-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .routine-drawer .legacy-sched-pill.is-on {
+  background: var(--c-surface);
+  color: var(--c-accent-text);
+}
+/* Notification emails: input-styled chip container; email chips follow Component Spec Chip (26 high, --r-2, filled, 12.5) */
+:root:root .routine-drawer .legacy-sched-chips {
+  gap: 6px;
+  min-height: var(--control-h-lg);
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--c-control-line),
+    var(--shadow-control-drop);
+}
+:root:root .routine-drawer .legacy-sched-chips:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root .routine-drawer .legacy-sched-chip {
+  height: 26px;
+  padding: 0 6px 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .routine-drawer .legacy-sched-chip-x {
+  border-radius: 4px;
+  color: var(--c-ink-3);
+}
+:root:root .routine-drawer .legacy-sched-chip-inp {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .routine-drawer .legacy-sched-notify-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .routine-drawer .legacy-sched-notify-desc {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .routine-drawer .legacy-sched-bound-clear {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+}
+/* Footer: right-aligned, buttons 28; cancel secondary (filled), save primary, whole button 0.4 when saving unavailable */
+:root:root .routine-drawer .legacy-sched-dr-foot {
+  gap: 8px;
+  padding: 10px 18px;
+  border-top: var(--hairline) solid var(--c-separator);
+  background: var(--c-surface);
+}
+:root:root .routine-drawer .legacy-sched-foot-hint {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .routine-drawer :is(.legacy-sched-dr-foot .legacy-sched-btn-ghost, .legacy-sched-btn-pri) {
+  height: var(--control-h-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .routine-drawer .legacy-sched-dr-foot .legacy-sched-btn-ghost {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-weight: 500;
+}
+:root:root .routine-drawer .legacy-sched-dr-foot .legacy-sched-btn-ghost:hover:not(:disabled) {
+  background: var(--c-fill-3);
+}
+:root:root .routine-drawer .legacy-sched-btn-pri {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+:root:root .routine-drawer .legacy-sched-btn-pri.is-disabled {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  opacity: 0.4;
+}
+
+
+
+/* ── Data source · new Datarc connection / change key: replace-current-connection choice group and bottom actions ── */
+:root:root .legacy-datarc-modal-form {
+  gap: 12px;
+  font-family: var(--font-control);
+}
+:root:root .legacy-datarc-modal-choice-title {
+  margin-bottom: 4px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .legacy-datarc-modal-choice-hint {
+  margin: 0 0 8px;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root :is(.legacy-datarc-modal-option, .legacy-datarc-modal-option-last) {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-datarc-modal-option-hint {
+  margin: 2px 0 0 22px;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root :is(.legacy-datarc-modal-actions-split, .legacy-datarc-modal-actions) {
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ── System built-in agent · settings: lead, optional skills list (control border, --r-2, group title 11/600) ── */
+:root:root .legacy-bsa-intro {
+  margin: 0;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+:root:root .legacy-bsa-skills {
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  font-family: var(--font-control);
+}
+:root:root .legacy-bsa-skill {
+  min-height: var(--control-h-md);
+  padding: 4px 8px;
+  border-radius: var(--r-1);
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-bsa-skill:hover {
+  background: var(--c-fill-1);
+}
+:root:root .legacy-bsa-skill-name {
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-bsa-skill-desc {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-bsa-skills-group {
+  padding: 8px 8px 2px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+:root:root .legacy-bsa-skills-loading {
+  color: var(--c-ink-3);
+  font-size: var(--fs-md);
+}
+
+/* ── Credits dialogs: replace mono uppercase labels (12/600 --c-ink-2); period-reset preview note uses light background, no left stripe ── */
+:root:root .legacy-credits-field-label {
+  margin-bottom: 5px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root :is(.legacy-credits-grant-field, .legacy-credits-edit-field) {
+  margin-bottom: 12px;
+}
+:root:root .legacy-credits-quota-field {
+  gap: 5px;
+  margin-bottom: 12px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root .legacy-credits-quota-field :is(input, textarea) {
+  font-weight: 400;
+}
+:root:root .legacy-credits-quota-count {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-credits-quota-error {
+  margin: 0 0 12px;
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-credits-edit-overdraft {
+  font-size: 0.71875rem;
+}
+:root:root .legacy-credits-edit-check {
+  margin-top: 8px;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-credits-edit-check-hint {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root .legacy-credits-reset-skeleton {
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+:root:root .legacy-credits-reset-cooldown {
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+}
+:root:root .legacy-credits-reset-affected {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-credits-reset-overrides {
+  padding: 10px 12px;
+  border-left: 0;
+  border-radius: var(--r-3);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-credits-reset-overrides-list {
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-credits-reset-balance {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Skills drawer: hairline separators for team state/copy bar, small text from 11.5 ── */
+:root:root .legacy-skill-drawer-team {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .legacy-skill-drawer-team-label {
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+}
+:root:root :is(.legacy-skill-drawer-team-reason, .legacy-skill-drawer-team-conflict) {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-skill-drawer-team-done {
+  color: var(--c-pos);
+  font-size: var(--fs-sm);
+}
+
+
+
+
+/* ── Share dialog body (shared by reports, skills, team processes, agents): roster, search, read-only explanation and tags ──
+ * Shell, segments, avatars and buttons unified in batch 5; body blocks become hairline / filled, --r-2 / --r-3, small text from 11,
+ * roster remove action becomes a red text button per transition rules (decision 23), hidden by opacity — still reachable
+ * by Tab, appears on row hover or
+ * focus within (original visibility:hidden was keyboard-unreachable); always visible on touch. */
+:root:root .legacy-share-pending {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .legacy-share-pending:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .legacy-share-roster-kept {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-roster-kept-icon {
+  color: var(--c-ink-3);
+}
+/* Search: Component Spec search — filled background, no border, --r-2; focus switches to solid background with focus halo */
+:root:root .legacy-share-search-box {
+  height: var(--control-h-lg);
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink-3);
+}
+:root:root .legacy-share-search-box.is-focus {
+  border: 0;
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-accent),
+    0 0 0 3px var(--c-accent-soft);
+}
+:root:root .legacy-share-search-input {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .legacy-share-search-input::placeholder {
+  color: var(--c-ink-4);
+}
+@media (pointer: coarse) {
+  :root:root .legacy-share-search-box {
+    height: var(--control-h-touch);
+  }
+}
+/* Candidate dropdown: solid overlay (same layer as dialog, no material), --r-3, rows 32 high, filled hover */
+:root:root .legacy-share-suggest {
+  padding: 6px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+}
+:root:root .legacy-share-suggest-row {
+  min-height: var(--menu-item-h, 32px);
+  padding: 4px 10px;
+  border-radius: var(--r-2);
+}
+:root:root .legacy-share-suggest-row.is-hover {
+  background: var(--c-fill-2);
+}
+:root:root .legacy-share-suggest-name {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .legacy-share-suggest-meta {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root .legacy-share-suggest-add {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-suggest-more {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+}
+/* Roster: gap 8 between count and permission note, wrapping when narrow (previously cramped as 3权限 on mobile) */
+:root:root .legacy-share-roster-head {
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+:root:root .legacy-share-roster-count {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root :is(.legacy-share-roster-perm, .legacy-share-foot-note, .legacy-share-row-group-note, .legacy-share-ro-note) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+}
+:root:root .legacy-share-row {
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: var(--r-2);
+}
+:root:root .legacy-share-row.is-hover {
+  background: var(--c-fill-1);
+}
+:root:root .legacy-share-row-name {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .legacy-share-row-remove {
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-err);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  visibility: visible;
+  opacity: 0;
+}
+:root:root .legacy-share-row-remove.is-visible,
+:root:root .legacy-share-row:focus-within .legacy-share-row-remove {
+  opacity: 1;
+}
+:root:root .legacy-share-row-remove:hover {
+  background: var(--c-fill-1);
+}
+:root:root .legacy-share-row-remove:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  :root:root .legacy-share-row-remove {
+    opacity: 1;
+  }
+}
+/* Empty roster: replace dashed border with filled background */
+:root:root .legacy-share-roster-empty {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+}
+/* Audience-state placeholder */
+:root:root .legacy-share-quiet-mark {
+  width: 44px;
+  height: 44px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+}
+:root:root .legacy-share-quiet-mark.is-tint {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .legacy-share-quiet-title {
+  font-family: var(--font-control);
+  font-size: 0.875rem;
+}
+:root:root .legacy-share-quiet-sub {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  line-height: 1.55;
+}
+/* Tags: small badges (Component Spec badges, 18 high, filled background) */
+:root:root .legacy-share-type-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+:root:root .legacy-share-perm-tag {
+  height: 20px;
+  padding: 0 8px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-weight: 600;
+}
+:root:root .legacy-share-perm-tag.is-small {
+  height: 18px;
+  padding: 0 6px;
+}
+:root:root .legacy-share-perm-tag-icon {
+  color: var(--c-ink-3);
+}
+/* Header type color block: 28, --r-2, light accent background */
+:root:root .legacy-share-type-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: var(--r-2);
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+/* Read-only (recipient) view */
+:root:root .legacy-share-ro-audience {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-ro-audience-icon {
+  color: var(--c-ink-3);
+}
+:root:root .legacy-share-ro-access {
+  padding: 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-ro-access-label {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  letter-spacing: normal;
+}
+:root:root .legacy-share-ro-access-name {
+  font-size: var(--fs-md);
+}
+:root:root .legacy-share-ro-access-by {
+  color: var(--c-ink-3);
+}
+:root:root :is(.legacy-share-state-err, .legacy-share-state-loading) {
+  font-family: var(--font-control);
+}
+:root:root .legacy-share-state-loading {
+  color: var(--c-ink-3);
+}
+

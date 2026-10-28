@@ -1,0 +1,695 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "name": "compact-accessible-guarded-line",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 40,
+        "categoryCount": 40,
+        "seriesCount": 3,
+        "longestLabelGraphemes": 3,
+        "series": [
+          { "key": "line:0", "role": "line", "pointCount": 40, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "line:1", "role": "line", "pointCount": 40, "stackKey": null, "hasPositive": true, "hasNegative": true },
+          { "key": "line:2", "role": "line", "pointCount": 40, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": true, "hasMissingValues": false }
+      },
+      "kindTokens": {
+        "line": {
+          "tooltip": "disabled",
+          "grid": "hidden",
+          "line": { "curve": "monotone", "widthPx": 1.5, "points": "show", "pointRadiusPx": 3 }
+        }
+      },
+      "categoricalSeriesPalette": ["#111111", "#777777"],
+      "accessibility": { "contrast": "high", "colorVision": "color-safe" },
+      "renderContext": {
+        "placement": "chat",
+        "bounds": { "widthPx": 344, "heightPx": 320, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "zh-CN",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "none" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "disabled",
+          "grid": "hidden",
+          "line": { "curve": "monotone", "widthPx": 1.5, "points": "show", "pointRadiusPx": 3, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 },
+          "series": [
+            { "key": "line:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "line:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "line:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "standard",
+          "line": { "curve": "monotone", "widthPx": 2, "points": "auto", "pointRadiusPx": 0, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 },
+          "series": [
+            { "key": "line:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "line:1", "paletteIndex": 1, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "line:2", "paletteIndex": 0, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "adjustments": [
+          { "path": "grid", "requested": "hidden", "effective": "standard", "adjustedBy": "accessibility", "reasonCodes": ["accessibility.grid_structure_required"] },
+          { "path": "line.points", "requested": "show", "effective": "auto", "adjustedBy": "correctness", "reasonCodes": ["legibility.points_density_limited"] },
+          { "path": "line.widthPx", "requested": 1.5, "effective": 2, "adjustedBy": "accessibility", "reasonCodes": ["accessibility.line_width_minimum"] },
+          {
+            "path": "seriesEncodings",
+            "requested": ["line:0:color", "line:1:color", "line:2:color"],
+            "effective": [
+              "line:0:dash=:point=circle:fill=solid:boundary=0",
+              "line:1:dash=7-4:point=rect:fill=solid:boundary=0",
+              "line:2:dash=2-3:point=triangle:fill=solid:boundary=0"
+            ],
+            "adjustedBy": "accessibility",
+            "reasonCodes": ["accessibility.non_color_encoding_required"]
+          },
+          { "path": "tooltip", "requested": "disabled", "effective": "enabled", "adjustedBy": "capability", "reasonCodes": ["capability.tooltip_exact_data_unavailable"] }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "static-straight-line",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 4,
+        "categoryCount": 4,
+        "seriesCount": 1,
+        "longestLabelGraphemes": 2,
+        "series": [
+          { "key": "line:0", "role": "line", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": {
+        "line": {
+          "tooltip": "enabled",
+          "grid": "standard",
+          "line": { "curve": "straight", "widthPx": 2.5, "points": "hide", "pointRadiusPx": 3 }
+        }
+      },
+      "categoricalSeriesPalette": ["#111111", "#777777"],
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "embed",
+        "bounds": { "widthPx": 1456, "heightPx": 772, "devicePixelRatio": 1 },
+        "input": { "hover": false, "pointer": "none", "keyboard": false },
+        "output": { "medium": "raster", "static": true },
+        "mode": "light",
+        "locale": "zh-CN",
+        "reducedMotion": true,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "none" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "standard",
+          "line": { "curve": "straight", "widthPx": 2.5, "points": "hide", "pointRadiusPx": 3, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 },
+          "series": [
+            { "key": "line:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "effective": {
+          "tooltip": "disabled",
+          "grid": "standard",
+          "line": { "curve": "straight", "widthPx": 2.5, "points": "hide", "pointRadiusPx": 0, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 },
+          "series": [
+            { "key": "line:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "adjustments": [
+          { "path": "tooltip", "requested": "enabled", "effective": "disabled", "adjustedBy": "context", "reasonCodes": ["context.tooltip_not_applicable_static"] }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "stacked-bar-beyond-color-capacity",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "stacked_bar",
+        "family": "composition",
+        "rowCount": 4,
+        "categoryCount": 4,
+        "seriesCount": 13,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "bar:0", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:1", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:2", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:3", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:4", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:5", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:6", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:7", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:8", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:9", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:10", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:11", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "bar:12", "role": "bar", "pointCount": 4, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": true, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "stacked_bar": {"tooltip": "enabled", "grid": "quiet", "bar": {"radiusPx": 3}} },
+      "categoricalSeriesPalette": [
+        "#2563A7",
+        "#2F7F87",
+        "#52607B",
+        "#B06B33",
+        "#718356",
+        "#3B4654",
+        "#7A2117",
+        "#6F5C55",
+        "#592C76",
+        "#1F86C1",
+        "#6E5F37",
+        "#009381",
+        "#6D2C39",
+        "#8E4000",
+        "#97686E",
+        "#485E62"
+      ],
+      "colorOnlySeriesCapacity": 11,
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:6", "paletteIndex": 6, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:7", "paletteIndex": 7, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:8", "paletteIndex": 8, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:9", "paletteIndex": 9, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:10", "paletteIndex": 10, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:11", "paletteIndex": 11, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:12", "paletteIndex": 12, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 1 },
+            { "key": "bar:6", "paletteIndex": 6, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:7", "paletteIndex": 7, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:8", "paletteIndex": 8, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:9", "paletteIndex": 9, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:10", "paletteIndex": 10, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:11", "paletteIndex": 11, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 1 },
+            { "key": "bar:12", "paletteIndex": 12, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "dots", "boundaryWidthPx": 1 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "adjustments": [
+          {
+            "path": "seriesEncodings",
+            "requested": [
+              "bar:0:color",
+              "bar:1:color",
+              "bar:2:color",
+              "bar:3:color",
+              "bar:4:color",
+              "bar:5:color",
+              "bar:6:color",
+              "bar:7:color",
+              "bar:8:color",
+              "bar:9:color",
+              "bar:10:color",
+              "bar:11:color",
+              "bar:12:color"
+            ],
+            "effective": [
+              "bar:0:dash=:point=circle:fill=solid:boundary=1",
+              "bar:1:dash=:point=circle:fill=solid:boundary=1",
+              "bar:2:dash=:point=circle:fill=solid:boundary=1",
+              "bar:3:dash=:point=circle:fill=solid:boundary=1",
+              "bar:4:dash=:point=circle:fill=solid:boundary=1",
+              "bar:5:dash=:point=circle:fill=solid:boundary=1",
+              "bar:6:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:7:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:8:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:9:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:10:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:11:dash=7-4:point=rect:fill=diagonal:boundary=1",
+              "bar:12:dash=2-3:point=triangle:fill=dots:boundary=1"
+            ],
+            "adjustedBy": "correctness",
+            "reasonCodes": ["correctness.palette_overflow_non_color_encoding"]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "bar-within-color-capacity-unchanged",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "bar",
+        "family": "comparison",
+        "rowCount": 4,
+        "categoryCount": 4,
+        "seriesCount": 6,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "bar:0", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:1", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:2", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:3", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:4", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:5", "role": "bar", "pointCount": 4, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "bar": {"tooltip": "enabled", "grid": "quiet", "bar": {"radiusPx": 3}} },
+      "categoricalSeriesPalette": [
+        "#2563A7",
+        "#2F7F87",
+        "#52607B",
+        "#B06B33",
+        "#718356",
+        "#3B4654",
+        "#7A2117",
+        "#6F5C55",
+        "#592C76",
+        "#1F86C1",
+        "#6E5F37",
+        "#009381",
+        "#6D2C39",
+        "#8E4000",
+        "#97686E",
+        "#485E62"
+      ],
+      "colorOnlySeriesCapacity": 11,
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "adjustments": [],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "color-safe-grouped-bar",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "bar",
+        "family": "comparison",
+        "rowCount": 3,
+        "categoryCount": 3,
+        "seriesCount": 5,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "bar:0", "role": "bar", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:1", "role": "bar", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:2", "role": "bar", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:3", "role": "bar", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "bar:4", "role": "bar", "pointCount": 3, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "bar": {"tooltip": "enabled", "grid": "quiet", "bar": {"radiusPx": 3}} },
+      "categoricalSeriesPalette": ["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"],
+      "accessibility": { "contrast": "standard", "colorVision": "color-safe" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "bar:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "bar:1", "paletteIndex": 1, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 0 },
+            { "key": "bar:2", "paletteIndex": 2, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "dots", "boundaryWidthPx": 0 },
+            { "key": "bar:3", "paletteIndex": 3, "lineDash": [10, 3, 2, 3], "pointStyle": "rectRot", "fillPattern": "crosshatch", "boundaryWidthPx": 0 },
+            { "key": "bar:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "bar": { "radiusPx": 3 }
+        },
+        "adjustments": [
+          {
+            "path": "seriesEncodings",
+            "requested": ["bar:0:color", "bar:1:color", "bar:2:color", "bar:3:color", "bar:4:color"],
+            "effective": [
+              "bar:0:dash=:point=circle:fill=solid:boundary=0",
+              "bar:1:dash=7-4:point=rect:fill=diagonal:boundary=0",
+              "bar:2:dash=2-3:point=triangle:fill=dots:boundary=0",
+              "bar:3:dash=10-3-2-3:point=rectRot:fill=crosshatch:boundary=0",
+              "bar:4:dash=:point=circle:fill=solid:boundary=0"
+            ],
+            "adjustedBy": "accessibility",
+            "reasonCodes": ["accessibility.non_color_encoding_required"]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "pie-slices-beyond-color-capacity",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "pie",
+        "family": "composition",
+        "rowCount": 8,
+        "categoryCount": 8,
+        "seriesCount": 8,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "segment:0", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:1", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:2", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:3", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:4", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:5", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:6", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "segment:7", "role": "segment", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "pie": {"tooltip": "enabled", "grid": "quiet"} },
+      "categoricalSeriesPalette": ["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"],
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "segment:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:6", "paletteIndex": 6, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:7", "paletteIndex": 7, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "segment:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "segment:6", "paletteIndex": 0, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 0 },
+            { "key": "segment:7", "paletteIndex": 1, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 0 }
+          ]
+        },
+        "adjustments": [
+          {
+            "path": "seriesEncodings",
+            "requested": [
+              "segment:0:color",
+              "segment:1:color",
+              "segment:2:color",
+              "segment:3:color",
+              "segment:4:color",
+              "segment:5:color",
+              "segment:6:color",
+              "segment:7:color"
+            ],
+            "effective": [
+              "segment:0:dash=:point=circle:fill=solid:boundary=0",
+              "segment:1:dash=:point=circle:fill=solid:boundary=0",
+              "segment:2:dash=:point=circle:fill=solid:boundary=0",
+              "segment:3:dash=:point=circle:fill=solid:boundary=0",
+              "segment:4:dash=:point=circle:fill=solid:boundary=0",
+              "segment:5:dash=:point=circle:fill=solid:boundary=0",
+              "segment:6:dash=7-4:point=rect:fill=diagonal:boundary=0",
+              "segment:7:dash=7-4:point=rect:fill=diagonal:boundary=0"
+            ],
+            "adjustedBy": "correctness",
+            "reasonCodes": ["correctness.palette_overflow_non_color_encoding"]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "scatter-groups-beyond-color-capacity",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "scatter",
+        "family": "relationship",
+        "rowCount": 7,
+        "categoryCount": 7,
+        "seriesCount": 7,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "point:0", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:1", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:2", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:3", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:4", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:5", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false },
+          { "key": "point:6", "role": "point", "pointCount": 1, "stackKey": null, "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": false, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "scatter": {"tooltip": "enabled", "grid": "quiet"} },
+      "categoricalSeriesPalette": ["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"],
+      "colorOnlySeriesCapacity": 2,
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "point:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:3", "paletteIndex": 3, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:4", "paletteIndex": 4, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:5", "paletteIndex": 5, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:6", "paletteIndex": 6, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "point:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:2", "paletteIndex": 2, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:3", "paletteIndex": 3, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:4", "paletteIndex": 4, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:5", "paletteIndex": 5, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "point:6", "paletteIndex": 0, "lineDash": [10, 3, 2, 3], "pointStyle": "rectRot", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ]
+        },
+        "adjustments": [
+          {
+            "path": "seriesEncodings",
+            "requested": ["point:0:color", "point:1:color", "point:2:color", "point:3:color", "point:4:color", "point:5:color", "point:6:color"],
+            "effective": [
+              "point:0:dash=:point=circle:fill=solid:boundary=0",
+              "point:1:dash=:point=circle:fill=solid:boundary=0",
+              "point:2:dash=7-4:point=rect:fill=solid:boundary=0",
+              "point:3:dash=7-4:point=rect:fill=solid:boundary=0",
+              "point:4:dash=2-3:point=triangle:fill=solid:boundary=0",
+              "point:5:dash=2-3:point=triangle:fill=solid:boundary=0",
+              "point:6:dash=10-3-2-3:point=rectRot:fill=solid:boundary=0"
+            ],
+            "adjustedBy": "correctness",
+            "reasonCodes": ["correctness.palette_overflow_non_color_encoding"]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    },
+    {
+      "name": "stacked-area-low-capacity-team-palette",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "area_stacked",
+        "family": "composition",
+        "rowCount": 6,
+        "categoryCount": 6,
+        "seriesCount": 3,
+        "longestLabelGraphemes": 4,
+        "series": [
+          { "key": "area:0", "role": "area", "pointCount": 6, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "area:1", "role": "area", "pointCount": 6, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false },
+          { "key": "area:2", "role": "area", "pointCount": 6, "stackKey": "stack:0", "hasPositive": true, "hasNegative": false }
+        ],
+        "flags": { "stacked": true, "crossesZero": false, "hasMissingValues": false }
+      },
+      "kindTokens": { "area_stacked": {"tooltip": "enabled", "grid": "quiet", "line": {"curve": "monotone", "widthPx": 2, "points": "auto", "pointRadiusPx": 3}} },
+      "categoricalSeriesPalette": ["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"],
+      "colorOnlySeriesCapacity": 1,
+      "accessibility": { "contrast": "standard", "colorVision": "standard" },
+      "renderContext": {
+        "placement": "canvas",
+        "bounds": { "widthPx": 760, "heightPx": 380, "devicePixelRatio": 2 },
+        "input": { "hover": true, "pointer": "fine", "keyboard": true },
+        "output": { "medium": "screen", "static": false },
+        "mode": "light",
+        "locale": "en-US",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": { "kind": "inspect-table" }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "area:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "area:1", "paletteIndex": 1, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "area:2", "paletteIndex": 2, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 }
+          ],
+          "line": { "curve": "monotone", "widthPx": 2, "points": "auto", "pointRadiusPx": 3, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 }
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "quiet",
+          "series": [
+            { "key": "area:0", "paletteIndex": 0, "lineDash": [], "pointStyle": "circle", "fillPattern": "solid", "boundaryWidthPx": 0 },
+            { "key": "area:1", "paletteIndex": 1, "lineDash": [7, 4], "pointStyle": "rect", "fillPattern": "diagonal", "boundaryWidthPx": 0 },
+            { "key": "area:2", "paletteIndex": 2, "lineDash": [2, 3], "pointStyle": "triangle", "fillPattern": "dots", "boundaryWidthPx": 0 }
+          ],
+          "line": { "curve": "monotone", "widthPx": 2, "points": "auto", "pointRadiusPx": 3, "hitRadiusPx": 8, "pointHoverRadiusPx": 4 }
+        },
+        "adjustments": [
+          {
+            "path": "seriesEncodings",
+            "requested": ["area:0:color", "area:1:color", "area:2:color"],
+            "effective": [
+              "area:0:dash=:point=circle:fill=solid:boundary=0",
+              "area:1:dash=7-4:point=rect:fill=diagonal:boundary=0",
+              "area:2:dash=2-3:point=triangle:fill=dots:boundary=0"
+            ],
+            "adjustedBy": "correctness",
+            "reasonCodes": ["correctness.palette_overflow_non_color_encoding"]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
+    }
+  ]
+}

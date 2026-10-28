@@ -1,0 +1,491 @@
+schema_version: 1
+
+# Definition versions are immutable product contracts.  Tool/Skill names belong
+# only to implementations below and never to the consumer definition.
+definitions:
+  - id: cap_analysis
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: analysis
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Analyze and reason,
+          description: Turn evidence and context into structured findings and recommendations.,
+          task_examples: [Explain the main drivers and recommend next actions.],
+        }
+      zh-CN: { name: 分析与推理, description: 将证据和上下文整理为结构化洞察与建议。, task_examples: [解释主要驱动因素并建议下一步行动。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: evidence, version: 1, required: false }]
+    outputs: [{ contract: findings, version: 1 }]
+    compatibility_class: evidence_to_findings
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: findings_contract
+
+  - id: cap_data_discovery
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: data
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Discover available data,
+          description: "Find the datasets, metrics and dimensions available to the current user.",
+          task_examples: [Show me which sales metrics I can analyze.],
+        }
+      zh-CN: { name: 发现可用数据, description: 查找当前用户可访问的数据集、指标和维度。, task_examples: [告诉我可以分析哪些销售指标。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: data.discovery.request, version: 1 }]
+    outputs: [{ contract: data.catalog, version: 1 }]
+    compatibility_class: authorized_data_discovery
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: data_discovery_contract
+
+  - id: cap_data_query
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: data
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Query and analyze data,
+          description: Query authorized business data and return a structured dataset with traceable context.,
+          task_examples: [Compare this quarter's revenue with last quarter.],
+        }
+      zh-CN:
+        { name: 查询与分析数据, description: 查询获授权的业务数据，并返回带可追溯上下文的结构化数据集。, task_examples: [比较本季度和上季度的收入。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: dataset.request, version: 1 }]
+    outputs: [{ contract: dataset, version: 1 }]
+    compatibility_class: authorized_dataset_read
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: dataset_query_contract
+
+  - id: cap_knowledge_search
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: knowledge
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Search team knowledge,
+          description: Search authorized team knowledge and return findings with source references.,
+          task_examples: [Find the policy requirements relevant to this review.],
+        }
+      zh-CN: { name: 检索团队知识, description: 检索获授权的团队知识，并返回带来源引用的结论。, task_examples: [找出与本次审查相关的制度要求。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: knowledge.query, version: 1 }]
+    outputs: [{ contract: cited.findings, version: 1 }]
+    compatibility_class: authorized_cited_research
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: cited_knowledge_contract
+
+  - id: cap_web_research
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: research
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Research the public web,
+          description: Search and read public sources and return cited findings with an external-source disclosure.,
+          task_examples: [Research recent competitor announcements.],
+        }
+      zh-CN: { name: 研究公开网络, description: 搜索和阅读公开来源，并返回带引用及外部来源说明的结论。, task_examples: [调研竞品近期的公开动态。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: web.query, version: 1 }]
+    outputs: [{ contract: cited.web.findings, version: 1 }]
+    compatibility_class: cited_open_world_research
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: cited_web_contract
+
+  - id: cap_compute
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: analysis
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Run isolated computation,
+          description: Execute bounded calculations or file processing in an isolated environment.,
+          task_examples: [Calculate the cohort retention curve from this dataset.],
+        }
+      zh-CN: { name: 运行隔离计算, description: 在隔离环境中执行有边界的计算或文件处理。, task_examples: [根据这份数据计算分群留存曲线。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: compute.request, version: 1 }]
+    outputs: [{ contract: findings, version: 1 }]
+    compatibility_class: isolated_compute_findings
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: isolated_compute_contract
+
+  - id: cap_report
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: document
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Write a report,
+          description: Turn findings into a traceable Bowhead report that can be reviewed and revised.,
+          task_examples: [Create a management report from these findings.],
+        }
+      zh-CN: { name: 撰写报告, description: 将结论整理为可追溯、可审阅和修订的 Bowhead 报告。, task_examples: [根据这些结论生成一份管理报告。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: findings, version: 1 }, { contract: chart, version: 1, required: false }]
+    outputs: [{ contract: report.document, version: 1 }]
+    compatibility_class: report_authoring
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: report_document_contract
+
+  - id: cap_presentation
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: presentation
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Create a presentation,
+          description: "Build an editable presentation from an approved brief, findings or report.",
+          task_examples: [Turn this analysis into a board-ready presentation.],
+        }
+      zh-CN:
+        { name: 制作演示文稿, description: 根据已确认的简报、结论或报告生成可编辑演示文稿。, task_examples: [把这份分析制作成董事会汇报演示稿。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: { language: { type: string, maxLength: 32 } } }
+    inputs:
+      [
+        { contract: presentation.brief, version: 1 },
+        { contract: findings, version: 1, required: false },
+        { contract: report.document, version: 1, required: false },
+      ]
+    outputs: [{ contract: presentation.document, version: 1 }]
+    compatibility_class: editable_presentation
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: presentation_document_contract
+
+  - id: cap_document
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: document
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Create or edit a document,
+          description: Create or edit a structured document and produce a verified document artifact.,
+          task_examples: [Export this report as an editable Word document.],
+        }
+      zh-CN:
+        { name: 制作与编辑文档, description: 创建或编辑结构化文档，并生成经过校验的文档产物。, task_examples: [把这份报告导出成可编辑的 Word 文档。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: { format: { type: string, enum: [docx, pdf] } } }
+    inputs: [{ contract: document.source, version: 1 }]
+    outputs: [{ contract: document.file, version: 1 }]
+    compatibility_class: verified_document_file
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: document_file_contract
+
+  - id: cap_spreadsheet
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: spreadsheet
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Create a spreadsheet,
+          description: Turn structured data into an editable and verified spreadsheet artifact.,
+          task_examples: [Create an Excel workbook with the analysis and source data.],
+        }
+      zh-CN:
+        {
+          name: 制作电子表格,
+          description: 将结构化数据整理为可编辑、经过校验的电子表格产物。,
+          task_examples: [生成包含分析和源数据的 Excel 工作簿。],
+        }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: spreadsheet.source, version: 1 }]
+    outputs: [{ contract: spreadsheet.document, version: 1 }]
+    compatibility_class: verified_spreadsheet
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: spreadsheet_document_contract
+
+  - id: cap_visualize
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: visual
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Create charts and visuals,
+          description: Turn data or a bounded creative brief into a visual artifact with clear provenance.,
+          task_examples: [Create a chart that explains the monthly trend.],
+        }
+      zh-CN:
+        { name: 制作图表与视觉内容, description: 将数据或有边界的创意简报转化为来源清晰的视觉产物。, task_examples: [制作一张解释月度趋势的图表。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: visual.request, version: 1 }]
+    outputs: [{ contract: visual.artifact, version: 1 }]
+    compatibility_class: traceable_visual_artifact
+    market_visible: true
+    authoring_selectable: true
+    contract_test_family: visual_artifact_contract
+
+  - id: cap_team_read
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: team-system
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Read a team system,
+          description: Read an approved team-system operation within the current user's authorization.,
+          task_examples: [Look up the current status of this customer record.],
+        }
+      zh-CN: { name: 查询团队系统, description: 在当前用户授权范围内读取经批准的团队系统操作。, task_examples: [查询这条客户记录的当前状态。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: team.query, version: 1 }]
+    outputs: [{ contract: team.result, version: 1 }]
+    compatibility_class: authorized_team_read
+    market_visible: true
+    authoring_selectable: false
+    contract_test_family: team_read_contract
+
+  - id: cap_team_write
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: team-system
+    listing_revision: 1
+    listing:
+      en-US:
+        {
+          name: Update a team system,
+          description: Execute an approved team-system change with the required confirmation or approval.,
+          task_examples: [Update this approved ticket after I confirm.],
+        }
+      zh-CN: { name: 操作团队系统, description: 在完成所需确认或审批后执行经批准的团队系统变更。, task_examples: [我确认后更新这张工单。] }
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: team.command, version: 1 }]
+    outputs: [{ contract: team.receipt, version: 1 }]
+    compatibility_class: approved_team_write
+    market_visible: true
+    authoring_selectable: false
+    contract_test_family: team_write_contract
+
+# Implementations remain in shadow review and are not eligible for live dispatch.
+# M3-A adds exact Skill and report Artifact contracts so the next phase can bind
+# a reviewed plan without widening the current runtime.
+implementations:
+  - id: capi_analysis_reasoning
+    version: 1
+    capability: { id: cap_analysis, version: 1 }
+    lifecycle: active
+    required_tools: []
+    optional_tools: []
+    required_skills: []
+    required_connections: []
+    lead_role_ids: []
+    risk_floor: read
+    effect_class: read
+    availability_checks: [model_ready]
+    priority: 100
+    owner: platform-agents
+    review_state: shadow
+
+  - id: capi_data_discovery_native
+    version: 1
+    capability: { id: cap_data_discovery, version: 1 }
+    lifecycle: active
+    required_tools: [bi_schema]
+    optional_tools: []
+    required_skills: []
+    required_connections: [datarc]
+    lead_role_ids: []
+    risk_floor: read
+    effect_class: read
+    availability_checks: [data_connection_ready, principal_data_scope_ready]
+    priority: 100
+    owner: platform-data
+    review_state: shadow
+
+  - id: capi_data_query_native
+    version: 1
+    capability: { id: cap_data_query, version: 1 }
+    lifecycle: active
+    required_tools: [bi_query]
+    optional_tools: [bi_schema]
+    required_skills: []
+    required_connections: [datarc]
+    lead_role_ids: [data]
+    # The protocol for retrieving data from datarc belongs to this implementation, not any Agent persona.
+    # Switching to Power BI means adding an implementation of the same Definition with its own protocol.
+    prompt_modules:
+      - id: data-query-datarc-protocol
+        version: 1
+        sha256: sha256:cc2e7503e3d4697673cca91b0f33f5bf8202ada4a71c4c86a807f0ba11776d34
+    risk_floor: read
+    effect_class: read
+    availability_checks: [data_connection_ready, principal_data_scope_ready]
+    priority: 100
+    owner: platform-data
+    review_state: shadow
+
+  - id: capi_knowledge_search_native
+    version: 1
+    capability: { id: cap_knowledge_search, version: 1 }
+    lifecycle: active
+    required_tools: [kb_search]
+    optional_tools: [kb_query_records, kb_get_record]
+    required_skills: []
+    required_connections: []
+    lead_role_ids: [knowledge]
+    risk_floor: read
+    effect_class: read
+    availability_checks: [knowledge_index_ready, principal_resource_scope_ready]
+    priority: 100
+    owner: platform-knowledge
+    review_state: shadow
+
+  - id: capi_web_research_native
+    version: 1
+    capability: { id: cap_web_research, version: 1 }
+    lifecycle: active
+    required_tools: [web_search]
+    optional_tools: [web_fetch, web_extract, web_map, web_crawl, web_deep_research]
+    required_skills: []
+    required_connections: [web-search-provider]
+    lead_role_ids: []
+    risk_floor: read
+    effect_class: read
+    availability_checks: [web_provider_ready]
+    priority: 100
+    owner: platform-research
+    review_state: shadow
+
+  - id: capi_compute_python_native
+    version: 1
+    capability: { id: cap_compute, version: 1 }
+    lifecycle: active
+    required_tools: [python_exec]
+    optional_tools: []
+    required_skills: []
+    required_connections: []
+    lead_role_ids: [compute]
+    # Sandbox **input/output mechanisms** (how data enters and paths are retrieved), not computation methods.
+    # This turn only adds this section; relocating `compute.md` section ④ remains out of scope.
+    prompt_modules:
+      - id: sandbox-io-protocol
+        version: 1
+        sha256: sha256:9ffdf85b3dcff413db38fd174c940bddb3e46f5bf81ea0ce8f8b1531b32c47a5
+    risk_floor: compute
+    effect_class: compute
+    availability_checks: [sandbox_ready]
+    priority: 100
+    owner: platform-runtime
+    review_state: shadow
+
+  - id: capi_compute_python_skill
+    version: 1
+    capability: { id: cap_compute, version: 1 }
+    lifecycle: active
+    required_tools: [skill_read, skill_invoke]
+    optional_tools: []
+    required_skills:
+      - ref: skill://python_sandbox@sha256:e2d7f394067841d22b54d89f8f5e2af296a1e2a883bc41640dba8cdfda707e9b
+        permission: read
+      - ref: skill://python_sandbox@sha256:e2d7f394067841d22b54d89f8f5e2af296a1e2a883bc41640dba8cdfda707e9b
+        permission: invoke
+    required_connections: []
+    lead_role_ids: [compute]
+    risk_floor: compute
+    effect_class: compute
+    availability_checks: [sandbox_ready]
+    priority: 90
+    owner: platform-runtime
+    review_state: shadow
+
+  - id: capi_report_canvas
+    version: 1
+    capability: { id: cap_report, version: 1 }
+    lifecycle: active
+    required_tools: []
+    optional_tools: []
+    required_skills: []
+    required_connections: []
+    lead_role_ids: []
+    artifact:
+      contract: report.document
+      version: 1
+      adapter: { id: canvas-report, version: 1 }
+    prompt_modules:
+      - id: canvas-report-protocol
+        version: 1
+        sha256: sha256:a5b858fd525ebbc92a9f1d55e29c7135c776ce4fe6187ce6ef9a0f4dd15c9f48
+      # Delivery contract and body structure. `anchor_tools` separately narrows each to executors holding that tool family,
+      # because this implementation has empty `required_tools` (dependencies are expressed through the Adapter's delegate_tools).
+      - id: canvas-delivery-protocol
+        version: 1
+        sha256: sha256:b88f4df626efdae161f50e9af6d0d0962fe15ab7405b58d38eaf15ec8a8cfa05
+      - id: report-authoring-protocol
+        version: 1
+        sha256: sha256:4d45040cca212e1594cda66073f9accd388fd73c2239d8ff007b118c07b4b36c
+    output_grant: { id: report-writer-grant, version: 1 }
+    risk_floor: internal_artifact_write
+    effect_class: internal_artifact_write
+    availability_checks: [canvas_ready, report_target_ready]
+    priority: 100
+    owner: platform-artifacts
+    review_state: shadow
+
+  # M3-13E image vertical slice.  This contract proves only the trusted
+  # image_generate invocation and visual artifact output; the optional Canvas
+  # tools remain outside the role grant and are still authorized separately at
+  # runtime.
+  - id: capi_image_generation_native
+    version: 1
+    capability: { id: cap_visualize, version: 1 }
+    lifecycle: active
+    required_tools: [image_generate]
+    optional_tools: [add_image, canvas_create_design, canvas_flatten_design, canvas_update_design_text]
+    required_skills: []
+    required_connections: []
+    lead_role_ids: [image]
+    risk_floor: internal_artifact_write
+    effect_class: internal_artifact_write
+    availability_checks: [image_runtime_contract_ready]
+    eval_suite: image-deliverable-parity-v1
+    priority: 100
+    owner: platform-media
+    review_state: reviewed
+    reviewed_at: 2026-09-07T00:00:00Z

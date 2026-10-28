@@ -1,0 +1,32 @@
+{
+  "skill_name": "analyst-sop-period-compare",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "今年 GMV 同比",
+      "files": [],
+      "expected_behavior": [
+        "MUST-1: single bi_query with '同比' keyword (no two-period split + manual delta).",
+        "Returns current value + YoY delta + kpi_row section."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "今年 GMV 同比 + 月度趋势",
+      "files": [],
+      "expected_behavior": [
+        "MUST-1 + MUST-2 both run, batched in one bi_query call ('同比' + '每月'; no per-month split).",
+        "Trend chart rendered; narrative identifies any inflection month."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "各省同比",
+      "files": [],
+      "expected_behavior": [
+        "MUST-1 + SHOULD-1 main-dim breakdown (two-period bi_query batch + python_sandbox merge, or native '按省 同比').",
+        "rank chart by per-province delta."
+      ]
+    }
+  ]
+}

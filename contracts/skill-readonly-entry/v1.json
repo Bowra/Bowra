@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "entry_file": "references/method.md",
+  "required_files": ["references/metrics.md"],
+  "parameter_schema": {
+    "type": "object",
+    "properties": {
+      "period": { "type": "string", "format": "date", "title": "期间" },
+      "region": {
+        "type": ["string", "null"],
+        "enum": ["APAC", "EMEA", null],
+        "default": "APAC"
+      },
+      "limit": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 },
+      "adjustments": {
+        "type": "array",
+        "maxItems": 3,
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string", "maxLength": 40 },
+            "amount": { "type": "number" }
+          },
+          "required": ["label", "amount"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["period"],
+    "additionalProperties": false
+  },
+  "required_skill_refs": [
+    {
+      "kind": "skill",
+      "source_kind": "builtin",
+      "id": "profitability-method",
+      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "requires_script": false,
+  "requires_new_tools": false,
+  "requires_new_connections": false
+}

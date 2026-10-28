@@ -1,0 +1,446 @@
+{
+  "en-US": {
+    "chinese_skill_labels": [
+      {
+        "capabilityRefs": [
+          "skill:canvas-docx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_24ec38d4259e232c",
+        "kind": "create",
+        "outputFormat": "docx",
+        "prompt": "Help me turn the materials I provide into an editable DOCX draft. First confirm the audience and desired outcome, then create it.",
+        "reason": "A DOCX export capability is available in this space.",
+        "title": "Create an editable DOCX draft"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_264a5136b5c90e18",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Review the materials I select from this space, separate evidence from assumptions, and produce a concise decision brief with source references.",
+        "reason": "Space knowledge can read and organize available materials.",
+        "title": "Turn space materials into a decision brief"
+      }
+    ],
+    "full": [
+      {
+        "capabilityRefs": [
+          "skill:pptx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_b1ecc6754fd87e16",
+        "kind": "create",
+        "outputFormat": "pptx",
+        "prompt": "Help me turn the materials I provide into an editable PPTX draft. First confirm the audience and desired outcome, then create it.",
+        "reason": "A PPTX export capability is available in this space.",
+        "title": "Create an editable PPTX draft"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_264a5136b5c90e18",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Review the materials I select from this space, separate evidence from assumptions, and produce a concise decision brief with source references.",
+        "reason": "Space knowledge can read and organize available materials.",
+        "title": "Turn space materials into a decision brief"
+      },
+      {
+        "capabilityRefs": [
+          "tool:crm.update"
+        ],
+        "contextRefs": [],
+        "id": "hpi_c16e605998229979",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "Help me plan an action using CRM 更新. Show the exact proposed changes first and wait for the required confirmation before writing anything.",
+        "reason": "A write-capable tool is available; changes still require the normal confirmation flow.",
+        "title": "Carry out a confirmed action with CRM 更新"
+      },
+      {
+        "capabilityRefs": [
+          "platform:routine"
+        ],
+        "contextRefs": [],
+        "id": "hpi_b07d762d18e185c8",
+        "kind": "automate",
+        "outputFormat": null,
+        "prompt": "Help me define a recurring workflow as a Routine. Confirm the inputs, schedule, recipients, and failure handling before creating it.",
+        "reason": "Routine creation is available for recurring work.",
+        "title": "Turn a repeated workflow into a Routine"
+      }
+    ],
+    "full_default_limit": [
+      {
+        "capabilityRefs": [
+          "skill:pptx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_b1ecc6754fd87e16",
+        "kind": "create",
+        "outputFormat": "pptx",
+        "prompt": "Help me turn the materials I provide into an editable PPTX draft. First confirm the audience and desired outcome, then create it.",
+        "reason": "A PPTX export capability is available in this space.",
+        "title": "Create an editable PPTX draft"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_264a5136b5c90e18",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Review the materials I select from this space, separate evidence from assumptions, and produce a concise decision brief with source references.",
+        "reason": "Space knowledge can read and organize available materials.",
+        "title": "Turn space materials into a decision brief"
+      },
+      {
+        "capabilityRefs": [
+          "tool:crm.update"
+        ],
+        "contextRefs": [],
+        "id": "hpi_c16e605998229979",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "Help me plan an action using CRM 更新. Show the exact proposed changes first and wait for the required confirmation before writing anything.",
+        "reason": "A write-capable tool is available; changes still require the normal confirmation flow.",
+        "title": "Carry out a confirmed action with CRM 更新"
+      }
+    ],
+    "lead_only": [
+      {
+        "capabilityRefs": [
+          "platform:lead"
+        ],
+        "contextRefs": [],
+        "id": "hpi_17ccbbddf38d6ae1",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Help me break down a work goal. First clarify the expected outcome, then identify the required materials, decisions, and execution steps.",
+        "reason": "Bowhead can clarify the goal and identify the capabilities and materials needed.",
+        "title": "Turn a goal into a workable plan"
+      }
+    ],
+    "lead_only_platforms": [
+      {
+        "capabilityRefs": [
+          "platform:lead"
+        ],
+        "contextRefs": [],
+        "id": "hpi_17ccbbddf38d6ae1",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Help me break down a work goal. First clarify the expected outcome, then identify the required materials, decisions, and execution steps.",
+        "reason": "Bowhead can clarify the goal and identify the capabilities and materials needed.",
+        "title": "Turn a goal into a workable plan"
+      }
+    ],
+    "read_only_viewer": [
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_264a5136b5c90e18",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Review the materials I select from this space, separate evidence from assumptions, and produce a concise decision brief with source references.",
+        "reason": "Space knowledge can read and organize available materials.",
+        "title": "Turn space materials into a decision brief"
+      },
+      {
+        "capabilityRefs": [
+          "tool:scheduled_job_create"
+        ],
+        "contextRefs": [],
+        "id": "hpi_4e80155dd3a41a8f",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "Help me plan an action using scheduled_job_create. Show the exact proposed changes first and wait for the required confirmation before writing anything.",
+        "reason": "A write-capable tool is available; changes still require the normal confirmation flow.",
+        "title": "Carry out a confirmed action with scheduled_job_create"
+      }
+    ],
+    "read_skill_as_knowledge": [
+      {
+        "capabilityRefs": [
+          "skill:brief-reader"
+        ],
+        "contextRefs": [],
+        "id": "hpi_a7d280655084b964",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "Review the materials I select from this space, separate evidence from assumptions, and produce a concise decision brief with source references.",
+        "reason": "简报阅读 can read and organize available materials.",
+        "title": "Turn space materials into a decision brief"
+      },
+      {
+        "capabilityRefs": [
+          "tool:send_email"
+        ],
+        "contextRefs": [],
+        "id": "hpi_03f242290b915b88",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "Help me plan an action using Send email. Show the exact proposed changes first and wait for the required confirmation before writing anything.",
+        "reason": "A write-capable tool is available; changes still require the normal confirmation flow.",
+        "title": "Carry out a confirmed action with Send email"
+      }
+    ],
+    "write_tool_with_display_name": [
+      {
+        "capabilityRefs": [
+          "tool:scheduled_job_create"
+        ],
+        "contextRefs": [],
+        "id": "hpi_4e80155dd3a41a8f",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "Help me plan an action using scheduled_job_create. Show the exact proposed changes first and wait for the required confirmation before writing anything.",
+        "reason": "A write-capable tool is available; changes still require the normal confirmation flow.",
+        "title": "Carry out a confirmed action with scheduled_job_create"
+      },
+      {
+        "capabilityRefs": [
+          "platform:routine"
+        ],
+        "contextRefs": [],
+        "id": "hpi_b07d762d18e185c8",
+        "kind": "automate",
+        "outputFormat": null,
+        "prompt": "Help me define a recurring workflow as a Routine. Confirm the inputs, schedule, recipients, and failure handling before creating it.",
+        "reason": "Routine creation is available for recurring work.",
+        "title": "Turn a repeated workflow into a Routine"
+      }
+    ]
+  },
+  "zh-CN": {
+    "chinese_skill_labels": [
+      {
+        "capabilityRefs": [
+          "skill:canvas-docx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_50a5da69f2149493",
+        "kind": "create",
+        "outputFormat": "docx",
+        "prompt": "请把我接下来提供的材料整理成一版可编辑的 DOCX 初稿。先确认受众和预期结果，再开始产出。",
+        "reason": "当前可用的报告导出 Word支持产出 DOCX。",
+        "title": "生成一版可编辑的 DOCX 初稿"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_736bcb2d3ed67691",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请分析我从当前空间选择的材料，区分事实、假设和待确认项，整理成一份带来源引用的简明决策简报。",
+        "reason": "当前可用的空间知识可以读取并整理材料。",
+        "title": "把空间材料整理成决策简报"
+      }
+    ],
+    "full": [
+      {
+        "capabilityRefs": [
+          "skill:pptx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_0be2d6b2888a6a3b",
+        "kind": "create",
+        "outputFormat": "pptx",
+        "prompt": "请把我接下来提供的材料整理成一版可编辑的 PPTX 初稿。先确认受众和预期结果，再开始产出。",
+        "reason": "当前可用的Presentation builder支持产出 PPTX。",
+        "title": "生成一版可编辑的 PPTX 初稿"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_736bcb2d3ed67691",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请分析我从当前空间选择的材料，区分事实、假设和待确认项，整理成一份带来源引用的简明决策简报。",
+        "reason": "当前可用的空间知识可以读取并整理材料。",
+        "title": "把空间材料整理成决策简报"
+      },
+      {
+        "capabilityRefs": [
+          "tool:crm.update"
+        ],
+        "contextRefs": [],
+        "id": "hpi_58ea84156691ba90",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "请帮我规划一项使用CRM 更新完成的操作。先列出具体变更内容，并在写入前等待所需确认。",
+        "reason": "当前存在可写工具；实际变更仍会经过正常确认流程。",
+        "title": "用CRM 更新执行一项已确认操作"
+      },
+      {
+        "capabilityRefs": [
+          "platform:routine"
+        ],
+        "contextRefs": [],
+        "id": "hpi_29f9f5c8102dc1ae",
+        "kind": "automate",
+        "outputFormat": null,
+        "prompt": "请帮我把一项重复工作整理成 Routine。创建前先确认输入、运行时间、接收人和失败处理方式。",
+        "reason": "当前空间支持把重复工作配置为 Routine。",
+        "title": "把重复工作整理成一个 Routine"
+      }
+    ],
+    "full_default_limit": [
+      {
+        "capabilityRefs": [
+          "skill:pptx"
+        ],
+        "contextRefs": [],
+        "id": "hpi_0be2d6b2888a6a3b",
+        "kind": "create",
+        "outputFormat": "pptx",
+        "prompt": "请把我接下来提供的材料整理成一版可编辑的 PPTX 初稿。先确认受众和预期结果，再开始产出。",
+        "reason": "当前可用的Presentation builder支持产出 PPTX。",
+        "title": "生成一版可编辑的 PPTX 初稿"
+      },
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_736bcb2d3ed67691",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请分析我从当前空间选择的材料，区分事实、假设和待确认项，整理成一份带来源引用的简明决策简报。",
+        "reason": "当前可用的空间知识可以读取并整理材料。",
+        "title": "把空间材料整理成决策简报"
+      },
+      {
+        "capabilityRefs": [
+          "tool:crm.update"
+        ],
+        "contextRefs": [],
+        "id": "hpi_58ea84156691ba90",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "请帮我规划一项使用CRM 更新完成的操作。先列出具体变更内容，并在写入前等待所需确认。",
+        "reason": "当前存在可写工具；实际变更仍会经过正常确认流程。",
+        "title": "用CRM 更新执行一项已确认操作"
+      }
+    ],
+    "lead_only": [
+      {
+        "capabilityRefs": [
+          "platform:lead"
+        ],
+        "contextRefs": [],
+        "id": "hpi_cacc49bc94d678be",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请帮我拆解一个工作目标。先澄清预期结果，再列出所需材料、关键决策和可执行步骤。",
+        "reason": "Bowhead 可以先澄清目标，再识别所需材料和可执行步骤。",
+        "title": "把一个目标拆成可推进的工作计划"
+      }
+    ],
+    "lead_only_platforms": [
+      {
+        "capabilityRefs": [
+          "platform:lead"
+        ],
+        "contextRefs": [],
+        "id": "hpi_cacc49bc94d678be",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请帮我拆解一个工作目标。先澄清预期结果，再列出所需材料、关键决策和可执行步骤。",
+        "reason": "Bowhead 可以先澄清目标，再识别所需材料和可执行步骤。",
+        "title": "把一个目标拆成可推进的工作计划"
+      }
+    ],
+    "read_only_viewer": [
+      {
+        "capabilityRefs": [
+          "platform:knowledge"
+        ],
+        "contextRefs": [],
+        "id": "hpi_736bcb2d3ed67691",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请分析我从当前空间选择的材料，区分事实、假设和待确认项，整理成一份带来源引用的简明决策简报。",
+        "reason": "当前可用的空间知识可以读取并整理材料。",
+        "title": "把空间材料整理成决策简报"
+      },
+      {
+        "capabilityRefs": [
+          "tool:scheduled_job_create"
+        ],
+        "contextRefs": [],
+        "id": "hpi_6272faf13e62d9b0",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "请帮我规划一项使用scheduled_job_create完成的操作。先列出具体变更内容，并在写入前等待所需确认。",
+        "reason": "当前存在可写工具；实际变更仍会经过正常确认流程。",
+        "title": "用scheduled_job_create执行一项已确认操作"
+      }
+    ],
+    "read_skill_as_knowledge": [
+      {
+        "capabilityRefs": [
+          "skill:brief-reader"
+        ],
+        "contextRefs": [],
+        "id": "hpi_a512fdc17a514c69",
+        "kind": "analyze",
+        "outputFormat": null,
+        "prompt": "请分析我从当前空间选择的材料，区分事实、假设和待确认项，整理成一份带来源引用的简明决策简报。",
+        "reason": "当前可用的简报阅读可以读取并整理材料。",
+        "title": "把空间材料整理成决策简报"
+      },
+      {
+        "capabilityRefs": [
+          "tool:send_email"
+        ],
+        "contextRefs": [],
+        "id": "hpi_c91d6a1f3ee6cbd7",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "请帮我规划一项使用Send email完成的操作。先列出具体变更内容，并在写入前等待所需确认。",
+        "reason": "当前存在可写工具；实际变更仍会经过正常确认流程。",
+        "title": "用Send email执行一项已确认操作"
+      }
+    ],
+    "write_tool_with_display_name": [
+      {
+        "capabilityRefs": [
+          "tool:scheduled_job_create"
+        ],
+        "contextRefs": [],
+        "id": "hpi_6272faf13e62d9b0",
+        "kind": "act",
+        "outputFormat": null,
+        "prompt": "请帮我规划一项使用scheduled_job_create完成的操作。先列出具体变更内容，并在写入前等待所需确认。",
+        "reason": "当前存在可写工具；实际变更仍会经过正常确认流程。",
+        "title": "用scheduled_job_create执行一项已确认操作"
+      },
+      {
+        "capabilityRefs": [
+          "platform:routine"
+        ],
+        "contextRefs": [],
+        "id": "hpi_29f9f5c8102dc1ae",
+        "kind": "automate",
+        "outputFormat": null,
+        "prompt": "请帮我把一项重复工作整理成 Routine。创建前先确认输入、运行时间、接收人和失败处理方式。",
+        "reason": "当前空间支持把重复工作配置为 Routine。",
+        "title": "把重复工作整理成一个 Routine"
+      }
+    ]
+  }
+}

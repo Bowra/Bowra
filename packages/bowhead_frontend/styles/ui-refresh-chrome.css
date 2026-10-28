@@ -1,0 +1,1485 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · P2 batch 3: sidebar and topbar visuals, and icon sizes snapped to the
+ * 14 / 16 / 20 tiers.
+ *
+ * Spec: Claude Design "P2 Sidebar & Topbar Spec" (row metrics, selection, section headers, session rows,
+ * identity row, topbar) and "P2 Icons & Type Spec" (size tiers); decisions in
+ * docs/design/界面改版-Apple设计方向.md "P2 视觉改版"; implementation and acceptance in
+ * docs/design/组件统一-技术设计.md "P2 第 3 批结果".
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles. Colours come
+ * from tokens only. Navigation structure is unchanged
+ * (batch 4); the knowledge base in-page navigation is untouched (batch 5). Imported last by the
+ * authenticated layout. Contract: styles/ui-refresh-chrome.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ 1 · Sidebar frame ═══
+ * Persistent expanded sidebar 248 wide (spec: >= 1280 is 248; the expanded mode is persistent from 1440 up,
+ * the overlay stays 280). Side padding 8, header 48, search 28 (touch 36). */
+:root:root .unified-sidebar.is-expanded,
+:root:root .unified-sidebar.is-expanded .unified-sidebar-expanded {
+  flex-basis: 248px;
+  width: 248px;
+}
+@media (min-width: 1440px) {
+  :root:root[data-sidebar-mode="expanded"] .unified-sidebar.is-bootstrap {
+    flex-basis: 248px;
+    width: 248px;
+  }
+  /* The first-paint fallback matches the 248 sidebar (globals.css sizes it 280 for the base layer), so the main
+   * column does not move when the product shell replaces it. */
+  :root:root[data-sidebar-mode="expanded"] .app-boot-sidebar {
+    flex-basis: 248px;
+    width: 248px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+:root:root .unified-sidebar-expanded {
+  padding: 0 8px 8px;
+  font-family: var(--font-control);
+}
+:root:root .unified-sidebar-header {
+  height: 48px;
+  padding: 0 0 0 4px;
+  gap: 8px;
+}
+:root:root .unified-sidebar-header .unified-sidebar-icon-button {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: var(--r-2);
+}
+:root:root :is(.unified-sidebar-icon-button, .unified-sidebar-compact-button) {
+  color: var(--c-ink-2);
+}
+:root:root :is(.unified-sidebar-icon-button, .unified-sidebar-compact-button):hover {
+  color: var(--c-ink);
+  background: var(--c-fill-1);
+}
+:root:root :is(.unified-sidebar-icon-button, .unified-sidebar-compact-button):active {
+  background: var(--c-fill-2);
+}
+:root:root .unified-work-search input {
+  height: 28px;
+  padding: 0 40px 0 28px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  box-shadow: inset 0 0 0 var(--hairline, 0.5px) var(--c-separator);
+  font: 400 var(--fs-md) var(--font-control);
+}
+:root:root .unified-work-search > svg {
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--c-ink-3);
+}
+:root:root .unified-work-search kbd {
+  border: 0;
+  box-shadow: inset 0 0 0 var(--hairline, 0.5px) var(--c-separator-strong);
+  color: var(--c-ink-3);
+  font: 400 0.6875rem var(--font-control);
+}
+:root:root .unified-work-search input::placeholder {
+  color: var(--c-ink-3);
+}
+
+/* ═══ 2 · Navigation rows (persistent sidebar, overlay, mobile drawer) ═══
+ * Same metrics as menu items: 32 high, radius 7, 13px system font, icon 16 in --c-ink-2.
+ * Selected = neutral fill-2 + 600 + accent icon, no colour bar; hover fill-1, pressed fill-2;
+ * keyboard focus 2px inset ring (offset -2, so the scroll container does not clip it). */
+:root:root
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-sidebar-subnav-item, .unified-drawer-subnav-item) {
+  min-height: 32px;
+  padding: 0 8px;
+  gap: 8px;
+  border-radius: 7px;
+  color: var(--c-ink);
+  font: 400 var(--fs-md) / 1.35 var(--font-control);
+  letter-spacing: normal;
+}
+:root:root :is(.unified-sidebar-nav-item, .unified-drawer-nav-item) > svg:first-child {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--c-ink-2);
+}
+:root:root
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-sidebar-subnav-item, .unified-drawer-subnav-item):hover {
+  color: var(--c-ink);
+  background: var(--c-fill-1);
+}
+:root:root
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-sidebar-subnav-item, .unified-drawer-subnav-item):active {
+  background: var(--c-fill-2);
+}
+:root:root
+  :is(
+    .unified-sidebar-nav-item,
+    .unified-drawer-nav-item,
+    .unified-sidebar-subnav-item,
+    .unified-drawer-subnav-item,
+    .unified-sidebar-group-toggle,
+    .unified-drawer-group-toggle,
+    .unified-sidebar-compact-button,
+    .unified-sidebar-icon-button,
+    .unified-work-item-main,
+    .unified-work-archive-entry,
+    .unified-sidebar-user
+  ):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+/* Selected leaf: the item itself carries aria-current="page" */
+:root:root
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-sidebar-subnav-item, .unified-drawer-subnav-item):is(
+    .is-active,
+    [aria-current="page"]
+  ) {
+  color: var(--c-ink);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  font-weight: 600;
+}
+:root:root
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item):is(.is-active, [aria-current="page"])
+  > svg:first-child {
+  color: var(--c-accent);
+}
+/* No colour bar on the left of the selected row */
+:root:root
+  :is(.unified-sidebar-nav-group-row, .unified-sidebar-nav-item, .unified-drawer-nav-group-row, .unified-drawer-nav-item).is-active::before {
+  content: none;
+}
+
+/* Group rows: two click areas (label opens the overview, the trailing chevron only expands).
+ * The row is the hover target; a group whose overview is the current page is selected (fill-2 + 600);
+ * a group that only contains the current page keeps a plain row and turns its icon accent. */
+:root:root :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row) {
+  align-items: center;
+  border-radius: 7px;
+  color: var(--c-ink);
+  background: transparent;
+}
+:root:root :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row):hover {
+  background: var(--c-fill-1);
+}
+:root:root :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row).is-active {
+  color: var(--c-ink);
+  background: transparent;
+}
+:root:root :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row).is-active:hover {
+  background: var(--c-fill-1);
+}
+:root:root
+  :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row)
+  :is(.unified-sidebar-nav-item, .unified-drawer-nav-item).is-group-link {
+  padding-right: 4px;
+  background: transparent;
+  color: var(--c-ink);
+  font-weight: 400;
+}
+:root:root
+  :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row):has(> [aria-current="page"]) {
+  background: var(--c-fill-2);
+}
+:root:root
+  :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row)
+  > :is(.unified-sidebar-nav-item, .unified-drawer-nav-item)[aria-current="page"] {
+  font-weight: 600;
+}
+:root:root
+  :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row).is-active
+  > :is(.unified-sidebar-nav-item, .unified-drawer-nav-item)
+  > svg:first-child {
+  color: var(--c-accent);
+}
+/* Expand chevron: 24 x 24 hit area inside the 32 row (touch 44 x 44), 14px chevron in --c-ink-3,
+ * pointing right when collapsed and down when expanded. */
+:root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle) {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-right: 4px;
+  border-radius: 6px;
+  color: var(--c-ink-3);
+}
+:root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle):hover {
+  color: var(--c-ink);
+  background: var(--c-fill-2);
+}
+:root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle) > svg {
+  width: 14px;
+  height: 14px;
+  color: inherit;
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast, 120ms) var(--ease-standard, ease);
+}
+:root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle)[aria-expanded="true"] > svg {
+  transform: none;
+}
+/* Child rows: no guide line; text aligns with the parent's label (8 padding + 16 icon + 8 gap = 32) */
+:root:root :is(.unified-sidebar-subnav, .unified-drawer-subnav) {
+  margin: 1px 0 0;
+  padding-left: 0;
+  gap: 1px;
+}
+:root:root :is(.unified-sidebar-subnav, .unified-drawer-subnav)::before {
+  content: none;
+}
+:root:root :is(.unified-sidebar-subnav-item, .unified-drawer-subnav-item) {
+  padding-left: 32px;
+}
+:root:root :is(.unified-sidebar-nav, .unified-drawer-nav) {
+  gap: 1px;
+}
+
+/* ═══ 3 · Section headers: 11/600 system font in --c-ink-3, 12 above and 4 below; no monospace, no
+ * uppercase, no letter spacing. Empty and status lines in the list are 12px regular text. ═══ */
+:root:root
+  :is(.unified-sidebar-section-label, .unified-work-group h3, .unified-sidebar-flyout-title) {
+  margin-top: 0;
+  padding: 12px 8px 4px;
+  color: var(--c-ink-3);
+  font: 600 0.6875rem / 1rem var(--font-control);
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .unified-work-empty {
+  padding: 12px 8px 4px;
+  color: var(--c-ink-3);
+  font: 400 var(--fs-sm) / 1.4 var(--font-control);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* ═══ Session list before real data (Agents & Reports polish spec 3b, D9) ═══
+ * First load: six skeleton rows at the 40px two-line height (title bar 10 high 60–85% wide, time bar 8 high about
+ * 30%), shown after the shared 300ms delay and breathing between full and 0.55 opacity every 1.6s; still under
+ * reduced motion. Failure: an error row with a Retry text button. A completed empty load: title + one-line hint. */
+:root:root .ui-skeleton--sessions {
+  gap: 0;
+  padding: 4px 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root .ui-skeleton--sessions .ui-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px;
+  box-shadow: none;
+}
+:root:root .ui-skeleton--sessions .ui-skeleton-row:nth-child(n) > .ui-skeleton-bar:first-child {
+  width: 72%;
+  height: 10px;
+  background: var(--c-fill-2);
+}
+:root:root .ui-skeleton--sessions .ui-skeleton-row:nth-child(3n + 2) > .ui-skeleton-bar:first-child {
+  width: 60%;
+}
+:root:root .ui-skeleton--sessions .ui-skeleton-row:nth-child(3n) > .ui-skeleton-bar:first-child {
+  width: 85%;
+}
+:root:root .ui-skeleton--sessions .ui-skeleton-row:nth-child(n) > .ui-skeleton-bar:last-child {
+  width: 30%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--c-fill-1);
+}
+@keyframes ui-skeleton-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:root .ui-skeleton--sessions:not(.is-pending) .ui-skeleton-row {
+    animation: ui-skeleton-breathe 1.6s ease-in-out infinite;
+  }
+}
+:root:root .session-list-error {
+  margin: 8px 4px 0;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  font-family: var(--font-control);
+}
+:root:root .session-list-error > p {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--r-2);
+  background: var(--c-err-soft);
+  color: var(--c-err-ink, var(--c-err));
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+:root:root .session-list-error > p svg {
+  flex: none;
+}
+:root:root .session-list-error > button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-accent-text);
+  font: 500 var(--fs-sm) / 1.2 var(--font-control);
+  cursor: pointer;
+}
+:root:root .session-list-error > button:hover {
+  background: var(--c-fill-1);
+}
+:root:root .session-list-error > button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  :root:root .session-list-error > button {
+    min-height: 44px;
+  }
+}
+:root:root .unified-work-empty--first {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 24px 8px 8px;
+  text-align: center;
+}
+:root:root .unified-work-empty--first > strong {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .unified-work-empty--first > span {
+  color: var(--c-ink-3);
+}
+
+/* ═══ Older sessions and sidebar search counts (Header, Language & Paging spec 4, D11/D12) ═══
+ * The list ends with a quiet text row, not a button: 32 high (44 on touch and in the phone drawer), 12.5 ink3 with
+ * a 14px chevron in ink4, hover fill. Loading swaps it for three session-height skeleton rows (shared 300ms delay);
+ * a failure swaps it for an error row with Retry; the end state is one 12px ink4 line. Search group headings carry
+ * the match count on the right (11/500 ink4, tabular); the matched term is marked accent-soft; a hit inside the
+ * user's message shows a small "In message" tag and about 12 characters on each side. */
+:root:root .older-sessions {
+  padding: 2px 0 4px;
+}
+:root:root .older-sessions .ui-skeleton--sessions {
+  padding: 0;
+}
+:root:root .older-sessions-more {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-ink-3);
+  font: 400 0.78125rem / 1.2 var(--font-control);
+  text-align: left;
+  cursor: pointer;
+}
+:root:root .older-sessions-more svg {
+  flex: none;
+  color: var(--c-ink-4);
+}
+:root:root .older-sessions-more:hover:not([aria-disabled="true"]) {
+  background: var(--c-fill-1);
+}
+:root:root .older-sessions-more:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .older-sessions-more[aria-disabled="true"] {
+  cursor: progress;
+}
+:root:root .older-sessions-end {
+  margin: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  color: var(--c-ink-4);
+  font: 400 0.75rem / 1.3 var(--font-control);
+}
+:root:root .older-sessions-error {
+  margin: 4px 0;
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: var(--r-2);
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+  font: 400 0.78125rem / 1.5 var(--font-control);
+}
+:root:root .older-sessions-error > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--c-err);
+}
+:root:root .older-sessions-error > button {
+  margin-left: auto;
+  flex: none;
+  min-height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-accent-text);
+  font: 500 0.78125rem / 1.2 var(--font-control);
+  cursor: pointer;
+}
+:root:root .older-sessions-error > button:hover {
+  background: var(--c-fill-1);
+}
+:root:root .older-sessions-error > button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root :is(.older-sessions-more, .older-sessions-end).is-touch {
+  min-height: 44px;
+  font-size: 0.9375rem;
+}
+@media (pointer: coarse) {
+  :root:root .older-sessions-more {
+    min-height: 44px;
+  }
+  :root:root .older-sessions-error > button {
+    min-height: 44px;
+  }
+}
+:root:root .unified-search-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+:root:root .unified-search-count {
+  margin-left: auto;
+  color: var(--c-ink-4);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .unified-search-result mark {
+  border-radius: 3px;
+  padding: 0 1px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .unified-search-result-snippet.is-content {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .unified-search-source {
+  box-sizing: border-box;
+  height: 16px;
+  margin-right: 4px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: 1px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 0.5px var(--c-line);
+  color: var(--c-ink-3);
+  font: 600 0.65625rem / 1 var(--font-control);
+}
+:root:root .unified-search-result-date {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .unified-search-note {
+  margin: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  color: var(--c-ink-4);
+  font: 400 0.75rem / 1.3 var(--font-control);
+}
+:root:root .unified-search-empty {
+  display: grid;
+  gap: 4px;
+  padding: 16px 8px;
+  text-align: center;
+}
+:root:root .unified-search-empty > strong {
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+:root:root .unified-search-empty > span {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+
+/* ═══ 4 · Session rows: two lines, 44 high (5 + 18 + 16 + 5); title 13/500; second line 12px with the state
+ * on the left and the time on the right (tabular figures, system font). Selected fill-2 + title 600 and a
+ * --c-ink-2 second line (--c-ink-3 on fill-2 is under 4.5:1 in dark); unread = title 600 only (no dot; screen
+ * readers get hidden "Unread" text). Running = a still accent dot + text (a 2s fade only without "reduce motion");
+ * pending = warning dot + text; failed = error circle-x + text. Row actions live only in "⋯" (no inline
+ * Pin / Archive), which shows on hover / focus and stays visible on touch. ═══ */
+:root:root .unified-work-item {
+  min-height: 44px;
+  border-radius: 7px;
+  color: var(--c-ink);
+}
+:root:root .unified-work-item:hover {
+  background: var(--c-fill-1);
+}
+:root:root .unified-work-item.is-active {
+  background: var(--c-fill-2);
+  box-shadow: none;
+}
+/* padding-right stays with the legacy rules: they make room for the hover / touch row actions */
+:root:root .unified-work-item-main {
+  position: relative;
+  padding-block: 5px;
+  padding-left: 8px;
+  gap: 0;
+  align-items: center;
+}
+/* touch keeps "⋯" visible, so the title always yields its width (the legacy rule keys on inline buttons) */
+@media (hover: none) {
+  :root:root .unified-work-item.has-more .unified-work-item-main {
+    padding-right: 42px;
+  }
+}
+/* mouse: the 32px "⋯" sits flush right; reserve its width plus a 4px gap so the right-aligned time
+ * is never clipped under it (the legacy 30px reserve cut the last glyph: "36m agc") */
+@media (hover: hover) and (pointer: fine) {
+  :root:root .unified-work-item.has-more:is(
+      :hover,
+      :has(.unified-work-more-wrap:focus-within),
+      :has(.unified-work-more[aria-expanded="true"])
+    )
+    .unified-work-item-main {
+    padding-right: 36px;
+  }
+}
+:root:root .unified-work-copy {
+  gap: 0;
+}
+:root:root .unified-work-title {
+  color: var(--c-ink);
+  font: 500 var(--fs-md) / 1.125rem var(--font-control);
+}
+:root:root :is(.unified-work-item.is-active, .unified-work-item.is-unread) .unified-work-title {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .unified-work-meta {
+  align-items: center;
+  min-height: 16px;
+  color: var(--c-ink-3);
+  font: 400 var(--fs-sm) / 1rem var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .unified-work-item.is-active .unified-work-meta {
+  color: var(--c-ink-2);
+}
+:root:root .unified-work-meta > :last-child:not(:only-child),
+:root:root .unified-work-meta > :only-child:not(.unified-work-meta-signals) {
+  margin-left: auto;
+}
+:root:root .unified-work-lifecycle-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 400;
+}
+:root:root .unified-work-lifecycle-state.active {
+  color: var(--c-accent-text);
+}
+:root:root .unified-work-lifecycle-state.pending {
+  color: var(--c-warn-ink);
+}
+:root:root .unified-work-lifecycle-state.error {
+  color: var(--c-err-ink);
+}
+:root:root .unified-work-lifecycle-state:is(.active, .pending)::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+:root:root .unified-work-lifecycle-state.pending::before {
+  background: var(--c-warn);
+}
+:root:root .unified-work-lifecycle-state.error::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--c-err);
+  -webkit-mask: var(--glyph-circle-x) center / contain no-repeat;
+  mask: var(--glyph-circle-x) center / contain no-repeat;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:root .unified-work-lifecycle-state.active::before {
+    animation: ui-chrome-running-fade 2s ease-in-out infinite;
+  }
+}
+@keyframes ui-chrome-running-fade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+:root:root {
+  /* Lucide circle-x as a mask, stroke 2.5 of 24 like the other glyph tokens (mask glyphs cannot use non-scaling strokes) */
+  --glyph-circle-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m15 9-6 6'/%3E%3Cpath d='m9 9 6 6'/%3E%3C/svg%3E");
+}
+
+/* "Archived" at the end of the list is an ordinary navigation row; its count is a 12px number in --c-ink-3 */
+:root:root .unified-work-archive-entry {
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 0 8px;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--c-ink);
+  font: 400 var(--fs-md) var(--font-control);
+}
+:root:root .unified-work-archive-entry:hover {
+  color: var(--c-ink);
+  background: var(--c-fill-1);
+}
+:root:root .unified-work-archive-entry > svg:first-child {
+  width: 16px;
+  height: 16px;
+  color: var(--c-ink-2);
+}
+:root:root .unified-work-archive-entry > span:nth-last-child(2) {
+  margin-left: 0;
+  color: inherit;
+  font: inherit;
+}
+:root:root .unified-work-archive-entry > span:last-child {
+  margin-left: auto;
+  color: var(--c-ink-3);
+  font: 400 var(--fs-sm) var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══ 5 · Identity row: 52 high, avatar 28, name 13/500, second line 12px --c-ink-3 (team role, system font),
+ * up/down chevron 14; hairline on top; hover fill-1, menu open fill-2. ═══ */
+:root:root .unified-sidebar-user {
+  height: auto;
+  min-height: 52px;
+  margin: 4px 0 0;
+  padding: 0 10px 0 12px;
+  gap: 10px;
+  border-top: 0;
+  border-radius: var(--r-3);
+  box-shadow: none;
+  font-family: var(--font-control);
+}
+:root:root .unified-sidebar-expanded > .unified-sidebar-user {
+  position: relative;
+}
+:root:root .unified-sidebar-expanded > .unified-sidebar-user::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  border-top: var(--hairline, 0.5px) solid var(--c-separator);
+  pointer-events: none;
+}
+:root:root .unified-sidebar-user:hover {
+  background: var(--c-fill-1);
+}
+:root:root .unified-sidebar-user[aria-expanded="true"] {
+  background: var(--c-fill-2);
+}
+:root:root .unified-sidebar-user .v2-sb-avatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  font-size: 0.75rem;
+}
+:root:root .unified-sidebar-user-copy {
+  gap: 1px;
+}
+:root:root .unified-sidebar-user-copy strong {
+  font: 500 var(--fs-md) / 1.125rem var(--font-control);
+}
+:root:root .unified-sidebar-user-copy small {
+  color: var(--c-ink-3);
+  font: 400 var(--fs-sm) / 1rem var(--font-control);
+}
+:root:root .unified-sidebar-user > svg:last-child {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  flex: 0 0 14px;
+  color: var(--c-ink-3);
+  transform: none;
+}
+:root:root .unified-sidebar-user:is(:hover, [aria-expanded="true"]) > svg:last-child {
+  color: var(--c-ink-2);
+}
+
+/* ═══ 6 · Icon rail (compact sidebar, 56 wide): 36 buttons with 20 icons (touch 44); selected = fill-2 +
+ * accent icon, no colour bar. ═══ */
+:root:root .unified-sidebar-compact-button {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: var(--r-2);
+}
+:root:root .unified-sidebar-compact-button > svg {
+  width: 20px;
+  height: 20px;
+}
+:root:root .unified-sidebar-compact-button.is-active {
+  color: var(--c-ink);
+  background: var(--c-fill-2);
+}
+:root:root .unified-sidebar-compact-button.is-active::before {
+  content: none;
+}
+
+/* ═══ 7 · Touch (pointer: coarse, independent of width): rows 44 / radius 10 / 15px / icon 20; session rows
+ * 56; identity row 60; search 36; chevron hit area 44. ═══ */
+@media (pointer: coarse) {
+  :root:root
+    :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-sidebar-subnav-item, .unified-drawer-subnav-item, .unified-work-archive-entry) {
+    min-height: 44px;
+    padding: 0 10px;
+    gap: 10px;
+    border-radius: var(--r-3);
+    font-size: calc(var(--fs-md) + 0.125rem);
+  }
+  :root:root :is(.unified-sidebar-subnav-item, .unified-drawer-subnav-item) {
+    padding-left: 40px;
+  }
+  :root:root :is(.unified-sidebar-nav-item, .unified-drawer-nav-item, .unified-work-archive-entry) > svg:first-child {
+    width: 20px;
+    height: 20px;
+    flex-basis: 20px;
+  }
+  :root:root :is(.unified-sidebar-nav-group-row, .unified-drawer-nav-group-row) {
+    border-radius: var(--r-3);
+  }
+  :root:root :is(.unified-sidebar-group-toggle, .unified-drawer-group-toggle) {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    margin-right: 0;
+  }
+  :root:root .unified-work-item {
+    min-height: 56px;
+    border-radius: var(--r-3);
+  }
+  :root:root .unified-work-item-main {
+    padding-block: 9px;
+    padding-left: 10px;
+  }
+  :root:root .unified-work-title {
+    font-size: calc(var(--fs-md) + 0.125rem);
+    line-height: 1.25rem;
+  }
+  :root:root .unified-work-meta {
+    font-size: var(--fs-md);
+    min-height: 18px;
+    line-height: 1.125rem;
+  }
+  :root:root .unified-sidebar-user {
+    height: auto;
+    min-height: 60px;
+  }
+  :root:root .unified-work-search input {
+    height: 36px;
+  }
+  :root:root .unified-sidebar-compact-button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* ═══ 8 · Topbar: 44 high, left padding 20, right controls 28 (touch 44) 4 apart; title 13/600 with the
+ * caption inline as 12px --c-ink-2 (system font, tabular figures). Right side: space, notifications,
+ * credits. Material and hairline after scrolling come from ui-refresh-materials.css. ═══ */
+:root:root .v2-main-head {
+  height: 44px;
+  padding: 0 12px 0 20px;
+  gap: 8px;
+  font-family: var(--font-control);
+}
+:root:root .v2-main-head-titles {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+:root:root .v2-main-head .title {
+  min-width: 0;
+  color: var(--c-ink);
+  font: 600 var(--fs-md) / 1.125rem var(--font-control);
+}
+/* Large-title pattern (lib/use-page-title-collapse.ts): while the page H1 repeating the bar title is on screen,
+ * the desktop and mobile bar titles are hidden; they fade in once the H1 scrolls under the bar. */
+:root:root :is(.v2-main-head-titles, .v2-mobile-topbar-title)[data-collapsed] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:root :is(.v2-main-head-titles, .v2-mobile-topbar-title) {
+    transition: opacity var(--dur-fast, 120ms) linear;
+  }
+}
+/* Meta in --c-ink-2, not the spec's --c-ink-3: over the scrolled bar material (worst-case backdrop)
+ * --c-ink-3 drops below 4.5:1 in the default warm light theme. */
+:root:root .v2-main-head .meta {
+  color: var(--c-ink-2);
+  font: 400 var(--fs-sm) / 1rem var(--font-control);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Session "⋯" menu (Chat Cards Spec D12): an icon button after the title cluster, 28 (touch 44; 44 in the
+ * mobile top bar, whose --control-h-md is 44); the menu holds
+ * Pin, Copy Diagnostic Information and Archive. Overrides the sidebar row's hover-revealed absolute trigger. */
+:root:root :is(.v2-main-head, .v2-mobile-topbar-right) .session-topbar-menu.unified-work-more-wrap {
+  position: static;
+  display: inline-flex;
+  flex: none;
+  transform: none;
+}
+:root:root :is(.v2-main-head, .v2-mobile-topbar-right) .session-topbar-menu__trigger.unified-work-more {
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  background: transparent;
+}
+:root:root :is(.v2-main-head, .v2-mobile-topbar-right) .session-topbar-menu__trigger.unified-work-more:is(:hover, [aria-expanded="true"]) {
+  color: var(--c-ink);
+  background: var(--c-fill-2);
+}
+:root:root :is(.v2-main-head, .v2-mobile-topbar-right) .session-topbar-menu__trigger.unified-work-more:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+:root:root .v2-main-head-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Space switcher plus its "About this Space" button (Space instructions E2). */
+:root:root .shell-space-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+@media not (pointer: coarse) {
+  :root:root .v2-main-head .v2-icon-btn {
+    --control-h-md: 28px;
+  }
+}
+/* Touch: the 28 space chip keeps a 44 high hit area (same technique as the mobile topbar) */
+@media (pointer: coarse) {
+  :root:root .v2-main-head .v2-ws-picker {
+    position: relative;
+  }
+  :root:root .v2-main-head .v2-ws-picker > button::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+}
+
+/* Space: 28 high, fill-1, space icon 14 + name + chevron 14, at most 200 wide (full name in the menu) */
+:root:root .v2-ws-picker {
+  box-sizing: border-box;
+  height: 28px;
+  max-width: 200px;
+  margin-left: 0;
+  padding: 0 8px;
+  gap: 6px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+  font: 400 0.78125rem var(--font-control);
+}
+:root:root .v2-ws-picker:hover {
+  background: var(--c-fill-2);
+}
+:root:root .v2-ws-picker > .v2-ws-picker-button {
+  box-sizing: border-box;
+  height: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: inherit;
+}
+/* Keyboard focus: the ring goes around the whole chip, not just the button inside its padding */
+:root:root .v2-ws-picker > .v2-ws-picker-button:focus-visible {
+  outline: none;
+}
+:root:root .v2-ws-picker:has(> .v2-ws-picker-button:focus-visible) {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .v2-ws-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .v2-ws-picker > button > svg {
+  flex: none;
+  color: var(--c-ink-2);
+}
+
+/* Notifications: a number badge for things that need you (accent with --c-accent-ink, 2px ring in the bar
+ * colour); a 7px dot when there are only ordinary updates. */
+:root:root .notification-bell__badge {
+  top: 1px;
+  right: 0;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0 4px;
+  border: 0;
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  box-shadow: 0 0 0 2px var(--c-bg);
+  font: 600 0.65625rem / 1 var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .notification-bell__dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-bg);
+  pointer-events: none;
+}
+
+/* Credits: gauge icon + balance (--c-ink-2, tabular figures); low balance turns warning with the remaining
+ * share, very low turns error on its soft fill with "almost out". The plan name stays in the tooltip. */
+:root:root .ui-credit-badge {
+  box-sizing: border-box;
+  height: max(28px, 1.6em);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font: 400 0.78125rem var(--font-control);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* The badge is the credits popover trigger (a button) */
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+:root:root .ui-credit-badge:hover,
+:root:root .ui-credit-badge[aria-expanded="true"] {
+  background: var(--c-fill-1);
+}
+:root:root .ui-credit-badge:active {
+  background: var(--c-fill-2);
+}
+:root:root .ui-credit-badge:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .ui-credit-badge > svg {
+  flex: none;
+  color: var(--c-ink-3);
+}
+:root:root .ui-credit-badge[data-level="low"],
+:root:root .ui-credit-badge[data-level="low"] > svg {
+  color: var(--c-warn-ink);
+}
+:root:root .ui-credit-badge[data-level="critical"] {
+  background: var(--c-err-soft);
+}
+:root:root .ui-credit-badge[data-level="critical"],
+:root:root .ui-credit-badge[data-level="critical"] > svg {
+  color: var(--c-err-ink);
+}
+
+/* Credits popover (Sidebar & Topbar spec): overlay material, 280 wide; narrow screens use the shared bottom sheet.
+ * Text on the material stays at --c-ink / --c-ink-2 and the *-ink state colours (>= 4.5:1 over the worst backdrop). */
+:root:root .ui-credit-pop {
+  box-sizing: border-box;
+  width: min(280px, calc(100vw - 16px));
+  padding: 14px 16px 16px;
+  border-radius: 12px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink);
+  font: 400 0.8125rem / 1.4 var(--font-control);
+  text-align: left;
+  outline: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:root .ui-credit-pop:not(.ui-credit-pop--sheet) {
+    animation: ui-overlay-in var(--dur-menu) var(--ease-standard);
+  }
+}
+:root:root .ui-credit-pop.ui-credit-pop--sheet {
+  width: auto;
+  padding: 4px 16px 16px;
+}
+:root:root .ui-credit-pop__title {
+  margin: 0;
+  color: var(--c-ink-2);
+  font: 600 0.75rem / 1.35 var(--font-control);
+}
+:root:root .ui-credit-pop__balance {
+  margin: 4px 0 10px;
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+}
+:root:root .ui-credit-pop__num {
+  color: var(--c-ink);
+  font: 600 1.375rem / 1.2 var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-credit-pop__bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--c-fill-2);
+}
+:root:root .ui-credit-pop__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--ui-credit-used, 0%);
+  border-radius: inherit;
+  background: var(--c-accent);
+}
+:root:root .ui-credit-pop__bar[data-level="low"] .ui-credit-pop__fill {
+  background: var(--c-warn);
+}
+:root:root .ui-credit-pop__bar[data-level="critical"] .ui-credit-pop__fill {
+  background: var(--c-err);
+}
+:root:root .ui-credit-pop__meta {
+  margin: 6px 0 0;
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-credit-pop__state {
+  margin: 10px 0 0;
+  font-size: 0.78125rem;
+  font-weight: 500;
+}
+:root:root .ui-credit-pop__state[data-level="low"] {
+  color: var(--c-warn-ink);
+}
+:root:root .ui-credit-pop__state[data-level="critical"] {
+  color: var(--c-err-ink);
+}
+:root:root .ui-credit-pop__link {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--c-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+:root:root .ui-credit-pop__link:hover {
+  text-decoration: underline;
+}
+:root:root .ui-credit-pop__link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  :root:root .ui-credit-pop__link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 4px;
+  }
+}
+
+/* Mobile topbar (< 1024 since P2 batch 4): 44 high; menu button 44 without a border (icon 20); title 15/600 */
+@media (max-width: 1023.98px) {
+  :root:root .v2-mobile-topbar {
+    box-sizing: border-box;
+    height: 44px;
+    padding: 0 4px;
+    gap: 0;
+    font-family: var(--font-control);
+  }
+  :root:root .v2-mobile-topbar-hamburger {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--r-3);
+    background: transparent;
+    color: var(--c-ink-2);
+  }
+  :root:root .v2-mobile-topbar-hamburger:hover {
+    background: var(--c-fill-1);
+  }
+  :root:root .v2-mobile-topbar-title {
+    padding-left: 2px;
+    color: var(--c-ink);
+    font: 600 calc(var(--fs-md) + 0.125rem) / 1.25rem var(--font-control);
+  }
+  /* Session title not known yet: one skeleton bar in place of the title (same fill as list skeletons). */
+  :root:root .v2-mobile-topbar-title-skeleton {
+    display: inline-block;
+    width: min(140px, 40vw);
+    height: 12px;
+    border-radius: var(--r-1);
+    background: var(--c-fill-2);
+    vertical-align: middle;
+  }
+  :root:root .v2-mobile-topbar-right .v2-ws-picker {
+    max-width: min(132px, 30vw);
+  }
+}
+/* Phones: a session page also puts its "⋯" in the bar, which squeezed the Space chip to its icon plus a sliver of
+ * the name (116, 390 wide). There the chip turns icon-only (icon + chevron, never shrinking); the button keeps its
+ * accessible name "Space: <name>" and the menu shows the full name. */
+@media (max-width: 767.98px) {
+  :root:root .v2-mobile-topbar-right:has(.session-topbar-menu) .v2-ws-picker {
+    flex: none;
+    max-width: none;
+  }
+  :root:root .v2-mobile-topbar-right:has(.session-topbar-menu) .v2-ws-picker-name {
+    display: none;
+  }
+}
+
+/* ═══ 9 · Icon sizes: CSS-sized icons snapped to the 14 / 16 / 20 tiers ═══
+ * Icons sized by width/height attributes snap in components/icon-refresh.tsx (`snapIconSize`). These call sites
+ * size the icon in CSS instead, so the attribute snap does not reach them; each one gets its tier by role:
+ * 14 next to 12-13px text and in small buttons, badges and banners; 16 in controls, menu items and toasts; 20 for
+ * empty states and large status marks. Only refreshed icons (svg.bh-icon) are touched: legacy SVGs, brand marks
+ * and illustrations keep their sizes. The stroke stays 1.5px at any size (non-scaling stroke, written inline).
+ * Exempt on purpose: the 9px mark inside the skills scope switch knob and the 8px plan-graph node stamp (they
+ * sit inside 12-14px shapes), char glyphs (1em, they follow the text). Mapping table: the tech design doc. */
+/* 11-13 -> 14: inline with small text, small buttons, badges, banners */
+:root:root .ent-banner__icon svg.bh-icon,
+:root:root .ent-banner__ro svg.bh-icon,
+:root:root .ent-banner__cta svg.bh-icon,
+:root:root .ent-banner__x svg.bh-icon,
+:root:root .ent-banner__degraded svg.bh-icon,
+:root:root .ent-ro-chip svg.bh-icon,
+:root:root .unified-search-result > svg.bh-icon,
+:root:root .am-detail-link svg.bh-icon,
+:root:root .gwrap .gcause svg.bh-icon,
+:root:root .gwrap .gact svg.bh-icon,
+:root:root .pp svg.bh-icon,
+:root:root .bact svg.bh-icon,
+:root:root :is(.pbadge, :where(.pcard) .vpill, .rc-badge, .legacy-ctool-source-auth, .legacy-preset-pill) svg.bh-icon,
+:root:root :is(.ui-badge, .cbadge, .kbbadge, .sset .sbadge, .legacy-badge-sched-fail, .mset .pill) svg.bh-icon,
+:root:root .bh-step-list .ag-trace svg.agb-chev.bh-icon,
+:root:root .bh-step-list .ag-trace svg.stp-chev.bh-icon {
+  width: 14px;
+  height: 14px;
+}
+/* The step chevron box was 11 x 16 (flex basis 11); keep it from shrinking and centre it on the row */
+:root:root .bh-step-list .ag-trace svg.stp-chev.bh-icon {
+  flex: 0 0 14px;
+  align-self: center;
+}
+/* 17-21 in controls, menu items and toasts -> 16 */
+:root:root .app-floating-menu-item > svg.bh-icon,
+:root:root .am-search svg.bh-icon,
+:root:root .am-hire-success button svg.bh-icon,
+:root:root svg.composer-v2__refresh-glyph.bh-icon,
+:root:root .composer-v2 .v2-send-btn--cancel svg.composer-v2__refresh-glyph.bh-icon {
+  width: 16px;
+  height: 16px;
+}
+/* Empty states and large status marks -> 20 */
+:root:root .home-work-state-icon svg.bh-icon,
+:root:root .ai-sched-empty-ico svg.bh-icon,
+:root:root [class*="statusBadge"] svg.bh-icon {
+  width: 20px;
+  height: 20px;
+}
+/* Icons drawn inside a padded, bordered circle already have tier glyphs (box - padding - border): home row
+ * action 40 - 22 - 2 = 16, "all clear" check 42 - 20 - 2 = 20. */
+
+/* ═══ 10 · Unified navigation (P2 batch 4, "P2 Navigation Spec") ═══
+ * One sidebar, two kinds of content: settings and administration routes show the settings content
+ * (components/settings-sidebar-nav.tsx) in the expanded sidebar, the overlay and the mobile drawer; the
+ * settings page no longer has its own 210 column or <select>.
+ * Breakpoints (P2 Navigation Spec): the desktop layout starts at 1024 (only public pages keep their 1024–1199
+ * page scrolling, styles/public-narrow-band.css); the sidebar is persistent from 1024,
+ * 232 wide below 1280 and 248 from 1280 (section 1); 768–1023 it is hidden and opens as an overlay from the
+ * top bar's menu button; below 768 the drawer. */
+@media (min-width: 1024px) and (max-width: 1279.98px) {
+  :root:root .unified-sidebar.is-expanded,
+  :root:root .unified-sidebar.is-expanded .unified-sidebar-expanded,
+  :root:root[data-sidebar-mode="expanded"] .unified-sidebar.is-bootstrap {
+    flex-basis: 232px;
+    width: 232px;
+  }
+  :root:root[data-sidebar-mode="expanded"] .app-boot-sidebar {
+    flex-basis: 232px;
+    width: 232px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+@media (min-width: 1280px) and (max-width: 1439.98px) {
+  :root:root[data-sidebar-mode="expanded"] .unified-sidebar.is-bootstrap {
+    flex-basis: 248px;
+    width: 248px;
+  }
+  :root:root[data-sidebar-mode="expanded"] .app-boot-sidebar {
+    flex-basis: 248px;
+    width: 248px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+@media (min-width: 1024px) and (max-width: 1439.98px) {
+  :root:root[data-sidebar-mode="expanded"] .app-boot-nav span,
+  :root:root[data-sidebar-mode="expanded"] .app-boot-account {
+    width: 100%;
+  }
+}
+/* 768–1023: the sidebar takes no space; its overlay (opened from the top bar) is a solid panel inset 8 with
+ * radius 14 over a light scrim, above the single-column page. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  :root:root .unified-sidebar.is-overlay,
+  :root:root .unified-sidebar-scrim {
+    display: block !important;
+  }
+  :root:root .unified-sidebar.is-overlay {
+    flex: 0 0 0px;
+    width: 0;
+    height: 0;
+  }
+  :root:root .unified-sidebar.is-overlay .unified-sidebar-expanded {
+    inset: 8px auto 8px 8px;
+    width: 280px;
+    height: auto;
+    border-radius: var(--r-4);
+  }
+  /* The top bar also carries the credits here, as the gauge icon only; the balance stays in the button's
+   * accessible name and the plan, usage and reset date are in the credits popover. */
+  /* Icon-only, so the button itself is the 44 x 44 touch target (filling the 44 bar, like the bell); the
+   * visible 26 x 28 chip (hover, open, pressed, critical fill and the focus ring) moves to ::before, so the
+   * icon and the chip look as before. The icon is positioned to paint above the chip without a z-index. */
+  :root:root .v2-mobile-topbar-right .ui-credit-badge {
+    position: relative;
+    justify-content: center;
+    min-width: 44px;
+    height: 44px;
+    margin: -8px 0;
+    padding: 0;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge:is(:hover, :active, [aria-expanded="true"], [data-level]) {
+    background: transparent;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge:focus-visible {
+    outline: none;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge::before {
+    content: "";
+    position: absolute;
+    inset: 8px 9px;
+    border-radius: var(--r-2);
+    pointer-events: none;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge:is(:hover, [aria-expanded="true"])::before {
+    background: var(--c-fill-1);
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge:active::before {
+    background: var(--c-fill-2);
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge[data-level="critical"]::before {
+    background: var(--c-err-soft);
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge:focus-visible::before {
+    outline: 2px solid var(--c-focus, var(--c-accent));
+    outline-offset: 2px;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge > svg {
+    position: relative;
+  }
+  :root:root .v2-mobile-topbar-right .ui-credit-badge__value {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+/* Settings content fills the space between the header and the footer; the list scrolls on its own. */
+:root:root .unified-settings {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+:root:root .unified-settings[data-surface="drawer"] {
+  padding: 0 8px;
+}
+:root:root .unified-settings-back {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--c-ink-2);
+  text-decoration: none;
+}
+:root:root .unified-settings-search {
+  position: relative;
+  flex: none;
+  margin: 0 0 4px;
+}
+:root:root .unified-settings-search > svg {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--c-ink-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+:root:root .unified-settings-search input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 28px;
+  border: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink);
+  background: var(--c-fill-1);
+  box-shadow: inset 0 0 0 var(--hairline, 0.5px) var(--c-separator);
+  font: 400 var(--fs-md) var(--font-control);
+}
+/* --c-ink-2: on the fill-1 field in the drawer --c-ink-3 measured 4.45:1 (blue palette, dark) */
+:root:root .unified-settings-search input::placeholder {
+  color: var(--c-ink-2);
+}
+:root:root .unified-settings-search input:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .unified-settings-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+:root:root .unified-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+:root:root .unified-settings-item {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+:root:root .unified-settings-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .unified-settings-empty {
+  margin: 0;
+  padding: 12px 8px 4px;
+  color: var(--c-ink-3);
+  font: 400 var(--fs-sm) / 1.4 var(--font-control);
+}
+/* Row-end counters: a plain count is 12px --c-ink-3 tabular figures (scheduled tasks, like the archived
+ * count); something waiting for you is an accent-soft pill with the plain number (decided 2026-09-26). */
+:root:root .unified-settings-count {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  color: var(--c-ink-3);
+  font: 400 0.75rem / 1rem var(--font-control);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .unified-settings-count.is-pending {
+  box-sizing: border-box;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--c-accent-text);
+  background: var(--c-accent-soft);
+  font-weight: 600;
+  text-align: center;
+}
+:root:root .unified-settings-count__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+/* Rail menus list the same destinations; the counter sits at the row end like a menu item tail. */
+:root:root .unified-settings-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

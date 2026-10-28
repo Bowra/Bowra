@@ -1,0 +1,1371 @@
+/* ═════════════════════════════════════════════════════════════
+ * Chat cards: one shell for every card in the conversation stream (components/ui/card.tsx).
+ *
+ * Spec: Claude Design "Chat Cards Spec" parts 1 and 2 (D1–D12 approved 2026-10-05; D1 replaces the
+ * Workbench Spec §8 "radius 12 + shadow" interactive shell). One shell: content surface, hairline structural
+ * edge, --r-4, no shadow, no tinted background, no left accent bar; only the input intent swaps the edge for a
+ * 1px warning edge. The intent colours the leading icon and the eyebrow only.
+ *
+ * Every rule starts with :root:root (see styles/css-contract.ts). All colours are tokens. Imported last by the
+ * authenticated layout. Contract: styles/ui-refresh-cards.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── Tokens ── */
+:root:root {
+  --card-radius: var(--r-4);
+  --card-edge: var(--hairline) solid var(--c-separator-strong);
+  --card-edge-input: 1px solid color-mix(in srgb, var(--c-warn) 45%, transparent);
+  --card-pad: 12px 14px;
+  --card-pad-row: 6px 8px 6px 14px;
+  --card-row-min-h: 40px;
+  --card-icon: 16px;
+  --card-icon-gap: 10px;
+  --card-gap: 4px;
+  --card-foot-gap: 8px;
+  --card-eyebrow: 600 var(--fs-sm) / 1.125rem var(--font-control);
+  --card-title: 600 var(--fs-base) / 1.45 var(--font-control);
+  --card-body: 400 0.8125rem / 1.55 var(--font-control);
+  --card-meta: 400 var(--fs-sm) / 1.5 var(--font-control);
+  --card-intent-input: var(--c-warn-ink);
+  --card-intent-info: var(--c-ink-2);
+  --card-intent-success: var(--c-pos-ink);
+  --card-intent-failure: var(--c-err-ink);
+  --card-intent-progress: var(--c-accent);
+}
+/* Dark: the semantic hues are already light on the dark surface; mixing toward the (light) ink washes them out. */
+:root:root[data-theme="dark"] {
+  --card-intent-input: var(--c-warn);
+  --card-intent-success: var(--c-pos);
+  --card-intent-failure: var(--c-err);
+}
+
+/* ── Shell ── */
+:root:root .ui-card {
+  --ui-card-icon: var(--card-intent-info);
+  --ui-card-eyebrow: var(--c-ink-3);
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--card-icon) minmax(0, 1fr);
+  column-gap: var(--card-icon-gap);
+  align-items: start;
+  width: 100%;
+  max-width: 640px;
+  min-width: 0;
+  margin: 0;
+  padding: var(--card-pad);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  background: var(--c-surface);
+  box-shadow: none;
+  color: var(--c-ink);
+  font: var(--card-body);
+  text-align: start;
+  overflow: hidden;
+}
+:root:root .ui-card--input {
+  --ui-card-icon: var(--card-intent-input);
+  --ui-card-eyebrow: var(--card-intent-input);
+  border: var(--card-edge-input);
+}
+:root:root .ui-card--success {
+  --ui-card-icon: var(--card-intent-success);
+  --ui-card-eyebrow: var(--card-intent-success);
+}
+:root:root .ui-card--failure {
+  --ui-card-icon: var(--card-intent-failure);
+  --ui-card-eyebrow: var(--card-intent-failure);
+}
+:root:root .ui-card--progress {
+  --ui-card-icon: var(--card-intent-progress);
+  --ui-card-eyebrow: var(--c-accent-text);
+}
+:root:root .ui-card--icon-warning {
+  --ui-card-icon: var(--card-intent-input);
+}
+:root:root .ui-card--icon-muted {
+  --ui-card-icon: var(--c-ink-3);
+}
+
+/* Leading icon: 16 column, centred on the first text line (18px) */
+:root:root .ui-card__icon {
+  display: flex;
+  align-items: center;
+  height: 18px;
+  color: var(--ui-card-icon);
+}
+:root:root .ui-card__icon > svg {
+  flex: none;
+}
+
+/* ── Text ── */
+:root:root .ui-card__body {
+  display: grid;
+  gap: var(--card-gap);
+  min-width: 0;
+  align-content: start;
+}
+:root:root .ui-card__eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font: var(--card-eyebrow);
+  color: var(--ui-card-eyebrow);
+}
+:root:root .ui-card__meta {
+  margin-left: auto;
+  font: var(--card-meta);
+  line-height: 1.125rem;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:root:root .ui-card__title {
+  display: block;
+  font: var(--card-title);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+:root:root .ui-card__content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font: var(--card-body);
+  color: var(--c-ink-2);
+}
+/* Body sentence (13 / 1.55 ink-2) and secondary note (12 ink-3 tabular) inside the content area */
+:root:root .ui-card__text {
+  margin: 0;
+  font: var(--card-body);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+:root:root .ui-card__note {
+  margin: 0;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card__note--error {
+  color: var(--c-err);
+}
+
+/* ── Footer: secondary / plain left, the one primary right ── */
+:root:root .ui-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--card-foot-gap);
+  margin-top: 4px;
+  min-width: 0;
+}
+:root:root .ui-card__footer-space {
+  flex: 1;
+}
+/* A leading plain button's text lines up with the body text */
+:root:root .ui-card__footer > .ui-card__btn--plain:first-child {
+  margin-left: -12px;
+}
+:root:root .ui-card__why {
+  display: flex;
+  justify-content: flex-end;
+  text-align: end;
+}
+
+/* Card buttons: plain (ink-2 text) and ghost (accent text) treatments of the shared button */
+:root:root :is(.ui-card, .ui-card-notice) .settings-button.ui-card__btn--plain {
+  --ui-btn-fg: var(--c-ink-2);
+}
+:root:root :is(.ui-card, .ui-card-notice) .settings-button.settings-button--ghost:not(.ui-card__btn--plain) {
+  --ui-btn-fg: var(--c-accent-text);
+}
+
+/* Hint, inline error */
+:root:root .ui-card__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__hint--error,
+:root:root .ui-card__error {
+  color: var(--c-err);
+}
+:root:root .ui-card__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font: var(--card-meta);
+}
+
+/* ── Technical details (failure / error states only) ── */
+:root:root .ui-card__details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  height: 24px;
+  margin: 0 0 0 -4px;
+  padding: 0 6px 0 4px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  font: 500 var(--fs-sm) / 1 var(--font-control);
+  cursor: pointer;
+}
+:root:root .ui-card__details-toggle > svg {
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__details-toggle:hover {
+  background: var(--c-fill-1);
+}
+:root:root .ui-card__details-toggle:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .ui-card__details {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font: var(--card-meta);
+  color: var(--c-ink-2);
+}
+:root:root .ui-card__details dl {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+}
+:root:root .ui-card__details dt {
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card__details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .ui-card__details-note {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+
+/* ── Row size: 40 high, icon + one sentence (two lines at most) + trailing actions ── */
+:root:root .ui-card--row {
+  grid-template-columns: var(--card-icon) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: var(--card-row-min-h);
+  padding: var(--card-pad-row);
+}
+:root:root .ui-card--row .ui-card__icon {
+  height: auto;
+}
+/* A whole-row button (step summary) is a 44px target on touch */
+@media (pointer: coarse) {
+  :root:root .ui-card--row.ui-card--activatable {
+    min-height: var(--control-h-touch);
+  }
+}
+:root:root .ui-card__line {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font: 400 0.8125rem / 1.45 var(--font-control);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card__line b {
+  font-weight: 600;
+}
+:root:root .ui-card--row:is(.ui-card--info, .ui-card--input) .ui-card__line {
+  color: var(--c-ink-2);
+}
+:root:root .ui-card--row:is(.ui-card--info, .ui-card--input) .ui-card__line b {
+  color: var(--c-ink);
+}
+:root:root .ui-card__row-meta {
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-card__line .ui-card__line-warn {
+  color: var(--card-intent-input);
+}
+:root:root .ui-card__trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+/* Non-interactive trailing label inside a whole-row button ("Expand trace ⌄") */
+:root:root .ui-card__trailing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: var(--r-2);
+  font: var(--card-meta);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+
+/* ── Media tile (file card): 36 tile, 20 icon, 12 to the text ── */
+:root:root .ui-card--media {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 10px 10px 10px 12px;
+}
+:root:root .ui-card__media {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .ui-card--media .ui-card__body {
+  gap: 2px;
+}
+
+/* ── Whole-card activation ── */
+/* Row: the card itself is the button */
+:root:root button.ui-card {
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root button.ui-card:hover {
+  background-image: linear-gradient(var(--c-fill-1), var(--c-fill-1));
+}
+:root:root button.ui-card:active {
+  background-image: linear-gradient(var(--c-fill-2), var(--c-fill-2));
+}
+:root:root button.ui-card:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Regular: one activation area spanning icon/media + text, the trailing control is its sibling */
+:root:root .ui-card--activatable.ui-card--regular {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+:root:root .ui-card__activate {
+  display: grid;
+  grid-template-columns: var(--card-icon) minmax(0, 1fr);
+  column-gap: var(--card-icon-gap);
+  align-items: start;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+:root:root .ui-card--media .ui-card__activate {
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+/* The button covers the whole card (trailing control stays above it) */
+:root:root .ui-card__activate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+:root:root .ui-card__activate:focus-visible {
+  outline: 0;
+}
+/* Details, error and footer of an activatable card: a full-width row under the button, above its overlay */
+:root:root .ui-card__after {
+  position: relative;
+  grid-column: 1 / -1;
+  padding-top: var(--card-gap);
+  padding-left: calc(var(--card-icon) + var(--card-icon-gap));
+}
+:root:root .ui-card--media .ui-card__after {
+  padding-left: calc(36px + 12px);
+}
+:root:root .ui-card__trailing {
+  position: relative;
+}
+:root:root .ui-card--activatable:has(.ui-card__activate:hover) {
+  background-image: linear-gradient(var(--c-fill-1), var(--c-fill-1));
+}
+:root:root .ui-card--activatable:has(.ui-card__activate:active) {
+  background-image: linear-gradient(var(--c-fill-2), var(--c-fill-2));
+}
+:root:root .ui-card--activatable:has(.ui-card__activate:focus-visible) {
+  overflow: visible;
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* ── Progress: 2px accent bar on the bottom edge ── */
+:root:root .ui-card__progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--card-progress, 0%);
+  height: 2px;
+  background: var(--c-accent);
+  transition: width var(--dur-fast) linear;
+}
+
+/* Indeterminate: a 30% segment sweeps the bottom edge; under reduced motion it rests at the start. */
+:root:root .ui-card__progress--indeterminate {
+  width: 30%;
+  transition: none;
+  animation: ui-card-progress-sweep 1.4s ease-in-out infinite;
+}
+@keyframes ui-card-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .ui-card__progress--indeterminate {
+    animation: none;
+  }
+}
+:root:root[data-theme-motion="reduced"] .ui-card__progress--indeterminate {
+  animation: none;
+}
+
+/* ── Spinner: 14 in regular cards, 12 in rows; static accent dot under reduced motion ── */
+:root:root .ui-card__spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--c-fill-3);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  animation: ui-refresh-spin 0.8s linear infinite;
+}
+:root:root .ui-card__spinner--sm {
+  width: 12px;
+  height: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .ui-card__spinner {
+    width: 6px;
+    height: 6px;
+    margin: 0 3px;
+    border: 0;
+    background: var(--c-accent);
+    animation: none;
+  }
+}
+:root:root[data-theme-motion="reduced"] .ui-card__spinner {
+  width: 6px;
+  height: 6px;
+  margin: 0 3px;
+  border: 0;
+  background: var(--c-accent);
+  animation: none;
+}
+
+/* ── Touch: 44 targets for the details toggle (buttons already follow --control-h-*) ── */
+@media (pointer: coarse) {
+  :root:root .ui-card__details-toggle {
+    height: var(--control-h-touch);
+  }
+}
+/* Narrow: footer buttons share the row equally (spec 390 frames) */
+@media (max-width: 767.98px) {
+  :root:root .ui-card__footer > :is(.settings-button, a.settings-button) {
+    flex: 1 1 0;
+  }
+  :root:root .ui-card__footer > .ui-card__btn--plain:first-child {
+    margin-left: 0;
+  }
+  :root:root .ui-card .ui-card__footer > .settings-button.ui-card__btn--plain {
+    --ui-btn-bg: var(--c-fill-2);
+    --ui-btn-bg-hover: var(--c-fill-3);
+    --ui-btn-fg: var(--c-ink);
+  }
+  :root:root .ui-card__footer-space {
+    display: none;
+  }
+}
+
+/* ═══ Fact list in a receipt card (Canvas Objects Spec part 2: created Agent, published document): fill-1 block,
+ *     r2, 12 ink-3 terms beside 13 ink-2 values ═══ */
+:root:root .ui-card-facts {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font: var(--card-meta);
+  color: var(--c-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-card-facts dt {
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ═══ Created-Agent receipt: release status line and numbered next steps with inline links ═══ */
+:root:root .ui-card__status-line {
+  margin: 0;
+}
+:root:root .ui-card__steps {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+  list-style: decimal outside;
+  font: var(--card-body);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card__steps strong {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .ui-card__inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--c-accent-text);
+  cursor: pointer;
+}
+:root:root .ui-card__inline-link:hover {
+  text-decoration: underline;
+}
+
+/* ═══ Stacks of cards (memory receipts, suggestion outcomes): 8 between cards ═══ */
+:root:root .ui-card-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+/* Cards that settle inside a reply (answered / continuing rows, the question card) keep 8px from the run block
+ * and from each other, instead of touching it */
+:root:root .ui-card-turn-slot {
+  margin-block: 8px;
+}
+/* Focus lands on the answered rows only to keep the reader's place (tabIndex -1): no ring on a non-control */
+:root:root .ui-card-turn-slot:focus {
+  outline: 0;
+}
+/* A card right after another card or the folded trace in a reply (failure card under "Not finished") */
+:root:root .bh-bot-block > :is(.ui-card, .ui-card-turn-slot, .bh-step-interaction-region) + .ui-card {
+  margin-top: 8px;
+}
+:root:root .ui-card__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ═══ Card content: options, questions, checkbox (clarification, document questions) ═══ */
+/* Multi-line field inside a card ("Change it" for a memory suggestion): 56 min, top-aligned text */
+:root:root .ui-card .ui-input.ui-card-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  height: auto;
+  padding: 8px 10px;
+  resize: vertical;
+  font: 400 0.8125rem / 1.5 var(--font-control);
+}
+:root:root .ui-card-options {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+/* Option: 36 high (touch 44), fill-1, 16 radio / checkbox, selected accent-soft with body-colour text */
+:root:root .ui-card-option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+  font: 400 0.8125rem / 1.4 var(--font-control);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .ui-card-option:hover:not(:disabled) {
+  background: var(--c-fill-2);
+}
+:root:root .ui-card-option.is-on,
+:root:root .ui-card-option.is-on:hover:not(:disabled) {
+  background: var(--c-accent-soft);
+}
+:root:root .ui-card-option:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+:root:root .ui-card-option:disabled {
+  color: var(--c-ink-3);
+  cursor: not-allowed;
+}
+:root:root .ui-card-option__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:root:root :is(.ui-card-option__radio, .ui-card-option__box) {
+  box-sizing: border-box;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  background: var(--c-surface);
+  box-shadow: inset 0 0 0 1.5px var(--c-line);
+}
+:root:root .ui-card-option__radio {
+  border-radius: 50%;
+}
+:root:root .ui-card-option__box {
+  border-radius: 5px;
+}
+:root:root .ui-card-option.is-on .ui-card-option__radio {
+  box-shadow: inset 0 0 0 5px var(--c-accent);
+}
+:root:root .ui-card-option.is-on .ui-card-option__box {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  box-shadow: none;
+}
+/* "Other, type your own…" is a field, not an option: 32 high (touch 44) */
+:root:root .ui-card .ui-input.ui-card-option-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  font: 400 0.8125rem / 1.4 var(--font-control);
+}
+/* Question groups: "Question N" + question 13/600 + type on the right */
+:root:root .ui-card-question {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 4px;
+}
+:root:root .ui-card-question__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-question__head b {
+  flex: none;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+:root:root .ui-card-question__text {
+  min-width: 0;
+  font: 600 0.8125rem / 1.45 var(--font-control);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card-question__type {
+  flex: none;
+  margin-left: auto;
+}
+/* Footer checkbox ("Remember my choice") */
+:root:root .ui-card-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h-md);
+  font: var(--card-meta);
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  :root:root .ui-card-option {
+    min-height: var(--control-h-touch);
+  }
+  :root:root .ui-card .ui-input.ui-card-option-input {
+    height: var(--control-h-touch);
+    min-height: var(--control-h-touch);
+  }
+}
+
+/* ═══ File / deliverable card (§6): 28 download button (touch 44), done = positive soft; spacing below the answer ═══ */
+:root:root .chat-deliverable {
+  margin: 12px 0 4px;
+}
+:root:root .ui-card-dl {
+  box-sizing: border-box;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.ui-card-dl:hover:not(:disabled), .ui-card--activatable:has(.ui-card__activate:hover) .ui-card-dl) {
+  background: var(--c-fill-3);
+}
+:root:root .ui-card-dl[data-state="done"] {
+  background: var(--c-pos-soft);
+  color: var(--c-pos-ink);
+}
+:root:root .ui-card-dl:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* ═══ Attachment chips (§5, D10/D11): 32 high, --r-2, fill-2; 16 line icon ink-2; name 13 ellipsised first (max 300);
+ *     one meta fact 12 that never wraps; inner buttons 28 (touch 44); 2px progress bar; error chip on err-soft ═══ */
+:root:root .v2-composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 10px 0;
+}
+:root:root .v2-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: var(--r-2);
+}
+:root:root .v2-chip {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 300px;
+  height: 32px;
+  padding: 0 2px 0 8px;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font: 400 0.8125rem / 1.3 var(--font-control);
+}
+:root:root :is(.v2-chip--error, .v2-chip--warning) {
+  background: var(--c-err-soft);
+}
+:root:root .v2-chip__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--c-ink-2);
+}
+:root:root .v2-chip--error .v2-chip__icon,
+:root:root .v2-chip--warning .v2-chip__icon {
+  color: var(--c-err);
+}
+:root:root .v2-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .v2-chip__meta {
+  flex: none;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:root:root .v2-chip__meta[data-tone="warn"] {
+  color: var(--card-intent-input);
+}
+:root:root .v2-chip__meta[data-tone="neg"] {
+  color: var(--c-err);
+}
+/* Last inner element keeps a little room on the right when no button follows */
+:root:root .v2-chip > .v2-chip__meta:last-child {
+  margin-right: 6px;
+}
+:root:root :is(.v2-chip__x, .v2-chip__chev, button.v2-chip__dl) {
+  box-sizing: border-box;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+:root:root :is(.v2-chip__x, .v2-chip__chev, button.v2-chip__dl):hover:not(:disabled) {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .v2-chip__chev.is-open {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .v2-chip__chev.is-open > svg {
+  transform: rotate(180deg);
+}
+:root:root :is(.v2-chip__x, .v2-chip__chev, .v2-chip__retry, button.v2-chip__dl):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root :is(.v2-chip__x, .v2-chip__chev, .v2-chip__retry, button.v2-chip__dl):disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+:root:root span.v2-chip__dl {
+  display: inline-flex;
+  flex: none;
+  margin-right: 6px;
+  color: var(--c-ink-2);
+}
+:root:root .v2-chip--dl-done .v2-chip__dl {
+  color: var(--c-pos-ink);
+}
+:root:root .v2-chip__retry {
+  flex: none;
+  height: var(--control-h-md);
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-accent-text);
+  font: 600 var(--fs-sm) / 1 var(--font-control);
+  cursor: pointer;
+}
+:root:root .v2-chip__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--chip-progress, 0%);
+  height: 2px;
+  background: var(--c-accent);
+}
+/* Read-only chips: the whole chip downloads, or (Results) opens; the overlay download stays a sibling button */
+:root:root .v2-chip--downloadable {
+  cursor: pointer;
+}
+:root:root .v2-chip--downloadable:hover {
+  background: var(--c-fill-3);
+}
+:root:root .v2-chip--downloadable:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .v2-chip--openable {
+  padding-right: var(--control-h-md);
+}
+:root:root .v2-chip__open-hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0 var(--control-h-md) 0 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2) 0 0 var(--r-2);
+  background: transparent;
+  cursor: pointer;
+}
+:root:root .v2-chip__dl--overlay {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 2px;
+  transform: translateY(-50%);
+}
+:root:root .v2-chip-wrap:has(.v2-chip__open-hit:hover) .v2-chip--openable {
+  background: var(--c-fill-3);
+}
+:root:root .v2-chip-wrap:has(.v2-chip__open-hit:focus-visible) .v2-chip--openable {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* D10: the same file added again outlines the existing chip once instead of adding a second chip */
+:root:root .v2-chip-wrap.is-flash {
+  animation: ui-card-chip-flash 600ms ease-out 1;
+}
+@keyframes ui-card-chip-flash {
+  from {
+    box-shadow: 0 0 0 1.5px var(--c-accent);
+  }
+  to {
+    box-shadow: 0 0 0 1.5px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:root .v2-chip-wrap.is-flash {
+    animation: none;
+  }
+}
+:root:root[data-theme-motion="reduced"] .v2-chip-wrap.is-flash {
+  animation: none;
+}
+@media (pointer: coarse) {
+  :root:root .v2-chip {
+    height: var(--control-h-touch);
+  }
+}
+
+/* Bundle contents (shared menu): header, failures first, "N more indexed" */
+:root:root .ui-card-bundle-menu {
+  min-width: 280px;
+  max-width: min(380px, calc(100vw - 32px));
+}
+:root:root .ui-card-bundle-menu__head,
+:root:root .ui-card-bundle-menu__more {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px 4px;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-bundle-menu__head b {
+  font: 600 0.8125rem / 1.4 var(--font-control);
+  color: var(--c-ink);
+}
+:root:root .ui-card-bundle-menu__more {
+  padding-top: 8px;
+  border-top: var(--hairline) solid var(--c-separator);
+  margin-top: 4px;
+}
+:root:root .ui-card-bundle-menu__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .ui-card-bundle-menu__state {
+  flex: none;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-bundle-menu__item[data-tone="neg"] :is(svg, .ui-card-bundle-menu__state) {
+  color: var(--c-err);
+}
+
+/* ═══ Revision target bar (§9): inside the composer above the text; 36 high, fill-1, --r-2; remove 28 (touch 44) ═══ */
+:root:root .ui-card-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  min-width: 0;
+  margin: 10px 10px 0;
+  padding: 0 2px 0 10px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  font-family: var(--font-control);
+}
+:root:root .ui-card-target > svg {
+  flex: none;
+  color: var(--c-accent-text);
+}
+:root:root .ui-card-target__label {
+  flex: none;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  white-space: nowrap;
+}
+:root:root .ui-card-target__name {
+  min-width: 0;
+  overflow: hidden;
+  font: 600 0.8125rem / 1.4 var(--font-control);
+  color: var(--c-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .ui-card-target__name--link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: start;
+}
+:root:root .ui-card-target__name--link:hover {
+  text-decoration: underline;
+}
+:root:root .ui-card-target__name--link:focus-visible {
+  border-radius: var(--r-1, 2px);
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .ui-card-target__version {
+  flex: none;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:root:root .ui-card-target__space {
+  flex: 1;
+}
+:root:root .ui-card-target__remove {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+:root:root .ui-card-target__remove:hover:not(:disabled) {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root .ui-card-target__remove:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+:root:root .ui-card-target__remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+@media (pointer: coarse) {
+  :root:root .ui-card-target {
+    height: auto;
+    min-height: var(--control-h-touch);
+  }
+}
+
+/* ═══ Composer notice slot (§9, D9): one line below the composer; tone colours the icon and text ═══ */
+/* The composer wrapper is a centred flex row: the notice takes its own full row under the composer box. */
+:root:root .v2-composer-wrap:has(> .ui-card-notice) {
+  flex-wrap: wrap;
+}
+:root:root .v2-composer-wrap > .ui-card-notice {
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  max-width: 840px;
+}
+:root:root .home-work-composer-inner .v2-composer-wrap > .ui-card-notice {
+  max-width: none;
+}
+:root:root .ui-card-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-height: 28px;
+  padding: 6px 4px 0;
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-notice__text {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.45;
+}
+:root:root .ui-card-notice__text > svg {
+  flex: none;
+}
+:root:root .ui-card-notice[data-tone="warning"] .ui-card-notice__text {
+  color: var(--card-intent-input);
+}
+:root:root .ui-card-notice[data-tone="error"] .ui-card-notice__text {
+  color: var(--c-err);
+}
+:root:root .ui-card-notice__more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font: var(--card-meta);
+  cursor: pointer;
+}
+:root:root .ui-card-notice__more:hover,
+:root:root .ui-card-notice__more.is-open {
+  background: var(--c-fill-2);
+}
+:root:root .ui-card-notice__more.is-open > svg {
+  transform: rotate(180deg);
+}
+:root:root .ui-card-notice__more:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  :root:root .ui-card-notice__more {
+    height: var(--control-h-touch);
+  }
+}
+/* "N more notices": two-line items, the fix as the second line */
+:root:root .ui-card-notice-menu {
+  min-width: 260px;
+  max-width: min(380px, calc(100vw - 32px));
+}
+:root:root .ui-card-notice-menu__item {
+  align-items: flex-start;
+  height: auto;
+  min-height: 44px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+:root:root .ui-card-notice-menu__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  white-space: normal;
+  text-align: start;
+}
+:root:root .ui-card-notice-menu__text small {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card-notice-menu__item[data-tone="warning"] > svg {
+  color: var(--card-intent-input);
+}
+:root:root .ui-card-notice-menu__item[data-tone="error"] > svg {
+  color: var(--c-err);
+}
+
+/* ── Check row (components/ui/check-row.tsx; "Agent Eval Alignment Loop" .chk, 2026-10-19) ──
+ * Grouped rows inside a chat card: inset hairline above each, 12 top/bottom, 6 between parts. The segmented
+ * control sits right on cards at least 560 wide and spans the row with equal segments below that. */
+:root:root .ui-check-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .ui-check-row--first {
+  padding-top: 4px;
+  box-shadow: none;
+}
+:root:root .ui-check-row__question {
+  font: var(--card-meta);
+  line-height: 1.45;
+  color: var(--c-ink-3);
+  overflow-wrap: anywhere;
+}
+:root:root .ui-check-row__excerpt {
+  font: 400 0.8125rem / 1.65 var(--font-control);
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  white-space: pre-line;
+}
+:root:root .ui-check-row__excerpt[data-folded="true"] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+:root:root .ui-check-row__excerpt mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--c-accent-soft);
+  color: var(--c-ink);
+}
+:root:root .ui-check-row__more {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--card-meta);
+  color: var(--c-accent-text);
+  cursor: pointer;
+}
+:root:root .ui-check-row__verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  font: var(--card-body);
+  color: var(--c-ink-2);
+}
+:root:root .ui-check-row__verdict > .ui-segmented {
+  display: inline-flex;
+  margin-left: auto;
+}
+:root:root .ui-check-row__verdict > .ui-segmented [role="radio"] {
+  min-height: 24px;
+}
+@container (max-width: 559px) {
+  :root:root .ui-check-row__verdict > .ui-segmented {
+    width: 100%;
+    margin-left: 0;
+  }
+  :root:root .ui-check-row__verdict > .ui-segmented [role="radio"] {
+    flex: 1;
+    padding: 0 6px;
+  }
+}
+@media (max-width: 560px) {
+  :root:root .ui-check-row__verdict > .ui-segmented {
+    width: 100%;
+    margin-left: 0;
+  }
+  :root:root .ui-check-row__verdict > .ui-segmented [role="radio"] {
+    flex: 1;
+    padding: 0 6px;
+  }
+}
+/* Old → new point text in a card (diff inks shared with the change views) */
+:root:root .ui-card del.ui-card__del {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--c-err) 12%, transparent);
+  color: var(--c-err-ink);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+:root:root .ui-card ins.ui-card__ins {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--c-pos) 12%, transparent);
+  color: var(--c-pos-ink);
+  text-decoration: none;
+}
+/* Report numbers: the overview tiles of a check, three across, stacked on phones */
+:root:root .ui-card__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+:root:root .ui-card__stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .ui-card__stat > span {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__stat > b {
+  font: 600 1.0625rem / 1.3 var(--font-control);
+  color: var(--c-ink);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .ui-card__stat > small {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+  overflow-wrap: anywhere;
+}
+:root:root .ui-card__note {
+  font: var(--card-meta);
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  font: var(--card-meta);
+  color: var(--c-ink-2);
+}
+:root:root .ui-card__notice > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--c-ink-3);
+}
+:root:root .ui-card__notice a {
+  margin-left: 4px;
+  color: var(--c-accent-text);
+}
+
+/* ── Review line (components/ui/review-line.tsx; "Agent Eval Points" .rv, 2026-10-19) ──
+ * One quiet sentence under a point, at most two 24-high text buttons; pale while Coach is reviewing. */
+:root:root .ui-review-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 2px;
+  font: 400 0.78125rem / 1.55 var(--font-control);
+  color: var(--c-ink-2);
+}
+:root:root .ui-review-line--busy {
+  color: var(--c-ink-4);
+}
+:root:root .ui-review-line__btn {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+:root:root .ui-review-line > span + .ui-review-line__btn {
+  margin-left: -4px;
+}
+/* Alignment cards measure their own width for the check row's control (see the @container rule above) */
+:root:root .ui-card.ui-alignment-card {
+  container-type: inline-size;
+}
+@media (max-width: 560px) {
+  :root:root .ui-card__stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

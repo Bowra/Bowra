@@ -1,0 +1,287 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_analytical_aligned_cycles",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "Aligned historical cycles with supplied estimate",
+      "subtitle": "Synthetic prepared observations for native renderer acceptance.",
+      "data_artifact_id": "source-ref-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "rows": [
+        {
+          "series": "Primary",
+          "elapsed_years": -3,
+          "value": 74,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": -1,
+          "value": 92,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 0,
+          "value": 100,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 1.25,
+          "value": 90,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 4,
+          "value": 68,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 5,
+          "value": 63,
+          "low": 58,
+          "high": 70
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 8,
+          "value": 59,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 12,
+          "value": 85,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Primary",
+          "elapsed_years": 16,
+          "value": 105,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": -3,
+          "value": 82,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": -1,
+          "value": 100,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 0,
+          "value": 108,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 1.25,
+          "value": 98,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 4,
+          "value": 76,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 5,
+          "value": 71,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 8,
+          "value": 67,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 12,
+          "value": 93,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference A",
+          "elapsed_years": 16,
+          "value": 113,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": -3,
+          "value": 64,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": -1,
+          "value": 82,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 0,
+          "value": 90,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 1.25,
+          "value": 80,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 4,
+          "value": null,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 5,
+          "value": 53,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 8,
+          "value": 49,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 12,
+          "value": 75,
+          "low": null,
+          "high": null
+        },
+        {
+          "series": "Reference B",
+          "elapsed_years": 16,
+          "value": 95,
+          "low": null,
+          "high": null
+        }
+      ],
+      "row_count": 27,
+      "columns": [
+        {
+          "key": "series",
+          "header": "Series",
+          "type": "categorical"
+        },
+        {
+          "key": "elapsed_years",
+          "header": "Elapsed Years",
+          "type": "numeric"
+        },
+        {
+          "key": "value",
+          "header": "Value",
+          "type": "numeric"
+        },
+        {
+          "key": "low",
+          "header": "Low",
+          "type": "numeric"
+        },
+        {
+          "key": "high",
+          "header": "High",
+          "type": "numeric"
+        }
+      ],
+      "_export_analytical": {
+        "view_id": "comparison",
+        "preset": "series_plot",
+        "x_key": "elapsed_years",
+        "x_kind": "numeric",
+        "value_key": "value",
+        "series_key": "series",
+        "range": {
+          "lower_key": "low",
+          "upper_key": "high",
+          "kind": "estimate",
+          "note_ids": [
+            "basis"
+          ]
+        },
+        "series_roles": [
+          {
+            "series_value": "Primary",
+            "role": "primary"
+          },
+          {
+            "series_value": "Reference A",
+            "role": "reference"
+          },
+          {
+            "series_value": "Reference B",
+            "role": "observed"
+          }
+        ],
+        "binding_id": "analytical_fcf481259b33",
+        "binding": {
+          "observation_keys": [
+            "series",
+            "elapsed_years"
+          ],
+          "measure_keys": [
+            "high",
+            "low",
+            "value"
+          ],
+          "value_domain": [
+            45.8,
+            116.2
+          ],
+          "x_domain": [
+            -3.95,
+            16.95
+          ],
+          "series_values": [
+            "Primary",
+            "Reference A",
+            "Reference B"
+          ]
+        },
+        "availability": "available"
+      }
+    }
+  }
+}

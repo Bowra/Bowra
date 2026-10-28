@@ -1,0 +1,188 @@
+/* Config copilot — verbatim port of Claude Design cc.css (.ccp scope).
+   Design authority: docs/sprints/config-copilot/design/ (claude.ai/design project config-copilot/).
+   Tokens: add --c-ai-* (AI-prefill mauve) and --c-warn-tint/--c-shim-*; reuse other global app tokens. */
+/* Scope tokens under .ccp (as in plan-card.css): pages such as models-settings use
+   var(--c-warn-tint, fallback); global definitions hijack that fallback with the flag off (review P1-4). */
+.ccp {
+  --c-ai: #7b5570;
+  --c-ai-soft: #f3ebf0;
+  --c-ai-line: #e4d3de;
+  --c-ai-tint: #fbf6f9;
+  --c-warn-tint: #fdf8ec;
+  --c-shim-a: #f3eee2;
+  --c-shim-b: #f9f6ef;
+}
+[data-theme="dark"] .ccp {
+  --c-ai: #cb9dbd;
+  --c-ai-soft: #332633;
+  --c-ai-line: #4b3a4a;
+  --c-ai-tint: #261e26;
+  --c-warn-tint: #2a2317;
+  --c-shim-a: #2a251e;
+  --c-shim-b: #332d24;
+}
+
+/* ═══ Five field states (fld ai/warn/kept/done/pending + flash) ═══ */
+.ccp .fld { display: flex; flex-direction: column; gap: 7px; position: relative; }
+.ccp .fld > .ctl { position: relative; }
+.ccp .fld.ai > .ctl, .ccp .fld.warn > .ctl, .ccp .fld.kept > .ctl, .ccp .fld.done > .ctl { padding-left: 11px; }
+.ccp .fld.ai > .ctl::before, .ccp .fld.warn > .ctl::before, .ccp .fld.kept > .ctl::before, .ccp .fld.done > .ctl::before {
+  content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 2px; border-radius: 2px; background: var(--c-ai);
+}
+.ccp .fld.warn > .ctl::before { background: var(--c-warn); }
+.ccp .fld.kept > .ctl::before { background: var(--c-surface-3); }
+.ccp .fld.done > .ctl::before { background: var(--c-line); }
+/* Form controls have inline styles; override tint via element selectors + !important (design: .fld.ai .inp/.sel) */
+.ccp .fld.ai > .ctl input, .ccp .fld.ai > .ctl textarea, .ccp .fld.ai > .ctl select, .ccp .fld.ai > .ctl .chips {
+  background: var(--c-ai-tint) !important; border-color: var(--c-ai-line) !important;
+}
+.ccp .fld.warn > .ctl input, .ccp .fld.warn > .ctl textarea, .ccp .fld.warn > .ctl select {
+  background: var(--c-warn-tint) !important; border-color: var(--c-warn-line, var(--c-warn)) !important;
+}
+.ccp .fld .fill-fade { animation: ccp-fade 120ms var(--ease, cubic-bezier(0.2, 0.8, 0.2, 1)); }
+@keyframes ccp-fade { from { opacity: 0.4; } to { opacity: 1; } }
+.ccp .fld.flash > .ctl input, .ccp .fld.flash > .ctl textarea, .ccp .fld.flash > .ctl select {
+  box-shadow: 0 0 0 3px var(--c-ai-soft); border-color: var(--c-ai) !important; transition: box-shadow 600ms;
+}
+/* Markers */
+.ccp .mk {
+  display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-v2-mono, monospace);
+  font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.07em; border-radius: 4px; padding: 2px 5px; white-space: nowrap;
+}
+.ccp .mk.ai { color: var(--c-ai); background: var(--c-ai-soft); border: 1px solid var(--c-ai-line); }
+.ccp .mk.warn { color: var(--c-warn); background: var(--c-warn-soft, rgba(160, 119, 35, 0.12)); border: 1px solid var(--c-warn-line, var(--c-warn)); }
+.ccp .mk.kept { color: var(--c-ink-3); background: var(--c-surface-2); border: 1px solid var(--c-line); letter-spacing: 0.02em; font-weight: 600; }
+.ccp .mk.done { color: var(--c-ink-4); background: none; border: 1px solid var(--c-line); letter-spacing: 0.02em; font-weight: 600; }
+/* Inline accept/restore + evidence */
+.ccp .fld-acts { display: flex; align-items: center; gap: 7px; padding-left: 11px; }
+.ccp .mini {
+  font-size: 0.6875rem; font-weight: 600; border-radius: 6px; padding: 3px 9px; border: 1px solid var(--c-line);
+  background: var(--c-surface); color: var(--c-ink-3); cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.ccp .mini:hover { border-color: var(--c-ink-4); color: var(--c-ink); }
+.ccp .mini:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.ccp .mini.acc { color: var(--c-ai); border-color: var(--c-ai-line); background: var(--c-ai-soft); }
+.ccp .mini.acc:hover { border-color: var(--c-ai); }
+.ccp .why { font-size: 0.6875rem; color: var(--c-ink-4); display: inline-flex; align-items: center; gap: 5px; cursor: default; position: relative; }
+.ccp .why-wrap { position: relative; display: inline-flex; }
+.ccp .why-wrap .tip {
+  display: none; position: absolute; z-index: 9; left: 0; top: calc(100% + 7px); width: max-content; max-width: 250px;
+  background: var(--c-ink); color: var(--c-bg); font-size: 0.71875rem; line-height: 1.5; padding: 7px 11px; border-radius: 7px;
+}
+.ccp .why-wrap:hover .tip, .ccp .why-wrap:focus-within .tip { display: block; }
+.ccp .fld-note { display: flex; align-items: flex-start; gap: 7px; padding-left: 11px; font-size: 0.71875rem; line-height: 1.5; color: var(--c-warn); }
+[data-theme="dark"] .ccp .fld-note { color: #e2bb62; }
+.ccp .fld-note .ic { flex: none; margin-top: 1px; }
+/* Generation skeleton */
+.ccp .fld.pending > .ctl input, .ccp .fld.pending > .ctl textarea, .ccp .fld.pending > .ctl select { color: transparent !important; }
+.ccp .fld.pending > .ctl input::placeholder, .ccp .fld.pending > .ctl textarea::placeholder { color: transparent !important; }
+.ccp .fld.pending > .ctl::after {
+  content: ""; position: absolute; left: 23px; right: 14px; top: 50%; transform: translateY(-50%); height: 11px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--c-shim-a) 0%, var(--c-shim-b) 50%, var(--c-shim-a) 100%);
+  background-size: 200% 100%; animation: ccp-shim 1.3s infinite;
+}
+@keyframes ccp-shim { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ═══ AiFillPanel ═══ */
+.ccp.afp, .ccp .afp {
+  border: 1px solid var(--c-ai-line); border-radius: 12px; background: var(--c-ai-tint);
+  display: flex; flex-direction: column; gap: 11px; padding: 14px 15px 13px;
+}
+.ccp .afp-hd { display: flex; align-items: center; gap: 9px; }
+.ccp .afp-hd .ic {
+  width: 24px; height: 24px; border-radius: 7px; background: var(--c-ai-soft); border: 1px solid var(--c-ai-line);
+  color: var(--c-ai); display: grid; place-items: center; flex: none;
+}
+.ccp .afp-hd .t { font-size: 0.84375rem; font-weight: 600; color: var(--c-ink); letter-spacing: -0.005em; }
+.ccp .afp-hd .sp { flex: 1; }
+.ccp .afp-quota { font-family: var(--font-v2-mono, monospace); font-size: 0.65625rem; color: var(--c-ink-4); }
+.ccp .afp textarea, .ccp.afp textarea { background: var(--c-surface); border-color: var(--c-line); min-height: 62px; }
+.ccp .afp-foot { display: flex; align-items: center; gap: 12px; }
+.ccp .afp-cap { flex: 1; min-width: 0; font-size: 0.71875rem; color: var(--c-ink-3); line-height: 1.5; display: flex; align-items: center; gap: 7px; }
+.ccp .afp-cap .ic { flex: none; color: var(--c-ink-4); display: grid; place-items: center; }
+.ccp .afp-cap.err { color: var(--c-err); }
+.ccp .afp-cap.err .ic { color: var(--c-err); }
+.ccp .afp-sum { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--c-surface); border: 1px solid var(--c-ai-line); border-radius: 8px; }
+.ccp .afp-sum .t { flex: 1; min-width: 0; font-size: 0.78125rem; color: var(--c-ink-2); }
+.ccp .afp-sum .t b { font-weight: 600; color: var(--c-ink); }
+.ccp .afp-sum .t .w { color: var(--c-warn); font-weight: 600; }
+.ccp .afp-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px 13px; background: var(--c-surface); border: 1px solid var(--c-ai-line); border-radius: 8px; }
+.ccp .afp-ask .q-hd { display: flex; align-items: center; gap: 8px; font-size: 0.78125rem; font-weight: 600; color: var(--c-ink); }
+.ccp .afp-ask .q-hd .ic { color: var(--c-ai); flex: none; }
+.ccp .afp-ask .q { font-size: 0.78125rem; color: var(--c-ink-2); line-height: 1.65; }
+.ccp .afp-ask .row { display: flex; gap: 9px; align-items: center; }
+.ccp .afp-ask .row input { flex: 1; }
+.ccp .spin { animation: ccp-spin 0.9s linear infinite; display: grid; place-items: center; }
+@keyframes ccp-spin { to { transform: rotate(360deg); } }
+/* Generate button (btn-sec: always one level lighter than Save) */
+.ccp .btn-sec {
+  font-size: 0.78125rem; font-weight: 600; color: var(--c-accent); background: var(--c-surface);
+  border: 1px solid var(--c-accent-soft); border-radius: 8px; padding: 9px 14px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; flex: none;
+}
+.ccp .btn-sec:hover { border-color: var(--c-accent); background: var(--c-accent-tint); }
+.ccp .btn-sec[disabled] { color: var(--c-ink-4); border-color: var(--c-line); background: var(--c-surface-2); cursor: not-allowed; }
+.ccp .btn-ghost2 { font-size: 0.78125rem; font-weight: 500; color: var(--c-ink-3); background: none; border: none; cursor: pointer; padding: 9px 12px; border-radius: 8px; white-space: nowrap; }
+.ccp .btn-ghost2:hover { color: var(--c-ink); background: var(--c-surface-2); }
+
+/* ═══ One-line receipts (draft chip; the settings suggestion card is a ChatCard) ═══ */
+.ccp .lite-1 { display: flex; align-items: center; gap: 9px; width: 100%; max-width: 452px; padding: 9px 13px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-surface); font-size: 0.78125rem; color: var(--c-ink-2); }
+.ccp .lite-1 .ic { flex: none; color: var(--c-pos, #3a724a); display: grid; place-items: center; }
+.ccp .lite-1.muted { background: var(--c-surface-2); color: var(--c-ink-4); }
+.ccp .lite-1.muted .ic { color: var(--c-ink-4); }
+.ccp .lite-1.err { border-color: var(--c-err); background: var(--c-err-soft, rgba(168, 58, 44, 0.1)); color: var(--c-err); }
+.ccp .lite-1.err .ic { color: var(--c-err); }
+.ccp .lite-1 .sp { flex: 1; }
+.ccp .lite-1 b { font-weight: 600; color: var(--c-ink); }
+.ccp .lnk { font-size: 0.78125rem; font-weight: 600; color: var(--c-accent); background: none; border: none; padding: 0; cursor: pointer; }
+.ccp .lnk:hover { text-decoration: underline; }
+
+/* Mobile 412 (checklist #13): move accept/restore to a small row below the field; Regenerate spans full width */
+@media (max-width: 640px) {
+  .ccp .afp-foot { flex-direction: column; align-items: stretch; gap: 8px; }
+  .ccp .afp-foot .btn-sec { justify-content: center; }
+}
+
+/* ═══ ConfigDrawer (batch 1-b; verbatim design screens 09-13: drawer / dr- / badge- / receipt / sysline) ═══
+   ⚠ Do not write asterisk-wildcard prefixes such as `dr-*` in comments: `*` immediately following `/` is the comment terminator,
+   turning the rest into CSS text; cssnano reports `Unexpected '/'`, failing **only in production builds** (dev and
+   typecheck do not minify CSS and miss it). */
+.cc-drawer {
+  display: flex; flex-direction: column; background: var(--c-surface);
+  border-left: 1px solid var(--c-line); box-shadow: var(--shadow-3, 0 12px 40px rgba(22, 19, 16, 0.14));
+  animation: ccp-drawer-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes ccp-drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cc-drawer { animation: none; } }
+/* overlay: cover canvas column with a 16px edge visible; never cover chat (scrim also stays inside the canvas container) */
+.cc-drawer-overlay { position: absolute; top: 0; right: 0; bottom: 0; width: min(664px, calc(100% - 16px)); z-index: 12; }
+.cc-drawer-scrim { position: absolute; inset: 0; background: var(--scrim, rgba(22, 19, 16, 0.26)); z-index: 11; }
+/* column: without canvas, use the workspace's right column (host grid sets width); normal flow does not cover chat.
+   Set min-height/overflow: grid auto rows expand to content (dogfood drawer 1541px vs row 811px),
+   preventing .dr-body overflow and pushing footer Save outside the viewport. */
+.cc-drawer-column { position: relative; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+/* sheet: <1200 / mobile / overly narrow overlay — fullscreen slide-in from the right */
+.cc-drawer-sheet { position: fixed; inset: 0; width: 100%; z-index: 1300; border-left: none; }
+.ccp .dr-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 17px 22px; border-bottom: 1px solid var(--c-line); }
+.ccp .dr-head .ti { flex: 1; min-width: 0; }
+.ccp .dr-head .ti .e { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c-ink-4); margin-bottom: 3px; }
+.ccp .dr-head .ti .t { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+.ccp .dr-hint { flex: none; display: flex; align-items: center; gap: 9px; padding: 10px 22px; background: var(--c-ai-tint); border-bottom: 1px solid var(--c-ai-line); font-size: 0.75rem; color: var(--c-ink-3); }
+.ccp .dr-hint .ic { flex: none; color: var(--c-ai); display: grid; place-items: center; }
+.ccp .dr-hint .sp { flex: 1; }
+.ccp .dr-body { flex: 1; min-height: 0; overflow: auto; }
+.ccp .dr-back-hint { flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 22px; border-top: 1px solid var(--c-line); background: var(--c-surface-2); font-size: 0.71875rem; color: var(--c-ink-4); }
+.ccp .dr-load-err { padding: 24px 22px; font-size: 0.78125rem; color: var(--c-ink-3); }
+.ccp .badge-src { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.59375rem; font-weight: 600; letter-spacing: 0.06em; color: var(--c-ai); background: var(--c-ai-soft); border: 1px solid var(--c-ai-line); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.ccp .badge-upd { display: inline-flex; align-items: center; gap: 6px; font-size: 0.6875rem; font-weight: 600; color: var(--c-ai); background: var(--c-ai-soft); border: 1px solid var(--c-ai-line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+.ccp .icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--c-ink-3); display: grid; place-items: center; cursor: pointer; flex: none; }
+.ccp .icon-btn:hover { background: var(--c-surface-2); color: var(--c-ink); border-color: var(--c-line); }
+/* Draft-chip AI marker color (lite-1 reuse, icon becomes mauve) */
+.ccp .lite-1 .ic.ai { color: var(--c-ai); }
+/* Save receipt (design chat-receipt) */
+.ccp .draft-receipt-wrap { display: flex; flex-direction: column; gap: 7px; }
+.ccp .receipt { display: inline-flex; align-items: center; gap: 10px; font-size: 0.78125rem; color: var(--c-ink-2); padding: 9px 13px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-surface); }
+.ccp .receipt .ic { flex: none; color: var(--c-pos, #3a724a); display: grid; place-items: center; }
+.ccp .receipt b { font-weight: 600; color: var(--c-ink); }
+.ccp .sysline { display: inline-flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--c-ink-4); }
+.ccp .sysline .ic { flex: none; display: grid; place-items: center; }

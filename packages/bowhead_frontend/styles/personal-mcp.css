@@ -1,0 +1,787 @@
+.personal-mcp-panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  color: var(--c-ink);
+}
+.personal-mcp-panel h2,
+.personal-mcp-panel h3,
+.personal-mcp-panel p,
+.personal-mcp-confirmation h2,
+.personal-mcp-confirmation p {
+  margin: 0;
+}
+.personal-mcp-page-header {
+  display: grid;
+}
+.personal-mcp-page-header h2 {
+  font-family: var(--font-v2-serif);
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.personal-mcp-page-header p {
+  max-width: 680px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+.personal-mcp-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--c-line);
+}
+.personal-mcp-tab-panel {
+  display: grid;
+  gap: 20px;
+}
+.personal-mcp-risk-notice {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border: 1px solid color-mix(in srgb, var(--c-warn) 22%, var(--c-line));
+  border-radius: var(--r-1);
+}
+.personal-mcp-risk-notice strong {
+  font-size: 0.75rem;
+}
+.personal-mcp-risk-notice p {
+  font-size: 0.75rem;
+}
+.personal-mcp-panel form {
+  gap: 16px;
+}
+.personal-mcp-form-heading,
+.personal-mcp-list-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.personal-mcp-form-heading h3,
+.personal-mcp-list-heading h3 {
+  font-size: 0.9375rem;
+}
+.personal-mcp-form-heading p,
+.personal-mcp-list-heading p {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.personal-mcp-connections-list {
+  display: grid;
+}
+.personal-mcp-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.personal-mcp-list-actions > span {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.personal-mcp-panel .personal-mcp-add-connection {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.personal-mcp-panel .personal-mcp-add-connection:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+.personal-mcp-add-connection > span {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1;
+}
+.personal-mcp-connection-stack {
+  display: grid;
+  gap: 12px;
+}
+.personal-mcp-connections-empty {
+  display: grid;
+}
+.personal-mcp-panel p,
+.personal-mcp-confirmation p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.personal-mcp-panel form,
+.personal-mcp-panel fieldset {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  border-radius: var(--r-2);
+  min-width: 0;
+  margin: 0;
+}
+.personal-mcp-panel legend {
+  padding-inline: 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.personal-mcp-panel label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.personal-mcp-panel label:has(input[type="checkbox"]) {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding-block: 6px;
+  cursor: pointer;
+}
+.personal-mcp-panel input:not([type="checkbox"]),
+.personal-mcp-panel select {
+  box-sizing: border-box;
+  padding: 8px 10px;
+  min-height: 40px;
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+.personal-mcp-panel input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  accent-color: var(--c-accent);
+}
+.personal-mcp-panel label > span,
+.personal-mcp-panel small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.personal-mcp-panel small {
+  display: block;
+  color: var(--c-ink-3);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.personal-mcp-panel button,
+.personal-mcp-confirmation button {
+  padding: 8px 12px;
+  min-height: 40px;
+  font: inherit;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.personal-mcp-panel button:hover:not(:disabled),
+.personal-mcp-confirmation button:hover:not(:disabled) {
+  background: var(--c-surface-2);
+}
+.personal-mcp-panel .personal-mcp-tabs button {
+  min-height: 38px;
+  padding: 8px 14px;
+  color: var(--c-ink-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.personal-mcp-panel .personal-mcp-tabs button:hover:not(:disabled) {
+  color: var(--c-ink);
+  background: transparent;
+}
+.personal-mcp-panel .personal-mcp-tabs button.is-active {
+  color: var(--c-accent);
+  border-bottom-color: var(--c-accent);
+}
+.personal-mcp-panel button[type="submit"],
+.personal-mcp-confirmation-allow-session {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  border-color: var(--c-accent);
+}
+.personal-mcp-panel button[type="submit"]:hover:not(:disabled),
+.personal-mcp-confirmation-allow-session:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+.personal-mcp-panel :is(input, select, button):focus-visible,
+.personal-mcp-confirmation button:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.personal-mcp-panel :disabled,
+.personal-mcp-panel fieldset:disabled button,
+.personal-mcp-confirmation button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.personal-mcp-panel [role="alert"],
+.personal-mcp-confirmation [role="alert"] {
+  color: var(--c-err);
+}
+.personal-mcp-panel [role="status"] {
+  color: var(--c-pos);
+}
+.personal-mcp-connection-status {
+  width: fit-content;
+  padding: 3px 8px;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.personal-mcp-connection-status.is-ready {
+  color: var(--c-pos-ink);
+  background: var(--c-pos-soft);
+  border-color: color-mix(in srgb, var(--c-pos) 28%, var(--c-line));
+}
+.personal-mcp-connection-status.is-disabled {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border-color: color-mix(in srgb, var(--c-warn) 28%, var(--c-line));
+}
+.personal-mcp-panel .personal-mcp-connection-enable {
+  color: var(--c-pos-ink);
+  background: var(--c-pos-soft);
+  border-color: color-mix(in srgb, var(--c-pos) 32%, var(--c-line));
+}
+.personal-mcp-panel .personal-mcp-connection-enable:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-pos) 20%, var(--c-pos-soft));
+}
+.personal-mcp-panel .personal-mcp-connection-disable {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border-color: color-mix(in srgb, var(--c-warn) 32%, var(--c-line));
+}
+.personal-mcp-panel .personal-mcp-connection-disable:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-warn) 20%, var(--c-warn-soft));
+}
+.personal-mcp-panel ul {
+  display: grid;
+  gap: 10px;
+  padding-inline-start: 20px;
+  overflow-wrap: anywhere;
+}
+.personal-mcp-history {
+  gap: 14px;
+}
+.personal-mcp-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.personal-mcp-history-heading h3 {
+  font-size: 1rem;
+}
+.personal-mcp-history-heading p {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.personal-mcp-history-heading button {
+  flex: 0 0 auto;
+}
+.personal-mcp-history-empty {
+  padding: 18px;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px dashed var(--c-line);
+  border-radius: var(--r-2);
+  font-size: 0.8125rem;
+}
+.personal-mcp-history-list {
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+.personal-mcp-history-list > li {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+.personal-mcp-history-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.personal-mcp-history-call {
+  min-width: 0;
+}
+.personal-mcp-history-call p {
+  color: var(--c-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.personal-mcp-history-call p > span:first-child {
+  color: var(--c-ink-2);
+  font-weight: 500;
+}
+.personal-mcp-history-call time {
+  display: block;
+  margin-top: 5px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.personal-mcp-call-status {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: var(--c-ink-2);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.personal-mcp-call-status.is-ok {
+  color: var(--c-pos);
+  background: color-mix(in srgb, var(--c-pos) 9%, var(--c-surface));
+  border-color: color-mix(in srgb, var(--c-pos) 24%, var(--c-line));
+}
+.personal-mcp-call-status.is-error,
+.personal-mcp-call-status.is-unknown {
+  color: var(--c-err);
+  background: color-mix(in srgb, var(--c-err) 8%, var(--c-surface));
+  border-color: color-mix(in srgb, var(--c-err) 22%, var(--c-line));
+}
+.personal-mcp-call-status.is-dispatching,
+.personal-mcp-call-status.is-pending,
+.personal-mcp-call-status.is-approved {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border-color: color-mix(in srgb, var(--c-warn) 24%, var(--c-line));
+}
+.personal-mcp-history-unknown {
+  padding: 8px 10px;
+  color: var(--c-err);
+  background: color-mix(in srgb, var(--c-err) 6%, var(--c-surface));
+  border-radius: var(--r-1);
+  font-size: 0.75rem;
+}
+@media (max-width: 520px) {
+  .personal-mcp-history-heading,
+  .personal-mcp-history-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .personal-mcp-history-heading button,
+  .personal-mcp-call-status {
+    align-self: flex-start;
+  }
+}
+.personal-mcp-confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog-top);
+  background: rgb(0 0 0 / 40%);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+.personal-mcp-confirmation {
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  padding: 24px;
+  width: min(600px, 100%);
+  min-width: 0;
+  max-height: 85dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.personal-mcp-confirmation pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-height: 35dvh;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: var(--c-ink);
+  background: var(--c-bg);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+.personal-mcp-confirmation-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.personal-mcp-confirmation-actions button {
+  width: 100%;
+}
+.personal-mcp-confirmation-allow-once {
+  color: var(--c-accent) !important;
+  border-color: var(--c-accent) !important;
+  background: color-mix(
+    in srgb,
+    var(--c-accent) 8%,
+    var(--c-surface)
+  ) !important;
+}
+.personal-mcp-confirmation-allow-session {
+  grid-column: 1 / -1;
+}
+.personal-mcp-confirmation-session-note {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+@media (max-width: 480px) {
+  .personal-mcp-confirmation-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .personal-mcp-confirmation-allow-session {
+    grid-column: auto;
+  }
+}
+.personal-mcp-panel .personal-mcp-form-fields {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.personal-mcp-dialog-form {
+  display: grid;
+  gap: 16px;
+}
+.personal-mcp-dialog-hint {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.personal-mcp-dialog-form .personal-mcp-form-fields {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.personal-mcp-dialog-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.personal-mcp-dialog-form input,
+.personal-mcp-dialog-form select {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+.personal-mcp-dialog-form :is(input, select, button):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.personal-mcp-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+.personal-mcp-dialog-actions button {
+  min-height: 40px;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.personal-mcp-dialog-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.personal-mcp-dialog-actions button[type="submit"] {
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.personal-mcp-dialog-actions button[type="submit"]:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+.personal-mcp-agent-bindings {
+  gap: 12px;
+}
+.personal-mcp-agent-bindings > header h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+.personal-mcp-agent-bindings > header p {
+  margin-top: 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.personal-mcp-agent-binding {
+  gap: 14px !important;
+  padding: 14px !important;
+}
+.personal-mcp-agent-binding.is-embedded {
+  padding: 0 !important;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.personal-mcp-server-list {
+  display: grid;
+  gap: 10px;
+}
+.personal-mcp-server {
+  overflow: hidden;
+  background: var(--c-bg);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+.personal-mcp-server > header {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--c-accent-tint) 42%, var(--c-surface));
+  border-bottom: 1px solid var(--c-line);
+}
+.personal-mcp-server > header > div {
+  min-width: 0;
+}
+.personal-mcp-server > header span {
+  display: block;
+  color: var(--c-accent);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.personal-mcp-server h4 {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+}
+.personal-mcp-server > header p {
+  margin-top: 2px;
+  color: var(--c-ink-3);
+  font-family: var(--font-v2-mono);
+  font-size: 0.625rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.personal-mcp-server > header > small {
+  flex: none;
+  padding: 3px 7px;
+  color: var(--c-accent);
+  background: var(--c-surface);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 22%, var(--c-line));
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+.personal-mcp-server-tools {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+.personal-mcp-server-tools label,
+.personal-mcp-missing-tools label {
+  padding: 8px;
+  border-radius: 8px;
+}
+.personal-mcp-server-tools label:hover {
+  background: var(--c-surface-2);
+}
+.personal-mcp-server-tools label strong {
+  display: block;
+  font-family: var(--font-v2-mono);
+  font-size: 0.75rem;
+}
+.personal-mcp-server-tools label small {
+  margin-top: 2px;
+}
+.personal-mcp-binding-empty {
+  padding: 12px;
+  color: var(--c-ink-3);
+  background: var(--c-surface-2);
+  border: 1px dashed var(--c-line);
+  border-radius: var(--r-1);
+  font-size: 0.75rem;
+}
+.personal-mcp-missing-tools {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border: 1px solid color-mix(in srgb, var(--c-warn) 26%, var(--c-line));
+  border-radius: var(--r-1);
+}
+.personal-mcp-missing-tools strong {
+  font-size: 0.75rem;
+}
+.personal-mcp-missing-tools p {
+  font-size: 0.6875rem;
+}
+.personal-mcp-binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.personal-mcp-binding-actions .personal-mcp-connection-delete {
+  margin-left: auto;
+}
+.am-config-resources > .personal-mcp-agent-bindings,
+.am-config-resources > .am-config-capability-panel {
+  margin: 0 0 20px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--c-accent-tint) 28%, var(--c-surface));
+  border: 1px solid color-mix(in srgb, var(--c-accent) 14%, var(--c-line));
+  border-radius: 14px;
+}
+.personal-mcp-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+.personal-mcp-tool-selection-actions {
+  display: flex;
+  padding-top: 4px;
+}
+.personal-mcp-tool-selection-actions .personal-mcp-connection-save {
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.personal-mcp-tool-selection-actions
+  .personal-mcp-connection-save:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+.personal-mcp-connection-actions button {
+  min-height: 36px;
+  padding: 6px 12px;
+}
+.personal-mcp-connection-actions .personal-mcp-connection-edit {
+  color: var(--c-accent);
+  background: var(--c-accent-tint);
+  border-color: color-mix(in srgb, var(--c-accent) 28%, var(--c-line));
+}
+.personal-mcp-connection-actions
+  .personal-mcp-connection-edit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c-accent) 18%, var(--c-surface));
+}
+.personal-mcp-connection-actions .personal-mcp-connection-delete {
+  margin-left: auto;
+  color: var(--c-err);
+  border-color: color-mix(in srgb, var(--c-err) 35%, var(--c-line));
+}
+.personal-mcp-connection-actions
+  .personal-mcp-connection-delete:hover:not(:disabled) {
+  background: var(--c-err-soft);
+}
+@media (max-width: 560px) {
+  .personal-mcp-tabs {
+    overflow-x: auto;
+  }
+  .personal-mcp-connection-actions {
+    align-items: stretch;
+  }
+  .personal-mcp-connection-actions button {
+    flex: 1 1 140px;
+  }
+  .personal-mcp-tool-selection-actions button {
+    width: 100%;
+  }
+  .personal-mcp-connection-actions .personal-mcp-connection-delete {
+    margin-left: 0;
+  }
+  .personal-mcp-server > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .personal-mcp-binding-actions {
+    align-items: stretch;
+  }
+  .personal-mcp-binding-actions button {
+    flex: 1 1 180px;
+  }
+  .personal-mcp-binding-actions .personal-mcp-connection-delete {
+    margin-left: 0;
+  }
+}
+
+/* components/settings/google-connection-card.tsx: the member's own Google authorization in My connections */
+.google-connection-card {
+  margin-bottom: 24px;
+}
+.google-connection-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+}
+.google-connection-row > div:nth-child(2) {
+  display: grid;
+  gap: 4px;
+}
+.google-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .google-connection-row {
+    flex-wrap: wrap;
+  }
+  .google-connection-actions {
+    width: 100%;
+  }
+}

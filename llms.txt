@@ -1,0 +1,45 @@
+# Bowra
+
+> Verified Intelligence for business analysis: inspectable sources, numeric provenance, controlled calculations, reusable Agents, and reports your team can review.
+
+Bowra is the self-hosted Community edition of Bowhead. This repository is a source preview. It has no commercial activation key or built-in user-count cap; operators supply infrastructure, models, credentials, and configured usage budgets. Package names and BOWHEAD_* configuration remain stable for compatibility.
+
+## Start here
+
+- [Project overview](README.md): capabilities, Community scope, and availability.
+- [Documentation index](docs/README.md): first run, knowledge, reports, Agents, MCP, automation, and contribution.
+- [External-agent adoption guide](docs/agent-guide.md): capability/input/output/prerequisite/status map and actual Agent Developer API discovery.
+- [Build and setup](deploy/README.md): authoritative source commands, compatible executor requirements, and export dependencies.
+- [First-owner setup](deploy/community-setup.md): initialize a fresh Community installation.
+- [Examples](examples/community/README.md): start with a bounded task and inspect its evidence.
+
+## Task guides
+
+- [Supplier review](examples/community/supplier-review/README.md): document-matrix adoption example.
+- [Revenue review](examples/community/revenue-review/README.md): business-analysis adoption example.
+- [Agent automation](examples/community/agent-automation/README.md): opt-in version-workflow example.
+- [Knowledge base](docs/help/knowledge-base.en-US.md): document visibility, indexing, matrices, and source review.
+- [Conversation workspace](docs/help/conversation-workbench.en-US.md): reports, citations, charts, and result inspection.
+- [Create an Agent](docs/help/create-agent.en-US.md): instructions, selected capabilities, and document Skills.
+- [Team MCP tools](docs/help/team-mcp-tools.en-US.md): connect external tool services for Bowra's Agents.
+- [Agent Developer API](docs/agent-guide.md#discover-the-agent-developer-api): owner grants, proposal review, and evaluations. To stop an external pipeline, disable or revoke its key in Team settings › OpenAPI.
+
+## Integration facts
+
+- MCP provides connected tools to Bowra's Agents. A supported externally callable Bowra MCP server or general task-delegation API is not published in this source preview.
+- The scoped Agent Developer API base path is /api/openapi/v1 under the operator-provided service address, including any configured path prefix.
+- Discover actual availability at /api/openapi/v1/reference.md. With an authorized bearer token, GET /api/openapi/v1/scopes returns granted installed scopes. Check the reference for enabled endpoints as well.
+- Agent version automation requires deployment opt-in, an authorized API key, and an Agent-specific owner grant. Local Developer API transport is available; SaaS transport requires separate operator opt-in.
+- Automation may submit proposals, prepare owner-accepted candidates, run permitted evaluations, and read readiness. It cannot accept proposals, confirm risks, or release on the owner's behalf.
+- Citations and successful execution support verification; they do not guarantee correct conclusions. Preserve evidence gaps, assumptions, units, time ranges, and access boundaries.
+- Source checkout availability does not imply a published runtime image, hosted endpoint, or validated external integration.
+
+## Contribute and read in Chinese
+
+- [Contributor guide](CONTRIBUTING.md): development workflow and checks.
+- [Repository agent instructions](AGENTS.md): instructions for coding agents working on this repository.
+- [Security](SECURITY.md): security reporting guidance.
+- [License](LICENSE): MIT license; third-party components retain their own terms.
+- [Third-party notices](THIRD_PARTY_NOTICES.md): dependency and bundled-material attribution.
+- [中文文档导航](docs/README.zh-CN.md): Chinese documentation entry.
+- [外部 Agent 中文指南](docs/agent-guide.zh-CN.md): Chinese adoption and integration guide.

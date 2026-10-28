@@ -1,0 +1,5 @@
+# ShopifyQL availability
+
+This release exposes no ShopifyQL execution Tool. `read_reports` alone does not authorize API analytics: Shopify requires Level 2 protected customer data access for `shopifyqlQuery`, including aggregate queries. The pilot shop returned `ACCESS_DENIED` for a non-customer query. Do not generate a ShopifyQL query and pretend it ran through the object Tools.
+
+When discussing a future ShopifyQL path, use the maintained [Admin API integration guide](https://shopify.dev/docs/apps/build/shopifyql/graphql-admin-api) and [ShopifyQL syntax guide](https://shopify.dev/docs/api/shopifyql). The language is analytical (`FROM`, `SHOW`, optional filtering/grouping/time clauses), not general SQL or object retrieval. A future implementation needs verified dataset/metric availability, protected-data approval, parse-error handling, bounded output, throttling and reconciliation of timezone, currency and native report definitions before enabling execution. Customer-linked datasets remain outside this release.

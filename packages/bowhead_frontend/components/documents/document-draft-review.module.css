@@ -1,0 +1,100 @@
+/* Document draft review body (Canvas Objects Spec part 2, screens 1–4). Chrome comes from C1–C11. */
+.root {
+  display: contents;
+}
+.preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.previewFrame {
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background:
+    repeating-linear-gradient(135deg, var(--c-fill-1) 0 10px, transparent 10px 20px),
+    var(--c-surface-2);
+  box-shadow: inset 0 0 0 0.5px var(--c-separator);
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+}
+.previewFrame:has(.previewImage) {
+  aspect-ratio: auto;
+  background: var(--c-surface);
+}
+.previewImage {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.pageButton {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  cursor: pointer;
+}
+.pageButton:hover:not(:disabled) {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+.pageButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pageButton:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .pageButton {
+    width: 44px;
+    height: 44px;
+  }
+}
+.list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plain {
+  margin: 0;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+  color: var(--c-ink-2);
+  white-space: pre-wrap;
+}
+.acknowledgement {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--c-ink);
+  cursor: pointer;
+}
+.acknowledgement input {
+  margin: 0;
+  flex: none;
+}
+.acknowledgement:has(input:disabled) {
+  color: var(--c-ink-3);
+  cursor: default;
+}

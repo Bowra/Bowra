@@ -1,0 +1,516 @@
+.builtin-agents-settings {
+  font-family: var(--font-control);
+  padding-top: 24px;
+}
+/* Settings breadcrumb "‹ Team settings" (polish spec D1): 12px ink-4, sized to its text. */
+.settings-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  color: var(--c-ink-4);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+.settings-breadcrumb:hover {
+  color: var(--c-ink-2);
+}
+.settings-breadcrumb:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+@media (pointer: coarse) {
+  .settings-breadcrumb {
+    min-height: 44px;
+  }
+}
+.builtin-agents-head {
+  margin-bottom: 32px;
+}
+.builtin-agents-subtitle,
+.builtin-agents-save-note {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  margin: 8px 0 0;
+  max-width: 64ch;
+}
+.builtin-agents-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 12px;
+}
+.builtin-agents-section-head h2,
+.builtin-agents-empty h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.builtin-agents-section-head p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.builtin-agents-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+}
+/* Row (Agents & Reports polish spec 2d): icon 32 · display name 13/600 · one-line purpose 12 ink-3 · skill count · ⋯.
+   Minimum 56 for the two-line row; the slug and model live in the configuration dialog's details. */
+.builtin-agent-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+.builtin-agent-row + .builtin-agent-row {
+  border-top: 1px solid var(--c-line);
+}
+.builtin-agent-symbol {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  background: var(--c-fill-2);
+}
+.builtin-agent-content {
+  min-width: 0;
+}
+.builtin-agent-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.builtin-agent-title-row h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Read-only viewers open the details from the name */
+.builtin-agent-name-button {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.builtin-agent-name-button:hover {
+  text-decoration: underline;
+}
+.builtin-agent-name-button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+.builtin-agent-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+.builtin-agent-description {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.builtin-agent-skill-count {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Zero skills is a state for the owner to handle, shown in the faintest permitted ink */
+.builtin-agent-skill-count[data-empty="true"] {
+  color: var(--c-ink-4);
+}
+/* Read-only rows have no ⋯; the skill count closes the row. */
+.builtin-agent-row:not(:has(.ui-row-more)) {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+}
+.builtin-agent-details dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+.builtin-agent-details dl > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.builtin-agent-details dt {
+  color: var(--c-ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.builtin-agent-details dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+}
+.builtin-agent-detail-secondary {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+.builtin-agent-identifier {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--c-ink-4);
+  font-family: var(--font-v2-mono);
+  font-size: 0.6875rem;
+}
+@media (max-width: 640px) {
+  /* Narrow-screen list row: the skill count moves to the end of the second line, ⋯ stays visible at 44 */
+  .builtin-agent-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-areas: "icon content more" "icon count more";
+    row-gap: 0;
+  }
+  .builtin-agent-row:not(:has(.ui-row-more)) {
+    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-areas: "icon content" "icon count";
+  }
+  .builtin-agent-symbol {
+    grid-area: icon;
+  }
+  .builtin-agent-content {
+    grid-area: content;
+  }
+  .builtin-agent-skill-count {
+    grid-area: count;
+    justify-self: end;
+  }
+  .builtin-agent-row > .ui-row-more {
+    grid-area: more;
+    width: 44px;
+    height: 44px;
+  }
+  .builtin-agent-details dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+.builtin-agents-save-note {
+  margin-top: 16px;
+  max-width: none;
+}
+.builtin-agents-empty {
+  padding: 48px 24px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-4);
+  text-align: center;
+}
+.builtin-agents-empty p {
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.builtin-agent-config {
+  min-width: 0;
+}
+:root:root .settings-dialog:has(.builtin-agent-config) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+:root:root
+  .settings-dialog:has(.builtin-agent-config)
+  > .settings-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:root:root
+  .settings-dialog:has(.builtin-agent-config)
+  > .settings-dialog__footer {
+  flex-shrink: 0;
+}
+.builtin-agent-config-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+:root:root .builtin-agent-config .settings-field {
+  margin-bottom: 16px;
+}
+:root:root .builtin-agent-config .settings-field__hint {
+  color: var(--c-ink-3);
+}
+.builtin-agent-config-intro {
+  margin: 0 0 24px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.builtin-agent-config-section + .builtin-agent-config-section {
+  border-top: 1px solid var(--c-line);
+  padding-top: 24px;
+  margin-top: 24px;
+}
+.builtin-agent-config-section h4 {
+  margin: 0 0 16px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.builtin-agent-config .ui-input {
+  width: 100%;
+  min-width: 0;
+}
+.builtin-agent-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.builtin-agent-skills {
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+}
+.builtin-agent-skill {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  align-items: start;
+  min-height: 44px;
+  padding: 10px;
+  cursor: pointer;
+  border-radius: var(--r-2);
+}
+.builtin-agent-skill:hover {
+  background: var(--c-surface-2);
+}
+.builtin-agent-skill input {
+  grid-row: span 2;
+  margin-top: 3px;
+  accent-color: var(--c-accent);
+}
+.builtin-agent-skill-name {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.builtin-agent-skill-description {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.builtin-agent-skills-heading {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 10px 10px 4px;
+}
+.builtin-agent-skills-error {
+  margin: 8px;
+}
+.builtin-agent-skills-error p {
+  margin: 0 0 12px;
+}
+.builtin-agent-skills-loading {
+  padding: 12px;
+  color: var(--c-ink-3);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 700px) {
+  .builtin-agent-config-pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .builtin-agents-head {
+    margin-bottom: 24px;
+  }
+}
+
+@media (pointer: coarse) {
+  :root:root .builtin-agent-row > .ui-row-more {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Agent run limits tab (docs/design/agent-run-limits.md §4.1.1). Tabs reuse the
+   underline TabList; rows reuse FieldRow inside ui-group-card. */
+.builtin-agents-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 16px;
+  border-bottom: 1px solid var(--c-line);
+}
+.builtin-agents-tabs button {
+  padding: 9px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--c-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.builtin-agents-tabs button.is-active {
+  color: var(--c-accent);
+  border-bottom-color: var(--c-accent);
+  font-weight: 600;
+}
+.agent-run-limits {
+  display: grid;
+  gap: 12px;
+  max-width: 960px;
+}
+.agent-run-limits__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-run-limits__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+.agent-run-limits__head .settings-button {
+  margin-left: auto;
+}
+.agent-run-limits__control {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+.agent-run-limits__num {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-run-limits__input {
+  width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.agent-run-limits__rows {
+  padding-inline: 16px;
+}
+.agent-run-limits__row {
+  align-items: flex-start;
+  padding-block: 14px;
+}
+.agent-run-limits__row > :last-child {
+  width: 340px;
+  max-width: 48%;
+}
+.agent-run-limits__radios {
+  width: fit-content;
+  max-width: 100%;
+}
+.agent-run-limits__radio {
+  min-height: 32px;
+  padding-inline: 10px;
+}
+.agent-run-limits__control .settings-field__hint {
+  line-height: 1.5;
+}
+.runtime-limits-settings {
+  display: grid;
+  gap: 32px;
+  max-width: 960px;
+  --c-ink-3: var(--c-ink-2);
+}
+.execution-limits,
+.execution-limits__section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.execution-limits {
+  gap: 24px;
+}
+.execution-limits__status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.execution-limits__status > :first-child:not(:only-child) {
+  margin-right: auto;
+}
+:root:root .runtime-limits-settings .agent-run-limits__rows {
+  padding-inline: 16px;
+}
+.runtime-limits-settings .agent-run-limits__row {
+  align-items: flex-start;
+  padding-block: 16px;
+}
+.runtime-limits-settings .ui-page-desc {
+  margin: 0;
+  max-width: 70ch;
+}
+.execution-limits__section > .settings-field__hint {
+  margin: 0;
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .agent-run-limits__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-block: 16px;
+  }
+  .runtime-limits-settings .agent-run-limits__row {
+    align-items: stretch;
+    gap: 10px;
+  }
+  .agent-run-limits__row > :last-child {
+    width: 100%;
+    max-width: 100%;
+  }
+  .agent-run-limits__radio {
+    min-height: 44px;
+  }
+  .agent-run-limits__input {
+    width: 120px;
+    min-height: 44px;
+  }
+}

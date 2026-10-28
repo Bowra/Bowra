@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-solvency-cashflow",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "eval_healthy_solvency",
+      "query": "Evaluate solvency for a company with current_assets=500, current_liabilities=300, inventory=100, ebit=150, interest=30, total_debt=200, total_assets=800, ebitda=200, cash=100, cfo=120, cfi=-60, cff=-50, capex=40, net_income=100",
+      "expects": "Should return healthy solvency: current_ratio≥1.5 (1.667), quick_ratio≥1.0 (1.333), interest_coverage>3 (5.0), net_debt_to_ebitda<2 (0.5), FCF>0 (80), distress_count=0, verdict containing 'healthy' or 'normal'"
+    },
+    {
+      "id": "eval_distressed_solvency",
+      "query": "Evaluate solvency for a company with current_assets=100, current_liabilities=200, inventory=60, ebit=50, interest=60, total_debt=800, total_assets=900, ebitda=100, cash=20, cfo=-30, cfi=50, cff=80, capex=50, net_income=40",
+      "expects": "Should return high risk: current_ratio<1.0 (0.5), quick_ratio<0.7 (0.2), interest_coverage<1.5 (0.833), net_debt_to_ebitda>4 (7.8), CFO negative, FCF<0 (-80), distress_count≥2, verdict containing 'P0' or '风险'"
+    },
+    {
+      "id": "eval_partial_data_gaps",
+      "query": "Evaluate solvency with only partial data: current_assets=300, current_liabilities=250, inventory=None, ebit=80, interest=25, total_debt=None, total_assets=None, cfo=60, cfi=-40, cff=-20, capex=20, net_income=50",
+      "expects": "Should compute available metrics (current_ratio=1.2, interest_coverage=3.2, FCF=40) and explicitly note data_gaps for missing inventory/total_debt/total_assets, verdict should mention 'data gaps' or '无法验证'"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+.brand-graphic {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+}
+
+.brand-identity {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.brand-graphic--logo > * {
+  height: auto;
+  object-fit: contain;
+  width: auto;
+}
+
+.brand-graphic--logo > .brand-graphic__dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .brand-graphic__light {
+  display: none;
+}
+
+:root[data-theme="dark"] .brand-graphic__dark {
+  display: inline-flex;
+}
+
+.brand-graphic__initial {
+  align-items: center;
+  background: var(--c-accent);
+  border-radius: calc(var(--r-1) * 0.8);
+  color: var(--c-accent-ink);
+  display: inline-flex;
+  font-family: var(--font-v2-serif);
+  font-size: 0.58em;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+}

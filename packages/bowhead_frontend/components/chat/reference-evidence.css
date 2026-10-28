@@ -1,0 +1,11 @@
+.reference-evidence-root { margin: 8px 0; color: var(--c-ink-2); font-size: 0.8125rem; }
+.reference-evidence-action { min-height: 40px; padding: 6px 10px; border: 0; background: transparent; color: var(--c-ink-2); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.reference-evidence-action:hover { color: var(--c-ink); }
+.reference-evidence-excerpt:focus-visible, .reference-evidence-action:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.reference-evidence-action:disabled { cursor: default; opacity: 0.6; }
+.reference-evidence-panel { padding: 12px; border: 1px solid var(--c-line); border-radius: var(--r-2, 8px); overflow-wrap: anywhere; }
+.reference-evidence-panel p { margin: 6px 0; line-height: 1.6; }
+.reference-evidence-list { list-style: none; padding: 0; margin: 12px 0; }
+.reference-evidence-list li { padding: 10px 0; border-bottom: 1px solid var(--c-line); }
+.reference-evidence-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.reference-evidence-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 240px; overflow: auto; padding: 10px; background: var(--c-bg); border-radius: var(--r-2, 8px); }

@@ -1,0 +1,82 @@
+# Compliance-analyst — compliance risk analysis agent (sprint multi-agent-v1 PR-#8).
+#
+# Unlike compute, compliance frameworks (policy / internal controls / data compliance / anti-money laundering / risk levels)
+# load by default. Customer P4.5_C03 onsite feedback: "尽调含合规风险检查".
+
+name: compliance-analyst
+version: 2
+model: analyst
+trust_class: report-writer # M-C: read-mostly data discipline; writes its own report body with guarded write_report (M-B bake+owner+CAS).
+max_iterations: 100
+max_output_tokens: null # Automatic; resolved for each model request
+description: |
+  Bowhead 合规风险专业 agent. 政策合规 (GDPR/PIPL/个保法) / 内控 / 数据合规 /
+  反洗钱 / 业务风险等级评估. 返 typed risk_flag payload, 不写 canvas.
+
+system:
+  file: compliance-analyst.md
+  append: |
+    You are running as a parallel TaskAgent under Orchestrator.
+    DO NOT call subagent.spawn (you are already a leaf).
+    Return via subagent.return with the M137 payload schema.
+
+tools:
+  default_enabled: false
+  allow:
+    - bi_query
+    - bi_schema
+    - bi_concept_resolve
+    - skill_read
+    - skill_invoke
+    - skill_list
+    - add_chart
+    # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
+    # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
+    # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
+    - write_report
+    - read_report
+    - subagent_return
+
+output_schema:
+  type: object
+  additionalProperties: false
+  required: [title, insights, risk_flags]
+  properties:
+    title:
+      type: string
+      maxLength: 200
+    insights:
+      type: array
+      maxItems: 20
+    recommendations:
+      type: array
+      maxItems: 10
+    risk_flags:
+      type: array
+      maxItems: 20
+    risk_level:
+      enum: [low, medium, high, critical]
+
+examples:
+  - event: "用户数据采集流程是否合规, 是否符合 PIPL 个保法要求"
+    description: 数据合规审查 (PIPL / GDPR / 个保法)
+  - event: "近期大额可疑交易筛查, 风险等级评估"
+    description: 反洗钱 / KYC / 大额交易监控
+  - event: "财务数据访问日志, 内控合规检查"
+    description: 内控审计 / 权限 / 数据访问 lineage
+
+# WP M3-12: this agent's **contract** (its responsibility), not an incidental capability.
+# Same as above.
+# Lead routing prose renders assignee names by role, resolving assignees from this declaration;
+# an agent with a declared contract is not used as a fallback assignee for another role.
+primary_capability: cap_analysis
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 40
+  display_name: "Compliance Analyst"
+  summary: "Review policies, controls, privacy obligations, and business risks with structured findings."
+  capabilities: [cap_analysis, cap_knowledge_search, cap_report]

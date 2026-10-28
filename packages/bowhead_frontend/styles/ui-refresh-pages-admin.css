@@ -1,0 +1,341 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · page-by-page acceptance B: Administration Console (access control, approvals, replay, audit, credits)
+ * and mobile list rows shared across pages.
+ *
+ * Every rule starts with :root:root, which keeps (0,2,0) over the base styles; the classes in styles/ui-controls-legacy.css's
+ * Page-by-page Acceptance B are the base layer underneath.
+ * Imported by authenticated layout after ui-refresh-pages-settings.css. Contract: styles/ui-refresh-pages-admin.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ Mobile list rows (decision 12; narrow spec, Administration Tables: < 640 list rows, minimum height 56, left inset 12, trailing ⋯ 44×44) ═══
+ * components/ui/list-rows.tsx: callers render them below 640, replacing administration tables. */
+:root:root .ui-list-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+:root:root .ui-list-row {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .ui-list-row:last-child {
+  border-bottom: 0;
+}
+:root:root .ui-list-row.is-selected {
+  background: var(--c-accent-soft);
+}
+:root:root .ui-list-row.is-muted .ui-list-row-main {
+  opacity: 0.55;
+}
+:root:root .ui-list-row-main {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 4px 8px 12px;
+  box-sizing: border-box;
+}
+/* Without trailing ⋯ (only status or amount), match right inset to left */
+:root:root .ui-list-row-main:not(:has(> .ui-list-row-actions)) {
+  padding-right: 12px;
+}
+:root:root .ui-list-row-leading {
+  flex: none;
+  display: inline-flex;
+}
+:root:root .ui-list-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+:root:root .ui-list-row-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Click the whole row to open (decision 11): title-button hit area covers the row; trailing ⋯ and status stay above, independently clickable */
+:root:root .ui-list-row-open {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+:root:root .ui-list-row-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+:root:root .ui-list-row-open:focus-visible {
+  outline: none;
+}
+:root:root .ui-list-row-open:focus-visible::after {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .ui-list-row.is-openable:hover .ui-list-row-main {
+  background: var(--c-fill-1);
+}
+:root:root .ui-list-row-sub,
+:root:root .ui-list-row-meta {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-control);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .ui-list-row-sub {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+:root:root .ui-list-row-meta {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+/* Third-line metadata permits two lines (avoid losing numbers to one-line ellipsis at width 320); truncate only beyond that */
+:root:root .ui-list-row-text > .ui-list-row-meta {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:root:root .ui-list-row-status,
+:root:root .ui-list-row-actions {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+:root:root .ui-list-row-status {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+/* Trailing ⋯ 44×44, always visible (touch has no hover) */
+:root:root .ui-list-row-actions :is(.ui-row-more, .legacy-credits-more) {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  opacity: 1;
+  visibility: visible;
+}
+:root:root .ui-list-row-detail {
+  padding: 0 12px 12px;
+  min-width: 0;
+}
+:root:root .ui-list-row-detail pre {
+  max-width: 100%;
+  font-family: var(--font-v2-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* Original audit table had its frame on .admin-audit-page .audit-table; wrap list rows in a content-surface frame too */
+
+/* Credit-user list line two: disabled / admin markers do not shrink; truncate long display names; reasons for unavailable details go below the row */
+:root:root .credits-user-listrow-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+:root:root .credits-user-listrow-sub > :is(.legacy-credits-tag, .legacy-credits-tier) {
+  flex: none;
+}
+/* On mobile, stop nesting a padded credit card around another list frame: reduce card padding to 16 / 12,
+ * extend list rows to card edges (rows supply left padding 12), gaining about 40px for text */
+@media (max-width: 639.98px) {
+  :root:root .legacy-credits-card {
+    padding: 16px 12px;
+  }
+  :root:root :is(.legacy-credits-users-frame, .legacy-credits-ledger-frame):has(> .ui-list-rows) {
+    margin: 0 -12px;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+:root:root .credits-user-listrow-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root:root .credits-user-listrow-reason {
+  margin: 0 0 4px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+/* Do not draw an empty frame for empty lists (access-control grant tables formerly had headers without empty-state copy) */
+:root:root .ui-table-frame:has(> .ui-list-rows:empty) {
+  box-shadow: none;
+}
+
+/* ═══ Access control ═══ */
+:root:root .access-role-badge {
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+}
+
+/* ═══ Replay: stack Recent Turns and events on narrow screens instead of squeezing into 220 + remaining-width columns ═══ */
+@media (max-width: 639px) {
+  :root:root .legacy-turns-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root:root .legacy-turns-ids {
+    max-height: 200px;
+  }
+}
+
+/* ═══ Credits: wrap page-header and user-detail actions on narrow screens to prevent page overflow ═══ */
+:root:root .legacy-credits-head-actions,
+:root:root .legacy-credits-user-actions {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+/* Without period-reset permission, use shared disabled styling (batch-one buttons), without an extra 0.55 opacity */
+:root:root .legacy-credits-head-btn--dim-disabled:disabled {
+  opacity: 0.4;
+}
+
+/* @section tail:turns — Page-by-page acceptance cleanup · turn replay (/admin/turns, the actual destination of Turn Tracking in the admin menu): follow Page Layout Spec
+ * list-page layout: 24 from header to tools; Recent Turns, event table and memory-pack snapshots use content-surface
+ * hairline cards (formerly 1px solid, radius 4);
+ * header height 32, 11.5/600 --c-ink-3; hairline row dividers; sequence/time use system-font tabular numbers; Turn
+ * IDs/event data remain monospace (identifiers/raw data);
+ * selected turns use filled background and bold text (not pale accent); error notices have no frame. Narrow stacking is above. */
+:root:root .legacy-turns-toolbar {
+  margin: 24px 0 16px;
+}
+:root:root :is(.legacy-turns-ids, .legacy-turns-events, .legacy-turns-snapshot) {
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .legacy-turns-ids {
+  padding: 6px;
+}
+:root:root .legacy-turns-ids-head {
+  margin: 4px 6px 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+:root:root .legacy-turns-id {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-mono);
+}
+:root:root .legacy-turns-id:hover {
+  background: var(--c-fill-1);
+}
+:root:root .legacy-turns-id.is-selected {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .legacy-turns-id:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root :is(.legacy-turns-muted, .legacy-turns-hint, .legacy-turns-state) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+}
+:root:root .legacy-turns-muted {
+  padding: 6px 8px;
+}
+:root:root .legacy-turns-table {
+  border-collapse: collapse;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-turns-head {
+  background: var(--c-surface-2);
+}
+:root:root .legacy-turns-th {
+  height: max(var(--table-head-h), 2.4em);
+  padding: 0 10px;
+  color: var(--c-ink-3);
+  font-size: 0.71875rem;
+  font-weight: 600;
+}
+:root:root .legacy-turns-row {
+  border-top: 0;
+  box-shadow: inset 0 var(--hairline) 0 var(--c-separator);
+}
+:root:root .legacy-turns-td {
+  padding: 8px 10px;
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-turns-td--time {
+  color: var(--c-ink-3);
+}
+:root:root :is(.legacy-turns-payload, .legacy-turns-content) {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+:root:root .approval-card.legacy-turns-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  box-shadow: none;
+}
+:root:root .legacy-turns-snapshot {
+  margin-top: 32px;
+  padding: 14px 16px;
+}
+:root:root .legacy-turns-snapshot-title {
+  margin: 0 0 8px;
+  font-family: var(--font-control);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+:root:root .legacy-turns-kv {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-turns-k {
+  color: var(--c-ink-3);
+}
+:root:root .legacy-turns-summary {
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-turns-content {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+}

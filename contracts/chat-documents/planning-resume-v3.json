@@ -1,0 +1,22 @@
+{
+  "__schema_version": 3,
+  "team_id": "team_checkpoint",
+  "user_id": "u_checkpoint",
+  "workspace_id": "ws_checkpoint",
+  "session_id": "s_checkpoint",
+  "turn_id": "t_checkpoint",
+  "user_text": "Prepare the template using the attached data",
+  "continuation": {
+    "kind": "document_planning",
+    "version": 1,
+    "checkpoint": {
+      "job_id": "djob_checkpoint",
+      "attempt_no": 1,
+      "checkpoint_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "runtime_snapshot_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "creation_generation": 2,
+    "creation_owner_id": "owner_original"
+  }
+}

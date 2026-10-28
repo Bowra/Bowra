@@ -1,0 +1,469 @@
+.main {
+  overflow: auto;
+}
+
+.page {
+  min-height: 100%;
+  padding: clamp(28px, 6vh, 72px) clamp(20px, 5vw, 64px);
+  background:
+    radial-gradient(
+      circle at 72% 8%,
+      color-mix(in srgb, var(--c-cool) 9%, transparent),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 20% 88%,
+      color-mix(in srgb, var(--c-accent) 7%, transparent),
+      transparent 30%
+    );
+}
+
+.frame {
+  width: min(100%, 720px);
+  margin: 0 auto;
+}
+
+.context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px 14px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+
+.eyebrow {
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+}
+
+.contextLine {
+  width: 24px;
+  height: 1px;
+  background: var(--c-line);
+}
+
+.requestId {
+  overflow: hidden;
+  font-family: var(--font-v2-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c-line) 88%, var(--c-ink-4) 12%);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--c-surface) 96%, transparent);
+  box-shadow:
+    0 26px 70px -46px color-mix(in srgb, var(--c-ink) 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px 20px;
+}
+
+.providerMark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--c-cool) 34%, var(--c-line));
+  border-radius: 13px;
+  color: var(--c-cool);
+  background: var(--c-cool-soft);
+}
+
+.providerMark svg {
+  width: 28px;
+  height: 28px;
+}
+
+.provider {
+  margin: 0 0 3px;
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-v2-serif);
+  font-size: clamp(1.375rem, 3.5vw, 1.75rem);
+  font-weight: 450;
+  letter-spacing: -0.02em;
+}
+
+.divider {
+  height: 1px;
+  margin: 0 24px;
+  background: var(--c-line-2);
+}
+
+.liveRegion {
+  min-height: 430px;
+}
+
+.stateBody {
+  display: flex;
+  min-height: 430px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 42px 32px;
+  text-align: center;
+}
+
+.statusBadge {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid;
+  border-radius: 50%;
+  margin-bottom: 18px;
+}
+
+.statusBadge svg {
+  width: 22px;
+  height: 22px;
+}
+
+.statusBadge.loading,
+.statusBadge.pending {
+  border-color: color-mix(in srgb, var(--c-cool) 34%, var(--c-line));
+  color: var(--c-cool);
+  background: var(--c-cool-soft);
+}
+
+.statusBadge.success {
+  border-color: color-mix(in srgb, var(--c-pos) 38%, var(--c-line));
+  color: var(--c-pos);
+  background: var(--c-pos-soft);
+}
+
+.statusBadge.conflict,
+.statusBadge.error {
+  border-color: color-mix(in srgb, var(--c-err) 36%, var(--c-line));
+  color: var(--c-err);
+  background: var(--c-err-soft);
+}
+
+.statusBadge.expired {
+  border-color: color-mix(in srgb, var(--c-warn) 40%, var(--c-line));
+  color: var(--c-warn);
+  background: var(--c-warn-soft);
+}
+
+.stateCopy {
+  max-width: 510px;
+}
+
+.stateCopy h2 {
+  margin: 0 0 9px;
+  color: var(--c-ink);
+  font-family: var(--font-v2-serif);
+  font-size: 1.4375rem;
+  font-weight: 450;
+  letter-spacing: -0.015em;
+}
+
+.stateCopy p {
+  margin: 0;
+  color: var(--c-ink-3);
+  font-size: 0.78125rem;
+  line-height: 1.65;
+}
+
+.identityGrid {
+  width: 100%;
+  margin: 28px 0 0;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c-bg) 76%, var(--c-surface));
+}
+
+.identityRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.6fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 52px;
+  padding: 0 16px;
+  text-align: left;
+}
+
+.identityRow + .identityRow {
+  border-top: 1px solid var(--c-line-2);
+}
+
+.identityRow dt {
+  color: var(--c-ink-3);
+  font-size: 0.6875rem;
+}
+
+.identityRow dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--font-v2-mono);
+  font-size: 0.75rem;
+}
+
+.expiry {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 2px 16px;
+  box-sizing: border-box;
+  margin-top: 12px;
+  padding: 13px 16px;
+  border: 1px solid color-mix(in srgb, var(--c-warn) 22%, var(--c-line));
+  border-radius: 12px;
+  text-align: left;
+  background: color-mix(in srgb, var(--c-warn-soft) 56%, var(--c-surface));
+}
+
+.expiry span {
+  color: var(--c-ink-2);
+  font-size: 0.6875rem;
+}
+
+.expiry strong {
+  grid-row: span 2;
+  color: var(--c-warn);
+  font-family: var(--font-v2-mono);
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.expiry small {
+  color: var(--c-ink-3);
+  font-size: 0.625rem;
+}
+
+.boundaryNote,
+.privacyCallout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 12px 0 0;
+  padding: 11px 13px;
+  border-left: 3px solid var(--c-cool);
+  color: var(--c-ink-3);
+  text-align: left;
+  background: color-mix(in srgb, var(--c-cool-soft) 58%, transparent);
+  font-size: 0.65625rem;
+  line-height: 1.55;
+}
+
+.boundaryNote svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.privacyCallout {
+  border-left-color: var(--c-err);
+  background: color-mix(in srgb, var(--c-err-soft) 48%, transparent);
+}
+
+.actions {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 26px;
+}
+
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 0 18px;
+  font: 600 0.75rem/1 var(--font-v2-sans);
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.primaryButton {
+  min-width: 156px;
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  box-shadow: 0 10px 24px -18px
+    color-mix(in srgb, var(--c-accent) 80%, transparent);
+}
+
+.primaryButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--c-accent-hover);
+}
+
+.secondaryButton {
+  color: var(--c-ink-2);
+  border-color: var(--c-line);
+  background: var(--c-surface);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  border-color: var(--c-ink-4);
+  color: var(--c-ink);
+  background: var(--c-bg);
+}
+
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.spinner {
+  animation: binding-spin 900ms linear infinite;
+}
+
+.skeletonGrid {
+  display: grid;
+  width: 100%;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.skeletonGrid span {
+  height: 54px;
+  border-radius: 12px;
+  background: linear-gradient(
+    90deg,
+    var(--c-surface-2),
+    var(--c-line-2),
+    var(--c-surface-2)
+  );
+  background-size: 220% 100%;
+  animation: binding-shimmer 1.5s ease-in-out infinite;
+}
+
+.footerNote {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 14px 12px 0;
+  color: var(--c-ink-4);
+  font-size: 0.65625rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.fallback {
+  min-height: 100vh;
+  background: var(--c-bg);
+}
+
+@keyframes binding-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes binding-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    min-height: calc(100vh - 52px);
+    padding: 22px 14px 32px;
+  }
+
+  .context {
+    margin-inline: 2px;
+  }
+
+  .card {
+    border-radius: 15px;
+  }
+
+  .cardHeader {
+    padding: 18px;
+  }
+
+  .divider {
+    margin-inline: 18px;
+  }
+
+  .stateBody {
+    min-height: 470px;
+    padding: 30px 18px 24px;
+  }
+
+  .identityRow {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding-block: 12px;
+  }
+
+  .expiry {
+    grid-template-columns: 1fr auto;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryButton,
+  .secondaryButton {
+    transition: none;
+  }
+
+  .primaryButton:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .spinner,
+  .skeletonGrid span {
+    animation: none;
+  }
+}

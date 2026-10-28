@@ -1,0 +1,122 @@
+# kb-analyst — KB-grounded research analyst (subagent-unification fleet retrofit, 2026-06-01).
+#
+# Evolution (user decision: fully switch to analysis payloads): upgrade Sprint θ's retrieval-only bot (dumping chunks and
+# source_refs) to a **research analyst**: KB-grounded question -> retrieve multiple documents -> synthesize and
+# optionally apply method-skills / python_sandbox calculations / bi cross-checks against internal data -> produce a board-style
+# AnalysisPayload (insights/recommendations), citing KB content in narrative `[ref:N]` references.
+#
+# Why it is no longer a retrieval bot (agent-empowerment-audit §1 capability barriers): the old prompt explicitly prohibited bi/skills,
+# allowing only chunk dumps, without synthesis, KB-to-BI cross-checks, or frameworks. This is the sole retrofit changing
+# a tool allow-list. Citation flow is unchanged (discovery wkaj5n3fp): KB citations actually use kb_search
+# tool calls -> source_ref_aggregator + document allowlist -> `[ref:N]`, not top-level chunks/source_refs.
+
+name: kb-analyst
+version: 4
+model: analyst
+trust_class: report-writer # M-C: read-mostly data discipline; writes its own report body with guarded write_report (M-B bake+owner+CAS).
+max_iterations: 40
+max_output_tokens: null # Automatic; resolved for each model request
+
+description: |
+  Answer source-backed document questions and synthesize multi-document research.
+  Return concise Chat for specific facts and evidence-backed reports when requested.
+  Cite authorized KB sources as [ref:N]; use methods or BI cross-checks for concrete analytical needs.
+
+system:
+  file: kb-analyst.md
+  append: |
+    You are running as a parallel TaskAgent under Orchestrator.
+    DO NOT call subagent.spawn (you are already a leaf).
+    Return via subagent_return with the task-appropriate Chat answer or report evidence;
+    cite KB chunks inline as [ref:N] from your kb_search hits.
+
+tools:
+  default_enabled: false
+  allow:
+    # KB retrieval (core responsibility and factual foundation for research).
+    - kb_search
+    - kb_list_tables
+    - kb_query_records
+    - kb_get_record
+    # New cross-checks / quantification: compare KB facts with internal BI data and calculate derived metrics.
+    - bi_query
+    - bi_schema
+    - bi_concept_resolve
+    # New methods + python_sandbox: synthesize instead of merely listing; cross-domain method library is accessible.
+    - skill_read
+    - skill_invoke
+    - skill_list
+    # New optional evidence charts: add them to canvas like compute, without assembling sections directly.
+    - add_chart
+    # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
+    # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
+    # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
+    - write_report
+    - read_report
+    - subagent_return
+
+# input: research question + KB scope (dispatcher forwards workspace_id+project_id+kb_role).
+input_schema:
+  type: object
+  additionalProperties: false
+  required: [user_question]
+  properties:
+    user_question:
+      type: string
+      maxLength: 4000
+    kb_scope:
+      type: string
+      enum: [user-scoped, workspace-shared, both]
+      description: "PRD §4.0.1 I4 — workspace_id+project_id+kb_role 由 dispatcher 透传"
+
+# AnalysisPayload shape matches compute, routing research output through the standard composer -> canvas rendering + citations.
+# ⚠️ FOOT-GUN (as in compute.yaml): output_schema only checks well-formedness at manifest LOAD time
+# (registry._validate_jsonschema); the runtime gate is hand-written validate_payload (analysis_payload.py)
+# plus auto_fix_payload. Returning compute's shape passes the gate; validate_payload needs no change for kb-analyst.
+output_schema:
+  type: object
+  additionalProperties: false
+  required:
+    - title
+  properties:
+    title:
+      type: string
+      maxLength: 200
+    insights:
+      type: array
+      maxItems: 20
+    recommendations:
+      type: array
+      maxItems: 10
+
+# I2 one-hop invariant: kb-analyst does not call peers; cross-domain work uses the full method library directly, not spawn.
+callable_peers: []
+
+examples:
+  - event: "把这几份尽调文档里的合规风险综合一下，对比看哪个最严重"
+    description: 多文档检索 + 综合 + 风险排序 (研究分析, 非单点 lookup)
+  - event: "文档里说的毛利率，跟我们 BI 里实际的对得上吗"
+    description: KB 事实 × 内部 BI 数据交叉验证
+  - event: "这份新政策文件跟我们现在的数据采集做法冲突吗，影响多大"
+    description: 单文档政策 × 内部实践研判 (检索 + 综合判断 + [ref:N] 引用; 非纯概念 lookup)
+
+# WP M3-12: this agent's **contract** (its responsibility), not an incidental capability.
+# Document research is its contract; bi_query is also allowlisted, but it does not own data retrieval.
+# Lead routing prose renders assignee names by role, resolving assignees from this declaration;
+# an agent with a declared contract is not used as a fallback assignee for another role.
+primary_capability: cap_knowledge_search
+
+# Append the capability protocol blocks matching this Agent's tools (Datarc query
+# protocol, query_explain rules, ...) to its system prompt. Keep compute off: the
+# batch-2 A/B evaluation concluded it must not receive them.
+capability_protocol_block: true
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 80
+  display_name: "Knowledge Researcher"
+  summary: "Research team documents, connect evidence across sources, and produce cited findings."
+  capabilities: [cap_knowledge_search, cap_analysis, cap_report]

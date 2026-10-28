@@ -1,0 +1,2045 @@
+/* ═════════════════════════════════════════════════════════════
+ * Interface appearance · chat workbench and report canvas batch 3: report canvas appearance.
+ *
+ * Spec: Claude Design Report Canvas Chrome Spec (report canvas action layer); results-area header follows Workbench Spec section 9.
+ * Only canvas controls and borders change: sticky toolbar and results-area header, report-header history entry, editing
+ * status / guide / conflict bars, selection toolbar and
+ * AI rewrite (input, rewriting, result bar), section action bar and menu, canvas citation badges and source overlays,
+ * source rows, source details, revision history,
+ * chart / table / insight card borders and chart-header buttons, KPI labels. Report body layout, heading/body fonts, KPI
+ * value hierarchy and chart internals
+ * (data, palettes, axes) remain unchanged; chart-type switching stays in its original location/menu (user decision).
+ *
+ * Every rule starts with :root:root, which adds (0,2,0) so these rules stay above the base styles they restyle. Only the
+ * authenticated (app) layout imports this stylesheet; export screenshot pages /internal/canvas-export/* use the (public)
+ * layout without it, so exports are unaffected. All colors use tokens, no literal colors;
+ * control font fixed at --font-control (personal appearance font applies only to content); blur only for floating
+ * functional surfaces (selection toolbar,
+ * source overlays, section menus), using only --ui-material-filter (solid fallback for reduced transparency, high contrast or unsupported blur).
+ * Imported by authenticated layout before batch 2 workbench styles (after all non-refresh stylesheets). Contract: styles/ui-refresh-canvas.test.ts.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ 1 · Sticky toolbar (report object toolbar): 44 high, left 12 right 8, 0.5 separators between three groups (18 high) ═══
+ * Only dimensions, grouping and font change here; background and blur (bar material) are in P2 batch 1 ui-refresh-materials.css. */
+:root:root .results-report-object-toolbar {
+  min-height: 44px;
+  padding: 0 8px 0 12px;
+  gap: 8px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+}
+/* Object-type eyebrow: system font 12 secondary color (previously mono 11 uppercase) */
+:root:root .results-report-object-toolbar > span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+:root:root .results-report-object-toolbar > div {
+  gap: 4px;
+}
+/* One 0.5 separator each between editing/document-action groups and text export/icon more buttons, avoiding reading them as one button */
+:root:root .results-report-object-toolbar .results-report-edit-controls:not(:empty) {
+  display: flex;
+  align-items: center;
+  padding-right: 9px;
+  margin-right: 4px;
+  background: linear-gradient(var(--c-separator), var(--c-separator)) right center / var(--hairline) 18px no-repeat;
+}
+:root:root .results-report-object-toolbar .ws-menu-wrap:has(.ws-export) + .ws-menu-wrap {
+  padding-left: 9px;
+  margin-left: 4px;
+  background: linear-gradient(var(--c-separator), var(--c-separator)) left center / var(--hairline) 18px no-repeat;
+}
+/* Report scroll area: toolbar 44 + 16 space (previously 68 with 52), preventing anchors and Tab focus from landing beneath the toolbar */
+:root:root .v2-ws-right-body.results-body--report {
+  scroll-padding-top: 60px;
+}
+
+/* ── Editing status bar (toolbar editing group): save status 12 secondary system font; error color for failure ── */
+:root:root .v2-report-edit-bar.legacy-edit-bar {
+  gap: 6px;
+  font-family: var(--font-control);
+}
+:root:root .legacy-edit-bar-status {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .legacy-edit-bar-status.is-error {
+  color: var(--c-err);
+}
+
+/* ═══ Results-area header (Workbench Spec 9): 44 high, hairline bottom border, system font; results switch 28 secondary button, current title 13/600 ═══ */
+:root:root .v2-ws-right-head {
+  height: 44px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  font-family: var(--font-control);
+}
+:root:root .results-trigger {
+  min-height: 28px;
+  padding: 0 8px 0 10px;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .results-trigger:hover:not(:disabled) {
+  background: var(--c-fill-3);
+}
+:root:root .results-trigger:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .results-current-title {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  :root:root .v2-ws-right-head {
+    height: auto;
+    min-height: 44px;
+  }
+  :root:root .results-trigger {
+    min-height: 44px;
+  }
+}
+
+/* ═══ 2 · Report header: status badge + history — text button 28 high (previously bordered 30 high) ═══ */
+:root:root .canvas-report-history-btn {
+  min-height: 28px;
+  margin: 0;
+  padding: 0 10px 0 8px;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .canvas-report-history-btn:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .canvas-report-history-btn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .canvas-report-shell > .rc-report-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+@media (pointer: coarse) {
+  :root:root .canvas-report-history-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+:root:root .rc-status-trigger {
+  font-family: var(--font-control);
+}
+:root:root .rc-status-trigger:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+/* Status badges: system font 11/600; verified pos, potentially stale warn, archived neutral (retain original semantic colors) */
+:root:root .rc-report-header-meta .rc-badge {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  letter-spacing: 0;
+}
+
+/* ═══ 3 · Editing mode: guide bar (fill1 background, ink2 text, acknowledgment secondary button) and conflict bar (light warning background, two secondary buttons) ═══ */
+:root:root .rc-guide {
+  gap: 10px;
+  padding: 6px 6px 6px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-guide svg {
+  color: var(--c-ink-3);
+}
+:root:root :is(.rc-guide-dismiss, .rc-conflict-bar .rc-pill-btn) {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.rc-guide-dismiss, .rc-conflict-bar .rc-pill-btn):hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root :is(.rc-guide-dismiss, .rc-conflict-bar .rc-pill-btn):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .rc-conflict-bar {
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-warn-soft);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-conflict-bar .legacy-rc-conflict-icon {
+  color: var(--c-warn-ink);
+}
+/* Save failure notice: remove left stripe, light error background + body-text color */
+:root:root .canvas-report-alert {
+  border: 0;
+  border-radius: var(--r-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .canvas-report-alert--error {
+  background: var(--c-err-soft);
+  color: var(--c-ink);
+}
+
+/* ═══ 4 · Selection toolbar: overlay material, 34 high (buttons 28 + 3), radius 10; AI rewrite is the only accent text ═══ */
+:root:root .rc-sel-toolbar {
+  gap: 2px;
+  height: 34px;
+  padding: 0 3px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  font-family: var(--font-control);
+}
+:root:root .rc-sel-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .rc-sel-btn:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .rc-sel-btn:active {
+  background: var(--c-fill-2);
+}
+:root:root .rc-sel-btn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Active formatting (bold / italic / link) and changed font dropdown: neutral selected background, no accent */
+:root:root .rc-sel-btn.active {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-weight: 600;
+}
+/* Rewrite / send (accent actions, neither toggles nor dropdowns): accent text, no background */
+:root:root .rc-sel-btn.active:not([aria-pressed]):not([aria-haspopup]) {
+  background: transparent;
+  color: var(--c-accent-text);
+}
+:root:root .rc-sel-btn.active:not([aria-pressed]):not([aria-haspopup]):hover {
+  background: var(--c-fill-1);
+}
+:root:root :is(.rc-sel-toolbar, .rc-actions) .rc-action-sep {
+  width: var(--hairline);
+  height: 18px;
+  margin: 0 3px;
+  background: var(--c-separator);
+}
+/* Custom rewrite input (expands in place in selection toolbar): input 13, 28 high filled background, max width 420 */
+:root:root .rc-ai-custom .legacy-rc-ai-custom-input {
+  width: min(320px, 60vw);
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .rc-ai-custom .legacy-rc-ai-custom-input::placeholder {
+  color: var(--c-ink-3);
+}
+:root:root .rc-ai-custom .legacy-rc-ai-custom-input:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 0;
+}
+
+/* ── Whole-block AI rewrite input bar: starts at 36, radius 10, content surface + overlay shadow (no full accent border); send 28 circle ── */
+:root:root .rc-ai-bar {
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+:root:root .rc-ai-bar:focus-within {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 0;
+}
+:root:root .rc-ai-bar :is(input, .rc-ai-text) {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .rc-ai-bar input::placeholder,
+:root:root .rc-ai-bar .placeholder {
+  color: var(--c-ink-3);
+}
+:root:root .rc-ai-kbd {
+  border: 0;
+  background: var(--c-fill-2);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+}
+:root:root .rc-ai-send {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--c-accent-ink);
+}
+:root:root .rc-ai-send:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .rc-ai-bar .legacy-rc-ai-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .rc-ai-bar .legacy-rc-ai-close:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .rc-ai-bar .legacy-rc-ai-close:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 0;
+}
+
+/* ── Rewriting / rewrite result bars: 36 high, radius 10, content surface + overlay shadow; accept is the only solid primary action, others secondary buttons (no pill radii) ── */
+:root:root .rc-regen-chip {
+  height: 36px;
+  padding: 0 4px 0 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+:root:root .rc-result-bar {
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .rc-result-bar.error {
+  background: var(--c-surface);
+}
+:root:root .rc-result-error-message strong {
+  color: var(--c-ink);
+  font-weight: 600;
+}
+:root:root .rc-result-error-message span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .legacy-rc-result-spark {
+  color: var(--c-accent-text);
+}
+:root:root .legacy-rc-result-spark--error {
+  color: var(--c-err);
+}
+:root:root :is(.rc-result-bar, .rc-regen-chip) .rc-pill-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root :is(.rc-result-bar, .rc-regen-chip) .rc-pill-btn.ghost {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+:root:root :is(.rc-result-bar, .rc-regen-chip) .rc-pill-btn.ghost:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .rc-result-bar .rc-pill-btn.accept {
+  background: var(--c-accent);
+  color: var(--c-accent-ink);
+  font-weight: 600;
+}
+:root:root .rc-result-bar .rc-pill-btn.accept:hover {
+  background: var(--c-accent-hover);
+}
+:root:root :is(.rc-result-bar, .rc-regen-chip) .rc-pill-btn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Numbers-pending-verification warning badge: system font 11/600 */
+:root:root .rc-result-bar .rc-badge {
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  letter-spacing: 0;
+}
+
+/* ═══ 5 · Section action bar (hover / focus in edit mode): solid background + overlay shadow (body text beneath, no material), radius 10, buttons 28;
+ *     drag handle 20×28 at left −30; hovered section fill1; focus ring uses focus color ═══ */
+:root:root .rc-actions {
+  top: -14px;
+  right: -14px;
+  height: auto;
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--font-control);
+}
+:root:root .rc-action-btn {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .rc-action-btn:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .rc-action-btn:active {
+  background: var(--c-fill-2);
+}
+:root:root .rc-action-btn:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 0;
+}
+/* AI rewrite: accent text, no full light accent background */
+:root:root .rc-action-btn.ai {
+  background: transparent;
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+:root:root .rc-action-btn.ai:hover {
+  background: var(--c-fill-1);
+  color: var(--c-accent-text);
+}
+:root:root .rc-handle {
+  left: -30px;
+  width: 20px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator), var(--shadow-control-drop);
+  color: var(--c-ink-3);
+}
+:root:root .rc-handle:hover {
+  color: var(--c-ink);
+}
+:root:root .rc-handle:active {
+  border-color: transparent;
+  color: var(--c-ink);
+}
+:root:root .v2-section-chrome:focus-within {
+  outline-color: var(--c-focus, var(--c-accent));
+  box-shadow: none;
+}
+:root:root
+  [data-edit-mode="on"]
+  .v2-section-chrome:is([data-chrome-kind="narrative"], [data-chrome-kind="deck"], [data-chrome-kind="callout"]):is(
+    :hover,
+    :focus-within
+  ) {
+  background: var(--c-fill-1);
+  box-shadow: none;
+}
+/* Touch persistent ⋯: floats with solid background + hairline border when menu opens (previously 1px legacy border color) */
+:root:root .rc-mdots {
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+}
+:root:root .rc-mdots.on {
+  border: 0;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+}
+:root:root .rc-mdots:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 0;
+}
+
+/* ── Section menu (rc-menu-pop, menu-spec appearance: width ≥220, padding 6, radius 12, overlay material; rows 32, neutral hover fill) ──
+ * Mount position and keyboard migration to useMenu belong to behavior batch 4b; only appearance changes here. */
+:root:root .rc-menu-pop {
+  box-sizing: border-box;
+  width: auto;
+  min-width: 220px;
+  padding: 6px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  font-family: var(--font-control);
+}
+:root:root .rc-mi {
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .rc-mi svg {
+  color: var(--c-ink-3);
+}
+:root:root .rc-mi:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .rc-mi:hover svg {
+  color: var(--c-ink-2);
+}
+:root:root .rc-mi:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .rc-mi.danger,
+:root:root .rc-mi.danger svg {
+  color: var(--c-err);
+}
+:root:root .rc-mi.danger:hover {
+  background: var(--c-err-soft);
+  color: var(--c-err);
+}
+:root:root .rc-msep {
+  height: var(--hairline);
+  margin: 5px 4px;
+  background: var(--c-separator);
+}
+
+/* ═══ Canvas citation badges (same appearance as chat badges): system font with tabular numbers, filled background; restricted / invalid / unsupported use border + strikethrough ═══
+ * Global rules use !important for [N] (font size, line height, color); !important is also needed here. Position, numbers
+ * and source cards remain unchanged. */
+:root:root .canvas-report-article .citation-num--numbered {
+  padding: 1px 3px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2) !important;
+  font-family: var(--font-control);
+  font-size: 0.65625rem !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root .canvas-report-article .citation-num--numbered:hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink) !important;
+}
+:root:root .canvas-report-article .citation-num--numbered:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+:root:root .canvas-report-article .citation-num--numbered[data-source-denied] {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-control-line);
+  color: var(--c-ink-3) !important;
+  text-decoration: line-through;
+}
+:root:root .canvas-report-article .citation-num--numbered[data-source-denied]:hover {
+  background: var(--c-fill-1);
+}
+
+/* ── Source overlays (citation-popover on badge hover / click and rc-prov in chart source rows): overlay material, width 320, radius 12, padding 12 ──
+ * Header = type icon + name + badge; excerpt uses fill1 rounded block (no left stripe) 12.5/1.55; metadata 12 secondary
+ * color; links --c-accent-text. */
+:root:root .rc-prov {
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  border: 0;
+  border-radius: 12px;
+  background: var(--ui-material-bg);
+  -webkit-backdrop-filter: var(--ui-material-filter);
+  backdrop-filter: var(--ui-material-filter);
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+}
+:root:root .rc-prov-head {
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .rc-prov-tool {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:root:root .rc-prov-head .t-name {
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .rc-prov-head .t-sub {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-prov-badge {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+:root:root .rc-prov-badge.warn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}
+:root:root .rc-prov .rc-prov-value {
+  padding: 10px 12px 0;
+}
+:root:root .rc-prov-quote {
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border-left: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-style: normal;
+  font-size: 0.78125rem;
+  line-height: 1.55;
+}
+:root:root .rc-prov-quote.rc-prov-excerpt {
+  font-family: var(--font-v2-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs, 0.6875rem);
+  line-height: 1.5;
+  /* Canvas Objects Spec 12: excerpt shows at most five lines and fades out (full text in the source panel) */
+  max-height: 7.5em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, var(--c-ink) 70%, transparent);
+  mask-image: linear-gradient(to bottom, var(--c-ink) 70%, transparent);
+}
+/* “View all in source panel”: accent text link at the end of the preview */
+:root:root .rc-prov-view-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 12px 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: 0.78125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+:root:root .rc-prov-view-all:hover {
+  text-decoration: underline;
+}
+:root:root .rc-prov-view-all:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+:root:root .rc-prov-passage {
+  -webkit-line-clamp: 6;
+  max-height: 9.3em;
+}
+:root:root .rc-prov-quote.rc-prov-quote-note {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-prov-affirm {
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+:root:root .rc-prov-affirm.warn {
+  background: transparent;
+  color: var(--c-warn-ink);
+}
+:root:root .rc-prov-rows {
+  padding: 10px 12px 4px;
+}
+:root:root .rc-prov-kb-acts a {
+  border-bottom: 0;
+  color: var(--c-accent-text);
+}
+:root:root .rc-prov-kb-acts a:hover {
+  text-decoration: underline;
+}
+:root:root .rc-prov-kb-acts {
+  padding: 0 12px 12px;
+}
+:root:root .rc-prov-kb-acts span {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-prov-data {
+  margin: 10px 12px 0;
+}
+:root:root .rc-prov-data-scroll {
+  border: 0;
+  border-radius: var(--r-2);
+  box-shadow: inset 0 0 0 var(--hairline) var(--c-separator);
+}
+:root:root .rc-prov-data th {
+  background: var(--c-fill-1);
+  border-bottom: var(--hairline) solid var(--c-separator);
+  color: var(--c-ink-3);
+}
+:root:root .rc-prov-data td {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .rc-prov-data-more {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-prov-footer {
+  gap: 6px;
+  padding: 8px 12px 12px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .rc-prov-footer button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .rc-prov-footer button:not(:disabled):hover {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root .rc-prov-footer button:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .rc-prov-footer button:disabled {
+  opacity: 0.4;
+  color: var(--c-ink);
+}
+
+/* ── Source row below charts / tables: system font 12 secondary color (previously mono 10.5), hairline top border ── */
+:root:root .rc-source {
+  gap: 6px;
+  border-top: var(--hairline) solid var(--c-separator);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+}
+:root:root .rc-source .src-n {
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .rc-source .src-link {
+  border-bottom: 0;
+  color: var(--c-ink-3);
+}
+:root:root .rc-source:hover .src-link {
+  color: var(--c-accent-text);
+  text-decoration: underline;
+}
+
+/* ═══ Source details (right drawer min(420, 100vw − 48); mobile remains a bottom sheet): header content surface + hairline bottom border, secondary actions ═══ */
+:root:root .legacy-source-panel-eyebrow {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root:root .legacy-source-panel-actions {
+  gap: 8px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .legacy-source-panel-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background-color var(--dur-fast) linear;
+}
+:root:root .legacy-source-panel-action:hover {
+  background: var(--c-fill-3);
+}
+:root:root .legacy-source-panel-action:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root :is(.legacy-source-panel-query, .legacy-source-panel-preview, .legacy-source-panel-code) {
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .legacy-source-panel-query {
+  padding: 8px 10px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+:root:root :is(
+    .legacy-source-panel-note,
+    .legacy-source-panel-hint,
+    .legacy-source-panel-quote,
+    .legacy-source-panel-unmatched,
+    .legacy-source-panel-failed
+  ) {
+  border: 0;
+  border-radius: var(--r-2);
+}
+
+/* ═══ 9 · Chart / table / insight card borders: hairline (previously 1px legacy line color), radius 12; chart-header buttons system font 28 ═══
+ * Chart internals, colors, axes and chart-type menus unchanged; only within .canvas-report-article (export lacks both
+ * this ancestor and flag attribute). */
+:root:root .canvas-report-article :is(.v2-chart-block, .v2-insight-card, .v2-dt-wrap) {
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 0 0 var(--hairline) var(--c-separator);
+}
+/* Charts / tables inside insight cards = card body, not a second card (original rule removed their borders; also remove outlines here) */
+:root:root .canvas-report-article .v2-insight-card :is(.v2-chart-block, .v2-dt-wrap) {
+  box-shadow: none;
+}
+/* Chart tables share the report's reading surface. The scroll container owns clipping;
+ * the table has no card frame, and existing kind/action controls keep their shared styles.
+ * This screen-only scope preserves the fixed export table's row budget. */
+:root:root .canvas-report-article .v2-chart-table {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  overflow: visible;
+  min-width: 0;
+  max-width: 100%;
+}
+:root:root .canvas-report-article .v2-chart-table > .v2-chart-header {
+  padding-bottom: 12px;
+}
+:root:root .canvas-report-article .v2-chart-table-el {
+  font-size: inherit;
+  line-height: 1.5;
+}
+:root:root .canvas-report-article .v2-chart-table-el :is(th, td) {
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+/* Virtual-scroll spacer cells retain their measured heights rather than a data-row minimum. */
+:root:root .canvas-report-article .v2-chart-table-el th,
+:root:root .canvas-report-article .v2-chart-table-el tbody tr:not([aria-hidden]) td {
+  height: var(--table-row-h);
+}
+:root:root .canvas-report-article .v2-chart-table-el th {
+  font-weight: 600;
+  background: var(--c-surface);
+}
+:root:root .canvas-report-article .v2-chart-table-el :is(th, td):first-child {
+  padding-left: 0;
+}
+:root:root .canvas-report-article .v2-chart-table-el :is(th, td):last-child {
+  padding-right: 0;
+}
+:root:root .canvas-report-article .v2-chart-table-footer {
+  padding: 10px 0 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+/* Chart-header buttons (chart type, ⋯): the system font 12 / 28 high / filled treatment that started here now lives
+ * unscoped in globals.css `.v2-chart-action-btn` (Chart Embed Spec), so chat, embeds and reports share it. */
+
+/* ═══ 10 · KPI: value hierarchy unchanged; labels/change rows are not mono or uppercase, ≥12; increases use semantic positive color (previously accent) ═══ */
+:root:root .canvas-report-article .v2-kpi-cell .lbl {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root:root .canvas-report-article .v2-kpi-cell .sub {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+}
+:root:root .canvas-report-article .v2-kpi-cell .sub.pos {
+  color: var(--c-pos-ink);
+}
+:root:root .canvas-report-article .v2-kpi-cell .sub.neg {
+  color: var(--c-err);
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Batch 4b: canvas behavior.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ 4b-1 · Toolbar status group: writing progress (replaces sticky streaming banner) or status badge (replaces the report-header badge) ═══ */
+:root:root .results-report-object-toolbar > .results-report-status-group {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* With the status group, three groups compete for narrow-screen width: object-type eyebrow must not wrap or be squeezed vertically */
+:root:root .results-report-object-toolbar > span:first-child {
+  flex: none;
+  white-space: nowrap;
+}
+:root:root .rc-toolbar-stream {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-toolbar-stream-text {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+/* Stop: secondary button 28 (same action as composer stop: cancel this turn) */
+:root:root .rc-toolbar-stream-stop {
+  flex: none;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+:root:root .rc-toolbar-stream-stop:hover {
+  background: var(--c-fill-3);
+}
+:root:root .rc-toolbar-stream-stop:focus-visible,
+:root:root .results-report-share:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+/* Throttled screen-reader announcement region: visually hidden */
+:root:root .rc-toolbar-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* Reduced motion: replace spinner with a static accent dot (same as running status band) */
+@media (prefers-reduced-motion: reduce) {
+  :root:root .rc-toolbar-stream-spinner {
+    width: 8px;
+    height: 8px;
+    margin: 0 2px;
+    border: 0;
+    background: var(--c-accent);
+    animation: none;
+  }
+}
+:root:root[data-theme-motion="reduced"] .rc-toolbar-stream-spinner {
+  width: 8px;
+  height: 8px;
+  margin: 0 2px;
+  border: 0;
+  background: var(--c-accent);
+  animation: none;
+}
+/* Read-only / shared view: status only, not a menu button */
+:root:root .rc-status-control--static .rc-badge {
+  cursor: default;
+}
+
+/* ═══ 4b-2 · Body while writing: completed sections are not dimmed (previously inline 0.65); AI rewriting remains dimmed; neither accepts pointers ═══ */
+:root:root .canvas-report-article {
+  transition: opacity 200ms;
+}
+:root:root .canvas-report-article[data-streaming="on"] {
+  pointer-events: none;
+}
+:root:root .canvas-report-article[data-ai-rewriting="on"] {
+  opacity: 0.65;
+  pointer-events: none;
+}
+/* Currently written section: 2px accent left inset border, one explanation line, two 12-high fill2 skeleton rows below (static, no shimmer) */
+:root:root .sp-block--writing {
+  padding-left: 14px;
+  box-shadow: inset 2px 0 0 var(--c-accent);
+}
+:root:root .sp-writing-label {
+  margin: 0 0 6px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .sp-skeleton {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+:root:root .sp-skeleton > span {
+  display: block;
+  height: 12px;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+}
+:root:root .sp-skeleton > span:last-child {
+  width: 62%;
+}
+
+/* ═══ 4b-3 · Selection toolbar: Aa groups font / size / weight (three compact dropdowns appear after it when opened) ═══ */
+:root:root .rc-sel-toolbar .rc-sel-aa {
+  min-width: 28px;
+  font-weight: 600;
+}
+:root:root .rc-sel-toolbar .rc-sel-fontgroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ═══ 4b-4 · Source cards mount on body: batch 3 overlay appearance; narrow-screen bottom sheets follow panel width, no fixed 320 ═══ */
+:root:root .rc-prov.rc-prov--sheet {
+  width: auto;
+  max-width: none;
+}
+:root:root .rc-prov.rc-prov--sheet[data-dialog-presentation="sheet"] {
+  padding: 4px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Remaining batch 4b items: canvas behavior.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ═══ Remaining-1 · Writing paused (disconnected, reconnecting) and interrupted: paused warn, interrupted err (Report Canvas Chrome Spec color table) ═══ */
+:root:root .rc-toolbar-stream.is-paused {
+  /* Toolbar uses bar material: pure --c-warn is only 3.95:1 over the worst backdrop; use body-text-mixed --c-warn-ink (P2 batch 1) */
+  color: var(--c-warn-ink);
+}
+/* Pause marker: two static vertical lines (no spinner) */
+:root:root .rc-toolbar-stream-paused {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin: 0 1px;
+  background:
+    linear-gradient(currentColor, currentColor) left center / 3px 10px no-repeat,
+    linear-gradient(currentColor, currentColor) right center / 3px 10px no-repeat;
+}
+:root:root .rc-toolbar-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-toolbar-outcome.is-error {
+  color: var(--c-err);
+}
+/* Show the whole explanation: wrap on narrow screens (412) instead of truncating to … */
+:root:root .rc-toolbar-outcome {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+:root:root .rc-toolbar-outcome-text {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* Refresh report: secondary button 28 */
+:root:root .rc-toolbar-outcome-action {
+  flex: none;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+:root:root .rc-toolbar-outcome-action:hover {
+  background: var(--c-fill-3);
+}
+:root:root .rc-toolbar-outcome-action:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+
+/* ═══ Remaining-2 · Export disabled while writing: reason always visible in toolbar second row (12 secondary color), export button 40% ═══ */
+:root:root .results-report-object-toolbar:has(> .results-report-writing-hint) {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+:root:root .results-report-writing-hint {
+  flex: 1 0 100%;
+  margin: -4px 0 0;
+  padding: 0 0 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1rem;
+}
+:root:root .results-report-object-toolbar .ws-export:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ═══ Remaining-3 · Mobile reading toolbar: merge results header and report toolbar into back · title · status · share · ⋯; edit/export in more ═══ */
+:root:root .results-report-object-toolbar[data-phone-reading="true"] > span:first-child {
+  display: none;
+}
+:root:root .v2-ws-right[data-phone-reading-bar="true"] > .v2-ws-right-head {
+  display: none;
+}
+:root:root .results-report-object-toolbar[data-phone-reading="true"] {
+  flex-wrap: wrap;
+  row-gap: 0;
+  gap: 4px;
+}
+:root:root .results-report-phone-back {
+  flex: none;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 1rem;
+}
+/* Title takes remaining width, ellipsized when long (full title in title and screen-reader text). Original mobile header hid the title after back; merged toolbar must show it */
+:root:root .results-report-object-toolbar .results-report-phone-title {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+:root:root .results-report-object-toolbar[data-phone-reading="true"] > .results-report-status-group {
+  flex: 0 1 auto;
+}
+/* Touch: merged share/more/status badge targets at least 44 (buttons transparent, icon and badge visual sizes unchanged) */
+@media (pointer: coarse) {
+  :root:root .results-report-object-toolbar[data-phone-reading="true"] :is(.results-report-share, .ws-menu-wrap > .v2-icon-btn, .rc-status-trigger) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+/* With stopped / connection-interrupted explanations, status and explanation move to a new full-width row */
+:root:root .results-report-object-toolbar[data-phone-reading="true"] > .results-report-status-group:has(.rc-toolbar-outcome) {
+  flex: 1 0 100%;
+  order: 10;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+/* ═══ Remaining-4 · Source details (shared Dialog drawer): source-number eyebrow and content-block spacing ═══ */
+:root:root .source-panel-drawer {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+/* Drawer body is a grid: children default to content width, so long code lines make the whole drawer scroll horizontally; constrain to drawer width and let code blocks scroll themselves */
+:root:root .source-panel-drawer > * {
+  min-width: 0;
+}
+:root:root .source-panel-drawer .legacy-source-panel-actions {
+  padding-top: 12px;
+}
+
+/* ═════════════════════════════════════════════════════════════
+ * Canvas results alignment (P2 follow-up, technical design “Canvas results preview alignment”): the Results page/tab —
+ * browse-all explorer, quick switcher, results navigator, object detail (preview / raw / details, code runs), return bars
+ * and their empty / loading / error states — follows the current design language: system control font, hairline
+ * separators, the r1–r4 radius scale, filled (fill-1/2/3) controls instead of bordered boxes, sidebar-style list rows
+ * (hover fill-1, selected fill-2 + 600), 14 / 16 / 20 icon tiers, no card nested inside the results card.
+ * Content inside previews (text/code blocks, report body, document pages) keeps its content font.
+ * ═════════════════════════════════════════════════════════════ */
+
+/* ── R1 · Layout and headers ── */
+:root:root :is(.results-explorer-head, .results-explorer-controls, .results-explorer-query-status) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .results-explorer-head {
+  min-height: 0;
+  padding: 10px 16px;
+}
+:root:root .results-explorer-head h2 {
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+:root:root :is(.results-explorer-head p, .results-explorer-head > span, .results-explorer-query-status) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .results-explorer-controls {
+  padding: 10px 12px;
+  gap: 8px;
+}
+:root:root .results-explorer-filter-set {
+  gap: 8px;
+}
+:root:root .results-explorer-lens {
+  min-height: var(--control-h-md);
+  padding: 0 4px;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Compact filters: a secondary button (filled, no border) with an accent count badge */
+:root:root .results-explorer-compact-filters > summary {
+  min-height: var(--control-h-md);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+:root:root .results-explorer-compact-filters > summary:hover {
+  background: var(--c-fill-3);
+}
+:root:root .results-explorer-compact-filters > summary strong {
+  min-width: 18px;
+  min-height: 18px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Return bars: "Back to chat / report / code" and "Back to all results" are ghost toolbar buttons (13, ink-2, hover fill-1) */
+:root:root :is(.results-return-context button, .results-explorer-back) {
+  min-height: var(--control-h-md);
+  padding: 0 10px 0 6px;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+:root:root :is(.results-return-context button, .results-explorer-back):hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root :is(.results-return-context button, .results-explorer-back):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .results-return-context {
+  min-height: 40px;
+  padding: 4px 10px;
+}
+:root:root .results-explorer-back {
+  margin: 8px 10px 0;
+}
+:root:root :is(.results-return-context button, .results-explorer-back) svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── R2 · Search fields (explorer, quick switcher, navigator): filled 28 search spec, focus = surface + accent ring ── */
+:root:root :is(.results-explorer-controls > input[type="search"], .results-quick-search-wrap input, .results-nav-search) {
+  min-height: var(--control-h-md);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root
+  :is(.results-explorer-controls > input[type="search"], .results-quick-search-wrap input, .results-nav-search)::placeholder {
+  color: var(--c-ink-3);
+}
+:root:root
+  :is(.results-explorer-controls > input[type="search"], .results-quick-search-wrap input, .results-nav-search):focus-visible {
+  outline: none;
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-focus, var(--c-accent)),
+    0 0 0 3px var(--c-accent-soft);
+}
+
+/* ── R3 · Groups: section headers 12/600 system font, counts tabular; explorer group toggles are 32 rows with a 14 chevron ── */
+:root:root .results-explorer-group {
+  padding-top: 4px;
+}
+:root:root .results-explorer-group button {
+  min-height: 32px;
+  padding: 0 8px;
+  gap: 6px;
+  border-radius: var(--r-2);
+  color: var(--c-ink-2);
+}
+:root:root .results-explorer-group button:hover {
+  background: var(--c-fill-1);
+}
+:root:root .results-explorer-group button > span:first-child {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  color: var(--c-ink-3);
+  font-size: 0.875rem;
+}
+:root:root .results-explorer-group strong {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+:root:root :is(.results-explorer-group button > span:last-child, .results-nav-run-toggle span:last-child) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root :is(.results-quick-group h3, .results-nav-group h3) {
+  padding: 0 8px 4px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+:root:root .results-nav-subgroup h4 {
+  padding: 0 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .results-nav-run-toggle {
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+}
+:root:root .results-nav-run-toggle:hover {
+  background: var(--c-fill-1);
+}
+
+/* ── R4 · Item rows (explorer, quick switcher, navigator): sidebar list rows — 44 high, r2, no border; hover and keyboard-active fill-1,
+ * selected / current fill-2 + title 600 + meta ink-2 (ink-3 on fill-2 is under 4.5:1 in dark).
+ * Type badge = filled 32 × 24 r1 chip (no bordered box inside the row); open chevron 14 ink-3. ── */
+:root:root :is(.results-explorer-row, .results-quick-option, .results-nav-item) {
+  min-height: 44px;
+  padding: 5px 8px;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  font-family: var(--font-control);
+}
+:root:root .results-nav-item.nested {
+  padding-left: 18px;
+}
+:root:root :is(.results-explorer-row, .results-quick-option, .results-nav-item):hover,
+:root:root .results-quick-option.active {
+  background: var(--c-fill-1);
+}
+:root:root :is(.results-explorer-row.selected, .results-quick-option.selected, .results-nav-item.active) {
+  background: var(--c-fill-2);
+}
+:root:root :is(.results-explorer-badge, .results-quick-badge, .results-nav-badge) {
+  width: 32px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+:root:root
+  :is(.results-explorer-row.selected, .results-quick-option.selected, .results-nav-item.active)
+  :is(.results-explorer-badge, .results-quick-badge, .results-nav-badge) {
+  background: var(--c-fill-3);
+}
+:root:root :is(.results-explorer-row-copy, .results-quick-copy, .results-nav-copy) {
+  gap: 0;
+}
+:root:root :is(.results-explorer-row-copy strong, .results-quick-copy strong, .results-nav-copy strong) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.125rem;
+}
+:root:root :is(.results-explorer-row-copy span, .results-quick-copy > span, .results-nav-copy span) {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+:root:root :is(.results-explorer-row-copy span, .results-quick-copy > span, .results-nav-copy span:not(.running, .failed)) {
+  color: var(--c-ink-3);
+}
+:root:root
+  :is(.results-explorer-row.selected, .results-quick-option.selected, .results-nav-item.active)
+  :is(.results-explorer-row-copy strong, .results-quick-copy strong, .results-nav-copy strong) {
+  font-weight: 600;
+}
+:root:root
+  :is(.results-explorer-row.selected, .results-quick-option.selected, .results-nav-item.active)
+  :is(.results-explorer-row-copy span, .results-quick-copy > span, .results-nav-copy span:not(.running, .failed)) {
+  color: var(--c-ink-2);
+}
+:root:root .results-nav-copy span.running {
+  color: var(--c-accent-text);
+}
+:root:root .results-quick-current {
+  color: var(--c-accent-text);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+:root:root .results-explorer-open {
+  display: inline-grid;
+  place-items: center;
+  color: var(--c-ink-3);
+  font-size: 0.875rem;
+}
+:root:root
+  :is(.results-explorer-row, .results-explorer-group button, .results-quick-option, .results-nav-item, .results-nav-run-toggle):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: -2px;
+}
+:root:root .results-explorer-scroll {
+  padding: 4px 8px 8px;
+}
+
+/* ── R5 · Quick switcher and navigator popovers: menu container pattern (r 12, overlay shadow + material edge), hairline head / foot,
+ * 15/650 title, 28 icon close button; footer / load-more buttons are secondary buttons ── */
+:root:root :is(.results-quick, .results-navigator--overlay) {
+  border: 0;
+  border-radius: 12px;
+  box-shadow:
+    var(--shadow-overlay),
+    inset 0 0 0 1px var(--material-edge);
+}
+/* Phones: the quick switcher is the shared bottom sheet (Narrow Spec) instead of a panel pinned 8px from the top over the
+ * top bar. The sheet owns position, material and radius; the panel keeps its column so only the result list scrolls. */
+:root:root .ui-dialog-sheet > .results-quick[data-dialog-presentation="sheet"] {
+  position: static;
+  inset: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+:root:root .ui-dialog-sheet > .results-quick[data-dialog-presentation="sheet"] .results-quick-listbox {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+/* iOS zooms the page when focusing a field below 16px. The sheet-wide 16px input rule (ui-refresh.css) ties in
+ * specificity with the R2 search-field rule above, which loads later and set 13px; restate it for this sheet. */
+:root:root .ui-dialog-sheet > .results-quick[data-dialog-presentation="sheet"] .results-quick-search-wrap input {
+  font-size: max(1rem, 16px);
+}
+/* Pinned navigator column: structural hairline edge against the object area */
+:root:root .results-navigator--pinned {
+  border-right: var(--hairline) solid var(--c-separator-strong);
+}
+:root:root :is(.results-quick-head, .results-nav-head) {
+  min-height: 0;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .results-quick-head {
+  padding: 10px 10px 10px 16px;
+}
+:root:root :is(.results-quick-head h2, .results-nav-head strong) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+:root:root :is(.results-quick-head p, .results-nav-head span) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.results-quick-head button, .results-nav-head button) {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  border-radius: var(--r-2);
+  color: var(--c-ink-3);
+  font-size: 1rem;
+}
+:root:root :is(.results-quick-head button, .results-nav-head button):hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root :is(.results-quick-head button, .results-nav-head button):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root .results-nav-head-actions button[aria-pressed="true"] {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+}
+:root:root .results-quick-search-wrap {
+  padding: 10px 12px 6px;
+}
+:root:root :is(.results-quick-footer, .results-nav-footer) {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .results-quick-footer {
+  min-height: 0;
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+}
+:root:root :is(.results-quick-status, .results-nav-footer, .results-nav-empty) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── R6 · Secondary buttons of the results surfaces (batch 1 secondary: filled, no border, r2, control height, 13 system font);
+ * one accent-text primary per toolbar ── */
+:root:root
+  :is(
+    .results-quick-footer button,
+    .results-nav-footer button,
+    .results-explorer-state button,
+    .results-explorer-page-action,
+    .results-explorer-new button,
+    .results-explorer-page-error button,
+    .result-file-viewer .artifact-viewer-actions a,
+    .result-file-viewer .artifact-viewer-actions button,
+    .result-file-viewer .artifact-content-toolbar button,
+    .result-file-viewer .safe-html-preview-status button,
+    .result-file-viewer .artifact-recovery-actions a,
+    .result-file-viewer .artifact-recovery-actions button,
+    .code-run-actions button,
+    .code-run-outputs button
+  ) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-h-md);
+  margin-top: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--c-fill-2);
+  box-shadow: none;
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) linear,
+    color var(--dur-fast) linear;
+}
+:root:root
+  :is(
+    .results-quick-footer button,
+    .results-nav-footer button,
+    .results-explorer-state button,
+    .results-explorer-page-action,
+    .results-explorer-new button,
+    .results-explorer-page-error button,
+    .result-file-viewer .artifact-viewer-actions a,
+    .result-file-viewer .artifact-viewer-actions button,
+    .result-file-viewer .artifact-content-toolbar button,
+    .result-file-viewer .safe-html-preview-status button,
+    .result-file-viewer .artifact-recovery-actions a,
+    .result-file-viewer .artifact-recovery-actions button,
+    .code-run-actions button,
+    .code-run-outputs button
+  ):hover:not(:disabled) {
+  background: var(--c-fill-3);
+  color: var(--c-ink);
+}
+:root:root
+  :is(
+    .results-quick-footer button,
+    .results-nav-footer button,
+    .results-explorer-state button,
+    .results-explorer-page-action,
+    .results-explorer-new button,
+    .results-explorer-page-error button,
+    .result-file-viewer .artifact-viewer-actions a,
+    .result-file-viewer .artifact-viewer-actions button,
+    .result-file-viewer .artifact-content-toolbar button,
+    .result-file-viewer .safe-html-preview-status button,
+    .result-file-viewer .artifact-recovery-actions a,
+    .result-file-viewer .artifact-recovery-actions button,
+    .code-run-actions button,
+    .code-run-outputs button
+  ):focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root
+  :is(
+    .results-quick-footer button,
+    .results-nav-footer button,
+    .results-explorer-page-action,
+    .code-run-actions button,
+    .code-run-outputs button
+  ):disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+:root:root :is(.result-file-viewer .artifact-viewer-actions svg, .code-run-actions svg) {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+/* Primary action: accent text on the secondary fill (legacy uses !important accent border/text). With two primaries side by side
+ * (reference in chat + download of a deliverable) only the last keeps the accent, so each toolbar has one emphasis. */
+:root:root :is(.result-file-viewer .result-object-action-primary, .code-run-actions button.primary) {
+  border-color: transparent !important;
+  color: var(--c-accent-text) !important;
+  font-weight: 600 !important;
+}
+:root:root .result-file-viewer .result-object-action-primary:has(+ .result-object-action-primary) {
+  color: var(--c-ink) !important;
+  font-weight: 500 !important;
+}
+/* ⋯ more actions: square icon button with a 16 glyph */
+:root:root .result-file-viewer .result-object-actions-trigger {
+  width: var(--control-h-md);
+  padding: 0;
+}
+:root:root .result-file-viewer .result-object-actions-trigger svg {
+  flex-basis: 16px;
+  width: 16px;
+  height: 16px;
+}
+/* Narrow results (legacy shows the "More actions" label below 640): the trigger keeps its label, so it is a text button again */
+@container results-workspace (max-width: 640px) {
+  :root:root .result-file-viewer .result-object-actions-trigger {
+    width: auto;
+    padding: 0 12px;
+  }
+}
+
+/* ── R7 · Object detail: the viewer is the results card's content, not a card inside it. No border / shadow / tinted header band;
+ * header = title 13/600 + meta 12 ink-3 and the action row, closed by a hairline; the content frame below is the only boxed area. ── */
+:root:root :is(.result-file-viewer > .artifact-viewer, .result-file-viewer > .artifact-details) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:root:root :is(.result-file-viewer > .artifact-viewer > .artifact-viewer-head, .result-file-viewer .artifact-details-head) {
+  min-height: 0;
+  padding: 0 0 10px;
+  gap: 12px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  background: transparent;
+}
+:root:root :is(.result-file-viewer .artifact-viewer-title strong, .result-file-viewer .artifact-details-head strong) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root :is(.result-file-viewer .artifact-viewer-title span, .result-file-viewer .artifact-details-head span) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .result-file-viewer .artifact-viewer-actions {
+  gap: 6px;
+}
+:root:root .result-file-viewer .artifact-viewer-tools {
+  padding-left: 6px;
+  border-left: var(--hairline) solid var(--c-separator);
+}
+:root:root .result-file-viewer > .artifact-viewer > .artifact-viewer-body {
+  padding: 12px 0 0;
+  background: transparent;
+}
+/* Content frames: one hairline frame, r3 */
+:root:root
+  :is(
+    .result-file-viewer .safe-html-preview,
+    .result-file-viewer .artifact-markdown-preview,
+    .result-file-viewer .artifact-image-stage,
+    .result-file-viewer .artifact-document-preview,
+    .result-file-viewer .artifact-docx-preview,
+    .result-file-viewer .artifact-presentation-preview,
+    .result-file-viewer .artifact-workbook-preview
+  ) {
+  overflow: hidden;
+  border: var(--hairline) solid var(--c-separator);
+  border-radius: var(--r-3);
+}
+/* Text / raw blocks: filled code block, no border */
+:root:root .result-file-viewer .artifact-viewer-body pre {
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+/* Content toolbar (find, wrap, copy, zoom): a plain row above the content, not a boxed band */
+:root:root .result-file-viewer .artifact-content-toolbar {
+  min-height: 0;
+  padding: 0 0 8px;
+  gap: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .result-file-viewer .artifact-content-toolbar button {
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+}
+:root:root .result-file-viewer .artifact-content-toolbar button.active {
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+:root:root .result-file-viewer .artifact-text-toolbar input {
+  min-height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--c-fill-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .result-file-viewer .artifact-text-toolbar input:focus-visible {
+  outline: none;
+  background: var(--c-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--c-focus, var(--c-accent)),
+    0 0 0 3px var(--c-accent-soft);
+}
+/* Status rows inside the frame (safe-HTML status, page count, workbook notice) and footnotes: 12 system font ink-3, hairlines */
+:root:root
+  :is(.result-file-viewer .safe-html-preview-status, .result-file-viewer .artifact-document-status, .result-file-viewer .artifact-workbook-notice) {
+  border-bottom: var(--hairline) solid var(--c-separator);
+  background: transparent;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+:root:root .result-file-viewer .safe-html-preview-status button {
+  min-height: var(--control-h-sm);
+  margin-left: auto;
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.result-file-viewer .safe-html-preview-badge, .result-file-viewer .safe-html-preview-unverified) {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+:root:root .result-file-viewer .safe-html-preview-unverified {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}
+:root:root :is(.result-file-viewer .safe-html-preview-hint, .result-file-viewer .artifact-viewer-footnote) {
+  border-top-color: var(--c-separator);
+  border-top-width: var(--hairline);
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Details: hairline key/value rows, keys 12 ink-3, values 13 system font (identifiers included) */
+:root:root .result-file-viewer .artifact-details dl {
+  padding: 4px 0 0;
+}
+:root:root .result-file-viewer .artifact-details dl > div {
+  min-height: 36px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+}
+:root:root .result-file-viewer .artifact-details dt {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .result-file-viewer .artifact-details dd {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── R8 · Code runs: one hairline card per run (r3, no shadow), plain head, meta 12 system font; outputs are filled file chips;
+ * run details a ghost disclosure. Running / failed runs keep a status edge. ── */
+:root:root .code-result-intro h3 {
+  font-family: var(--font-control);
+  font-size: var(--fs-dialog-title);
+  font-weight: 650;
+}
+:root:root .code-result-intro p {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .code-run-card {
+  border: var(--hairline) solid var(--c-separator-strong);
+  border-radius: var(--r-3);
+  box-shadow: none;
+}
+:root:root .code-run-card[data-status="running"] {
+  border-color: color-mix(in srgb, var(--c-accent) 50%, var(--c-separator-strong));
+}
+:root:root .code-run-card[data-status="error"] {
+  border-color: color-mix(in srgb, var(--c-err) 50%, var(--c-separator-strong));
+}
+:root:root .code-run-card-head {
+  min-height: 0;
+  padding: 10px 12px;
+  border-bottom: var(--hairline) solid var(--c-separator);
+  background: transparent;
+}
+:root:root .code-run-card-head strong {
+  font-family: var(--font-control);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+:root:root .code-run-card-head span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root :is(.code-run-source, .code-run-stdout pre) {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root :is(.code-run-outputs, .code-run-details, .code-run-stdout) {
+  border-top: var(--hairline) solid var(--c-separator);
+}
+:root:root .code-run-outputs {
+  padding: 8px 12px;
+}
+:root:root .code-run-card .code-run-outputs button {
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-sm);
+}
+:root:root .code-run-details > summary {
+  min-height: 0;
+  margin: 6px 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: var(--control-h-md);
+}
+:root:root .code-run-details > summary:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink);
+}
+:root:root .code-run-details > summary:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 2px;
+}
+:root:root :is(.code-run-details dt, .code-run-stdout > strong, .code-run-pending) {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .code-run-details dd {
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── R9 · Notices, empty / loading / error states (Page Layout Spec states: one 20 icon, a clear 14/600 line, one next step;
+ * errors explain and offer retry without a solid red block). Banners are filled fill-1 r3 rows, no accent-tinted border. ── */
+:root:root :is(.results-explorer-new, .results-explorer-page-error) {
+  margin: 8px 8px 0;
+  padding: 6px 6px 6px 12px;
+  border: 0;
+  border-radius: var(--r-3);
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .results-explorer-pane > button.results-explorer-page-action {
+  margin: 8px 12px;
+}
+:root:root :is(.results-explorer-state, .results-quick-empty) {
+  gap: 8px;
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root :is(.results-explorer-state strong, .results-quick-empty strong) {
+  color: var(--c-ink);
+  font-family: var(--font-control);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+:root:root .results-quick-empty span {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .results-state-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--c-ink-3);
+}
+:root:root .results-state-icon svg {
+  width: 20px;
+  height: 20px;
+}
+:root:root .results-state-icon[data-tone="error"] {
+  color: var(--c-err);
+}
+/* Loading: neutral fill-1 skeleton rows at list-row height */
+:root:root .results-quick-loading span {
+  height: 44px;
+  border-radius: var(--r-2);
+  background: var(--c-fill-1);
+}
+:root:root .result-file-viewer .artifact-viewer-note {
+  color: var(--c-ink-3);
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+:root:root .result-file-viewer .artifact-viewer-note.loading {
+  border-radius: var(--r-3);
+}
+:root:root .result-file-viewer .artifact-viewer-note.error {
+  color: var(--c-err-ink);
+}

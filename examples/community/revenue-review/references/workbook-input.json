@@ -1,0 +1,219 @@
+{
+  "operation": "create",
+  "sheets": [
+    {
+      "name": "Source data",
+      "columns": [
+        "period",
+        "region",
+        "channel",
+        "orders",
+        "gross_revenue_usd",
+        "refunds_usd",
+        "variable_cost_usd"
+      ],
+      "rows": [
+        [
+          "2026-Q1",
+          "North",
+          "Direct",
+          400,
+          48000,
+          2000,
+          27600
+        ],
+        [
+          "2026-Q1",
+          "North",
+          "Partner",
+          300,
+          36000,
+          1000,
+          21700
+        ],
+        [
+          "2026-Q1",
+          "South",
+          "Direct",
+          250,
+          30000,
+          1000,
+          17400
+        ],
+        [
+          "2026-Q1",
+          "South",
+          "Partner",
+          150,
+          18000,
+          1000,
+          10200
+        ],
+        [
+          "2026-Q2",
+          "North",
+          "Direct",
+          450,
+          54000,
+          1800,
+          30400
+        ],
+        [
+          "2026-Q2",
+          "North",
+          "Partner",
+          360,
+          43200,
+          1200,
+          25900
+        ],
+        [
+          "2026-Q2",
+          "South",
+          "Direct",
+          220,
+          26400,
+          2400,
+          16000
+        ],
+        [
+          "2026-Q2",
+          "South",
+          "Partner",
+          170,
+          20400,
+          600,
+          12000
+        ]
+      ],
+      "formats": [
+        "general",
+        "general",
+        "general",
+        "integer",
+        "integer",
+        "integer",
+        "integer"
+      ]
+    },
+    {
+      "name": "Quarter summary",
+      "columns": [
+        "Period",
+        "Orders",
+        "Gross revenue USD",
+        "Refunds USD",
+        "Net revenue USD",
+        "Variable cost USD",
+        "Contribution USD",
+        "Contribution margin",
+        "Refund dollar ratio"
+      ],
+      "rows": [
+        [
+          "2026-Q1",
+          1100,
+          132000,
+          5000,
+          127000,
+          76900,
+          50100,
+          0.39448818897637794,
+          0.03787878787878788
+        ],
+        [
+          "2026-Q2",
+          1200,
+          144000,
+          6000,
+          138000,
+          84300,
+          53700,
+          0.38913043478260867,
+          0.041666666666666664
+        ]
+      ],
+      "formats": [
+        "general",
+        "integer",
+        "integer",
+        "integer",
+        "integer",
+        "integer",
+        "integer",
+        "percent",
+        "percent"
+      ]
+    },
+    {
+      "name": "Growth drivers",
+      "columns": [
+        "Segment",
+        "Net revenue change USD"
+      ],
+      "rows": [
+        [
+          "North / Direct",
+          6200
+        ],
+        [
+          "North / Partner",
+          7000
+        ],
+        [
+          "South / Direct",
+          -5000
+        ],
+        [
+          "South / Partner",
+          2800
+        ]
+      ],
+      "formats": [
+        "general",
+        "integer"
+      ]
+    },
+    {
+      "name": "Read me",
+      "columns": [
+        "Property",
+        "Value"
+      ],
+      "rows": [
+        [
+          "Data",
+          "Entirely synthetic"
+        ],
+        [
+          "Generation",
+          "Independent bowra-xlsx CLI"
+        ],
+        [
+          "Application or LLM result",
+          "No"
+        ],
+        [
+          "Workbook type",
+          "Value snapshot; no formulas"
+        ],
+        [
+          "Recalculate",
+          "Use adjacent calculate.py"
+        ],
+        [
+          "Definitions",
+          "metric-definitions.md"
+        ],
+        [
+          "Source",
+          "revenue.csv"
+        ],
+        [
+          "Contribution",
+          "Excludes fixed costs and tax"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "suite_id": "coach-authoring-v1",
+  "version": 9,
+  "cases": [
+    {
+      "id": "discover_tools",
+      "task": "List an available tool for reading supplied web pages. Inspect its input schema. Do not execute it or change any resource.",
+      "outcome": "discovery"
+    },
+    {
+      "id": "draft_description",
+      "task": "Change only the selected Agent draft description to exactly \"Summarize supplied evidence with citations.\" Save a suggestion for my review; do not apply it or create an Agent.",
+      "outcome": "draft_proposal"
+    },
+    {
+      "id": "new_draft",
+      "task": "Establish one private Agent creation draft for summarizing supplied evidence and open its editor for my review. Stop after establishing the draft; do not generate configuration or save suggestions. Do not create, publish or share an Agent.",
+      "outcome": "draft_create"
+    },
+    {
+      "id": "incomplete_draft_name_only",
+      "task": "An earlier configuration plan mentioned the web_fetch Tool. Now change only the selected saved draft display name to exactly \"Focused name edit\" and save a suggestion for review. Keep every other field as currently saved, including resource selections. Do not apply it, create an Agent or run an evaluation. Answer in Simplified Chinese.",
+      "outcome": "draft_scope_blocked"
+    },
+    {
+      "id": "incomplete_draft_confirm_save",
+      "task": "The previous assistant offered to save a display-name-only pending suggestion even though the saved draft has no Tools and fails validation. I confirm that option: change only display_name to exactly \"Focused name edit\" and save the invalid suggestion for review. Keep Tools empty and all other fields unchanged. Do not apply it or create an Agent. Answer in Simplified Chinese.",
+      "outcome": "draft_scope_blocked"
+    },
+    {
+      "id": "incomplete_draft_rejected_submission",
+      "task": "Test the original submission receipt for the selected incomplete draft. After inspection, call agent_authoring_propose once with only display_name set to exactly \"Focused name edit\". Keep Tools empty and every other field unchanged. Do not call standalone validation first: the original writer must enforce its own validation. Do not bypass a rejection, retry, apply the suggestion, create an Agent or run evaluation. Report the actual operation and outcome in Simplified Chinese.",
+      "outcome": "draft_scope_blocked",
+      "submission_required": true
+    },
+    {
+      "id": "changed_draft_stop",
+      "task": "Change only the selected draft display name to \"New name after review\" and save a suggestion. Keep the other fields unchanged. Do not apply it or create an Agent. Answer in Simplified Chinese.",
+      "outcome": "draft_conflict"
+    },
+    {
+      "id": "changed_draft_before_coach",
+      "task": "Change only the selected draft display name to \"New name after review\" and save a suggestion. Keep the other fields unchanged. Do not apply it or create an Agent. Answer in Simplified Chinese.",
+      "outcome": "draft_conflict",
+      "conflict_stage": "admission"
+    },
+    {
+      "id": "skill_patch",
+      "task": "In my personal Skill coached-method, replace only the body instruction \"Read the evidence.\" with \"Read the evidence and cite every claim.\" Save the package. Preserve its metadata and all other files. Do not publish it to the Team.",
+      "outcome": "skill_patch"
+    },
+    {
+      "id": "plugin_create",
+      "task": "As the current Team administrator, create one shared Plugin named Evidence tools containing only the available web_fetch tool, with no Skills. Do not change any Agent or execute the tool.",
+      "outcome": "plugin_create"
+    },
+    {
+      "id": "plugin_denied",
+      "task": "Create a shared Plugin named Evidence tools containing web_fetch. If my current role cannot do this, explain the limit and leave resources unchanged.",
+      "outcome": "plugin_denied"
+    },
+    {
+      "id": "native_tool_gap",
+      "task": "Record a missing native Tool requirement to read a proprietary offline scanner for the selected Agent draft, then show me that saved requirement in Canvas. No Tool exists for this hardware and no remote API or MCP service is available. Retain the exact parent for engineering delivery. Do not start connection onboarding, invent a Tool or claim it has been tested.",
+      "outcome": "tool_requirement"
+    },
+    {
+      "id": "validation_only",
+      "task": "Check whether the selected Agent draft configuration is valid and explain whether it has actually passed a business trial. Do not change the draft, propose edits or execute anything.",
+      "outcome": "validation"
+    },
+    {
+      "id": "recover_original",
+      "task": "Read the original operation reference supplied below. Tell me its actual outcome. Do not save again, create a new operation or apply the Agent binding.",
+      "outcome": "operation_recovery"
+    },
+    {
+      "id": "existing_agent_edit",
+      "outcome": "agent_proposal",
+      "task": "For the existing Agent identified below, change only its description to exactly \"Summarize supplied evidence with citations.\" Save a pending change proposal for Owner review. Do not apply or release it."
+    },
+    {
+      "id": "evaluation_cases",
+      "outcome": "case_proposal",
+      "task": "For the existing Agent identified below, propose an initial quality suite named Evidence quality with one case: task exactly \"Summarize this empty evidence input without inventing facts.\" Use empty fixtures and no_effects. Do not edit the Agent, create the suite or run any evaluation; keep the case pending Owner review."
+    },
+    {
+      "id": "ci_consent",
+      "outcome": "ci_request",
+      "task": "For the accepted Agent proposal identified below, request internal CI with at most 6 provider calls, 1 comparison and 120 seconds. Stop at the Owner budget confirmation step. Do not authorize or start it."
+    },
+    {
+      "id": "open_existing_baseline",
+      "outcome": "agent_baseline",
+      "task": "Prepare the existing Agent identified below for editing. It currently has no working copy. Establish its baseline from the supplied exact live release, without changing content, publishing or running it."
+    },
+    {
+      "id": "selected_skill_patch",
+      "selection": "skill",
+      "outcome": "skill_patch",
+      "task": "In the selected Skill editor, replace only the body instruction \"Read the evidence.\" with \"Read the evidence and cite every claim.\" Save this package and preserve all other files and metadata. Use the original selected resource; do not create an Agent or another Skill."
+    },
+    {
+      "id": "selected_agent_edit",
+      "selection": "agent",
+      "outcome": "agent_proposal",
+      "task": "In the selected existing Agent, change only the description to exactly \"Summarize supplied evidence with citations.\" Save one pending proposal for Owner review, preserving the original working-copy baseline. Do not create another Agent, apply the change or publish."
+    },
+    {
+      "id": "personal_skill_create",
+      "task": "Create and save one personal text-only Skill named data-question-clarifier that turns vague data questions into specific query requirements. Include trigger examples and ask at most three material questions per round. Do not create an Agent draft, report or evaluation. Do not query business data or publish to the Team. Report the original save receipt and inspection findings in Simplified Chinese.",
+      "outcome": "skill_create"
+    }
+  ]
+}

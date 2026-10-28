@@ -1,0 +1,41 @@
+{
+  "skill_name": "canvas-docx",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把当前 canvas 导出成 Word",
+      "files": [],
+      "expected_behavior": [
+        "Gateway triggers canvas-docx with current canvas sections JSON.",
+        "Output file output.docx created and opens in Word/WPS without a repair prompt.",
+        "Headings / bullets / tables preserved as native Word structures (editable, not one flat blob)."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "导出 Word — 空 canvas",
+      "files": [],
+      "expected_behavior": [
+        "Produces a stub .docx with an '(empty canvas)' placeholder rather than crashing."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "导出 Word — 含中文 narrative + KPI 表格",
+      "files": [],
+      "expected_behavior": [
+        "Chinese renders correctly (w:eastAsia set); no black boxes, no mojibake.",
+        "KPI row and data_table render as real Word tables with a bold header row."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "导出 Word — canvas 含 chart 段",
+      "files": [],
+      "expected_behavior": [
+        "chart degrades to a data table (matplotlib is absent in the app container).",
+        "No '[unsupported kind]' placeholder text anywhere (export contract 3)."
+      ]
+    }
+  ]
+}

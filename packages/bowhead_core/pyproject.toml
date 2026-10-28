@@ -1,0 +1,83 @@
+[project]
+name = "bowhead-core"
+version = "0.4.5"
+description = "Bowhead Agent 编排核心（Lead / Subagent loop / checkpoint / classifier）"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx2==2.16.0",
+    "mcp>=2.3.0",
+    "openai>=3.36.1",
+    "jsonschema>=4.0",
+    "anyio>=4.15.1",
+    "cryptography>=50.0.2",
+    "pyjwt>=2.15.1",
+    "pydantic>=2.14.1",
+    "structlog>=24.4.0",
+    "jinja2>=3.1.4",
+    "bowhead-router",
+    "bowhead-bi-bridge",
+    "bowhead-skill",
+    "bowhead-memory",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.14.0",
+    # Artifact S3/MinIO backend (stores user uploads and canvas exports).
+    "boto3>=1.35.0",
+    # kb-matrix M4: production assembly normalizes dates to ISO (graduation.normalize_date_iso;
+    # previously a usable transitive dependency; declare it explicitly to prevent upstream drift, review P3-4).
+    "python-dateutil>=2.9.0",
+    # Attachment text extraction (user-uploaded PDF/PPTX/DOCX/XLSX -> agent context).
+    "pypdf>=6.21.2",
+    # Canvas Export V2 PDF fallback consumes frozen ExportIR + materialized
+    # visuals. It does not reinterpret charts.
+    "reportlab>=5.1.0",
+    "python-pptx>=1.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    # Multimodal V2A: server-side schema-driven design flatten to PNG.
+    "pillow>=13.0.0",
+    # kb-doctype-config sprint: legacy .xls (Excel 97-2003) reader for financial/tax due-diligence statements.
+    # Multiple .xls variants (older WPS/Excel); openpyxl cannot read .xls, so xlrd<2.0 is required.
+    "xlrd>=1.2.0,<2.0",
+    # langgraph / langgraph-checkpoint-sqlite were retired with the LangGraph subagent backend
+    # (Agent SDK research A1+A2). Both have CVE fixes structurally unreachable under their pins:
+    #   · langgraph 0.2.76      CVE-2026-28277 (fixed in >=1.0.10, while the pin is <0.3).
+    #   · langgraph-checkpoint-sqlite 2.0.11  CVE-2025-67644 (fixed in >=3.0.1, while the pin is <3).
+    # The latter has no references anywhere in the repository and is entirely unused (MemorySaver comes
+    # from langgraph-checkpoint, not this package). Reachability was already near zero, but scanners keep flagging it.
+    # Retain langchain-core: langchain-text-splitters needs it for the active KB splitting path.
+    "langchain-core>=1.6.13,<2",
+    "json-repair>=0.64.1",
+    # i18n v1: CLDR-driven locale-aware number / date formatting
+    # V7 KB sprint deps (per tech design v3.6 §1.4 + Day 21 sprint-end review fix P1-21-1)
+    "chromadb>=1.5.9",                    # vector store (per-ws + per-team collection P0-N1)
+    "langchain-text-splitters>=1.1.3",      # paragraph + markdown splitter wrap
+    "tiktoken>=0.8",                      # token count for chunk_size cap (P1-G cl100k V1)
+    # kb-model-config-2026-05-26: dashscope SDK retired. KB embedder/reranker
+    # now use httpx2 + OpenAI-compat endpoints (DashScope's `compatible-mode/v1`
+    # OR Aliyun Model Router OR any OpenAI-style provider) driven by yaml
+    # config (see config/routing.dev.yaml `kb:` section).
+    "tenacity>=8.0",                      # P1-L embedder retry 3x exp backoff
+    "python-magic>=0.4",                  # P1-O12 server-side mime detection (req libmagic1)
+    # PDF L0: simple pypdfium2 text extraction (image-slim removed marker-pdf, saving ~3GB of torch+surya+transformers).
+    # Complex / scan-only PDFs automatically use L2 vision LLM (image-extraction already wired qwen3-vl-plus).
+    "pypdfium2>=4.30",
+    # DOCX L0: direct python-docx (image-slim removed unstructured[docx], saving ~500MB of spacy+blis+weasel+nltk).
+    "python-docx>=1.1",
+    # cca sprint: OpenAPI spec validation for team-authored tool sources (validate_openapi_spec →
+    # openapi_spec_validator.validate). $ref resolution is hand-rolled on the raw dict
+    # (openapi_tool_source._resolve_ref) — we deliberately DON'T use jsonschema_path.SchemaPath (its
+    # pathable 0.5.0 dep crashes ordinary navigation). Depend on openapi-spec-validator DIRECTLY (the
+    # only thing we import) instead of the heavier `openapi-core` which pulled it transitively — openapi-core
+    # itself is never imported. NOTE: pathable 0.5.0 still rides in via jsonschema-path (which
+    # openapi-spec-validator needs), but it's UNUSED at runtime (we never call SchemaPath).
+    "openapi-spec-validator>=0.7,<0.9",
+    "cronsim>=2.7",
+    "babel>=2.17,<3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bowhead_core"]

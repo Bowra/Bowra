@@ -1,0 +1,65 @@
+{
+  "contract": "embedded-data-provenance/B1a-v1",
+  "cases": [
+    {
+      "name": "object_missing_flag_with_sources",
+      "input": { "data": { "x": 1 }, "sources": [2, 6] },
+      "expected": { "status": "injected", "source_indexes": [2, 6], "has_sources": true }
+    },
+    {
+      "name": "array_false_flag_dedupes_sources",
+      "input": { "data": [1, { "x": true }], "unverified": false, "sources": [1, 1, 0, -1, 2.5, "2", 3] },
+      "expected": { "status": "injected", "source_indexes": [1, 3], "has_sources": true }
+    },
+    {
+      "name": "null_flag_allows_data",
+      "input": { "data": { "x": 1 }, "unverified": null },
+      "expected": { "status": "injected", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "true_flag_wins",
+      "input": { "data": { "x": 1 }, "unverified": true, "sources": [1] },
+      "expected": { "status": "computed_unchecked", "source_indexes": [1], "has_sources": true }
+    },
+    {
+      "name": "missing_data_false_flag",
+      "input": { "unverified": false, "sources": [1] },
+      "expected": { "status": "computed_unchecked", "source_indexes": [1], "has_sources": true }
+    },
+    {
+      "name": "empty_object_false_flag",
+      "input": { "data": {}, "unverified": false },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "empty_array_false_flag",
+      "input": { "data": [], "unverified": false },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "primitive_data",
+      "input": { "data": "value", "unverified": false },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "malformed_string_flag",
+      "input": { "data": { "x": 1 }, "unverified": "false" },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "malformed_number_flag",
+      "input": { "data": { "x": 1 }, "unverified": 0 },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "malformed_object_flag",
+      "input": { "data": { "x": 1 }, "unverified": {} },
+      "expected": { "status": "computed_unchecked", "source_indexes": [], "has_sources": false }
+    },
+    {
+      "name": "safe_integer_source_boundary",
+      "input": { "data": { "x": 1 }, "sources": [9007199254740991, 9007199254740992] },
+      "expected": { "status": "injected", "source_indexes": [9007199254740991], "has_sources": true }
+    }
+  ]
+}

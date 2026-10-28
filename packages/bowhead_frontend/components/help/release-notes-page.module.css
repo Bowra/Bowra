@@ -1,0 +1,123 @@
+.searchLabel {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.search {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  color: var(--c-ink);
+  background: var(--c-bg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.navigation {
+  position: relative;
+  margin-top: 24px;
+}
+
+/* Keep unshown navigation measurable at its actual width without adding scroll height. */
+.navigation [data-measuring="true"] {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  visibility: hidden;
+}
+
+.version[data-measuring="true"] {
+  height: 0;
+  overflow: hidden;
+}
+
+.loadMore {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.version + .version {
+  margin-top: 22px;
+}
+
+.version a {
+  display: block;
+  padding: 8px;
+  border-radius: var(--r-md);
+  color: var(--c-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.version .versionLink {
+  color: var(--c-ink);
+  font-weight: 650;
+}
+
+.version ul {
+  margin: 4px 0 0 8px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--c-line);
+  list-style: none;
+}
+
+.version a:hover,
+.version a[aria-current] {
+  background: var(--c-fill-2);
+  color: var(--c-ink);
+}
+
+.search:focus-visible,
+.version a:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.snippet,
+.status {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.article :is(h2, h3) {
+  scroll-margin-top: 24px;
+}
+
+.article :is(h2, h3):target {
+  background: var(--c-accent-soft);
+}
+
+@media (max-width: 920px) {
+  .sidebar {
+    height: 40vh;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+}
+
+.date {
+  margin: 0 8px 6px;
+  color: var(--c-ink-3);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.article .date {
+  margin-top: -8px;
+}
+
+.article mark {
+  border-radius: 2px;
+  background: var(--c-accent-soft);
+  color: var(--c-ink);
+}

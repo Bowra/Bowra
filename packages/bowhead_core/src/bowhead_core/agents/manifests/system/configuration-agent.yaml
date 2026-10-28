@@ -1,0 +1,43 @@
+name: configuration-agent
+version: 11
+model: analyst
+trust_class: read-mostly
+max_iterations: 12
+max_output_tokens: null # Automatic; resolved for each model request
+description: >-
+  Configure supported application settings as the actual user: personal appearance,
+  persistent answer language, current Space metadata, instructions and preferences,
+  and admitted Team execution limits, model settings and assignments.
+  Read, open the original editor, stage changes, and report actual save receipts.
+  Other Agent authoring and improvement belong to Coach.
+system:
+  file: configuration-agent.md
+tools:
+  default_enabled: false
+  allow: [skill_read, configuration_list]
+plugins:
+  - builtin:settings-space-metadata@4
+  - builtin:settings-personal-appearance@4
+  - builtin:settings-language-preferences@2
+  - builtin:settings-space-preferences@6
+  - builtin:settings-space-instructions@2
+  - builtin:settings-team-administration@1
+skill_grants: []
+callable_peers: []
+produces: []
+# WP M3-12 contract: this Agent holds no Lead routing role (data/compute/deck/knowledge/image).
+# Like the domain specialists it declares the non-role analysis contract, so the roster
+# never drafts it as a fallback holder for another role.
+primary_capability: cap_analysis
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 10
+  display_name: "Configuration Agent"
+  summary: "Explain and adjust available personal, Space and Team settings with your permissions."
+  capabilities: []
+  # Its Tools write drafts, packages or settings; model, Skills, prompt and limits stay platform policy.
+  team_overrides: [enabled, display_name, description]

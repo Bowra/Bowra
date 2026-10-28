@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bowhead.local/schema/chart-style-preset-v1.json",
+  "title": "Bowhead chart style preset",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "presetRevision", "id", "labelKey", "descriptionKey", "status", "extends", "fallbackPresetId", "capabilities", "tokens"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "presetRevision": { "type": "string", "pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]+$" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
+    "labelKey": { "type": "string", "minLength": 1 },
+    "descriptionKey": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["draft", "internal", "active", "deprecated", "retired"] },
+    "extends": { "const": "product-base" },
+    "fallbackPresetId": { "const": "product-base" },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coveredFamilies", "requiredRendererFeatures", "verifiedAccessibilityClaims"],
+      "properties": {
+        "coveredFamilies": { "type": "array", "items": { "enum": ["comparison", "trend", "composition", "distribution", "relationship", "flow", "matrix"] }, "uniqueItems": true },
+        "requiredRendererFeatures": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "verifiedAccessibilityClaims": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["light", "dark", "geometry"],
+      "properties": {
+        "light": { "$ref": "#/$defs/colorMode" },
+        "dark": { "$ref": "#/$defs/colorMode" },
+        "geometry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lineWidth", "pointRadius", "barRadius", "gridDensity"],
+          "properties": {
+            "lineWidth": { "type": "number", "minimum": 1, "maximum": 4 },
+            "pointRadius": { "type": "number", "minimum": 0, "maximum": 6 },
+            "barRadius": { "type": "number", "minimum": 0, "maximum": 12 },
+            "gridDensity": { "enum": ["quiet", "standard", "strong"] }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hex": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "colorMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["palette", "sequential", "diverging"],
+      "properties": {
+        "palette": { "type": "array", "minItems": 6, "maxItems": 8, "items": { "$ref": "#/$defs/hex" } },
+        "sequential": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": { "from": { "$ref": "#/$defs/hex" }, "to": { "$ref": "#/$defs/hex" } }
+        },
+        "diverging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["neg", "mid", "pos"],
+          "properties": { "neg": { "$ref": "#/$defs/hex" }, "mid": { "$ref": "#/$defs/hex" }, "pos": { "$ref": "#/$defs/hex" } }
+        }
+      }
+    }
+  }
+}

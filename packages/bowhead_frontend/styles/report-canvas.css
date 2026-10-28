@@ -1,0 +1,1857 @@
+/* ============================================================
+   Report Canvas — Verified Intelligence document language
+   Sprint report-refactor-2026-06-11 P1 · spec: docs/sprints/
+   report-refactor-2026-06-11/design/report.css (rc-* verbatim)
+
+   Strategy (adapter, NodeView unchanged): override existing selectors with design styles, scoped
+   under .canvas-report-shell / .canvas-report-article; same-named components reused
+   in chat (ChatInlineKpi etc.) are outside scope and unaffected.
+   New components (SourceLinkageStrip / ProvenanceCard / SourceLine) use native design rc-* classes.
+   ============================================================ */
+
+:root {
+  /* Design tokens.css --f-* → existing CJK-fallback font tokens */
+  --f-sans: var(--font-v2-sans);
+  --f-serif: var(--font-v2-serif);
+  --f-mono: var(--font-v2-mono);
+  /* Design tokens.css shadows (no same-named globals, safe to add) */
+  --rc-shadow-1: 0 1px 2px rgba(22, 19, 16, 0.04);
+  --rc-shadow-2: 0 2px 8px rgba(22, 19, 16, 0.06), 0 1px 2px rgba(22, 19, 16, 0.04);
+  --rc-shadow-float: 0 6px 24px -6px rgba(22, 19, 16, 0.14), 0 2px 6px rgba(22, 19, 16, 0.06);
+}
+
+/* ---------- document column ---------- */
+.canvas-report-article {
+  /* dogfood s_3e854 ③: size to the available pane width (was a fixed 860 that left a
+     big gap on wide screens and clipped wide content on narrow panes). `min-width:0`
+     lets it shrink below a wide child's min-content; the cap keeps prose readable on
+     ultrawide. Wide blocks (tables/pre) scroll inside this column — see rule below. */
+  max-width: 1180px;
+  min-width: 0;
+  margin: 0 auto;
+  font-family: var(--f-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--c-ink);
+}
+/* dogfood s_3e854 ③: any block wider than the column SCROLLS instead of overflowing the
+   pane (which is overflow:hidden → silently clips). Covers raw + markdown + data tables
+   and code blocks. display:block makes the table a scroll container while its cells keep
+   the table grid inside. */
+.canvas-report-article :is(table:not(.v2-chart-table-el):not(.v29-rich-table), pre) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* When a table is wider than the column it is laid out at its min-content width, so beside
+   unbreakable numbers a CJK text column collapsed to one character per line. A minimum cell
+   width keeps short labels on one line and lets the table scroll instead. */
+.canvas-report-article table:not(.v2-chart-table-el):not(.v29-rich-table) :is(th, td) {
+  min-width: 5em;
+}
+/* Data tables (chart kind "table") have their own scroll container with a sticky first column.
+   The Markdown-table rule `.v2-body table` also matched them here and forced `table-layout: fixed`,
+   so on narrow panes the columns were squeezed and numbers broke mid-value instead of scrolling.
+   Numbers never wrap; text columns keep a few characters per line.
+   Virtualized tables (`is-virtual`) render only a window of rows, so content-sized columns would change width
+   while scrolling: they stay on fixed layout with a stable minimum width per column instead. */
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) > table.v2-chart-table-el {
+  table-layout: auto;
+}
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) > .v2-chart-table-el td.is-num {
+  white-space: nowrap;
+}
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) > .v2-chart-table-el td:not(.is-num) {
+  min-width: 6em;
+}
+/* Intrinsic text width keeps short labels compact and gives sentences room before wrapping.
+   Only ordinary text cells opt in; interval plots, structured cells and virtual rows keep their owners. */
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) {
+  container-type: inline-size;
+}
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) .v2-chart-table-text {
+  display: inline-block;
+  inline-size: max-content;
+  max-inline-size: 32ch;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+/* A fixed identity must leave room to read the scrolling values, including in narrow compositions.
+   The cell's trailing padding occupies the remaining 12px of its half-width budget. */
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) td:first-child:not(:last-child) .v2-chart-table-text:not(.is-date) {
+  max-inline-size: min(32ch, calc(50cqi - 12px));
+}
+.canvas-report-article .v2-chart-table-scroll:not(.is-virtual) .v2-chart-table-text.is-date {
+  max-inline-size: none;
+  white-space: nowrap;
+}
+.canvas-report-article .v2-chart-table-scroll.is-virtual > table.v2-chart-table-el {
+  table-layout: fixed;
+  min-width: calc(var(--chart-table-columns, 1) * 7rem);
+}
+/* Batch 3 4.1 chart-table width rules are **not here**: all rules in this file require
+   a `.canvas-report-article` ancestor, absent from the export renderer (internal/canvas-export/visual) root
+   — nothing in this scope applies to exports (caught in review).
+   Intrinsic chart-table styles moved to globals.css, applying in both places. The `display:block` above
+   correctly stays here: it fixes **Markdown tables in report bodies**, which exports do not render. */
+
+/* ---------- report header (overrides v2-report-*) ---------- */
+.canvas-report-article .v2-report-eyebrow {
+  font-family: var(--f-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+  margin: 0 0 10px;
+}
+.canvas-report-article .v2-report-h1 {
+  color: var(--c-ink);
+  margin: 0 0 14px;
+  text-wrap: pretty;
+  font-style: normal;
+}
+.canvas-report-article .v2-report-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  /* review P1-5/P2-2: globals uses mono + border-bottom separator for this selector; design has neither */
+  font-family: var(--f-sans);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+.canvas-report-article .v2-report-meta .pill {
+  font-family: var(--f-sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  font-size: 0.71875rem;
+  font-weight: 500;
+  color: var(--c-ink-3);
+}
+
+/* ---------- B1a source-linkage strip ---------- */
+.rc-trust {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0 4px;
+  padding: 9px 0 10px;
+  border-top: 1px solid var(--c-line);
+  border-bottom: 1px solid var(--c-line);
+  font-size: 0.78125rem;
+  color: var(--c-ink-3);
+  font-family: var(--f-sans);
+}
+/* Align direct shell children to body width */
+.canvas-report-shell > .rc-trust { max-width: 720px; margin-left: auto; margin-right: auto; }
+.rc-trust .rc-trust-item { display: inline-flex; align-items: center; gap: 6px; }
+.rc-trust .sep { width: 3px; height: 3px; border-radius: 99px; background: var(--c-line); flex: none; }
+.rc-trust b { font-weight: 600; color: var(--c-ink-2); font-variant-numeric: tabular-nums; }
+.rc-trust .citation-linkage svg,
+.rc-trust .source-count svg { color: var(--c-ink-3); }
+.rc-trust .figure-review {
+  color: var(--c-warn);
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(169, 128, 40, 0.5);
+  background: none; border-top: none; border-left: none; border-right: none;
+  font: inherit; padding: 0;
+}
+.rc-trust .figure-review:hover { color: var(--c-warn-ink); }
+.rc-source-linkage-info { position: relative; display: inline-flex; }
+.rc-source-linkage-info-trigger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px;
+  color: var(--c-ink-3); background: transparent; cursor: pointer;
+}
+.rc-source-linkage-info-trigger:hover,
+.rc-source-linkage-info-trigger:focus-visible { color: var(--c-ink); background: var(--c-surface-2); }
+.rc-source-linkage-info-trigger:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.rc-source-linkage-info-note {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+  width: min(340px, calc(100vw - 32px)); padding: 10px 12px;
+  border: 1px solid var(--c-line); border-radius: 9px;
+  background: var(--c-surface); box-shadow: var(--rc-shadow-2);
+  color: var(--c-ink-2); font-size: 0.75rem; line-height: 1.55;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rc-source-linkage-info-trigger,
+  .rc-source-linkage-info-note { transition: none; animation: none; }
+}
+
+/* ---------- narrative ---------- */
+.canvas-report-article .v2-report-section h2,
+.canvas-report-article h2,
+/* Prose `#` headings use the same tier. Writer contract uses `##` for chapter names (REPORT_WRITING G4), but actual
+   h1 must not fall into preflight's 14px/400 body tier — an invisible heading. */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) h1 {
+  font-style: normal; /* review P1-5: globals declares italic separately after shorthand */
+  color: var(--c-ink);
+  margin: 36px 0 10px;
+}
+/* :not(.v2-report-deck): retain deck/lede 16px annotation tier instead of body text (review P2-8) */
+.canvas-report-article p:not(.v2-report-deck) {
+  margin: 0 0 14px;
+  text-wrap: pretty;
+}
+
+/* ---------- narrative prose hierarchy: h3–h6 / lists / quotes / dividers / body tables ----------
+ * Scope = `schema.ts` TEXT_BASED_KINDS (narrative / deck / callout) — these three
+ * are user-editable prose with standard PM blocks; other kinds are components with their own layouts,
+ * all untouched. **Do not take a shortcut with global .canvas-report-article rules**: sources render in the same
+ * document and also use `<ol>`, but draw their own `[N] · tool: query` rows; restoring list counters adds
+ * an extra number column (116 v1.2.21 measured one ol / 12 li in this section).
+ *
+ * Why needed: the h2/p rules above copy design `report.css` `.rc-h2`/`.rc-p`, but
+ * the design only defines through h2; `@import "tailwindcss"` preflight also reduces h1–h6 to
+ * `font-size/font-weight: inherit` + `margin: 0`, and ol/ul to `list-style: none`
+ * + `padding: 0`. Device result on 116 v1.2.21: six narrative h3 (营业额排名,
+ * 交叉观察, …) rendered as 14px/400/zero margin, identical to body; five ol/ul lost numbering and indentation
+ * entirely, making three category rankings read like three parallel body paragraphs.
+ * This extends the design's scale (38 / 23 / 14.5) down one tier, not a new form: h1/h2 use serif for
+ * chapters; h3 and below use sans serif for in-section labels — small CJK serif blurs, and font-family changes already provide
+ * distinction, without increasing font sizes further.
+ *
+ * ⚠ Do not set `:first-child { margin-top: 0 }`: section wrappers have zero margin/padding
+ * (measured); spacing between sections comes **entirely** from the first child's top margin; clearing it joins sections together.
+ */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) h3 {
+  color: var(--c-ink);
+  margin: 26px 0 8px;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) :is(h4, h5, h6) {
+  font-family: var(--f-sans);
+  font-weight: 600;
+  color: var(--c-ink);
+  margin: 20px 0 6px;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) :is(ol, ul) {
+  margin: 0 0 14px;
+  padding-left: 1.5em;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) ol {
+  list-style: decimal;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) ul {
+  list-style: disc;
+}
+/* li matches .rc-p (14.5/1.72/ink-2), item spacing one tier tighter than paragraphs */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li {
+  margin: 0 0 6px;
+}
+/* Numbers/bullets use a subdued tier, without competing with body text */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li::marker {
+  color: var(--c-ink-4);
+}
+/* Loose lists (Markdown wraps each item in <p>): do not apply p's 14px paragraph spacing within items */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li > p {
+  margin: 0 0 8px;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li > p:last-child {
+  margin-bottom: 0;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li :is(ol, ul) {
+  margin: 6px 0 0;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) li:last-child {
+  margin-bottom: 0;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) blockquote {
+  margin: 0 0 14px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--c-line);
+  color: var(--c-ink-3);
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) blockquote > :last-child {
+  margin-bottom: 0;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) hr {
+  border: none;
+  border-top: 1px solid var(--c-line);
+  margin: 24px 0;
+}
+/* Body Markdown tables: td directly uses body tier (14.5), rather than another small-text tier — this file already
+   has five micro-text tiers 9.5/10/10.5/11/11.5, no more. Header 12px is the only new tier,
+   with label semantics (uppercase + letter-spacing + ink-4), matching .rc-table headers.
+   Wide-table horizontal scrolling is handled by the opening `:is(table…, pre) { display: block; overflow-x }`
+   rule; this section handles layout only. */
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) table {
+  border-collapse: collapse;
+  margin: 0 0 14px;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) th {
+  text-align: right;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--c-line);
+  white-space: nowrap;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) td {
+  text-align: right;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--c-line-2);
+  color: var(--c-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.canvas-report-article :is([data-section-kind="narrative"], [data-section-kind="deck"], [data-section-kind="callout"]) :is(th, td):first-child {
+  text-align: left;
+  padding-left: 2px;
+}
+
+/* ---------- Feishu 07.06 #15b: AI rewrite revision visuals (view-only Decoration) ----------
+ * Pending (before Accept/Revert): old text struck through and gray (to delete), new text highlighted (added), like Word revisions,
+ * showing before/after at a glance. Accept/reject clears Decoration and removes it, without persistence. */
+.canvas-report-article .ai-rewrite-old {
+  text-decoration: line-through;
+  text-decoration-color: var(--c-err, #b4552d);
+  text-decoration-thickness: 1.5px;
+  color: var(--c-ink-3, #8a8578);
+  opacity: 0.7;
+}
+.canvas-report-article .ai-rewrite-new {
+  background: var(--c-pos-soft, #e7f2e9);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--c-pos, #4a8a5a) inset;
+  padding: 0 1px;
+}
+
+/* ---------- inline verified / unverified numbers ----------
+ * Reuse globals mechanism: .citation-num font-size:0 + ::before attr(data-display).
+ * Loaded after globals, overriding colors at equal specificity; glyph uses ::after (::before holds display text).
+ * Design rule: numbers always use ink, never terracotta. */
+.canvas-report-article .citation-num {
+  background: transparent;
+  border-bottom: none;
+  /* Retain 1px box: with font-size:0, the span itself needs a nonempty bounding box
+   * (both Playwright visibility and a11y focus ring depend on it); legacy globals value 1px 4px */
+  padding: 1px 1px 0.5px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap; /* Design rc-v/rc-u verbatim: value+unit+glyph must not wrap separately (review P2-4) */
+}
+.canvas-report-article .citation-num::before {
+  font-size: 0.90625rem; /* Match rc body size; globals 1rem is too large (review P2-10) */
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--c-ink);
+  border-bottom: 1px dotted rgba(176, 74, 42, 0.5);
+  padding-bottom: 0.5px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+/* Phase F cited-number (citation-vnum): source-linkage visuals for literal number phrases.
+ * Current narrative numbers are plain text + [N] (marker not persisted); dotted
+ * underline comes from plugin adjacency detection, with the same click/hover as [N].
+ * Source linkage is not factual verification, so no success check. */
+.canvas-report-article .citation-vnum {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--c-ink);
+  border-bottom: 1px dotted rgba(176, 74, 42, 0.5);
+  padding-bottom: 0.5px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.canvas-report-article .citation-vnum:hover {
+  background: var(--c-accent-tint);
+  border-bottom-color: var(--c-accent);
+}
+
+.canvas-report-article .citation-num:not(.citation-num--no-src):hover,
+.canvas-report-article .citation-num:not(.citation-num--no-src):hover::before {
+  background: var(--c-accent-tint);
+  border-bottom-color: var(--c-accent);
+}
+/* unverified (no-src): dijon ink on warn-soft + dashed-circle glyph */
+.canvas-report-article .citation-num--no-src::before {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border-bottom: 1px dotted rgba(169, 128, 40, 0.65);
+  padding: 0 2px 0.5px;
+}
+.canvas-report-article .citation-num--no-src::after {
+  background-color: var(--c-warn);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2.1' stroke-linecap='round' stroke-dasharray='3 2.6'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2.1' stroke-linecap='round' stroke-dasharray='3 2.6'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3C/svg%3E");
+}
+/* no-src hover retains warn colors, without accent-tint (review P2-5) */
+.canvas-report-article .citation-num--no-src:hover,
+.canvas-report-article .citation-num--no-src:hover::before {
+  background: var(--c-warn-soft);
+  border-bottom-color: var(--c-warn);
+}
+/* WP3 (design D8): unanchored downgraded numbers — edited formerly verified numbers, dijon unverified visuals
+ * (no tick, dashed-circle glyph). verified-edit-guard plugin adds citation-downgraded. */
+.canvas-report-article .citation-downgraded {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--c-ink);
+  background: var(--c-warn-soft);
+  border-bottom: 1px dotted rgba(169, 128, 40, 0.65);
+  padding: 0 2px 0.5px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.canvas-report-article .citation-downgraded::after {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 1.5px;
+  vertical-align: 1px;
+  opacity: 0.85;
+  background-color: var(--c-warn);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2.1' stroke-linecap='round' stroke-dasharray='3 2.6'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2.1' stroke-linecap='round' stroke-dasharray='3 2.6'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* numbered [N] → superscript citation (design .rc-p .cite).
+ * globals --numbered displays raw text directly (::before content:none + span 0.95em
+ * !important chip); override span itself with !important (review P1-4). */
+.canvas-report-article .citation-num--numbered {
+  display: inline;
+  min-height: 0;
+  /* 10px superscript visual + padding/negative margin restore ≥22px target area (legacy globals chip has
+   * deliberate min-height 20px tap target; [N] is the main provenance entry for Phase F data,
+   * so visual changes must not shrink clickable area). Vertical inline padding does not increase line height. */
+  line-height: 0 !important;
+  vertical-align: super;
+  border-bottom: none;
+}
+.canvas-report-article .citation-num--numbered::after { content: none; }
+
+/* ---------- KPI row (overrides v2-kpi-*) ---------- */
+/* canvas-sections re-baseline: KPI = flat/transparent (no white card border or hairline grid), transparent cells blend into bg,
+ * separated only by whitespace; value serif-italic 32, label/sub mono. (Design measured: cells have no border/background) */
+/* ⚠ Do not reduce minmax again to fit four columns in split view — tried, with a worse tradeoff.
+   116 v1.2.21 measured: at 1440 split width body column is 602px, current values fit at most three columns, rendering four KPIs as 3+1,
+   fourth alone (row height 131px). `minmax(126px)` + column gap 24px fit four,
+   reducing height to 74px, but column width fell from 179px to 132px — `.val` 24/18/15px tiers are
+   selected **by character count**, calibrated for wider columns, and fail when narrow: 女装 41.05亿 at 24px
+   needs ~138px, wrapping to two lines with 亿 alone on the second. An orphan row is merely uneven; wrapping is truly ugly.
+   Four columns require **width-aware** tiers first (with the globals.css export tiers changed too),
+   a separate task outside this layout-completion batch. */
+.canvas-report-article .v2-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 16px 32px;
+  margin: 22px 0 12px;
+}
+/* Balanced rows (lib/kpi-grid.ts): five KPIs wrap 3 + 2 instead of leaving the fifth alone. The column width is at
+   least 130px and at least 1/cap of the row, so the cap lowers the column count without narrowing any column. */
+.canvas-report-article .v2-kpi-row[data-max-cols="3"] {
+  grid-template-columns: repeat(auto-fit, minmax(max(130px, calc((100% - 2 * 32px) / 3)), 1fr));
+}
+.canvas-report-article .v2-kpi-row[data-max-cols="2"] {
+  grid-template-columns: repeat(auto-fit, minmax(max(130px, calc((100% - 32px) / 2)), 1fr));
+}
+.canvas-report-article .v2-kpi-row[data-max-cols="4"] {
+  grid-template-columns: repeat(auto-fit, minmax(max(130px, calc((100% - 3 * 32px) / 4)), 1fr));
+}
+/* Measured rows (lib/use-kpi-columns.ts): the column count derived from the row's real width — everything on one
+   row when it fits (five or six in a wide canvas), otherwise the fewest balanced rows (7 → 4 + 3, 8 → 4 + 4).
+   These follow the data-max-cols fallbacks above on purpose: same specificity, later rule wins once measured. */
+.canvas-report-article .v2-kpi-row[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+.canvas-report-article .v2-kpi-row[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="6"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="7"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-row[data-cols="8"] { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.canvas-report-article .v2-kpi-cell {
+  background: transparent;
+  border: none; /* Override legacy globals .v2-kpi-cell borders */
+  border-radius: 0;
+  padding: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.canvas-report-article .v2-kpi-cell .lbl {
+  font-weight: 500;
+  color: var(--c-ink-3);
+}
+.canvas-report-article .v2-kpi-cell .val {
+  color: var(--c-ink);
+}
+/* KPI verified tick — component rendered (KPI val uses pure-string formatInlineTokens,
+ * producing no citation-num span, so CSS ::after is a dead end → svg.rc-kpi-tick inside component) */
+.canvas-report-article .v2-kpi-cell .val .rc-kpi-tick {
+  color: var(--c-accent);
+  margin-left: 4px;
+  vertical-align: 2px;
+  opacity: 0.85;
+}
+.canvas-report-article .v2-kpi-cell .sub {
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink-3);
+}
+
+/* ---------- block card frames (chart / insight / table) ---------- */
+.canvas-report-article .v2-chart-block,
+.canvas-report-article .v2-insight-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 18px 20px 14px;
+  margin: 22px 0;
+  box-shadow: none;
+}
+/* A0 (user-observed nested cards): chart card within insight = block body, not a nested second card.
+ * Remove its border/background/padding, sharing one frame with insight (design Block model).
+ * Standalone charts (outside insight) retain borders — selectors scoped within .v2-insight-card. */
+.canvas-report-article .v2-insight-card .v2-chart-block {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 14px 0 0;
+  box-shadow: none;
+}
+
+/* Charts are bare figures; the shared content type scale owns screen title and subtitle hierarchy.
+ * NodeView ChartSourceLine renders the bottom source line (figcaption). */
+.canvas-report-article .v2-chart-figure {
+  margin: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+  /* U6 fix (with .v2-chart-canvas-wrap): keep the chart figure within the 860 column so a
+     transiently-wide chart canvas can't widen the report. No overflow:hidden here — the
+     header's "折线 ▼" dropdown must be free to overflow; the canvas-wrap owns the clip/scroll. */
+  max-width: 100%;
+  min-width: 0;
+}
+.canvas-report-article .v2-chart-figure .v2-chart-header {
+  background: transparent;
+  border-bottom: none;
+  padding: 0 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+/* Chart actions (open data/PNG/CSV/change type): only on desktop hover, always on touch — keep figure clean by default */
+.canvas-report-article .v2-chart-figure .v2-chart-actions {
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+.canvas-report-article .v2-chart-figure:hover .v2-chart-actions,
+.canvas-report-article .v2-chart-figure:focus-within .v2-chart-actions,
+/* While chart-type or ⋯ menu is open (mounted on body, focus in menu), do not fade actions when pointer leaves chart */
+.canvas-report-article .v2-chart-figure .v2-chart-actions.is-open {
+  opacity: 1;
+}
+@media (hover: none) {
+  .canvas-report-article .v2-chart-figure .v2-chart-actions { opacity: 1; }
+}
+/* Card title area: clear globals legacy color band (background+border-bottom); design has a plain title row
+ * (review P2-9). Card-frame padding comes from rules above. */
+.canvas-report-article .v2-chart-header {
+  background: transparent;
+  border-bottom: none;
+  padding: 0 0 6px;
+}
+
+/* ---------- recommendations: flat ranked table (no outer card border, hairline row separators, soft-background pills) ---------- */
+.canvas-report-article .v2-recommendations { margin: 24px 0; }
+.canvas-report-article .rc-rec-table { display: flex; flex-direction: column; }
+.canvas-report-article .rc-rec-head-row {
+  font-family: var(--f-mono); font-size: 0.59375rem; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--c-ink-3);
+  padding: 0 0 8px; border-bottom: 1px solid var(--c-line);
+}
+.canvas-report-article .rc-rec-row {
+  display: grid; grid-template-columns: 44px 1fr; gap: 12px;
+  align-items: start; padding: 13px 0;
+  border-bottom: 1px solid var(--c-line-2, var(--c-line));
+}
+.canvas-report-article .rc-rec-row:last-child { border-bottom: none; }
+.canvas-report-article .rc-rec-row .rec-pri {
+  flex: none; min-width: 38px; height: 20px; padding: 0 8px; border-radius: 4px; margin-top: 1px;
+  font-family: var(--f-mono); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.04em;
+  display: inline-flex; align-items: center; justify-content: center; align-self: start;
+}
+.canvas-report-article .rc-rec-row .rec-pri.p0 { background: var(--c-err-soft, rgba(159, 36, 56, 0.1)); color: var(--c-err); }
+.canvas-report-article .rc-rec-row .rec-pri.p1 { background: var(--c-accent-soft); color: var(--c-accent); }
+.canvas-report-article .rc-rec-row .rec-pri.p2 { background: var(--c-surface-2); color: var(--c-ink-3); }
+.canvas-report-article .rc-rec-row .rec-action { min-width: 0; }
+.canvas-report-article .rc-rec-row .rec-action-text { font-size: 0.875rem; line-height: 1.45; color: var(--c-ink); }
+.canvas-report-article .rc-rec-row .rec-meta { font-family: var(--f-mono); font-size: 0.6875rem; color: var(--c-ink-4); margin-top: 4px; }
+.canvas-report-article .rc-rec-row .rec-rationale { font-size: 0.71875rem; color: var(--c-ink-4); font-style: italic; margin-top: 3px; }
+
+/* Insight card: hero label (mono accent) + serif-italic thesis quotation marks */
+.canvas-report-article .v2-insight-card .rc-insight-label {
+  flex: none;
+  font-family: var(--f-mono);
+  font-size: 0.59375rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+}
+.canvas-report-article .rc-insight-thesis::before { content: "\201C"; }
+.canvas-report-article .rc-insight-thesis::after { content: "\201D"; }
+
+/* Card [N] citations → clickable superscripts (injected by rehypeCardCitations, hover/click delegated to CitationHoverManager) */
+.canvas-report-article .rc-cardcite {
+  font-family: var(--f-mono);
+  font-size: 0.68em;
+  font-weight: 600;
+  vertical-align: super;
+  line-height: 0;
+  margin-left: 1.5px;
+  color: var(--c-accent);
+  cursor: pointer;
+}
+.canvas-report-article .rc-cardcite:hover { color: var(--c-ink); }
+.canvas-report-article .v2-chart-title {
+  font-size: 0.90625rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+/* ---------- source line (rc-source, design verbatim — for ChartSourceLine) ---------- */
+.rc-source {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  /* Design ink-4 contrast 2.9:1 fails → ink-3 (review P2-7) */
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.rc-source .src-n {
+  flex: none;
+  min-width: 16px;
+  height: 1rem; /* 16px at the default root; grows with the root text size */
+  padding: 0 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.rc-source.none { font-style: italic; cursor: default; }
+.rc-source .src-link {
+  text-decoration: none;
+}
+
+/* ---------- provenance card (rc-prov, design verbatim — shared by popover/SourceLine details) ---------- */
+.rc-prov {
+  overflow: hidden;
+  font-size: 0.75rem;
+}
+.rc-prov-head {
+  display: flex;
+  align-items: center;
+}
+.rc-prov-tool {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+}
+.rc-prov-head .t-sub {
+  margin-top: 1px;
+  max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Citation hover card: the sub line is the query; wrap to two lines instead of a 190px ellipsis. */
+.citation-popover .rc-prov-head .t-sub {
+  max-width: none;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.citation-popover .legacy-rc-prov-main { min-width: 0; flex: 1 1 auto; }
+/* Text glimpse of a source (stdout, logs): keep its line breaks, cap the height. */
+.rc-prov-quote.rc-prov-excerpt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 9em;
+  overflow: hidden;
+}
+.rc-prov-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  flex: none;
+}
+.rc-prov-rows { display: flex; flex-direction: column; gap: 7px; }
+.rc-prov-affirm {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+/* Original passage block (KB hover): clamp to a few lines so the card stays compact;
+   full text lives in the SourcePanel / "open in KB" deep-dive. */
+.rc-prov-passage {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* loading / empty / error states reuse the quote frame but read as a note,
+   not an italic serif quotation. */
+/* Knowledge-base answer citations batch 3 (design 08 · D): report KB citation overlay — location row, original passage (≤4 lines,
+   longest match with body before citation badge highlighted), footer: shown per your permissions · open in knowledge base. */
+.rc-prov-kb-loc { font-family: var(--f-mono); font-size: 0.6875rem; }
+.rc-prov-quote.rc-prov-kb-quote {
+  font-family: inherit;
+  font-style: normal;
+  max-height: 9em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.rc-prov-kb-line { display: block; white-space: pre-wrap; }
+.rc-prov-kb-quote mark { background: #fbe7a6; color: var(--c-ink); border-radius: 2px; padding: 0 1px; }
+.rc-prov-kb-acts {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+}
+.rc-prov-kb-acts a { font-weight: 500; flex: none; }
+.rc-prov-quote.rc-prov-quote-note {
+  font-family: inherit;
+  font-style: normal;
+}
+.rc-prov .rc-prov-value {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  font-variant-numeric: tabular-nums;
+}
+/* citation-hover original data — inline original data table (bi_query sample_rows /
+   art_ preview). A compact glimpse; full data lives in the SourcePanel. */
+.rc-prov-data-scroll { overflow-x: auto; }
+.rc-prov-data table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.rc-prov-data th {
+  text-align: left;
+  font-weight: 600;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.rc-prov-data td {
+  color: var(--c-ink-2);
+  padding: 4px 8px;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-prov-data tbody tr:last-child td { border-bottom: none; }
+.rc-prov-data-more {
+  margin-top: 5px;
+}
+.rc-prov-footer {
+  margin-top: 8px;
+  display: flex;
+}
+.rc-prov-footer button {
+  flex: 1;
+  cursor: pointer;
+}
+.rc-prov-footer button:disabled { cursor: not-allowed; }
+
+/* ---------- badges (rc-badge, design verbatim) ---------- */
+.rc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.65625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.rc-badge.conf-high { background: var(--c-pos-soft); color: var(--c-pos); }
+.rc-badge.conf-med { background: var(--c-warn-soft); color: var(--c-warn-ink); }
+.rc-badge.neutral { background: var(--c-surface-2); color: var(--c-ink-3); }
+.rc-badge.ai { background: var(--c-accent-tint); color: var(--c-accent); }
+.rc-badge.amber { background: var(--c-warn-soft); color: var(--c-warn-ink); }
+
+/* ---------- streaming banner (design D6 verbatim) ---------- */
+.rc-stream-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  background: var(--c-accent-tint);
+  border-bottom: 1px solid var(--c-accent-soft);
+  font-size: 0.78125rem;
+  color: var(--c-ink-2);
+  font-family: var(--f-sans);
+}
+.rc-stream-banner b { font-weight: 600; }
+.rc-stream-banner code {
+  font-family: var(--f-mono);
+  font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+/* D6 simple banner: inline copy (truncates long section titles) + subtle turn-id pill */
+.rc-stream-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-stream-turn {
+  flex: none;
+  font-family: var(--f-mono);
+  font-size: 0.65625rem;
+  color: var(--c-ink-4);
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rc-stream-turn:hover { color: var(--c-ink-2); background: var(--c-accent-soft); }
+@keyframes rc-spin { to { transform: rotate(360deg); } }
+.rc-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 99px;
+  flex: none;
+  border: 1.5px solid var(--c-accent-soft);
+  border-top-color: var(--c-accent);
+  animation: rc-spin 0.9s linear infinite;
+}
+.rc-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.rc-pill-btn.accept { background: var(--c-ink); color: #fffefa; border: none; }
+.rc-pill-btn.ghost { background: var(--c-surface); color: var(--c-ink-3); border-color: var(--c-line); }
+.rc-pill-btn.ghost:hover { color: var(--c-ink); }
+
+/* ============================================================
+   WP3 (design D2): editing affordances — ported verbatim from design/report.css.
+   Token mapping: --r-2→12px · --r-pill→999px · --shadow-2/float→--rc-shadow-2/float.
+   Render only in hover/edit mode (SectionChrome controls visibility), never in read mode.
+   ============================================================ */
+
+/* ---------- affordance-layer tokens (design r2: report-edit-affordance) ----------
+   mark/dash use color-mix following --c-accent (team branding can change color); neutral lift/ring colors
+   have one tier per theme (light=white lift+beige ring, dark=warm white 4%+dark brown ring). */
+:root {
+  --rc-mark: color-mix(in srgb, var(--c-accent) 20%, transparent);
+  --rc-mark-strong: color-mix(in srgb, var(--c-accent) 85%, transparent);
+  --rc-dash: color-mix(in srgb, var(--c-accent) 42%, transparent);
+  --rc-lift: rgba(255, 255, 255, 0.72);
+  --rc-ring: rgba(232, 226, 212, 0.9);
+}
+:root[data-theme="dark"] {
+  --rc-mark: color-mix(in srgb, var(--c-accent) 34%, transparent);
+  --rc-mark-strong: color-mix(in srgb, var(--c-accent) 95%, transparent);
+  --rc-dash: color-mix(in srgb, var(--c-accent) 50%, transparent);
+  --rc-lift: rgba(255, 246, 236, 0.04);
+  --rc-ring: rgba(52, 46, 38, 0.9);
+}
+/* design r2: left drag handle becomes a 26×30 card (background/border/shadow when live) */
+.rc-handle {
+  position: absolute; top: 12px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: grab;
+}
+.rc-handle:active { cursor: grabbing; }
+/* design r2: overlay pill becomes 34px high, just outside block top (does not obscure first line) */
+.rc-actions {
+  position: absolute;
+  display: flex; align-items: center;
+  z-index: 4;
+}
+.rc-action-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: none; background: none;
+  cursor: pointer;
+}
+.rc-action-btn.danger:hover { background: var(--c-err-soft, rgba(181, 68, 59, 0.08)); color: var(--c-err, #b5443b); }
+.rc-action-sep { width: 1px; height: 16px; background: var(--c-line); margin: 0 2px; }
+
+/* ---------- Four inline-editable atom states (design r2: rc-ed family) ----------
+   hover=light accent background+dashed underline+trailing pencil+click-to-edit tooltip; edit(:focus)=accent
+   double ring; done=300ms teal glow after submit (InlineEditableText adds rc-ed-done).
+   All pseudo/class driven, absent from textContent (blur submit reads text, excludes pseudo-elements). */
+.rc-ed {
+  position: relative; border-radius: 5px; padding: 1px 5px; margin: 0 -5px;
+  transition: background 0.15s var(--ease-v2, ease), box-shadow 0.15s var(--ease-v2, ease);
+  outline: none;
+}
+/* r3 §5.4: hover decorations gated by (hover: hover) — 641-1023 touch tablets can enter editing, but simulated
+   hover would leave tooltip/pencil after tap. */
+@media (hover: hover) {
+  [data-edit-mode="on"] .rc-ed:hover:not(:focus) {
+    background: var(--c-accent-tint);
+    box-shadow: inset 0 -1px 0 var(--rc-dash);
+    cursor: text;
+  }
+  /* Trailing pencil (mask color follows brand color) */
+  [data-edit-mode="on"] .rc-ed:hover:not(:focus)::after {
+    content: ""; display: inline-block; width: 11px; height: 11px;
+    margin-left: 6px; vertical-align: baseline;
+    background: var(--c-accent); opacity: 0.7;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13l.8-3L10.5 3.3a1.3 1.3 0 0 1 1.9 0l.3.3a1.3 1.3 0 0 1 0 1.9L6 12.2z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13l.8-3L10.5 3.3a1.3 1.3 0 0 1 1.9 0l.3.3a1.3 1.3 0 0 1 0 1.9L6 12.2z'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  /* Click-to-edit tooltip (dark-ink label, hovered but unfocused). pointer-events:none lets pseudo-element
+     hits reach the host without blocking preceding-line clicks (r3 §5.4). */
+  [data-edit-mode="on"] .rc-ed[data-tip]:hover:not(:focus)::before {
+    content: attr(data-tip);
+    position: absolute; left: 0; bottom: calc(100% + 9px);
+    height: 24px; padding: 0 9px; display: inline-flex; align-items: center;
+    background: var(--c-ink); color: var(--c-bg);
+    border-radius: 6px; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.02em;
+    white-space: nowrap; box-shadow: var(--rc-shadow-2); z-index: 5;
+    font-family: var(--f-sans, inherit);
+    pointer-events: none;
+  }
+}
+.rc-ed:focus {
+  background: var(--c-surface);
+  box-shadow: 0 0 0 1.5px var(--c-accent), 0 0 0 5px var(--c-accent-tint);
+}
+/* r3 §5.4: edit-mode gate — clicking done within 300ms after blur submission exits; glow must not leak into read-only mode */
+[data-edit-mode="on"] .rc-ed-done {
+  background: var(--c-pos-soft);
+  box-shadow: 0 0 0 1.5px var(--c-pos);
+}
+/* First-entry flash: editable atoms light up together with traces */
+[data-affordance-flash="on"] .rc-ed {
+  background: var(--c-accent-tint);
+  box-shadow: inset 0 -1px 0 var(--rc-dash);
+}
+
+/* ---------- Touch form (mobile design A3/E412) ----------
+   Touch has no hover: editable hints must be **persistent**, or users have no clue (r3 wrapped hover decorations in
+   (hover: hover), leaving touch with nothing). Design decision: persistent dashed underline, **no background**
+   — retain document feel, with editing weight only after tapping in. */
+@media (hover: none), (pointer: coarse) {
+  [data-edit-mode="on"] .rc-ed {
+    background: transparent;
+    box-shadow: inset 0 -1px 0 var(--rc-dash);
+  }
+}
+
+/* Persistent ⋯ entry: no default background/border (no competition with body), floats as a card only when menu opens. */
+.rc-mdots {
+  position: absolute;
+  top: 6px;
+  right: 2px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  z-index: 3;
+}
+/* Body makes room for persistent ⋯ so the button does not cover first-line text */
+[data-chrome-touch="on"] > :is(p, h2, h3):first-of-type {
+  padding-right: 26px;
+}
+
+/* ---------- First-entry edit guide (design r2 frame H) ---------- */
+.rc-guide {
+  display: flex; align-items: center; margin: 0 0 20px;
+}
+.rc-guide svg { flex: none; }
+.rc-guide .rc-guide-text { flex: 1; }
+.rc-guide-dismiss {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 13px;
+  border-radius: 999px; border: 1px solid var(--c-line); background: var(--c-surface);
+  font-family: inherit; font-size: 0.75rem; font-weight: 600; color: var(--c-ink-3); cursor: pointer;
+}
+.rc-guide-dismiss:hover { color: var(--c-ink); }
+
+/* r3 §5.4: persistent edit decorations do not print (fallback for Cmd+P directly in edit mode;
+   PDF export uses /internal/canvas-export screenshots, unaffected). Left trace ::before
+   selector is in globals.css; suppress it here with the same [data-edit-mode] gate. */
+@media print {
+  .rc-handle,
+  .rc-mdots,
+  .rc-actions,
+  .rc-guide,
+  [data-edit-mode="on"] .v2-section-chrome::before {
+    display: none !important;
+  }
+  [data-edit-mode="on"] .rc-ed {
+    background: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* ---------- ⋮ menu (design r2: 212px layout, warm-red danger separator) ---------- */
+.rc-mi {
+  display: flex; align-items: center; width: 100%;
+  border: none; background: none;
+  cursor: pointer; text-align: left;
+}
+.rc-mi svg { flex: none; }
+.rc-msep { border: none; }
+
+/* ---------- block-level AI edit bar (D2Input) ---------- */
+.rc-ai-bar {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  background: var(--c-surface); border: 1px solid var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-tint), var(--rc-shadow-2);
+  border-radius: 10px; padding: 8px 10px 8px 12px;
+}
+.rc-ai-bar svg.spark { color: var(--c-accent); flex: none; }
+.rc-ai-bar input, .rc-ai-bar .rc-ai-text {
+  flex: 1; border: none; outline: none; font-family: inherit; font-size: 0.8125rem;
+  color: var(--c-ink); background: transparent;
+}
+.rc-ai-bar input::placeholder { color: var(--c-ink-4); }
+.rc-ai-bar .placeholder { color: var(--c-ink-4); }
+.rc-ai-kbd {
+  border-radius: 5px; padding: 2px 6px;
+}
+.rc-ai-send {
+  border: none; cursor: pointer;
+  background: var(--c-accent); display: inline-flex; align-items: center; justify-content: center;
+}
+.rc-ai-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- regenerating chip (D2Regenerating) ----------
+   Note: design D2Regenerating rc-shimmer-veil covered charts during chart-spec rewrites;
+   chart-AI decision A removed that path; narrative rewrites use text live streaming (article already has dim
+   state), no overlay needed → veil CSS had no consumers and was deleted (avoid dead CSS). */
+.rc-regen-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--c-surface);
+}
+
+/* ---------- accept / revert result bar (D2Result) ---------- */
+.rc-result-bar {
+  display: flex; align-items: center; margin-top: 8px;
+}
+.rc-result-bar.error {
+  border-color: var(--c-err-soft); align-items: flex-start;
+}
+.rc-result-error-message {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  line-height: 1.35; overflow-wrap: anywhere;
+}
+
+/* ---------- selection toolbar (D2TextEdit) ---------- */
+.rc-sel-toolbar {
+  display: inline-flex; align-items: center;
+}
+.rc-sel-btn {
+  border: none; background: none;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+}
+/* mobile r1 §1.2: no selection toolbar on touch — too wide for narrow screens and conflicts with touch selection handles;
+   AI rewrite instead enters through block action sheet (resolving P6's second historical reason for disabling mobile editing). */
+@media (hover: none), (pointer: coarse) {
+  .rc-sel-toolbar { display: none; }
+}
+
+/* ---------- inline conflict bar (D2Conflict, single-user realistic copy) ---------- */
+.rc-conflict-bar {
+  display: flex; align-items: center;
+  margin-bottom: 12px;
+}
+.rc-conflict-bar .rc-conflict-msg { flex: 1; min-width: 0; }
+
+/* ---------- typewriter caret (D2/D6, tokens.css verbatim) ---------- */
+@keyframes bh-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+/* ---------- empty report state (design D6Empty verbatim) ---------- */
+.rc-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  font-family: var(--f-sans);
+}
+.rc-empty-inner { text-align: center; max-width: 380px; padding: 40px 16px 60px; }
+.rc-empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  margin: 0 auto 18px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  box-shadow: var(--rc-shadow-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-accent);
+  font-size: 1.375rem;
+}
+.rc-empty-title {
+  font-family: var(--f-serif);
+  font-size: 1.3125rem;
+  font-weight: 600;
+  color: var(--c-ink);
+  letter-spacing: -0.01em;
+}
+.rc-empty-sub {
+  font-size: 0.8125rem;
+  color: var(--c-ink-3);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+/* P6/D7 chart swipe: inner physical box fills wrap (Chart.js responsive measures parent box, so not display:contents),
+   desktop size=wrap content box (zero regression); mobile @media below adds min-width to sizing parent for horizontal wrap scroll. */
+.v2-chart-canvas-inner { width: 100%; height: 100%; }
+
+/* Batch 3 4.2 (design C v2 C3): hbar categories on vertical axis — grow taller, not wider (--chart-h calculated by ChartBlock from
+   category count); widening only lengthens bars, category names still cramped.
+   ⚠ This rule **used to be only in the ≤640px block below** ⇒ desktop wrap always used baseline
+   `clamp(300px, 38vh, 420px)` (900px viewport =342px), 20 brands ≈17px/category, names blurred
+   together. A requested `--chart-h: 740px` must not remain clamped to a 342px wrapper.
+   Export unaffected: export root is outside `.canvas-report-article` (its own
+   `[data-testid="canvas-export-visual-root"] .v2-chart-canvas-wrap` still controls height).
+
+   ★ 2026-09-02: **height now belongs to `.is-tall`** (globals.css: `height:auto` +
+   `max-height:70vh` + internal scrolling); only no horizontal scrolling remains here. Device observation on 116:
+   this selector (0,3,0) outranks `.v2-chart-canvas-wrap.is-tall` (0,2,0),
+   so `height: var(--chart-h)` overrides that height model — wrap fixed at `--chart-h`,
+   inner also at `--chart-h`, making wrap's own 32px padding **always overflow**:
+   every tall hbar's x-axis ticks (0 / 2亿 / 4亿 …) were clipped outside viewport, with an extra scrollbar.
+   `--chart-h` and `is-tall` come from the same ChartBlock condition (`tallH`),
+   so no need to check tall-chart status again here. */
+.canvas-report-article .v2-chart-canvas-wrap[style*="--chart-h"] {
+  overflow-x: hidden;
+}
+
+/* ---------- mobile (≤640px) compact adjustments ---------- */
+@media (max-width: 640px) {
+  .canvas-report-article .v2-report-section h2,
+  .canvas-report-article h2 { margin: 22px 0 8px; }
+  /* The attribute selectors keep the phone's two columns ahead of the desktop data-max-cols / data-cols rules. */
+  .canvas-report-article .v2-kpi-row,
+  .canvas-report-article .v2-kpi-row[data-max-cols],
+  .canvas-report-article .v2-kpi-row[data-cols] { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+  .canvas-report-article .v2-kpi-cell { padding: 0; }
+  /* ⚠ Desktop [data-len] rules are **more specific** than this line (one extra attribute selector); without restating them here,
+     they leak into mobile and render intended 20px values at 27px — worse than doing nothing.
+     Mobile cards are only half-screen width, so tiers must be more aggressive. */
+  .canvas-report-article .v2-kpi-cell .val .citation-num::before { font-size: 1.25rem; }
+  .rc-trust { gap: 10px; font-size: 0.75rem; flex-wrap: wrap; }
+  /* P6/D7: many-category charts swipe horizontally (wrap scrolls, inner grows to --chart-min-w for crisp native Chart.js rendering) */
+  .canvas-report-article .v2-chart-canvas-wrap { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  .canvas-report-article .v2-chart-canvas-inner { min-width: var(--chart-min-w, 0px); }
+  /* --chart-h height rules moved outside media query (desktop also needs tall charts), not repeated here. */
+  /* Batch 3 4.2: action bar 429px wide on 412px screen → final download-CSV action pushed off-screen (actual production
+     capture). Allow shrink+wrap, first ensuring no panel overflow. */
+  .canvas-report-article .v2-chart-actions { min-width: 0; flex-wrap: wrap; }
+}
+
+/* Batch 3 4.2 (design C v2 C2): scale fallback summary for horizontally swiped charts — maximum/minimum/total remain even when swiped away.
+   This ChartBlock component spans mounts: report, chat and settings preview must all match, not scoped under
+   `.canvas-report-article` (116 narrow-width observation once became an unspaced string). */
+.v2-chart-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  padding: 0 2px 8px;
+  font: 0.6875rem var(--f-mono);
+  font-variant-numeric: tabular-nums;
+}
+.v2-chart-summary > span {
+  white-space: nowrap;
+  padding: 0 10px;
+}
+.v2-chart-summary > span:first-child {
+  padding-left: 0;
+}
+.v2-chart-summary > span + span {
+  border-left: 1px solid var(--c-line);
+}
+
+/* ---------- WP1 complete export UI (design D5: menu / toast / drawer) ---------- */
+.rc-fmt-ico {
+  border-radius: 8px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--f-mono);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.rc-export-menu { width: 320px; padding: 6px; }
+.rc-export-row-btn {
+  display: flex; gap: 11px; align-items: flex-start; width: 100%;
+  padding: 9px 10px; border-radius: 9px; border: none; background: transparent;
+  cursor: pointer; text-align: left; font-family: inherit;
+}
+.rc-export-row-btn:hover { background: var(--c-bg); }
+.rc-export-row-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rc-export-row-body { min-width: 0; flex: 1; display: block; }
+.rc-export-row-name { display: block; font-size: 0.8125rem; font-weight: 600; color: var(--c-ink); }
+.rc-export-row-desc { display: block; font-size: 0.71875rem; color: var(--c-ink-3); margin-top: 2px; line-height: 1.45; }
+.rc-export-history {
+  display: flex; align-items: center; gap: 6px; width: calc(100% - 8px);
+  margin: 5px 4px 2px; padding: 8px 6px 6px; border: none; background: none;
+  border-top: 1px solid var(--c-line-2); font-family: inherit;
+  font-size: 0.71875rem; color: var(--c-ink-3); cursor: pointer; text-align: left;
+}
+.rc-export-history:hover { color: var(--c-accent); }
+
+.rc-export-toast {
+  position: fixed; right: 18px; bottom: 18px; z-index: 1100; width: 348px;
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: 12px; box-shadow: var(--rc-shadow-float);
+  padding: 12px 14px; font-family: var(--f-sans);
+}
+.rc-export-toast-row { display: flex; align-items: flex-start; gap: 10px; }
+.rc-export-toast-ok {
+  width: 26px; height: 26px; border-radius: 8px; flex: none;
+  background: var(--c-pos-soft); color: var(--c-pos);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.rc-export-toast-body { flex: 1; min-width: 0; }
+.rc-export-toast-title { font-size: 0.8125rem; font-weight: 600; color: var(--c-ink); }
+.rc-export-toast-sub {
+  font-size: 0.71875rem; color: var(--c-ink-3); margin-top: 2px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.rc-export-toast-actions { display: flex; gap: 8px; margin-top: 10px; }
+.rc-export-toast-x {
+  flex: none; border: none; background: none; color: var(--c-ink-4);
+  cursor: pointer; font-size: 0.75rem; padding: 2px 4px; border-radius: 6px;
+}
+.rc-export-toast-x:hover { color: var(--c-ink); background: var(--c-surface-2); }
+.rc-export-toast .rc-pill-btn.accept { text-decoration: none; }
+@keyframes rc-export-indeterminate {
+  0% { left: -30%; } 100% { left: 100%; }
+}
+.rc-export-bar {
+  margin-top: 10px; height: 3px; border-radius: 99px;
+  background: var(--c-surface-2); position: relative; overflow: hidden;
+}
+.rc-export-bar span {
+  position: absolute; top: 0; bottom: 0; width: 30%; border-radius: 99px;
+  background: var(--c-accent); animation: rc-export-indeterminate 1.4s ease-in-out infinite;
+}
+
+.rc-drawer-scrim {
+  position: fixed; inset: 0; z-index: 1190; background: rgba(22, 19, 16, 0.18);
+}
+.rc-exports-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 1200; width: 332px;
+  background: var(--c-surface); border-left: 1px solid var(--c-line);
+  display: flex; flex-direction: column; font-family: var(--f-sans);
+  box-shadow: var(--rc-shadow-float);
+}
+.rc-exports-head {
+  display: flex; align-items: center; gap: 8px; padding: 13px 16px;
+  border-bottom: 1px solid var(--c-line); flex: none;
+}
+.rc-exports-title { font-size: 0.84375rem; font-weight: 600; color: var(--c-ink); }
+.rc-exports-scope { font-size: 0.6875rem; color: var(--c-ink-4); flex: 1; }
+.rc-exports-list { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.rc-exports-empty { padding: 24px 8px; text-align: center; font-size: 0.75rem; color: var(--c-ink-4); }
+.rc-exports-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 9px;
+}
+.rc-exports-item:hover { background: var(--c-bg); }
+.rc-exports-item[data-status="failed"] { opacity: 0.75; }
+.rc-exports-item-body { min-width: 0; flex: 1; }
+.rc-exports-item-name {
+  font-family: var(--f-mono); font-size: 0.6875rem; font-weight: 600; color: var(--c-ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rc-exports-item-meta {
+  font-size: 0.65625rem; color: var(--c-ink-4); margin-top: 2px; overflow-wrap: anywhere;
+}
+.rc-exports-item-err { color: var(--c-err); }
+.rc-export-legacy { display: block; color: var(--c-warn); }
+.rc-exports-dl {
+  flex: none; width: 26px; height: 26px; border-radius: 7px; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--c-ink-3); border: 1px solid var(--c-line); background: var(--c-surface);
+  font-size: 0.8125rem;
+}
+.rc-exports-dl:hover { color: var(--c-accent); border-color: var(--c-accent-soft); }
+@media (max-width: 640px) {
+  .rc-exports-drawer { width: min(332px, 88vw); }
+  .rc-export-toast { right: 10px; left: 10px; bottom: 10px; width: auto; }
+}
+
+/* ---------- WP2: chart fallback card (design D3 ChartFallback) + evidence missing-chart note ---------- */
+.canvas-report-article .v2-chart-fallback-wrap > .v2-chart-fallback-note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0 10px;
+  padding: 12px 16px;
+  background: var(--c-bg);
+  border: 1px dashed var(--c-line);
+  border-radius: 10px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+  line-height: 1.55;
+}
+.canvas-report-article .v2-chart-fallback-wrap > .v2-chart-fallback-note strong {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  flex: none;
+}
+.v2-evidence-missing-note {
+  margin: 2px 0 6px;
+  padding: 8px 12px;
+  border: 1px dashed var(--c-line);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--c-ink-3);
+  background: var(--c-bg);
+}
+
+/* ---------- S3: spec_block (structured diagrams: attribution chain/metric tree/flowchart, custom dagre+SVG) ---------- */
+.rc-spec-block { margin: 18px 0; }
+.rc-spec-graph {
+  display: flex; justify-content: center; padding: 14px 10px;
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: var(--r-2, 12px); overflow-x: auto;
+}
+.rc-spec-graph svg { max-width: 100%; height: auto; font-family: var(--f-sans); }
+.rc-spec-loading {
+  height: 80px; border: 1px solid var(--c-line); border-radius: var(--r-2, 12px);
+  background: var(--c-surface);
+}
+.rc-spec-node { fill: var(--c-surface); stroke: var(--c-line); stroke-width: 1.2; }
+.rc-spec-node--hl { fill: var(--c-accent-tint); stroke: var(--c-accent-soft); }
+.rc-spec-node--muted { fill: var(--c-bg); stroke: var(--c-line-2, var(--c-line)); }
+.rc-spec-node-label { font-size: 0.75rem; fill: var(--c-ink); font-weight: 500; }
+.rc-spec-node--hl + .rc-spec-node-label, .rc-spec-node--hl ~ .rc-spec-node-label { fill: var(--c-accent); }
+.rc-spec-edge { fill: none; stroke: var(--c-ink-3); stroke-width: 1.3; }
+.rc-spec-edge-label { font-size: 0.65625rem; fill: var(--c-ink-3); }
+.rc-spec-fallback {
+  border: 1px solid var(--c-line); border-radius: var(--r-2, 12px); overflow: hidden;
+}
+.rc-spec-fallback-note {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 12px;
+  background: var(--c-warn-soft); color: var(--c-warn-ink); font-size: 0.75rem;
+}
+.rc-spec-fallback-note strong { font-weight: 600; }
+.rc-spec-source {
+  margin: 0; padding: 12px; background: var(--c-bg); overflow-x: auto;
+  font-family: var(--f-mono); font-size: 0.71875rem; line-height: 1.5; color: var(--c-ink-2);
+}
+
+/* ============================================================
+   WP4 (design D4): Tier-3 interactive embed card (html_artifact).
+   Card frame + badge cluster + sandbox body + honest footer + fullscreen overlay.
+   ============================================================ */
+.rc-embed {
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: 14px; box-shadow: var(--rc-shadow-2); overflow: hidden;
+}
+.rc-embed-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 10px 16px;
+  background: var(--c-bg); border-bottom: 1px solid var(--c-line);
+}
+.rc-embed-head-icon { color: var(--c-ink-3); flex: none; }
+.rc-embed-title {
+  font-size: 0.8125rem; font-weight: 600; color: var(--c-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+.rc-embed-spacer { flex: 1; }
+.rc-embed-head .rc-action-btn { height: 26px; width: 26px; padding: 0; justify-content: center; }
+.rc-embed-frame {
+  display: block; width: 100%; border: none; background: var(--c-surface);
+}
+.rc-embed-loading {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--c-ink-3); font-size: 0.75rem; background: var(--c-bg);
+}
+.rc-embed-error {
+  padding: 20px; color: var(--c-err, crimson); font-size: 0.75rem; background: var(--c-bg);
+}
+.rc-embed-foot {
+  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+  border-top: 1px solid var(--c-line-2, var(--c-line));
+  font-family: var(--f-mono); font-size: 0.65625rem; color: var(--c-ink-4);
+}
+.rc-embed-foot-right { margin-left: auto; text-align: right; }
+
+/* ---------- Fullscreen overlay (Expand) ---------- */
+.rc-embed--placeholder {
+  min-height: 180px; border-style: dashed; box-shadow: none; background: var(--c-bg);
+}
+/* Scrim and card are siblings (no longer wraps card) → fixed centered floating card, iframe not reparented.
+   Layer uses --z-dialog: above app content; body-mounted menus, Toasts and confirmations remain above it (design section 图层).
+   At equal z, card follows scrim in DOM and paints above it. */
+.rc-embed-overlay {
+  position: fixed; inset: 0; z-index: var(--z-dialog);
+}
+.rc-embed--expanded {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(1100px, 92vw); height: min(86vh, 900px); z-index: var(--z-dialog);
+  display: flex; flex-direction: column;
+  box-shadow: var(--rc-shadow-float, var(--rc-shadow-2));
+}
+.rc-embed--expanded .rc-embed-frame { flex: 1 1 auto; height: auto !important; }
+.rc-embed-focus-sentinel {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+}
+/* During fullscreen (html-artifact.tsx marks <html>), temporarily remove ancestor stacking contexts and
+   fixed containing-block sources — `.v2-ws-right-body`/`.canvas-report-shell` isolation and any host
+   transform / filter / contain, etc. — so fixed card/scrim are viewport-relative, ordered by --z-dialog in the app root
+   stacking context. Card nodes never move (moving to body reloads iframe); closing restores them.
+   Desktop `.v2-app-root` position:fixed cannot be removed: it is z 0 in root stacking context, so body-mounted
+   overlays (menus, Toasts, dialogs) remain above fullscreen. */
+:root[data-rc-embed-fullscreen] :has(.rc-embed--expanded) {
+  isolation: auto !important;
+  z-index: auto !important;
+  transform: none !important;
+  translate: none !important;
+  rotate: none !important;
+  scale: none !important;
+  perspective: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+  clip-path: none !important;
+  mask: none !important;
+  contain: none !important;
+  content-visibility: visible !important;
+  will-change: auto !important;
+}
+/* P6/D7: mobile collapsed CTA (full-width "Open interactive" button replaces inline iframe) */
+.rc-embed-mobile-cta {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--c-bg);
+}
+.rc-embed-mobile-cta p { margin: 0; font-size: 0.75rem; line-height: 1.5; color: var(--c-ink-3); }
+.rc-embed-mobile-cta .rc-pill-btn { width: 100%; height: 44px; justify-content: center; font-size: 0.8125rem; }
+
+/* ============================================================
+   WP5 (R2): report state-machine chip + transition menu. Reuse rc-badge colors, no new visual language.
+   ============================================================ */
+.rc-report-header-meta { display: inline-flex; align-items: center; gap: 8px; }
+.rc-status-control { position: relative; display: inline-flex; }
+.rc-status-trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: none; background: none; cursor: pointer; padding: 2px; border-radius: 999px;
+  color: var(--c-ink-4);
+}
+.rc-status-trigger:hover { color: var(--c-ink-2); }
+.rc-status-trigger:disabled { opacity: 0.5; cursor: default; }
+.rc-status-trigger .rc-badge { cursor: pointer; }
+/* Portal menu positioned by useMenu: right-aligned in cards, left-aligned opening right in report header (component passes placement). */
+.rc-status-menu {
+  z-index: var(--z-menu); min-width: 132px;
+  display: flex; flex-direction: column; padding: 4px;
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: 10px; box-shadow: var(--rc-shadow-2);
+}
+.rc-status-menu-item {
+  text-align: left; border: none; background: none; cursor: pointer;
+  padding: 7px 10px; border-radius: 7px; font-family: inherit; font-size: 0.78125rem;
+  color: var(--c-ink-2);
+}
+.rc-status-menu-item:hover { background: var(--c-surface-2); color: var(--c-ink); }
+.rc-status-menu-item:disabled { opacity: 0.5; cursor: default; }
+/* /reports cards: status control on the right */
+.reports-card-meta .rc-status-control { margin-left: auto; }
+
+/* ---------- source-panel animations (P6: previously referenced but undefined keyframes = no animation, now added) ---------- */
+@keyframes source-panel-slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes source-panel-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes source-panel-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============================================================
+   report-agent-authorship α v1 (2026-06-24) — history collapse accordion
+   Verbatim translation of Claude Design spec
+   docs/sprints/report-agent-authorship-2026-06-24/design/history-collapse.html
+   L0 one quiet entry row → L1 bounded scrollable list → L2 inline archived report.
+   History always occupies ONE entry row regardless of N turns.
+   ============================================================ */
+.hist{margin:0 0 26px;}
+
+/* L0: aggregated entry — editorial divider, not a thick card */
+.hist-entry{
+  display:flex;align-items:center;gap:11px;width:100%;height:46px;padding:0 10px;
+  background:transparent;border:none;border-top:1px solid var(--c-line);border-bottom:1px solid var(--c-line);
+  font-family:inherit;text-align:left;color:var(--c-ink-3);cursor:pointer;transition:background .15s var(--ease-v2);
+}
+.hist-entry:hover{background:var(--c-surface-2);}
+.hist-entry:focus-visible{outline:none;border-color:transparent;box-shadow:inset 0 0 0 2px var(--c-accent);border-radius:8px;}
+.hist-entry .ec{flex:none;color:var(--c-ink-4);transition:transform .2s var(--ease-v2);}
+.hist.open .hist-entry .ec{transform:rotate(90deg);color:var(--c-ink-2);}
+.hist-entry .hicon{flex:none;color:var(--c-ink-4);display:flex;}
+.hist-entry .label{font-size:0.8125rem;color:var(--c-ink-3);}
+.hist-entry .label b{font-weight:600;color:var(--c-ink-2);font-variant-numeric:tabular-nums;}
+.hist-entry .right{margin-left:auto;display:inline-flex;align-items:center;gap:12px;font-size:0.71875rem;color:var(--c-ink-4);}
+.hist-entry .superseded{display:inline-flex;align-items:center;gap:5px;}
+.hist-entry .superseded svg{color:var(--c-ink-4);}
+.hist-entry .hint{font-weight:500;}
+.hist-entry:hover .hint{color:var(--c-accent);}
+.hist.open .hist-entry{background:var(--c-surface-2);border-bottom-color:transparent;}
+
+/* L1: compact list — bounded + scrollable, so N=100 is still a fixed height.
+   Hidden until the L0 entry is expanded (collapsed state = one entry row only). */
+.hist-list{display:none;border-bottom:1px solid var(--c-line);background:var(--c-bg);}
+.hist.open .hist-list{display:block;}
+.hist-list.scroll{max-height:288px;overflow-y:auto;}
+.hist-list.scroll::-webkit-scrollbar{width:8px;}
+.hist-list.scroll::-webkit-scrollbar-thumb{background:var(--c-surface-3);border-radius:999px;}
+.hist-list.scroll::-webkit-scrollbar-track{background:transparent;}
+.hrow{
+  display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:5px 12px 5px 30px;
+  background:transparent;border:none;border-bottom:1px solid var(--c-line-2);
+  font-family:inherit;text-align:left;cursor:pointer;transition:background .12s;color:var(--c-ink-3);
+}
+.hitem:last-child .hrow{border-bottom:none;}
+.hrow:hover{background:var(--c-surface-2);}
+.hrow:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--c-accent);}
+.hrow .turn{flex:none;width:46px;font-family:var(--f-mono);font-size:0.625rem;font-weight:600;color:var(--c-ink-4);letter-spacing:.02em;}
+.hrow .rt{flex:1;min-width:0;font-family:var(--f-serif);font-size:0.84375rem;font-weight:600;color:var(--c-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hrow .rm{flex:none;font-size:0.6875rem;color:var(--c-ink-4);font-variant-numeric:tabular-nums;}
+.hrow .rchev{flex:none;color:var(--c-ink-4);transition:transform .18s var(--ease-v2);}
+.hitem.open .hrow{background:var(--c-surface-2);}
+.hitem.open .hrow .rchev{transform:rotate(90deg);color:var(--c-ink-2);}
+
+/* L2: inline archived report (reduced + dimmer → clearly subordinate) */
+.arch{background:linear-gradient(180deg,#f4efe4 0%,var(--c-surface) 60px);border-bottom:1px solid var(--c-line);}
+.arch-notice{display:flex;align-items:center;gap:10px;padding:11px 16px 11px 30px;background:var(--c-surface-2);border-bottom:1px solid var(--c-line);}
+.arch-notice .ni{flex:none;width:22px;height:22px;border-radius:6px;background:var(--c-surface);border:1px solid var(--c-line);display:flex;align-items:center;justify-content:center;color:var(--c-ink-4);}
+.arch-notice .nt{font-size:0.78125rem;color:var(--c-ink-3);line-height:1.4;}
+.arch-notice .nt .en{display:block;font-size:0.65625rem;color:var(--c-ink-4);margin-top:1px;font-family:var(--f-mono);letter-spacing:.01em;}
+.arch-collapse{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:var(--r-pill);background:var(--c-surface);border:1px solid var(--c-line);font-family:inherit;font-size:0.75rem;font-weight:600;color:var(--c-ink-3);cursor:pointer;}
+.arch-collapse:hover{color:var(--c-ink);border-color:#dcd3bf;background:var(--c-surface-2);}
+/* container dim — the archived report renders via the real ReportView (v2-report-*
+   classes), so we subordinate it at the container level (the spec's per-rc-class
+   shrink targeted mockup-only class names). */
+.arch-doc{padding:14px 24px 18px;opacity:.86;}
+.arch-doc .v2-report-h1{font-size:1.375rem;}
+
+/* mobile — bigger tap targets */
+@media (max-width:640px){
+  .hist-entry{height:52px;}
+  .hrow{min-height:52px;padding-left:28px;}
+  .hist-entry .right .superseded span{display:none;}
+  .arch-notice{padding-left:16px;}
+  .arch-doc{padding:14px 16px 16px;}
+}
+
+/* ── Batch 1 2.1 (chart-table-ux): attached caption layout ──────────────────────────
+ * In read-only mode, figure-caption.ts marks paragraphs beginning 图N： immediately after [figure:] anchors with two classes:
+ *  - .rc-fig-caption: caption paragraph layout (font/color match .v2-chart-subtitle,
+ *    negative top margin attaches to chart above — chart and its conclusion form one unit)
+ *  - .rc-fig-caption-prefix: hide 图N： prefix (system never issued figure numbers, but body
+ *    referenced nonexistent numbering — prefix is noise, not information)
+ * Edit mode has zero decorations, these classes absent, original text editable. */
+/* ⚠ Selector must **outrank** `.canvas-report-article p:not(.v2-report-deck)` (above
+ * in this file, specificity (0,2,1)). Original `.canvas-report-article .rc-fig-caption`
+ * = (0,2,0), missing the `p` element selector, so the entire rule **never applied** since batch 1:
+ * 116 observed caption/body font-size/color/font-weight identical (14.5px/rgb(63,55,40)/400),
+ * `margin-top:-12px` overridden by p's `margin` shorthand ⇒ caption 20px below chart,
+ * 14px above body, proximity grouping it with body below — the criterion's isolated line.
+ * Only `.rc-fig-caption-prefix{display:none}` worked — no competing display.
+ * Now (0,3,1) strictly beats (0,2,1), without relying on source order. */
+.canvas-report-article p.rc-fig-caption:not(.v2-report-deck) {
+  margin-top: -12px;
+}
+.canvas-report-article .rc-fig-caption-prefix {
+  display: none;
+}
+
+/* ---------- unknown: fallback rendering for unrecognized sections ----------
+ * Appears only in two cases: emergency image rollback leaves frontend older than stored data, or a kind retired with existing content elsewhere.
+ * Aim for **honesty** — say it cannot display and show original type, rather than masquerading as SQL as before.
+ * Deliberately subdued (no competition with body), but not hidden: users are entitled to know something is missing. */
+.canvas-report-article .v2-unknown-section {
+  margin: 20px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--c-line-2);
+  border-radius: 4px;
+  background: var(--c-surface-2);
+}
+.canvas-report-article .v2-unknown-head {
+  font-family: var(--f-sans);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--c-ink-3);
+}
+.canvas-report-article .v2-unknown-head code {
+  font-family: var(--f-mono);
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+}
+.canvas-report-article .v2-unknown-body {
+  margin: 8px 0 0;
+  font-family: var(--f-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* canvas-update-turn batch B1-2 — replaced-charts bar: reuse .hist shell, but it belongs to the **current** report's
+   tail (not a historical report), so it follows the body with tighter top margin and neutral icons. */
+.hist-replaced{margin:18px 0 26px;}
+.hist-replaced .hist-entry .label{color:var(--c-ink-3);}
+.hist-replaced .arch{background:var(--c-surface);}
+.hist-replaced .arch-doc{opacity:1;}
+
+/* ─────────────────────────────────────────────────────────────
+ * Chat workbench and report canvas · batch 1: canvas control inline styles moved to legacy appearance classes
+ * (originally identical to the inline styles; batch 3 interface rules in styles/ui-refresh-canvas.css restyle them in the app,
+ * the canvas export page uses these values). Placed at file end to outrank rc-* family rules above at equal specificity;
+ * simultaneous family matches use compound selectors to raise specificity (original inline styles outranked them).
+ * ───────────────────────────────────────────────────────────── */
+
+/* Source details (components/canvas/source-panel.tsx): desktop right slide 480, mobile bottom sheet 75vh */
+.legacy-source-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+.legacy-source-panel-action {
+  text-decoration: none;
+  cursor: pointer;
+}
+.legacy-source-panel-query {
+  margin-bottom: 12px;
+  background: var(--c-surface-2);
+  border-radius: 4px;
+}
+.legacy-source-panel-query-line {
+  margin-top: 2px;
+}
+.legacy-source-panel-preview {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--c-surface-2);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--c-ink-2);
+}
+.legacy-source-panel-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--c-surface-2);
+  border: 1px solid;
+  border-color: var(--c-line);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.legacy-source-panel-hint {
+  padding: 10px 12px;
+  background: var(--c-warn-soft);
+  border: 1px solid var(--c-warn-line);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--c-warn-ink);
+}
+.legacy-source-panel-quote {
+  padding: 10px 12px;
+  background: var(--c-info-soft);
+  border: 1px solid var(--c-info-line);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--c-info-ink);
+}
+.legacy-source-panel-quote-note {
+  margin-top: 6px;
+  color: var(--c-info-ink);
+  font-size: 0.6875rem;
+}
+.legacy-source-panel-unmatched {
+  padding: 8px 10px;
+  background: var(--c-err-soft);
+  border: 1px solid var(--c-err-line);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--c-err-ink);
+  margin-bottom: 10px;
+}
+.legacy-source-panel-code {
+  padding: 12px;
+  background: var(--c-surface-2);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--c-ink-2);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.legacy-source-panel-mark {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+.legacy-source-panel-failed {
+  padding: 16px;
+  background: var(--c-err-soft);
+  border: 1px solid var(--c-err-line);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  color: var(--c-err-ink);
+}
+.legacy-source-panel-failed-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.legacy-source-panel-failed-hint {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* Selection toolbar (components/canvas/formatting-toolbar.tsx): serif I for italic button, custom rewrite input */
+.legacy-rc-italic-glyph {
+  font-family: var(--f-serif);
+}
+.rc-ai-custom.legacy-rc-ai-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rc-ai-custom .legacy-rc-ai-custom-input {
+  outline: none;
+}
+
+/* Whole-block AI rewrite close button (components/canvas/block-ai-bar.tsx) */
+.rc-ai-bar .legacy-rc-ai-close {
+  all: unset;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Rewrite result bar and streaming banner (ai-rewrite-diff-bar.tsx / streaming-banner.tsx) */
+.rc-pill-btn.legacy-rc-pill--compact {
+  height: 24px;
+}
+.rc-result-bar.legacy-rc-result-bar {
+  width: min(560px, calc(100vw - 32px));
+}
+.legacy-rc-result-spark {
+  flex: none;
+}
+.legacy-rc-grow {
+  flex: 1;
+}
+.legacy-rc-push {
+  margin-left: auto;
+}
+
+/* Editing status bar (components/canvas/edit-mode-toggle.tsx) */
+.v2-report-edit-bar.legacy-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 0;
+}
+
+/* Conflict bar icon (components/canvas/report-view.tsx) */
+.rc-conflict-bar .legacy-rc-conflict-icon {
+  flex: none;
+}
+
+/* Small spinner in streaming source strip (components/canvas/trust-strip.tsx) */
+.rc-spinner.legacy-rc-spinner--sm {
+  width: 11px;
+  height: 11px;
+}
+
+/* Citation source overlay (lib/canvas-pm-adapter/extensions/citation-popover.tsx) */
+.rc-prov-head > .legacy-rc-prov-main {
+  min-width: 0;
+}
+.rc-prov-affirm.legacy-rc-prov-affirm--gap {
+  margin-top: 10px;
+}
+.rc-prov-affirm.legacy-rc-prov-affirm--flush {
+  margin-top: 0;
+}
+
+/* Compact chart reading: only screen figures participate; exports retain their frozen frame. */
+.v2-chart-figure[data-chart-output="screen"] {
+  container: chart-reading / inline-size;
+}
+.v2-chart-figure[data-chart-output="screen"] .v2-chart-canvas-wrap.is-tall:not(.is-page-height) {
+  overflow-y: auto;
+}
+@container chart-reading (max-width: 600px) {
+  .v2-chart-canvas-wrap { padding-inline: 0; }
+  .v2-chart-canvas-wrap.is-page-height { max-height: none; overflow-y: hidden; }
+  .v2-chart-figure[data-chart-output="screen"] .v2-chart-title {
+    font-family: var(--font-v2-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    letter-spacing: normal;
+  }
+  .v2-chart-figure[data-chart-output="screen"] .v2-chart-subtitle {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .v2-chart-summary { font-size: 0.75rem; }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  @container chart-reading (max-width: 900px) {
+    .v2-chart-canvas-wrap { padding-inline: 0; }
+    .v2-chart-canvas-wrap.is-page-height { max-height: none; overflow-y: hidden; }
+  }
+}

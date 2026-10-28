@@ -1,0 +1,62 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_shared_scale",
+  "payload": {
+    "spec": {
+      "kind": "line",
+      "title": "Revenue on a shared numeric scale",
+      "columns": [
+        {
+          "key": "month",
+          "header": "Month",
+          "type": "date"
+        },
+        {
+          "key": "revenue",
+          "header": "Revenue",
+          "type": "numeric",
+          "unit": "USD",
+          "percent_shape_unknown": true
+        }
+      ],
+      "rows": [
+        {
+          "month": "2026-01",
+          "revenue": 52.12345
+        },
+        {
+          "month": "2026-02",
+          "revenue": -5
+        },
+        {
+          "month": "2026-03",
+          "revenue": null
+        },
+        {
+          "month": "2026-04",
+          "revenue": 40
+        },
+        {
+          "month": "2026-05",
+          "revenue": 1.2345e-05
+        },
+        {
+          "month": "2026-06",
+          "revenue": 80
+        }
+      ],
+      "row_count": 6,
+      "show_legend": true,
+      "show_data_labels": true,
+      "_export_axis_domains": {
+        "encoding": "line",
+        "domains": {
+          "y": [
+            -9.25,
+            84.25
+          ]
+        }
+      }
+    }
+  }
+}

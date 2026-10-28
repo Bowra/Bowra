@@ -1,0 +1,157 @@
+{
+  "frontendBaseUrl": "http://127.0.0.1:3000",
+  "locale": "zh-CN",
+  "timezone": "Asia/Singapore",
+  "timeoutMs": 15000,
+  "payload": {
+    "blockKey": "sec_export_chart",
+    "sectionKind": "chart",
+    "locale": "zh-CN",
+    "theme": {
+      "kind": "chart-style",
+      "schemaVersion": 1,
+      "mode": "light",
+      "preset": {
+        "schemaVersion": 1,
+        "presetRevision": "2026.10.1",
+        "id": "bowhead-editorial",
+        "labelKey": "bowheadEditorial",
+        "descriptionKey": "bowheadEditorialDesc",
+        "status": "active",
+        "extends": "product-base",
+        "fallbackPresetId": "product-base",
+        "capabilities": {
+          "coveredFamilies": [
+            "comparison",
+            "trend",
+            "composition",
+            "distribution",
+            "relationship",
+            "flow",
+            "matrix"
+          ],
+          "requiredRendererFeatures": [],
+          "verifiedAccessibilityClaims": [
+            "minimum-contrast"
+          ]
+        },
+        "tokens": {
+          "light": {
+            "palette": [
+              "#B04A2A",
+              "#5E7D8A",
+              "#A98028",
+              "#775B45",
+              "#9A8A6A",
+              "#3A342C"
+            ],
+            "sequential": {
+              "from": "#FAF0E8",
+              "to": "#B04A2A"
+            },
+            "diverging": {
+              "neg": "#9F2438",
+              "mid": "#E8E2D4",
+              "pos": "#3A724A"
+            }
+          },
+          "dark": {
+            "palette": [
+              "#D4714E",
+              "#7E9DAB",
+              "#C9A045",
+              "#967B64",
+              "#B5A584",
+              "#C9C2B8"
+            ],
+            "sequential": {
+              "from": "#3B241C",
+              "to": "#D4714E"
+            },
+            "diverging": {
+              "neg": "#E88A98",
+              "mid": "#3A3630",
+              "pos": "#7BC28F"
+            }
+          },
+          "geometry": {
+            "lineWidth": 2,
+            "pointRadius": 2.5,
+            "barRadius": 3,
+            "gridDensity": "quiet"
+          }
+        }
+      },
+      "presetChecksum": "sha256:c3c14a924bfed7aea2cd5b468f76ad03d7bf09e2b7d9eaa5d0a3c9a286b6f5b5",
+      "selectionSource": "product",
+      "accessibility": {
+        "contrast": "standard",
+        "colorVision": "standard"
+      },
+      "teamPolicyEtag": "W/\"chart-style-policy:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+      "resolverPolicyVersion": "1",
+      "contextRecipeVersion": "1"
+    },
+    "printTheme": {
+      "schemaVersion": 1,
+      "recipeVersion": "bowhead-print-theme-v3",
+      "mode": "light",
+      "tokens": {
+        "background": "#F4F7FB",
+        "surface": "#FFFFFF",
+        "surface2": "#E5EFFF",
+        "surface3": "#D5E6FF",
+        "line": "#77879F",
+        "line2": "#A8B9D1",
+        "ink": "#061223",
+        "ink2": "#2B394D",
+        "ink3": "#4F5F74",
+        "ink4": "#63728A",
+        "accent": "#1754DB",
+        "accentHover": "#003ABC",
+        "accentInk": "#FFFFFF",
+        "accentSoft": "#E1ECFF",
+        "accentTint": "#F5F9FF",
+        "warning": "#8A5A00",
+        "warningSoft": "#FFF0C2"
+      },
+      "fontBundleVersion": "bowhead-system-fonts-v1",
+      "checksum": "sha256:f1b2e4faa632f9ebe955cfd0fe6617cb0750529c48e913b159232fc97f736738"
+    },
+    "payload": {
+      "spec": {
+        "kind": "bar",
+        "title": "Revenue by region",
+        "row_count": 2,
+        "columns": [
+          {
+            "key": "region",
+            "header": "Region",
+            "type": "categorical",
+            "role": "x"
+          },
+          {
+            "key": "revenue",
+            "header": "Revenue",
+            "type": "numeric",
+            "role": "y",
+            "unit": "USD"
+          }
+        ],
+        "rows": [
+          {
+            "region": "APAC",
+            "revenue": 120
+          },
+          {
+            "region": "EMEA",
+            "revenue": 90
+          }
+        ],
+        "show_legend": false
+      }
+    },
+    "visualInputSha256": "sha256:c640f694edf1d74d5a905c191aee08150694a74c58ffc2ccf3f7e35bedec9324",
+    "rendererVersion": "28"
+  }
+}

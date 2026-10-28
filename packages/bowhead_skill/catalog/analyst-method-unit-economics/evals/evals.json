@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-unit-economics",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "healthy_channel",
+      "query": "渠道A: CAC=100, 月ARPU=50, 生命周期24月, 毛利率60%。判断健康度。",
+      "expects": "LTV=1200, 毛利调整=720, LTV/CAC=7.2 >= 3 健康; 回本14.4月 < 24月优秀"
+    },
+    {
+      "id": "medium_risk_channel",
+      "query": "渠道B: CAC=200, 月ARPU=60, 生命周期12月, 毛利率50%。多渠道对比中哪个优先",
+      "expects": "LTV=720, 毛利调整=360, LTV/CAC=1.8 中等风险; 回本3.3月现金流可控; 建议限制投资"
+    },
+    {
+      "id": "high_risk_channel",
+      "query": "渠道C: CAC=500, 月ARPU=80, 生命周期8月, 毛利率40%。是否继续",
+      "expects": "LTV=640, 毛利调整=256, LTV/CAC=0.51 < 1.5 高风险亏损; 回本6.25月但每笔亏损; 建议暂停"
+    }
+  ]
+}

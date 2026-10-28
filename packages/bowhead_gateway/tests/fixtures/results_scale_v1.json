@@ -1,0 +1,125 @@
+{
+  "fixture_version": 1,
+  "scales": [
+    {"name": "empty", "count": 0},
+    {"name": "quick", "count": 10},
+    {"name": "grouped", "count": 30},
+    {"name": "production_116", "count": 135},
+    {"name": "large", "count": 500},
+    {"name": "guardrail", "count": 2000}
+  ],
+  "generator": {
+    "artifact_id_pattern": "art_results_{index:04d}",
+    "title_pattern": "结果 {index:04d}",
+    "search_title_every": 17,
+    "search_title_prefix": "quarterly-summary"
+  },
+  "benchmark": {
+    "warmup_iterations": 20,
+    "measured_iterations": 200,
+    "page_size": 50
+  },
+  "cursor_binding": {
+    "scope_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "query_filter_hash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "sort_version": "results-sort-v1",
+    "projection_digest": "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+  },
+  "dto_samples": [
+    {
+      "key": "report:canvas_fixture",
+      "object_type": "report",
+      "title": "季度分析报告",
+      "primary_group": "deliverables",
+      "secondary_group": null,
+      "viewer_profile": "report",
+      "status": "ready",
+      "route": {"type": "report"},
+      "capabilities": ["read_report", "export_report", "view_history"],
+      "relation_roles": ["main_deliverable"],
+      "execution": null,
+      "display_context": {
+        "source_role": "report",
+        "output_role": "main_deliverable",
+        "execution_label": null,
+        "occurred_at": "2026-08-24T12:00:00+00:00",
+        "duplicate_ordinal": null,
+        "duplicate_count": null
+      },
+      "position": 1,
+      "version": null,
+      "artifact_metadata": null
+    },
+    {
+      "key": "artifact:art_fixture_0001",
+      "object_type": "artifact",
+      "title": "季度销售明细.csv",
+      "primary_group": "evidence",
+      "secondary_group": "data",
+      "viewer_profile": "table",
+      "status": "ready",
+      "route": {
+        "type": "artifact",
+        "artifact_id": "art_fixture_0001",
+        "default_mode": "preview"
+      },
+      "capabilities": ["download", "reference_in_chat", "view_raw", "view_details"],
+      "relation_roles": ["report_chart_data", "run_output"],
+      "execution": {
+        "key": "tool:t_fixture:call_1",
+        "kind": "tool_call",
+        "label": "查询季度销售",
+        "sequence": 1
+      },
+      "display_context": {
+        "source_role": "data_query",
+        "output_role": "run_output",
+        "execution_label": "查询季度销售",
+        "occurred_at": "2026-08-24T12:01:00+00:00",
+        "duplicate_ordinal": null,
+        "duplicate_count": null
+      },
+      "position": 2,
+      "version": null,
+      "artifact_metadata": {
+        "mime": "text/csv",
+        "size": 2048,
+        "source": "bi_fetch_rows",
+        "kind": "tool_data",
+        "origin": "query",
+        "trust": "trusted",
+        "created_at": "2026-08-24T12:01:00+00:00",
+        "producer_kind": "bi_fetch_rows"
+      }
+    },
+    {
+      "key": "code:session_fixture",
+      "object_type": "code",
+      "title": "代码与运行",
+      "primary_group": "evidence",
+      "secondary_group": "code",
+      "viewer_profile": "code",
+      "status": "running",
+      "route": {"type": "code"},
+      "capabilities": ["copy_code", "open_outputs", "view_run_details"],
+      "relation_roles": ["code_output"],
+      "execution": {
+        "key": "code:t_fixture:step_1",
+        "kind": "code_run",
+        "label": null,
+        "sequence": 1
+      },
+      "display_context": {
+        "source_role": "code",
+        "output_role": "code_output",
+        "execution_label": null,
+        "occurred_at": "2026-08-24T12:02:00+00:00",
+        "duplicate_ordinal": null,
+        "duplicate_count": null
+      },
+      "position": 3,
+      "version": null,
+      "artifact_metadata": null
+    }
+  ]
+}

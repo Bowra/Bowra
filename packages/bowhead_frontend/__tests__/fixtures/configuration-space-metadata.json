@@ -1,0 +1,96 @@
+{
+  "open": {
+    "turn_id": "t_metadata_fixture",
+    "target": {
+      "page": "space_general",
+      "user_id": "usr_metadata_admin",
+      "team_id": "team_metadata",
+      "workspace_id": "ws_metadata"
+    }
+  },
+  "send": {
+    "form_id": "workspace_metadata",
+    "user_id": "usr_metadata_admin",
+    "team_id": "team_metadata",
+    "workspace_id": "ws_metadata",
+    "edit_generation": 0,
+    "saved_ready": true,
+    "pending_writes": 0,
+    "unconfirmed_fields": []
+  },
+  "review": {
+    "proposal_id": "ccd_metadata_fixture",
+    "form_id": "workspace_metadata",
+    "turn_id": "t_metadata_fixture",
+    "team_id": "team_metadata",
+    "owner_user_id": "usr_metadata_admin",
+    "workspace_id": "ws_metadata",
+    "workspace_name": "Original Space",
+    "status": "proposed",
+    "settings_target": null,
+    "rows": [
+      {
+        "field": "name",
+        "from": "Original Space",
+        "to": "Finance",
+        "from_unset": false,
+        "baseline_revision": 7
+      }
+    ],
+    "notes": {}
+  },
+  "read": {
+    "ok": true,
+    "form_id": "workspace_metadata",
+    "fields": {
+      "name": {
+        "value": "Original Space",
+        "unset": false,
+        "value_source": "saved"
+      },
+      "description": {
+        "value": "",
+        "unset": false,
+        "value_source": "saved"
+      }
+    },
+    "allowed_values": {},
+    "editable_fields": [
+      "description",
+      "name"
+    ],
+    "save_policy": "user_confirmation",
+    "actions": [
+      "read",
+      "propose",
+      "confirm",
+      "open"
+    ],
+    "revision": 7,
+    "field_constraints": {
+      "name": {
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "description": {
+        "maxLength": 2000
+      }
+    },
+    "required_skill": "settings-space-metadata",
+    "target": {
+      "user_id": "usr_metadata_admin",
+      "team_id": "team_metadata",
+      "workspace_id": "ws_metadata",
+      "workspace_name": "Original Space"
+    }
+  },
+  "receipt": {
+    "proposal_id": "ccd_metadata_fixture",
+    "form_id": "workspace_metadata",
+    "team_id": "team_metadata",
+    "owner_user_id": "usr_metadata_admin",
+    "workspace_id": "ws_metadata",
+    "status": "applied",
+    "replayed": false
+  }
+}

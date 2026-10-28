@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-customer-structure",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "case-high-concentration",
+      "query": "python customer_checks.py '{\"concentration\": {\"top1_pct\": 0.52, \"top5_pct\": 0.78, \"top20_pct\": 0.95}, \"margins\": {\"big_customer_margin\": 0.08, \"longtail_margin\": 0.22}}'",
+      "expects": "verdict contains '客户结构风险高' AND flags include 'Top1 集中度' with level high AND 'Top5 集中度' with level high AND '毛利倒挂' with level high AND margin_inversion_ppt=0.14"
+    },
+    {
+      "id": "case-rfm-sleep-risk",
+      "query": "python customer_checks.py '{\"customers\": [{\"revenue\": 1000, \"margin\": 0.20, \"recency_days\": 180, \"frequency\": 1}, {\"revenue\": 800, \"margin\": 0.18, \"recency_days\": 200, \"frequency\": 0}, {\"revenue\": 600, \"margin\": 0.22, \"recency_days\": 30, \"frequency\": 5}, {\"revenue\": 400, \"margin\": 0.25, \"recency_days\": 45, \"frequency\": 3}]}'",
+      "expects": "verdict contains '有风险项' AND rfm_distribution includes 沉睡>0 AND flags include 'RFM 沉睡客户' with level medium"
+    },
+    {
+      "id": "case-healthy-structure",
+      "query": "python customer_checks.py '{\"concentration\": {\"top1_pct\": 0.12, \"top5_pct\": 0.35, \"top20_pct\": 0.65}, \"margins\": {\"big_customer_margin\": 0.25, \"longtail_margin\": 0.23}}'",
+      "expects": "verdict contains '未见明显警报' AND metrics include top1_pct=0.12 AND top5_pct=0.35 AND flags is empty or only medium severity"
+    }
+  ]
+}

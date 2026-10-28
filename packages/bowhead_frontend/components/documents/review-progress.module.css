@@ -1,0 +1,147 @@
+/* C8 · review progress (Canvas Objects Spec part 1): count + 4px meter + thumbnail strip. */
+.progress {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.hint {
+  font-size: 0.75rem;
+  color: var(--c-ink-3);
+}
+.spacer {
+  flex: 1;
+}
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--c-fill-2);
+  overflow: hidden;
+}
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--c-accent);
+}
+.thumbs {
+  display: flex;
+  gap: 8px;
+  padding: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--c-ink) 12px, var(--c-ink) calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to right, transparent, var(--c-ink) 12px, var(--c-ink) calc(100% - 12px), transparent);
+  padding-inline: 12px;
+}
+.thumb {
+  appearance: none;
+  width: 72px;
+  flex: none;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.thumb:focus-visible {
+  outline: none;
+}
+.thumb:focus-visible .image {
+  box-shadow: 0 0 0 2px var(--c-focus);
+}
+.image {
+  position: relative;
+  width: 72px;
+  height: 41px;
+  border-radius: 5px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background:
+    repeating-linear-gradient(135deg, var(--c-fill-1) 0 6px, transparent 6px 12px),
+    var(--c-surface-2);
+  box-shadow: inset 0 0 0 0.5px var(--c-separator);
+  font: 0.75rem ui-monospace, Menlo, monospace;
+  color: var(--c-ink-4);
+}
+.image[data-orientation="page"] {
+  height: 96px;
+}
+.image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.thumb[aria-selected="true"] .image {
+  box-shadow: 0 0 0 2px var(--c-accent);
+}
+.number {
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.thumb[aria-selected="true"] .number {
+  color: var(--c-accent-text);
+  font-weight: 600;
+}
+.viewed {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-surface);
+  color: var(--c-ink-3);
+  box-shadow: 0 0 0 0.5px var(--c-separator);
+}
+.viewed svg {
+  width: 10px;
+  height: 10px;
+}
+.changed {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent-text);
+  font: 600 0.6875rem/1rem var(--font-control);
+}
+@container canvas-object (max-width: 479.98px) {
+  .thumb {
+    width: 56px;
+  }
+  .image {
+    width: 56px;
+    height: 32px;
+  }
+  .image[data-orientation="page"] {
+    height: 75px;
+  }
+  .collapsibleText {
+    display: none;
+  }
+}

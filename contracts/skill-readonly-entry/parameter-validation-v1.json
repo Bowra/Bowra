@@ -1,0 +1,1220 @@
+{
+  "valid_schemas": [
+    {
+      "name": "profitability-method",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      },
+      "valid_values": [
+        {
+          "period": "2026-09-13"
+        },
+        {
+          "period": "2024-02-29",
+          "region": null,
+          "limit": 1
+        },
+        {
+          "period": "2026-09-13",
+          "adjustments": [
+            {
+              "label": "销售收入",
+              "amount": -2.5
+            }
+          ]
+        }
+      ],
+      "invalid_values": [
+        {},
+        {
+          "period": "2026-02-29"
+        },
+        {
+          "period": "2026-09-13",
+          "region": "US"
+        },
+        {
+          "period": "2026-09-13",
+          "limit": true
+        },
+        {
+          "period": "2026-09-13",
+          "limit": 11
+        },
+        {
+          "period": "2026-09-13",
+          "extra": "private-value"
+        },
+        {
+          "period": "2026-09-13",
+          "adjustments": [
+            {
+              "label": "x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "required-presence",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "flag": {
+            "type": "boolean"
+          },
+          "none": {
+            "type": "null"
+          }
+        },
+        "additionalProperties": false,
+        "required": ["text", "flag", "none"]
+      },
+      "valid_values": [
+        {
+          "text": "",
+          "flag": false,
+          "none": null
+        }
+      ],
+      "invalid_values": [
+        {},
+        {
+          "text": "x",
+          "flag": 0,
+          "none": null
+        },
+        {
+          "text": null,
+          "flag": true,
+          "none": null
+        }
+      ]
+    },
+    {
+      "name": "unicode-length",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 3
+          }
+        },
+        "additionalProperties": false,
+        "required": ["text"]
+      },
+      "valid_values": [
+        {
+          "text": "👩‍💻"
+        },
+        {
+          "text": "中😀"
+        },
+        {
+          "text": " ab"
+        }
+      ],
+      "invalid_values": [
+        {
+          "text": "😀"
+        },
+        {
+          "text": "abcd"
+        }
+      ]
+    },
+    {
+      "name": "numeric-bounds",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "ratio": {
+            "type": "number",
+            "exclusiveMinimum": -1,
+            "exclusiveMaximum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": ["count", "ratio"]
+      },
+      "valid_values": [
+        {
+          "count": 0,
+          "ratio": 0
+        },
+        {
+          "count": 2.0,
+          "ratio": 0.999
+        }
+      ],
+      "invalid_values": [
+        {
+          "count": 1.5,
+          "ratio": 0
+        },
+        {
+          "count": -1,
+          "ratio": 0
+        },
+        {
+          "count": 1,
+          "ratio": 1
+        },
+        {
+          "count": 1,
+          "ratio": -1
+        },
+        {
+          "count": 1,
+          "ratio": "0"
+        }
+      ]
+    },
+    {
+      "name": "calendar-dates",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "additionalProperties": false,
+        "required": ["day"]
+      },
+      "valid_values": [
+        {
+          "day": "0001-01-01"
+        },
+        {
+          "day": "9999-12-31"
+        },
+        {
+          "day": "2000-02-29"
+        },
+        {
+          "day": "2024-02-29"
+        }
+      ],
+      "invalid_values": [
+        {
+          "day": "0000-01-01"
+        },
+        {
+          "day": "1900-02-29"
+        },
+        {
+          "day": "2026-04-31"
+        },
+        {
+          "day": "2026-13-01"
+        },
+        {
+          "day": "2026-01-00"
+        },
+        {
+          "day": "20260913"
+        },
+        {
+          "day": "２０２６-０９-１３"
+        },
+        {
+          "day": "2026-09-13\n"
+        }
+      ]
+    },
+    {
+      "name": "nullable-complex-inputs",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": ["null", "array"],
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "item": {
+            "type": ["object", "null"],
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "required": ["rows", "item"]
+      },
+      "valid_values": [
+        {
+          "rows": null,
+          "item": null
+        },
+        {
+          "rows": [1, 2],
+          "item": {
+            "name": "A"
+          }
+        }
+      ],
+      "invalid_values": [
+        {
+          "rows": [],
+          "item": null
+        },
+        {
+          "rows": [true],
+          "item": null
+        },
+        {
+          "rows": [1, 2, 3],
+          "item": null
+        },
+        {
+          "rows": [1],
+          "item": {}
+        },
+        {
+          "rows": [1],
+          "item": {
+            "name": "A",
+            "extra": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "defaults-are-annotations",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string",
+            "default": "APAC"
+          },
+          "flag": {
+            "type": "boolean",
+            "default": false
+          },
+          "none": {
+            "type": ["string", "null"],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "valid_values": [
+        {},
+        {
+          "region": "",
+          "none": null
+        }
+      ],
+      "invalid_values": [
+        {
+          "flag": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicate-enum-values-supported",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "enum": [1, 1]
+          }
+        },
+        "additionalProperties": false
+      },
+      "valid_values": [
+        {},
+        {
+          "count": 1
+        }
+      ],
+      "invalid_values": [
+        {
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "object-enum-is-order-independent",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false,
+            "enum": [
+              {
+                "a": 1,
+                "b": false
+              }
+            ],
+            "required": ["a", "b"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "valid_values": [
+        {},
+        {
+          "item": {
+            "b": false,
+            "a": 1
+          }
+        }
+      ],
+      "invalid_values": [
+        {
+          "item": {
+            "a": 2,
+            "b": false
+          }
+        },
+        {
+          "item": {
+            "a": 1,
+            "b": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "prototype-like-business-keys",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "__proto__": {
+            "type": "string"
+          },
+          "constructor": {
+            "type": "integer"
+          },
+          "toString": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "required": ["__proto__"]
+      },
+      "valid_values": [
+        {
+          "__proto__": "label"
+        },
+        {
+          "__proto__": "label",
+          "constructor": 2,
+          "toString": false
+        }
+      ],
+      "invalid_values": [
+        {},
+        {
+          "__proto__": {}
+        }
+      ]
+    }
+  ],
+  "invalid_schemas": [
+    {
+      "name": "extra-keyword",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false,
+        "$id": "private"
+      }
+    },
+    {
+      "name": "required-null",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": null,
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "required-duplicate",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period", "period"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "required-unknown",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["missing"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "open-object",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": true
+      }
+    },
+    {
+      "name": "unknown-root-type",
+      "schema": {
+        "type": "date",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nullable-root",
+      "schema": {
+        "type": ["object", "null"],
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "root-default-incomplete",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false,
+        "default": {}
+      }
+    },
+    {
+      "name": "root-default-null",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "format": "date",
+            "title": "期间"
+          },
+          "region": {
+            "type": ["string", "null"],
+            "enum": ["APAC", "EMEA", null],
+            "default": "APAC"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+          },
+          "adjustments": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "amount": {
+                  "type": "number"
+                }
+              },
+              "required": ["label", "amount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["period"],
+        "additionalProperties": false,
+        "default": null
+      }
+    },
+    {
+      "name": "untyped",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unknown-type",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "date"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "composition",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "oneOf": []
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "external-ref",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "$ref": "https://invalid.example/schema"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "internal-ref",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "$ref": "#/$defs/x"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pattern",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": ".*"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "password",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "write-only",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "array-no-items",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "array-boolean-items",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "array",
+            "items": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "object-no-properties",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "union-too-wide",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": ["string", "integer", "null"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "union-no-null",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": ["string", "integer"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "union-duplicate-null",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": ["null", "null"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "enum-empty",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": []
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "enum-null",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": null
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "enum-wrong-type",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer",
+            "enum": [1, true]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "default-wrong-type",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer",
+            "default": "1"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "default-outside-enum",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": ["A"],
+            "default": "B"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "bad-date-default",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "format": "date",
+            "default": "2026-02-30"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "negative-length",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "minLength": -1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fractional-length",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "maxLength": 1.5
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "boolean-limit",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer",
+            "minimum": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "null-title",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": null
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "numeric-description",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "root-default-nested-ref",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "$ref": "https://invalid.example/private"
+          }
+        },
+        "additionalProperties": false,
+        "default": {
+          "value": "private-value"
+        }
+      }
+    }
+  ]
+}

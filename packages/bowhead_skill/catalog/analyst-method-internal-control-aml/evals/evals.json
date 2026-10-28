@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-internal-control-aml",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "eval_1_critical_sod_cdd_gaps",
+      "query": "{\"sod_segregation\": {\"has_duty_matrix\": false, \"violations_count\": 0, \"log_retention_months\": 0}, \"cdd_coverage\": {\"total_customers\": 100, \"cdd_complete\": 40, \"edd_required\": 20, \"edd_complete\": 5}, \"str_monitoring\": {\"threshold_defined\": false, \"alerts_30d\": 0, \"reported_30d\": 0}, \"data_access\": {\"rbac_defined\": true, \"audit_log_months\": 1, \"anomaly_alerts_active\": false}}",
+      "expects": "control_maturity: 1, critical flags in SoD (no matrix) + CDD (40% coverage, EDD 25%), STR (no threshold), data_access (1 month logs < 3), verdict contains CMMC L1"
+    },
+    {
+      "id": "eval_2_medium_compliance_posture",
+      "query": "{\"sod_segregation\": {\"has_duty_matrix\": true, \"violations_count\": 1, \"log_retention_months\": 4}, \"cdd_coverage\": {\"total_customers\": 200, \"cdd_complete\": 180, \"edd_required\": 15, \"edd_complete\": 14}, \"str_monitoring\": {\"threshold_defined\": true, \"alerts_30d\": 10, \"reported_30d\": 9}, \"data_access\": {\"rbac_defined\": true, \"audit_log_months\": 6, \"anomaly_alerts_active\": true}}",
+      "expects": "control_maturity: 4, SoD score ~0.9, CDD score ~0.95, STR score ~1.0, access score ~1.0, high flag for 1 SoD violation, verdict contains CMMC L4 (management)"
+    },
+    {
+      "id": "eval_3_data_gaps_with_partial_controls",
+      "query": "{\"sod_segregation\": {\"has_duty_matrix\": true, \"violations_count\": 0, \"log_retention_months\": 0}, \"cdd_coverage\": {\"total_customers\": 0, \"cdd_complete\": 0, \"edd_required\": 0, \"edd_complete\": 0}, \"str_monitoring\": {\"threshold_defined\": true, \"alerts_30d\": 5, \"reported_30d\": 5}, \"data_access\": {\"rbac_defined\": false, \"audit_log_months\": 0, \"anomaly_alerts_active\": false}}",
+      "expects": "data_gaps: missing customer list (CDD), missing audit logs (SoD), missing RBAC; control_maturity: 2, flags in CDD (cannot assess), access (no RBAC), verdict contains partial controls"
+    }
+  ]
+}

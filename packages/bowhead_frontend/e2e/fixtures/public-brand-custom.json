@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 2,
+  "brand": {
+    "applicationName": "Northstar Data",
+    "logoAlt": "Northstar Data",
+    "logoOnLight": {
+      "kind": "asset",
+      "artifactId": "art_aaaaaaaaaaaaaaaaaaaaaaa1",
+      "path": "/api/v1/branding/assets/art_aaaaaaaaaaaaaaaaaaaaaaa1"
+    },
+    "logoOnDark": {
+      "kind": "asset",
+      "artifactId": "art_bbbbbbbbbbbbbbbbbbbbbbb2",
+      "path": "/api/v1/branding/assets/art_bbbbbbbbbbbbbbbbbbbbbbb2"
+    },
+    "mark": {
+      "kind": "asset",
+      "artifactId": "art_ccccccccccccccccccccccc3",
+      "path": "/api/v1/branding/assets/art_ccccccccccccccccccccccc3"
+    },
+    "favicon": {
+      "kind": "asset",
+      "artifactId": "art_ccccccccccccccccccccccc3",
+      "path": "/api/v1/branding/assets/art_ccccccccccccccccccccccc3"
+    }
+  },
+  "effective": {
+    "version": 1,
+    "mode": "system",
+    "colorProfile": {
+      "type": "preset",
+      "id": "bowhead"
+    },
+    "typographyProfile": {
+      "type": "preset",
+      "id": "bowhead"
+    },
+    "typeScale": "standard",
+    "density": "comfortable",
+    "radius": "balanced",
+    "motion": "standard",
+    "chartPalette": "default",
+    "colorScheme": {
+      "tokenSchemaVersion": 2,
+      "light": {
+        "background": "#F4F8F6",
+        "surface": "#FFFFFF",
+        "surface2": "#D9F6ED",
+        "surface3": "#CFECE3",
+        "line": "#728D85",
+        "line2": "#A3BFB6",
+        "ink": "#011611",
+        "ink2": "#253E37",
+        "ink3": "#4B645C",
+        "ink4": "#5D7770",
+        "accent": "#1A735F",
+        "accentHover": "#005B49",
+        "accentInk": "#FFFFFF",
+        "accentSoft": "#ADFFE6",
+        "accentTint": "#E7FFF7",
+        "focus": "#1A735F",
+        "positive": "#16794A",
+        "positiveSoft": "#DDF5E8",
+        "warning": "#8A5A00",
+        "warningSoft": "#FFF0C2",
+        "error": "#B42318",
+        "errorSoft": "#FEE4E2",
+        "info": "#175CD3",
+        "infoSoft": "#E5EFFF"
+      },
+      "dark": {
+        "background": "#0E1A17",
+        "surface": "#15231F",
+        "surface2": "#000D08",
+        "surface3": "#011611",
+        "line": "#567068",
+        "line2": "#3A534C",
+        "ink": "#CFECE3",
+        "ink2": "#96B2A9",
+        "ink3": "#7C988F",
+        "ink4": "#728D85",
+        "accent": "#59AA93",
+        "accentHover": "#79CAB2",
+        "accentInk": "#000101",
+        "accentSoft": "#022019",
+        "accentTint": "#021610",
+        "focus": "#59AA93",
+        "positive": "#62C491",
+        "positiveSoft": "#10291F",
+        "warning": "#E5B65A",
+        "warningSoft": "#30240D",
+        "error": "#F58B82",
+        "errorSoft": "#351714",
+        "info": "#8BB7FF",
+        "infoSoft": "#14243E"
+      },
+      "checksum": "sha256:b446c7acb1aed5ca725b1ee48b93b51dd0ea0102cb6f7b93a9efb9a395e327a7"
+    }
+  },
+  "locks": {},
+  "source": {
+    "mode": "product",
+    "colorProfile": "team_default",
+    "typographyProfile": "product",
+    "typeScale": "product",
+    "density": "product",
+    "radius": "product",
+    "motion": "product",
+    "chartPalette": "product",
+    "colorScheme": "team_default"
+  },
+  "userConfig": {
+    "version": 1
+  },
+  "team": {
+    "id": "team_pub",
+    "themeRevision": 3,
+    "revisionId": "tbr_777777777777777777777777",
+    "configurationType": "custom"
+  }
+}

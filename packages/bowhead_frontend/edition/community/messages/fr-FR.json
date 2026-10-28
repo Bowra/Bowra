@@ -1,0 +1,89 @@
+{
+  "team_onboarding": {
+    "items": {
+      "license_active": {
+        "title": "Installation prête",
+        "action": "Vérifier la configuration",
+        "impact": "Configurez le premier compte propriétaire avant d’utiliser l’équipe."
+      }
+    },
+    "reasons": {
+      "license_active": "Cette installation Community est configurée. Aucune licence commerciale ni limite de comptes n’est requise.",
+      "suspended": "Cette équipe est suspendue.",
+      "license_state_unavailable": "L’état de l’installation n’a pas pu être déterminé.",
+      "kb_not_licensed": "La base de connaissances est indisponible pour cette équipe."
+    }
+  },
+  "settings": {
+    "appearance": {
+      "viewTeamAppearance": "Gérer les styles de graphique de l’équipe"
+    },
+    "members": {
+      "err_seat_full": "Cette action est indisponible. Vérifiez vos autorisations dans l’équipe ou contactez un administrateur.",
+      "err_over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "err_needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+      "err_license_invalid": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système.",
+      "err_entitlement_unavailable": "Ce service est indisponible. Réessayez plus tard ou contactez votre administrateur système."
+    },
+    "people": {
+      "err_seat_full": "Cette action est indisponible. Vérifiez vos autorisations dans l’équipe ou contactez un administrateur.",
+      "err_over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "err_needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+      "err_license_invalid": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système."
+    },
+    "datarc": {
+      "errors": {
+        "entitlement_unavailable": "Ce service est indisponible. Réessayez plus tard ou contactez votre administrateur système.",
+        "over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+        "needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+        "tamper": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système."
+      }
+    },
+    "scheduled": {
+      "errors": {
+        "feature_unlicensed": "Cette fonctionnalité est indisponible pour cette équipe. Contactez votre administrateur système.",
+        "over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+        "needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+        "tamper": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système."
+      }
+    },
+    "integrations": {
+      "email_err_readonly": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "email_err_entitlement_unavailable": "Ce service est indisponible. Réessayez plus tard ou contactez votre administrateur système."
+    },
+    "models": {
+      "errors": {
+        "err_readonly": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification."
+      }
+    },
+    "subagents": {
+      "draft_locked_mcp": "Cette fonctionnalité est indisponible pour cette équipe. Contactez votre administrateur système."
+    },
+    "tabs": {
+      "team-appearance": "Styles de graphique"
+    }
+  },
+  "auth": {
+    "error": {
+      "oauth_over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "oauth_needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+      "oauth_tamper": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système."
+    }
+  },
+  "admin": {
+    "credits": {
+      "err_over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "err_needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+      "err_license_invalid": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système.",
+      "err_entitlement_unavailable": "Ce service est indisponible. Réessayez plus tard ou contactez votre administrateur système.",
+      "err_feature_unlicensed": "Cette fonctionnalité est indisponible pour cette équipe. Contactez votre administrateur système.",
+      "err_managed_by_license": "Cette action est indisponible. Vérifiez vos autorisations dans l’équipe ou contactez un administrateur."
+    },
+    "members_promote": {
+      "err_over_grace": "Cette équipe est suspendue ou en lecture seule. Contactez votre administrateur système avant toute modification.",
+      "err_needs_license": "Terminez la configuration de l’installation avant de continuer. Contactez votre administrateur système.",
+      "err_license_invalid": "L’état de l’installation n’a pas pu être vérifié. Contactez votre administrateur système.",
+      "err_entitlement_unavailable": "Ce service est indisponible. Réessayez plus tard ou contactez votre administrateur système."
+    }
+  }
+}

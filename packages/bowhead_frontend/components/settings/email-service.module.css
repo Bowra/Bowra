@@ -1,0 +1,90 @@
+.page {
+  display: grid;
+  gap: 20px;
+}
+
+.header {
+  display: grid;
+  gap: 7px;
+  max-width: 720px;
+}
+
+.header h1 {
+  font-family: var(--font-v2-serif);
+  font-size: var(--fs-2xl);
+  font-weight: 400;
+  letter-spacing: -.02em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.header p { color: var(--c-ink-2); font-size: var(--fs-sm); line-height: 1.6; margin: 0; }
+
+.formCard {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.statusRow {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--c-line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-bottom: 18px;
+}
+
+.statusTitle { font-size: 0.9375rem; font-weight: 650; margin: 0; }
+.statusDescription { color: var(--c-ink-2); font-size: 0.8125rem; line-height: 1.55; margin: 5px 0 0; max-width: 610px; }
+.badgeGood { background: var(--c-pos-soft); color: var(--c-pos-ink); }
+.badgeWarn { background: var(--c-warn-soft); color: var(--c-warn-ink); }
+.badgeMuted { background: var(--c-surface-2); color: var(--c-ink-3); }
+
+.form { display: grid; gap: 24px; margin-top: 24px; max-width: 760px; }
+.section { display: grid; gap: 14px; }
+.sectionHeader { display: grid; gap: 3px; }
+.sectionHeader h2 { font-size: 0.9375rem; font-weight: 650; margin: 0; }
+.sectionHeader p { color: var(--c-ink-2); font-size: 0.8125rem; line-height: 1.5; margin: 0; }
+.twoColumn { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.preset { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.preset button { background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: 6px; color: var(--c-ink-2); cursor: pointer; font-size: 0.75rem; min-height: 32px; padding: 5px 9px; }
+.actions { align-items: center; border-top: 1px solid var(--c-line); display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; padding-top: 20px; }
+.actionHint { color: var(--c-ink-3); flex-basis: 100%; font-size: 0.75rem; line-height: 1.5; margin: 0; }
+
+@media (max-width: 640px) {
+  .formCard { padding: 18px; }
+  .statusRow { display: grid; }
+  .twoColumn { grid-template-columns: 1fr; }
+}
+
+/* ── UI appearance refresh batch two: show connection status as the design-spec badge (:global(:root:root) keeps these above the module base rules) ── */
+:global(:root:root) .badge {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-control);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  background: var(--c-fill-2);
+  color: var(--c-ink-2);
+}
+:global(:root:root) .badge.badgeGood {
+  background: var(--c-pos-soft);
+  color: var(--c-pos-ink);
+}
+:global(:root:root) .badge.badgeWarn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+}

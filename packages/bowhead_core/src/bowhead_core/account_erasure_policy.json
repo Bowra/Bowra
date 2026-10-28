@@ -1,0 +1,6703 @@
+{
+  "version": 1,
+  "shared_tables": [
+    "access_policy_state",
+    "admin_audit_log",
+    "agent_assignment_backfill_expected",
+    "agent_assignment_backfill_run",
+    "agent_catalog_projection",
+    "agent_change_proposal",
+    "agent_change_proposal_decision",
+    "agent_collaboration_operation",
+    "agent_collaboration_participant",
+    "agent_collaboration_turn",
+    "agent_default_policy",
+    "agent_dependency_update_policy",
+    "agent_eval_attempt_identity",
+    "agent_eval_candidate_control",
+    "agent_eval_case_job",
+    "agent_eval_case_result",
+    "agent_eval_case_revision",
+    "agent_eval_comparison_execution",
+    "agent_eval_comparison_run",
+    "agent_eval_evidence_state",
+    "agent_eval_override",
+    "agent_eval_plan",
+    "agent_eval_plan_suite",
+    "agent_eval_point_calibration",
+    "agent_eval_point_example",
+    "agent_eval_policy_revision",
+    "agent_eval_regression_outbox",
+    "agent_eval_run",
+    "agent_eval_run_execution",
+    "agent_eval_scratch_turn",
+    "agent_eval_snapshot",
+    "agent_eval_suite",
+    "agent_eval_suite_review",
+    "agent_eval_suite_revision",
+    "agent_eval_trigger_policy",
+    "agent_listing_safety_finding",
+    "agent_listing_safety_report",
+    "agent_marketplace_schema_meta",
+    "agent_name_claim",
+    "agent_name_conflict_group",
+    "agent_ranking_coverage",
+    "agent_ranking_snapshot",
+    "agent_release_baseline_expected",
+    "agent_release_baseline_run",
+    "agent_release_candidate_name_claim",
+    "agent_release_eval_evidence",
+    "agent_revision_compatibility",
+    "agent_safety_report",
+    "agent_taxonomy_suggestion",
+    "agent_team_tag",
+    "agent_version_automation_preparation",
+    "builtin_pbi_template",
+    "business_rules",
+    "catalog_localized_listing",
+    "feishu_app_configs",
+    "group_memberships",
+    "groups",
+    "identity_provider_realms",
+    "local_oidc_config_revisions",
+    "local_oidc_configs",
+    "notification_items",
+    "oidc_audit_events",
+    "oidc_callback_routes",
+    "oidc_client_registration_revisions",
+    "oidc_client_registrations",
+    "oidc_client_secret_versions",
+    "oidc_jwks_snapshots",
+    "oidc_login_transactions",
+    "oidc_metadata_snapshots",
+    "oidc_public_entry_bindings",
+    "public_entries",
+    "public_entry_audit",
+    "registered_facts",
+    "registered_facts_history",
+    "resource_dependency_edge",
+    "resource_dependency_subject_projection",
+    "resource_grants",
+    "slack_connections",
+    "space_instruction_versions",
+    "system_agent_effective_revision",
+    "system_agent_revision_behavior",
+    "team_brand_asset_metadata",
+    "team_branding_draft_copies",
+    "team_branding_drafts",
+    "team_branding_revisions",
+    "team_branding_state",
+    "team_builtin_subagent_override",
+    "team_builtin_tool",
+    "team_capability",
+    "team_capability_resource",
+    "team_capability_revision",
+    "team_chart_style_drafts",
+    "team_chart_style_registry_state",
+    "team_chart_style_revisions",
+    "team_chart_styles",
+    "team_identity_provider_binding_revisions",
+    "team_identity_provider_bindings",
+    "team_invite_tokens",
+    "team_invite_workspace_grants",
+    "team_license",
+    "team_llm_apply_snapshots",
+    "team_llm_capability_evidence",
+    "team_llm_provider_identities",
+    "team_llm_risk_acceptance_retirements",
+    "team_llm_risk_acceptances",
+    "team_llm_v2_enrollments",
+    "team_llm_v2_migration_baseline_invalidations",
+    "team_llm_v2_migration_baselines",
+    "team_llm_verification_batches",
+    "team_llm_verification_items",
+    "team_llm_verification_plans",
+    "team_members",
+    "team_openapi_call_logs",
+    "team_openapi_keys",
+    "team_reference_retention_policies",
+    "team_settings",
+    "team_skill",
+    "team_subagent",
+    "team_subagent_app_compatibility",
+    "team_subagent_capability_binding",
+    "team_subagent_fork_lineage",
+    "team_subagent_fork_policy",
+    "team_subagent_release",
+    "team_subagent_release_candidate",
+    "team_subagent_release_event",
+    "team_subagent_revision",
+    "team_subagent_revision_behavior",
+    "team_subagent_revision_extensions",
+    "team_subagent_schema_meta",
+    "team_subagent_working_copy",
+    "team_tool_source",
+    "teams",
+    "teams_connections",
+    "workspaces"
+  ],
+  "tables": {
+    "access_policy_state": {
+      "columns": [
+        "team_id",
+        "epoch",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "access_requests": {
+      "columns": [
+        "id",
+        "team_id",
+        "kind",
+        "resource_id",
+        "requester_id",
+        "owner_id",
+        "message",
+        "status",
+        "decided_by",
+        "decided_at",
+        "created_at",
+        "updated_at",
+        "decision_note",
+        "expires_at",
+        "requested_role",
+        "granted_permission",
+        "withdrawn_at",
+        "target",
+        "shadow",
+        "grant_expires_at",
+        "cooldown_until",
+        "escalated_at",
+        "release_candidate_id",
+        "legacy_origin"
+      ],
+      "owner_columns": []
+    },
+    "admin_audit_log": {
+      "columns": [
+        "id",
+        "actor_user_id",
+        "team_id",
+        "action",
+        "target_kind",
+        "target_id",
+        "target_team_id",
+        "scope",
+        "payload_json",
+        "ts",
+        "ip",
+        "user_agent"
+      ],
+      "owner_columns": []
+    },
+    "agent_assignment": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "agent_id",
+        "agent_source_kind",
+        "personal_state",
+        "access_state",
+        "source",
+        "source_policy_version",
+        "row_version",
+        "hired_at",
+        "current_cycle_started_at",
+        "personal_state_changed_at",
+        "access_state_changed_at",
+        "removed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_answer_feedback": {
+      "columns": [
+        "turn_id",
+        "team_id",
+        "agent_id",
+        "user_id",
+        "score",
+        "reason_codes",
+        "comment",
+        "created_at",
+        "updated_at",
+        "owner_handled_at",
+        "owner_handled_action"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_assignment_backfill_expected": {
+      "columns": [
+        "run_id",
+        "team_id",
+        "user_id",
+        "agent_id"
+      ],
+      "owner_columns": []
+    },
+    "agent_assignment_backfill_run": {
+      "columns": [
+        "id",
+        "status",
+        "cursor_team_id",
+        "cursor_user_id",
+        "expected_count",
+        "inserted_count",
+        "conflict_count",
+        "error_count",
+        "source_build",
+        "started_at",
+        "updated_at",
+        "finished_at",
+        "snapshot_at",
+        "snapshot_completed_at",
+        "stage_cursor_team_id",
+        "stage_cursor_user_id",
+        "cursor_agent_id",
+        "expected_digest",
+        "owner_token",
+        "lease_expires_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_catalog_projection": {
+      "columns": [
+        "team_id",
+        "agent_id",
+        "source_kind",
+        "source_version",
+        "compiler_version",
+        "canonical_name",
+        "canonical_summary",
+        "owner_label",
+        "capability_summary_json",
+        "facet_json",
+        "risk_summary_json",
+        "safety_summary_json",
+        "dependency_json",
+        "search_text",
+        "projection_hash",
+        "built_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_change_proposal": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "source_type",
+        "source_ref",
+        "base_release_id",
+        "base_working_copy_id",
+        "base_working_copy_version",
+        "base_document_json",
+        "base_document_hash",
+        "patch_json",
+        "patch_hash",
+        "atomic_groups_json",
+        "suggested_cases_json",
+        "rationale",
+        "provenance_json",
+        "status",
+        "row_version",
+        "created_by_kind",
+        "created_by_id",
+        "created_at",
+        "decided_at",
+        "base_suite_revision_id",
+        "initial_suite_name"
+      ],
+      "owner_columns": []
+    },
+    "agent_change_proposal_decision": {
+      "columns": [
+        "id",
+        "proposal_id",
+        "decision_kind",
+        "selected_group_ids_json",
+        "selected_case_ids_json",
+        "decision_reason_json",
+        "result_working_copy_id",
+        "result_working_copy_version",
+        "result_working_copy_hash",
+        "result_suite_revision_id",
+        "actor_user_id",
+        "created_at",
+        "result_content_hash"
+      ],
+      "owner_columns": []
+    },
+    "agent_coach_generation_request": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "owner_user_id",
+        "key_hash",
+        "request_hash",
+        "source_ref",
+        "working_copy_id",
+        "working_copy_version",
+        "base_release_id",
+        "state",
+        "result_proposal_id",
+        "failure_code",
+        "created_at",
+        "response_deadline",
+        "provider_started_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "agent_collaboration_operation": {
+      "columns": [
+        "seq",
+        "id",
+        "turn_id",
+        "execution_id",
+        "recipient_id",
+        "frame_id",
+        "model_step_id",
+        "native_call_id",
+        "action",
+        "arguments_hash",
+        "content_ciphertext",
+        "receipt_json",
+        "question_id",
+        "family_id",
+        "required",
+        "response_status",
+        "dependency_status",
+        "reply_id",
+        "deadline",
+        "event_id",
+        "published",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_collaboration_participant": {
+      "columns": [
+        "execution_id",
+        "turn_id",
+        "assignment_ciphertext",
+        "assignment_hash",
+        "wait_operation_id",
+        "wait_revision",
+        "coordination_attempts"
+      ],
+      "owner_columns": []
+    },
+    "agent_collaboration_turn": {
+      "columns": [
+        "turn_id",
+        "protocol_version",
+        "owner_execution_id",
+        "policy_json",
+        "deadline",
+        "created_at",
+        "model_attempts",
+        "tool_attempts"
+      ],
+      "owner_columns": []
+    },
+    "agent_command_receipt": {
+      "columns": [
+        "team_id",
+        "actor_user_id",
+        "command_scope",
+        "idempotency_hash",
+        "request_hash",
+        "result_json",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_default_opt_out": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "agent_id",
+        "policy_version_at_opt_out",
+        "opted_out_at",
+        "cleared_at",
+        "row_version"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_default_policy": {
+      "columns": [
+        "team_id",
+        "agent_id",
+        "agent_source_kind",
+        "enabled",
+        "policy_version",
+        "row_version",
+        "changed_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_dependency_update_policy": {
+      "columns": [
+        "team_id",
+        "agent_id",
+        "dependency_kind",
+        "dependency_ref",
+        "policy",
+        "row_version",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_attempt_identity": {
+      "columns": [
+        "run_id",
+        "case_revision_id",
+        "attempt",
+        "subject_provider_ref",
+        "subject_provider_hash",
+        "judge_provider_ref",
+        "judge_provider_hash",
+        "reproducibility",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_candidate_control": {
+      "columns": [
+        "candidate_id",
+        "team_id",
+        "agent_id",
+        "source_working_copy_id",
+        "source_working_copy_version",
+        "source_working_copy_hash",
+        "active_plan_id",
+        "readiness",
+        "stale_subject",
+        "reason_codes_json",
+        "active_execution_id",
+        "active_snapshot_id",
+        "active_override_id",
+        "prepared_actor_kind",
+        "prepared_actor_ref",
+        "prepared_user_id",
+        "prepared_automation_grant_id",
+        "review_submitted_by",
+        "review_submitted_at",
+        "review_plan_id",
+        "review_plan_hash",
+        "review_snapshot_id",
+        "review_snapshot_hash",
+        "review_override_id",
+        "review_override_hash",
+        "row_version",
+        "created_at",
+        "updated_at",
+        "review_release_note"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_case_job": {
+      "columns": [
+        "id",
+        "run_id",
+        "case_revision_id",
+        "attempt",
+        "status",
+        "lease_generation",
+        "lease_owner",
+        "lease_token_hash",
+        "lease_expires_at",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "failure_code"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_case_result": {
+      "columns": [
+        "run_id",
+        "case_revision_id",
+        "attempt",
+        "status",
+        "deterministic_json",
+        "judge_json",
+        "trace_evidence_ref",
+        "duration_ms",
+        "cost_microusd",
+        "failure_code",
+        "created_at",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "model_call_count"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_case_revision": {
+      "columns": [
+        "id",
+        "suite_revision_id",
+        "case_key",
+        "case_hash",
+        "input_json",
+        "fixture_ref_json",
+        "expected_contract_json",
+        "scorer_config_json",
+        "effect_policy_json",
+        "valid_until",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_comparison_execution": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "candidate_id",
+        "plan_id",
+        "run_kind",
+        "selection_json",
+        "selection_hash",
+        "status",
+        "idempotency_hash",
+        "request_hash",
+        "actor_kind",
+        "actor_ref",
+        "automation_grant_id",
+        "generation",
+        "row_version",
+        "requested_at",
+        "started_at",
+        "finalizing_at",
+        "finished_at",
+        "cancelled_at",
+        "failure_code",
+        "client_intent_hash",
+        "automation_context_json",
+        "coach_delegation_id",
+        "coach_client_intent_hash"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_comparison_run": {
+      "columns": [
+        "execution_id",
+        "suite_revision_id",
+        "subject_side",
+        "run_id"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_evidence_state": {
+      "columns": [
+        "team_id",
+        "agent_source_kind",
+        "agent_id",
+        "suite_id",
+        "current_run_id",
+        "subject_fingerprint",
+        "state",
+        "stale_reason",
+        "row_version",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_notification_outbox": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "run_id",
+        "recipient_user_id",
+        "status",
+        "lease_generation",
+        "lease_owner",
+        "lease_token_hash",
+        "lease_expires_at",
+        "attempt_count",
+        "outcome_code",
+        "available_at",
+        "created_at",
+        "settled_at"
+      ],
+      "owner_columns": [
+        "recipient_user_id"
+      ]
+    },
+    "agent_eval_override": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "candidate_id",
+        "plan_id",
+        "snapshot_id",
+        "override_hash",
+        "reason_overrides_json",
+        "reason_overrides_hash",
+        "team_evidence_selection_json",
+        "team_evidence_selection_hash",
+        "team_evidence_json",
+        "team_evidence_hash",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_plan": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "candidate_id",
+        "sequence",
+        "policy_revision_id",
+        "baseline_release_id",
+        "execution_workspace_id",
+        "execution_workspace_scope_hash",
+        "candidate_hash",
+        "plan_json",
+        "plan_hash",
+        "compiler_version",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_plan_suite": {
+      "columns": [
+        "plan_id",
+        "suite_revision_id",
+        "suite_kind",
+        "execution_scope",
+        "required",
+        "tier",
+        "attempts",
+        "fixture_bundle_json",
+        "fixture_bundle_hash",
+        "scorer_bundle_ref",
+        "scorer_bundle_hash",
+        "judge_policy_hash",
+        "order_index"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_point_example": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "suite_id",
+        "point_id",
+        "case_revision_id",
+        "kind",
+        "answer_ref",
+        "answer_text",
+        "expected_met",
+        "graded_text_hash",
+        "graded_prompt_version",
+        "graded_model_fingerprint",
+        "graded_met",
+        "graded_at",
+        "created_by",
+        "created_at",
+        "task_text",
+        "label_source",
+        "turn_id",
+        "source_turn_id"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_conversation_share": {
+      "columns": [
+        "turn_id",
+        "team_id",
+        "agent_id",
+        "user_id",
+        "shared_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_eval_point_calibration": {
+      "columns": [
+        "suite_id",
+        "point_id",
+        "team_id",
+        "agent_id",
+        "text_hash",
+        "prompt_version",
+        "model_fingerprint",
+        "state",
+        "failure_reason",
+        "rewording",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_policy_revision": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "sequence",
+        "policy_json",
+        "policy_hash",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_regression_outbox": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_source_kind",
+        "agent_id",
+        "change_kind",
+        "change_ref",
+        "status",
+        "lease_generation",
+        "lease_owner",
+        "lease_token_hash",
+        "lease_expires_at",
+        "attempt_count",
+        "outcome_code",
+        "available_at",
+        "created_at",
+        "delivered_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_run": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "agent_source_kind",
+        "revision_ref",
+        "release_id",
+        "capability_fingerprint",
+        "dependency_fingerprint",
+        "model_config_hash",
+        "subject_fingerprint",
+        "suite_revision_id",
+        "case_set_hash",
+        "scorer_bundle_ref",
+        "judge_role_ref",
+        "judge_model_fingerprint",
+        "trigger_kind",
+        "status",
+        "summary_json",
+        "idempotency_key",
+        "created_by",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "candidate_id"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_run_execution": {
+      "columns": [
+        "run_id",
+        "team_id",
+        "workspace_id",
+        "requested_attempts",
+        "max_concurrency",
+        "max_duration_ms",
+        "max_cost_microusd",
+        "cancel_requested_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_scratch_turn": {
+      "columns": [
+        "job_id",
+        "lease_generation",
+        "run_id",
+        "case_revision_id",
+        "attempt",
+        "team_id",
+        "revision_ref",
+        "session_id",
+        "turn_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_snapshot": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "candidate_id",
+        "plan_id",
+        "execution_id",
+        "readiness",
+        "identity_json",
+        "identity_hash",
+        "summary_json",
+        "reviewer_projection_json",
+        "reviewer_projection_hash",
+        "snapshot_hash",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_suite": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "agent_source_kind",
+        "category_term_id",
+        "suite_kind",
+        "name",
+        "visibility",
+        "state",
+        "row_version",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "platform_managed"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_suite_revision": {
+      "columns": [
+        "id",
+        "suite_id",
+        "sequence",
+        "definition_json",
+        "definition_hash",
+        "scorer_bundle_ref",
+        "judge_policy_json",
+        "case_count",
+        "case_set_hash",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_trigger_policy": {
+      "columns": [
+        "team_id",
+        "agent_source_kind",
+        "agent_id",
+        "on_definition_change",
+        "on_dependency_change",
+        "on_model_change",
+        "cron_expr",
+        "enabled",
+        "row_version",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_listing_safety_finding": {
+      "columns": [
+        "report_id",
+        "ordinal",
+        "rule_family",
+        "field_path",
+        "severity",
+        "disposition",
+        "reviewer_id",
+        "reviewed_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_listing_safety_report": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "listing_hash",
+        "scanner_version",
+        "deterministic_status",
+        "semantic_status",
+        "effective_status",
+        "team_dictionary_revision",
+        "created_at",
+        "completed_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_marketplace_schema_meta": {
+      "columns": [
+        "singleton",
+        "schema_version",
+        "assignment_cutover_complete_at",
+        "assignment_backfill_expected",
+        "assignment_backfill_inserted",
+        "assignment_backfill_digest",
+        "updated_at",
+        "minimum_reader_version",
+        "minimum_writer_version"
+      ],
+      "owner_columns": []
+    },
+    "agent_name_claim": {
+      "columns": [
+        "team_id",
+        "locale",
+        "normalized_key",
+        "holder_kind",
+        "holder_id",
+        "agent_id",
+        "claimed_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_name_conflict_group": {
+      "columns": [
+        "team_id",
+        "normalized_key",
+        "agent_id",
+        "detected_at",
+        "resolved_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_ranking_coverage": {
+      "columns": [
+        "singleton",
+        "complete_days_from"
+      ],
+      "owner_columns": []
+    },
+    "agent_ranking_snapshot": {
+      "columns": [
+        "id",
+        "team_id",
+        "ranking_kind",
+        "domain_id",
+        "window_start",
+        "window_end",
+        "algorithm_version",
+        "privacy_policy_version",
+        "input_watermark",
+        "state",
+        "rows_json",
+        "generated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_release_baseline_expected": {
+      "columns": [
+        "run_id",
+        "team_id",
+        "agent_id",
+        "source_row_version",
+        "source_updated_at",
+        "stage_state",
+        "source_hash",
+        "definition_hash",
+        "dependency_fingerprint",
+        "capability_fingerprint",
+        "audience_hash",
+        "safety_report_id",
+        "reason_codes_json",
+        "imported_revision_id",
+        "imported_release_id",
+        "imported_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_release_baseline_run": {
+      "columns": [
+        "id",
+        "state",
+        "compiler_version",
+        "source_build",
+        "snapshot_at",
+        "expected_count",
+        "staged_count",
+        "ready_count",
+        "degraded_count",
+        "blocked_count",
+        "imported_count",
+        "error_count",
+        "expected_digest",
+        "lease_owner",
+        "lease_expires_at",
+        "started_at",
+        "staged_at",
+        "finished_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_release_candidate_name_claim": {
+      "columns": [
+        "team_id",
+        "candidate_id",
+        "agent_id",
+        "locale",
+        "normalized_key",
+        "claim_kind",
+        "state",
+        "claimed_at",
+        "settled_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_release_eval_evidence": {
+      "columns": [
+        "release_id",
+        "team_id",
+        "agent_id",
+        "candidate_id",
+        "plan_id",
+        "snapshot_id",
+        "override_id",
+        "candidate_hash",
+        "plan_hash",
+        "snapshot_hash",
+        "override_hash",
+        "readiness",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_revision_compatibility": {
+      "columns": [
+        "revision_id",
+        "team_id",
+        "agent_id",
+        "base_revision_id",
+        "compatibility_major",
+        "verdict",
+        "compiler_version",
+        "contract_hash",
+        "reason_codes_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_role_preference": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "role_id",
+        "assignment_id",
+        "assignment_cycle_started_at",
+        "cleared_at",
+        "row_version",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_safety_report": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "subject_kind",
+        "subject_ref",
+        "content_hash",
+        "dependency_fingerprint",
+        "compiler_version",
+        "semantic_scanner_version",
+        "status",
+        "deterministic_json",
+        "semantic_json",
+        "restricted_evidence_ref",
+        "safe_summary_json",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_taxonomy_suggestion": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "working_copy_id",
+        "source_hash",
+        "taxonomy_version",
+        "suggestion_json",
+        "confidence",
+        "state",
+        "row_version",
+        "created_by",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_team_tag": {
+      "columns": [
+        "id",
+        "team_id",
+        "display_name",
+        "normalized_key",
+        "status",
+        "merged_into_id",
+        "row_version",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_version_automation_grant": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "owner_user_id",
+        "principal_id",
+        "scopes_json",
+        "repository_rules_json",
+        "repository_rules_hash",
+        "expires_at",
+        "revoked_at",
+        "last_used_at",
+        "row_version",
+        "created_at",
+        "updated_at",
+        "evaluation_workspace_id"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "agent_version_automation_preparation": {
+      "columns": [
+        "team_id",
+        "agent_id",
+        "principal_id",
+        "grant_id",
+        "proposal_id",
+        "operation_key_hash",
+        "request_hash",
+        "context_hash",
+        "protocol_version",
+        "candidate_id",
+        "initial_plan_id",
+        "initial_plan_hash",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_version_notification_outbox": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "recipient_user_id",
+        "event_type",
+        "candidate_id",
+        "plan_id",
+        "snapshot_id",
+        "release_id",
+        "dedupe_key",
+        "safe_payload_json",
+        "status",
+        "lease_generation",
+        "lease_owner",
+        "lease_token_hash",
+        "lease_expires_at",
+        "attempt_count",
+        "available_at",
+        "created_at",
+        "settled_at",
+        "outcome_code"
+      ],
+      "owner_columns": [
+        "recipient_user_id"
+      ]
+    },
+    "api_tokens": {
+      "columns": [
+        "id",
+        "user_id",
+        "name",
+        "hash",
+        "workspace_id",
+        "role_snapshot",
+        "expires_at",
+        "created_at",
+        "last_used_at",
+        "revoked_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "approvals": {
+      "columns": [
+        "id",
+        "turn_id",
+        "session_id",
+        "workspace_id",
+        "member_uid",
+        "datarc_workspace_id",
+        "user_id",
+        "tool_name",
+        "arguments_json",
+        "request_key",
+        "arguments_digest",
+        "reason",
+        "risk_level",
+        "status",
+        "decided_by",
+        "decided_at",
+        "execution_ok",
+        "execution_result",
+        "execution_error",
+        "executed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "artifact_purge_claims": {
+      "columns": [
+        "artifact_id",
+        "path",
+        "created_by",
+        "claimed_at",
+        "completed_at"
+      ],
+      "owner_columns": []
+    },
+    "artifact_stdout": {
+      "columns": [
+        "artifact_id",
+        "stdout",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "artifact_upload_bindings": {
+      "columns": [
+        "artifact_id",
+        "workspace_id",
+        "user_id",
+        "session_id",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "artifact_upload_confirmations": {
+      "columns": [
+        "artifact_id",
+        "quarantine_path",
+        "candidate_path",
+        "filename",
+        "mime",
+        "declared_size",
+        "expected_sha256",
+        "user_id",
+        "workspace_id",
+        "session_id",
+        "upload_expires_at",
+        "phase",
+        "epoch",
+        "lease_owner",
+        "lease_until",
+        "candidate_sha256",
+        "actual_size",
+        "check_profile",
+        "package_info_json",
+        "error_code",
+        "cleanup_after"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "artifact_workspace_schema_meta": {
+      "columns": [
+        "singleton",
+        "activated_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "artifacts": {
+      "columns": [
+        "id",
+        "filename",
+        "mime",
+        "size",
+        "source",
+        "path",
+        "canvas_id",
+        "created_by",
+        "created_at",
+        "deleted_at",
+        "last_used_at",
+        "category",
+        "category_source",
+        "code_lang",
+        "status",
+        "expires_at",
+        "kind",
+        "scope",
+        "inject",
+        "trust",
+        "producer_kind",
+        "created_by_turn",
+        "derived_from",
+        "manifest_artifact_id",
+        "retention_hint",
+        "origin_query",
+        "row_count",
+        "workspace_id"
+      ],
+      "owner_columns": [
+        "created_by"
+      ]
+    },
+    "builtin_pbi_template": {
+      "columns": [
+        "id",
+        "team_id",
+        "tool_id",
+        "name",
+        "dax_template",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "builtin_tool_oauth_state": {
+      "columns": [
+        "state_hash",
+        "tool_id",
+        "team_id",
+        "user_id",
+        "requested_scopes",
+        "redirect_uri",
+        "verifier_cipher",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "builtin_tool_user_grant": {
+      "columns": [
+        "id",
+        "tool_id",
+        "team_id",
+        "user_id",
+        "provider_subject",
+        "provider_email",
+        "granted_scopes",
+        "refresh_cipher",
+        "status",
+        "created_at",
+        "updated_at",
+        "last_used_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "business_rules": {
+      "columns": [
+        "rule_id",
+        "rule_name",
+        "rule_type",
+        "schema_json",
+        "user_id",
+        "workspace_id",
+        "scope",
+        "status",
+        "source",
+        "source_turn_id",
+        "source_template_id",
+        "confidence",
+        "created_by",
+        "approved_by",
+        "rejected_by",
+        "created_at",
+        "approved_at",
+        "rejected_at",
+        "updated_at",
+        "version"
+      ],
+      "owner_columns": []
+    },
+    "canvas_export_job_events": {
+      "columns": [
+        "id",
+        "job_id",
+        "attempt",
+        "sequence",
+        "event_type",
+        "from_status",
+        "to_status",
+        "from_phase",
+        "to_phase",
+        "reason_code",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "canvas_export_jobs": {
+      "columns": [
+        "id",
+        "canvas_id",
+        "fmt",
+        "status",
+        "url",
+        "artifact_id",
+        "filename",
+        "size",
+        "error",
+        "created_at",
+        "updated_at",
+        "contract_version",
+        "profile",
+        "parity_contract",
+        "surface_token",
+        "phase",
+        "quality_status",
+        "warning_count",
+        "snapshot_id",
+        "manifest_artifact_id",
+        "requested_by",
+        "idempotency_key",
+        "request_sha256",
+        "error_code",
+        "progress_json",
+        "attempt",
+        "worker_id",
+        "runner_kind",
+        "runner_task_id",
+        "lease_expires_at",
+        "started_at",
+        "finished_at",
+        "expires_at",
+        "renderer_contract_version"
+      ],
+      "owner_columns": [
+        "requested_by"
+      ]
+    },
+    "canvas_export_snapshot_assets": {
+      "columns": [
+        "snapshot_id",
+        "artifact_id",
+        "section_id",
+        "role",
+        "mime",
+        "size_bytes",
+        "content_sha256",
+        "created_by",
+        "scope",
+        "scope_session_id",
+        "pinned_at",
+        "resolved_at"
+      ],
+      "owner_columns": []
+    },
+    "canvas_export_snapshots": {
+      "columns": [
+        "id",
+        "schema_version",
+        "canvas_id",
+        "session_id",
+        "team_id",
+        "workspace_id",
+        "canvas_owner",
+        "requested_by",
+        "format",
+        "profile",
+        "title",
+        "locale",
+        "timezone",
+        "projection_token",
+        "surface_contract_version",
+        "surface_token",
+        "parity_contract",
+        "payload_json",
+        "payload_sha256",
+        "size_bytes",
+        "section_count",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "requested_by"
+      ]
+    },
+    "canvas_fts": {
+      "columns": [
+        "canvas_id",
+        "section_id",
+        "body"
+      ],
+      "owner_columns": []
+    },
+    "canvas_revisions": {
+      "columns": [
+        "id",
+        "canvas_id",
+        "section_id",
+        "op",
+        "prev_payload",
+        "new_payload",
+        "by_turn_id",
+        "created_at",
+        "schema_version",
+        "owner"
+      ],
+      "owner_columns": []
+    },
+    "canvas_sections": {
+      "columns": [
+        "id",
+        "canvas_id",
+        "seq",
+        "kind",
+        "payload",
+        "rev",
+        "created_at",
+        "updated_at",
+        "quarantined",
+        "quarantine_reason",
+        "hidden_for_chat_mode",
+        "surface_rationale",
+        "superseded",
+        "superseded_by_turn",
+        "turn_id",
+        "schema_version",
+        "owner",
+        "surface_target"
+      ],
+      "owner_columns": []
+    },
+    "canvases": {
+      "columns": [
+        "id",
+        "session_id",
+        "workspace_id",
+        "user_id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at",
+        "content_status"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "catalog_localized_listing": {
+      "columns": [
+        "id",
+        "team_id",
+        "resource_kind",
+        "resource_id",
+        "resource_revision",
+        "locale",
+        "source_locale",
+        "fields_json",
+        "source_hash",
+        "generation_source",
+        "review_state",
+        "row_version",
+        "reviewed_by",
+        "reviewed_at",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_attachment_bundle_inventory": {
+      "columns": [
+        "bundle_artifact_id",
+        "created_by",
+        "inventory_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "created_by"
+      ]
+    },
+    "chat_attachment_bundle_members": {
+      "columns": [
+        "bundle_artifact_id",
+        "child_artifact_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_auth_session_generations": {
+      "columns": [
+        "user_id",
+        "auth_session_generation_hash",
+        "state",
+        "created_at",
+        "invalidated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_auth_user_generation_fences": {
+      "columns": [
+        "user_id",
+        "invalidated_before_epoch",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_reference_bi_continuations": {
+      "columns": [
+        "turn_id",
+        "execution_id",
+        "schema_version",
+        "created_generation",
+        "subagent_id",
+        "source_hash",
+        "composition_digest",
+        "checkpoint_hash",
+        "ciphertext",
+        "retention_state",
+        "clarification_id",
+        "state",
+        "resume_generation",
+        "answer_hash",
+        "started_at",
+        "created_at",
+        "expires_at",
+        "checkpoint_version",
+        "captured_iterations"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_content_snapshots": {
+      "columns": [
+        "turn_id",
+        "content_key",
+        "schema_version",
+        "descriptor_json",
+        "content_hash",
+        "byte_count",
+        "ciphertext",
+        "retention_state",
+        "created_generation",
+        "created_policy_epoch",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_evidence": {
+      "columns": [
+        "turn_id",
+        "evidence_key",
+        "schema_version",
+        "resolution_seq",
+        "execution_id",
+        "created_generation",
+        "kind",
+        "subagent_id",
+        "content_hash",
+        "ciphertext",
+        "retention_state",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_extension_checks": {
+      "columns": [
+        "invocation_id",
+        "turn_id",
+        "context_id",
+        "execution_id",
+        "created_generation",
+        "composition_digest",
+        "policy_check_json",
+        "policy_check_digest",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_lead_postdispatch_attempts": {
+      "columns": [
+        "turn_id",
+        "clarification_id",
+        "execution_id",
+        "generation",
+        "owner_id",
+        "started_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_mcp_calls": {
+      "columns": [
+        "turn_id",
+        "call_id",
+        "call_seq",
+        "schema_version",
+        "resolution_seq",
+        "execution_id",
+        "created_generation",
+        "owner_id",
+        "node_id",
+        "required_tool",
+        "source_id",
+        "operation_name",
+        "local_contract_revision",
+        "connection_binding_id",
+        "connection_subject_fingerprint",
+        "operation_contract_revision",
+        "parameter_digest",
+        "status",
+        "result_ok",
+        "result_hash",
+        "result_ciphertext",
+        "failure_code",
+        "retention_state",
+        "started_at",
+        "completed_at",
+        "expires_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_model_contexts": {
+      "columns": [
+        "turn_id",
+        "context_id",
+        "schema_version",
+        "kind",
+        "resolution_seq",
+        "execution_id",
+        "created_generation",
+        "subagent_id",
+        "composition_digest",
+        "input_hash",
+        "required_content_hash",
+        "retention_state",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_model_invocations": {
+      "columns": [
+        "turn_id",
+        "invocation_id",
+        "context_id",
+        "schema_version",
+        "execution_id",
+        "created_generation",
+        "subagent_id",
+        "provider",
+        "model",
+        "adapter_contract_key",
+        "mode",
+        "request_digest",
+        "status",
+        "response_digest",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "retention_state",
+        "created_at",
+        "ended_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_plans": {
+      "columns": [
+        "turn_id",
+        "schema_version",
+        "source_turn_id",
+        "logical_source_turn_id",
+        "snapshot_owner_turn_id",
+        "source_hash",
+        "plan_json",
+        "created_policy_epoch",
+        "retention_state",
+        "created_at",
+        "expires_at",
+        "retention_policy_version"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_primary_continuations": {
+      "columns": [
+        "turn_id",
+        "dispatch_seq",
+        "execution_id",
+        "created_generation",
+        "owner_id",
+        "call_id",
+        "subagent_id",
+        "task_hash",
+        "state",
+        "output_hash",
+        "output_ciphertext",
+        "failure_code",
+        "retention_state",
+        "started_at",
+        "ended_at",
+        "primary_ended_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_reference_queued_inputs": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "client_submission_id",
+        "session_id",
+        "workspace_id",
+        "schema_version",
+        "accepted_parent_turn_id",
+        "accepted_generation",
+        "payload_hash",
+        "ciphertext",
+        "state",
+        "row_version",
+        "materialized_turn_id",
+        "cancel_reason",
+        "retention_state",
+        "created_at",
+        "expires_at",
+        "retention_policy_version"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_reference_resolutions": {
+      "columns": [
+        "turn_id",
+        "resolution_seq",
+        "schema_version",
+        "kind",
+        "idempotency_key",
+        "source_turn_id",
+        "created_generation",
+        "execution_id",
+        "composition_digest",
+        "composition_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_submission_abandon_tombstones": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "client_submission_id",
+        "workspace_id",
+        "requested_session_id",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_submission_fingerprint_epochs": {
+      "columns": [
+        "fingerprint_key_id",
+        "first_seen_at",
+        "last_seen_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_submission_inflight": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "client_submission_id",
+        "workspace_id",
+        "requested_session_id",
+        "submission_kind",
+        "submission_contract_version",
+        "model_control_batch",
+        "request_fingerprint",
+        "fingerprint_key_id",
+        "auth_session_generation_hash",
+        "lease_owner",
+        "lease_version",
+        "lease_expires_at",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_submission_receipts": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "client_submission_id",
+        "workspace_id",
+        "requested_session_id",
+        "actual_session_id",
+        "turn_id",
+        "submission_kind",
+        "submission_contract_version",
+        "model_control_batch",
+        "request_fingerprint",
+        "fingerprint_key_id",
+        "auth_session_generation_hash",
+        "outcome",
+        "response_json",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "chat_turn_spawn_dispatch": {
+      "columns": [
+        "turn_id",
+        "session_id",
+        "source_submission_id",
+        "parent_turn_id",
+        "source_submission_ids_json",
+        "dispatch_kind",
+        "state",
+        "lease_kind",
+        "lease_execution_generation",
+        "owner_id",
+        "cancel_requested_at",
+        "lease_expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "chat_turn_user_sources": {
+      "columns": [
+        "turn_id",
+        "session_id",
+        "user_id",
+        "workspace_id",
+        "user_text",
+        "attachment_ids_json",
+        "attachment_refs_json",
+        "parts_json",
+        "created_at",
+        "input_document_json",
+        "document_revision_target_json"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "clarification_document_continuations": {
+      "columns": [
+        "card_id",
+        "job_id",
+        "attempt_no",
+        "turn_id",
+        "creation_generation",
+        "creation_owner_id",
+        "checkpoint_digest",
+        "source_hash",
+        "runtime_snapshot_digest",
+        "reserved_generation",
+        "consumed_generation",
+        "consumed_owner_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "clarification_invalidation_outbox": {
+      "columns": [
+        "request_id",
+        "turn_id",
+        "event_id",
+        "target_status",
+        "reason_code",
+        "actor_kind",
+        "state",
+        "lease_owner",
+        "lease_expires_at",
+        "attempt_count",
+        "created_at",
+        "updated_at",
+        "delivered_at"
+      ],
+      "owner_columns": []
+    },
+    "clarification_requests": {
+      "columns": [
+        "request_id",
+        "turn_id",
+        "user_id",
+        "workspace_id",
+        "token",
+        "rationale",
+        "candidates_json",
+        "status",
+        "chosen_value",
+        "chosen_at",
+        "created_at",
+        "kind",
+        "multi_select",
+        "chosen_values_json",
+        "user_directive",
+        "edited_subs_json",
+        "injected_at",
+        "session_id",
+        "directive_cancelled_at",
+        "resume_context_json",
+        "dismissed_at",
+        "tool",
+        "answers_json",
+        "continuation_generation",
+        "continuation_owner_id"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "clarification_resolution_outbox": {
+      "columns": [
+        "request_id",
+        "turn_id",
+        "state",
+        "channel",
+        "work_json",
+        "payload_json",
+        "lease_owner",
+        "lease_expires_at",
+        "attempt_count",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "coach_ci_delegation": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "owner_user_id",
+        "workspace_id",
+        "source_session_id",
+        "source_turn_id",
+        "proposal_id",
+        "request_key",
+        "request_hash",
+        "context_json",
+        "context_hash",
+        "max_provider_calls",
+        "max_comparisons",
+        "duration_seconds",
+        "state",
+        "row_version",
+        "created_at",
+        "authorized_at",
+        "expires_at",
+        "stopped_at",
+        "stop_reason",
+        "candidate_id",
+        "plan_id",
+        "preparation_json"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "coach_ci_invocation": {
+      "columns": [
+        "id",
+        "delegation_id",
+        "run_id",
+        "job_id",
+        "lease_generation",
+        "provider",
+        "model",
+        "adapter_contract_key",
+        "request_digest",
+        "state",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "created_at",
+        "settled_at",
+        "response_digest",
+        "outcome_code"
+      ],
+      "owner_columns": []
+    },
+    "coach_plugin_operation": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "origin_session_id",
+        "origin_turn_id",
+        "request_hash",
+        "result_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "coach_skill_operation": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "session_id",
+        "turn_id",
+        "request_hash",
+        "target_json",
+        "state",
+        "plan_json",
+        "result_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "coach_tool_observation": {
+      "columns": [
+        "id",
+        "requirement_id",
+        "request_key_hash",
+        "reference_json",
+        "observed_at"
+      ],
+      "owner_columns": []
+    },
+    "coach_tool_requirement": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "origin_session_id",
+        "origin_turn_id",
+        "key_hash",
+        "request_hash",
+        "parent_json",
+        "parent_context_json",
+        "requirement_json",
+        "onboarding_operation_id",
+        "onboarding_requested_at",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "composer_telemetry_dedupe": {
+      "columns": [
+        "user_id",
+        "event_id",
+        "occurred_at",
+        "received_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "config_copilot_draft": {
+      "columns": [
+        "id",
+        "team_id",
+        "owner_user_id",
+        "kind",
+        "form_id",
+        "workspace_id",
+        "turn_id",
+        "session_id",
+        "status",
+        "payload_json",
+        "row_version",
+        "expires_at",
+        "content_scrub_at",
+        "purge_at",
+        "applied_at",
+        "reverted_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "credential_recovery_tokens": {
+      "columns": [
+        "token_hash",
+        "user_id",
+        "team_id",
+        "purpose",
+        "status",
+        "created_by_user_id",
+        "created_at",
+        "expires_at",
+        "consumed_at",
+        "revoked_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "credit_attention_state": {
+      "columns": [
+        "attention_item_id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "policy_key",
+        "dedupe_key",
+        "state",
+        "state_reason",
+        "severity",
+        "severity_rank",
+        "opened_at",
+        "expires_at",
+        "first_shown_at",
+        "last_shown_at",
+        "shown_count",
+        "dismissed_by",
+        "dismissed_at",
+        "acted_by",
+        "acted_at",
+        "protected_at",
+        "protection_reason",
+        "protection_snapshot_json",
+        "resolved_at",
+        "linked_event_type",
+        "linked_event_id",
+        "payload_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "credit_exhaustion_events": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "code",
+        "credit_balance",
+        "credit_quota",
+        "team_credit_balance",
+        "team_credit_quota",
+        "turn_id",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "credit_ledger": {
+      "columns": [
+        "id",
+        "user_id",
+        "team_id",
+        "workspace_id",
+        "turn_id",
+        "delta",
+        "reason",
+        "tokens_input",
+        "tokens_output",
+        "created_at",
+        "rate_card_version"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "credit_model_usage": {
+      "columns": [
+        "ledger_id",
+        "line_no",
+        "provider",
+        "model",
+        "tokens_input",
+        "tokens_cached",
+        "tokens_output",
+        "rate_input",
+        "rate_cached",
+        "rate_output",
+        "weighted_tokens"
+      ],
+      "owner_columns": []
+    },
+    "datarc_connection": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "base_url",
+        "account_uid",
+        "auth_ref",
+        "key_hint",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "design_flatten_exports": {
+      "columns": [
+        "artifact_id",
+        "canvas_id",
+        "section_id",
+        "section_rev",
+        "size_preset",
+        "background_artifact_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "document_artifact_refs": {
+      "columns": [
+        "team_id",
+        "workspace_id",
+        "owner_user_id",
+        "owner_kind",
+        "owner_id",
+        "ref_key",
+        "artifact_id",
+        "artifact_sha256",
+        "retention_class",
+        "released_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "document_command_receipts": {
+      "columns": [
+        "team_id",
+        "workspace_id",
+        "owner_user_id",
+        "command_id",
+        "command_kind",
+        "request_hash",
+        "target_id",
+        "result_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "document_confirmations": {
+      "columns": [
+        "job_id",
+        "team_id",
+        "workspace_id",
+        "user_id",
+        "command_id",
+        "draft_digest",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "document_continuations": {
+      "columns": [
+        "parent_job_id",
+        "job_id",
+        "question_digest",
+        "instruction"
+      ],
+      "owner_columns": []
+    },
+    "document_dispatches": {
+      "columns": [
+        "job_id",
+        "profile",
+        "image_id",
+        "model_config_version",
+        "capability_execution_id"
+      ],
+      "owner_columns": []
+    },
+    "document_draft_files": {
+      "columns": [
+        "job_id",
+        "name",
+        "artifact_id",
+        "path",
+        "sha256",
+        "size_bytes",
+        "verified_at",
+        "cleanup_after"
+      ],
+      "owner_columns": []
+    },
+    "document_executions": {
+      "columns": [
+        "job_id",
+        "state",
+        "owner",
+        "lease_until",
+        "image_id",
+        "context_json",
+        "response",
+        "draft_json",
+        "draft_digest",
+        "error_code",
+        "question",
+        "rate_card_version",
+        "settled_credits",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "document_input_copies": {
+      "columns": [
+        "artifact_id",
+        "job_id",
+        "input_index",
+        "source_artifact_id",
+        "source_path",
+        "path",
+        "filename",
+        "mime",
+        "size_bytes",
+        "sha256",
+        "role",
+        "verified_at",
+        "cleanup_claimed_at",
+        "cleanup_after"
+      ],
+      "owner_columns": []
+    },
+    "document_input_sets": {
+      "columns": [
+        "job_id",
+        "team_id",
+        "workspace_id",
+        "owner_user_id",
+        "request_hash",
+        "input_count",
+        "created_at",
+        "frozen_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "document_job_events": {
+      "columns": [
+        "job_id",
+        "event_no",
+        "attempt",
+        "proposal_revision",
+        "type",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "document_job_links": {
+      "columns": [
+        "job_id",
+        "team_id",
+        "workspace_id",
+        "owner_user_id",
+        "session_id",
+        "turn_id",
+        "relation",
+        "command_id",
+        "created_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "document_jobs": {
+      "columns": [
+        "id",
+        "team_id",
+        "workspace_id",
+        "requested_by",
+        "session_id",
+        "origin_turn_id",
+        "action",
+        "idempotency_key",
+        "request_json",
+        "request_hash",
+        "user_source_sha256",
+        "proposal_revision",
+        "status",
+        "phase",
+        "cancel_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "requested_by"
+      ]
+    },
+    "document_model_calls": {
+      "columns": [
+        "job_id",
+        "call_no",
+        "state",
+        "provider",
+        "model",
+        "request_digest",
+        "response_digest",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "error_code",
+        "created_at",
+        "attempt_no",
+        "credit_rates_json",
+        "usage_family"
+      ],
+      "owner_columns": []
+    },
+    "document_physical_receipt_links": {
+      "columns": [
+        "job_id",
+        "attempt_no",
+        "call_no",
+        "receipt_id"
+      ],
+      "owner_columns": []
+    },
+    "document_planning_attempts": {
+      "columns": [
+        "job_id",
+        "attempt_no",
+        "creation_generation",
+        "owner_id",
+        "card_id",
+        "instruction",
+        "inputs_digest",
+        "context_json",
+        "checkpoint_json",
+        "checkpoint_digest",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "document_revision_inputs": {
+      "columns": [
+        "job_id",
+        "input_index",
+        "artifact_id",
+        "role",
+        "filename",
+        "mime",
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "owner_columns": []
+    },
+    "document_revisions": {
+      "columns": [
+        "parent_job_id",
+        "job_id",
+        "draft_digest",
+        "instruction"
+      ],
+      "owner_columns": []
+    },
+    "document_turn_dispatches": {
+      "columns": [
+        "job_id",
+        "creation_generation",
+        "owner_id",
+        "source_hash",
+        "runtime_snapshot_json",
+        "runtime_snapshot_digest",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "document_usage_receipts": {
+      "columns": [
+        "job_id",
+        "call_no",
+        "response_digest",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "created_at",
+        "settled_at",
+        "retry_after",
+        "attempt_no",
+        "credit_rates_json",
+        "usage_family"
+      ],
+      "owner_columns": []
+    },
+    "entitlement_clock": {
+      "columns": [
+        "id",
+        "highest_seen_ts"
+      ],
+      "owner_columns": []
+    },
+    "feedback_candidate_suppressions": {
+      "columns": [
+        "team_id",
+        "semantic_sig",
+        "target_kind",
+        "target_ref",
+        "last_state",
+        "last_evidence_count",
+        "pending_contributors",
+        "suppressed_until",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feedback_candidates": {
+      "columns": [
+        "id",
+        "team_id",
+        "target_kind",
+        "target_ref",
+        "base_fingerprint",
+        "proposed",
+        "rubric_text",
+        "evidence",
+        "semantic_sig",
+        "evidence_count",
+        "cluster_id",
+        "state",
+        "proposer_id",
+        "decided_by",
+        "decided_at",
+        "decide_note",
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feedback_casework": {
+      "columns": [
+        "candidate_id",
+        "team_id",
+        "trigger",
+        "status",
+        "reason_code",
+        "report_json",
+        "prefill_json",
+        "base_json",
+        "attempts",
+        "redraft_count",
+        "redraft_day",
+        "receipt_at",
+        "started_at",
+        "finished_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feishu_app_configs": {
+      "columns": [
+        "id",
+        "team_id",
+        "tenant_key",
+        "app_type",
+        "enabled",
+        "event_ingress",
+        "app_id",
+        "app_secret_ref",
+        "verification_token_ref",
+        "encrypt_key_ref",
+        "bot_open_id",
+        "group_public_answers_enabled",
+        "created_by_user_id",
+        "updated_by_user_id",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feishu_binding_sessions": {
+      "columns": [
+        "id",
+        "tenant_key",
+        "open_id",
+        "union_id",
+        "email",
+        "chat_id",
+        "source_message_id",
+        "state",
+        "bound_user_id",
+        "expires_at",
+        "created_at",
+        "updated_at",
+        "completed_at"
+      ],
+      "owner_columns": [
+        "bound_user_id"
+      ]
+    },
+    "feishu_message_dedup": {
+      "columns": [
+        "dedup_key",
+        "event_id",
+        "message_id",
+        "received_at",
+        "status"
+      ],
+      "owner_columns": []
+    },
+    "feishu_setup_sessions": {
+      "columns": [
+        "id",
+        "team_id",
+        "workspace_id",
+        "created_by_user_id",
+        "state",
+        "nonce",
+        "expires_at",
+        "tenant_key",
+        "app_type",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feishu_turn_links": {
+      "columns": [
+        "turn_id",
+        "session_id",
+        "tenant_key",
+        "chat_id",
+        "sender_open_id",
+        "source_message_id",
+        "card_message_id",
+        "answer_message_id",
+        "meta_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "feishu_user_bindings": {
+      "columns": [
+        "tenant_key",
+        "open_id",
+        "union_id",
+        "email",
+        "bowhead_user_id",
+        "binding_method",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "bowhead_user_id"
+      ]
+    },
+    "feishu_workspace_bindings": {
+      "columns": [
+        "tenant_key",
+        "chat_id",
+        "open_id",
+        "bowhead_user_id",
+        "workspace_id",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "bowhead_user_id"
+      ]
+    },
+    "group_memberships": {
+      "columns": [
+        "team_id",
+        "group_id",
+        "principal_type",
+        "principal_id",
+        "role",
+        "status",
+        "created_by",
+        "created_at",
+        "removed_at"
+      ],
+      "owner_columns": []
+    },
+    "groups": {
+      "columns": [
+        "id",
+        "team_id",
+        "workspace_id",
+        "name",
+        "description",
+        "status",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "home_proposal_cache": {
+      "columns": [
+        "user_id",
+        "workspace_id",
+        "locale",
+        "generation_id",
+        "generated_at",
+        "expires_at",
+        "capability_fingerprint",
+        "context_fingerprint",
+        "strategy",
+        "payload_json"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "identity_provider_realms": {
+      "columns": [
+        "id",
+        "provider_type",
+        "legacy_key",
+        "display_name",
+        "issuer_exact",
+        "status",
+        "allowed_algs_json",
+        "network_policy_id",
+        "tenant_constraints_json",
+        "subject_type_policy",
+        "config_version",
+        "security_epoch",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "installation_identity": {
+      "columns": [
+        "singleton",
+        "installation_id",
+        "origin_edition",
+        "current_edition",
+        "setup_complete",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "invite_intents": {
+      "columns": [
+        "secret_hash",
+        "invite_type",
+        "invite_id",
+        "token_version",
+        "created_at",
+        "expires_at",
+        "consumed_at",
+        "invalidated_at",
+        "last_seen_at"
+      ],
+      "owner_columns": []
+    },
+    "invite_tokens": {
+      "columns": [
+        "id",
+        "workspace_id",
+        "team_id",
+        "role",
+        "invited_email",
+        "token_hash",
+        "status",
+        "invited_by",
+        "created_at",
+        "expires_at",
+        "consumed_at",
+        "revoked_at",
+        "token_version",
+        "consumed_by_user_id",
+        "satisfied_at"
+      ],
+      "owner_columns": []
+    },
+    "llm_usage_daily": {
+      "columns": [
+        "day",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "reason",
+        "calls",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "llm_request_changes": {
+      "columns": [
+        "id",
+        "record_id",
+        "kind",
+        "detail_ciphertext",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "llm_request_chunks": {
+      "columns": [
+        "turn_id",
+        "chunk_hash",
+        "ciphertext",
+        "byte_size",
+        "omitted",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "llm_request_records": {
+      "columns": [
+        "id",
+        "turn_id",
+        "session_id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "reason",
+        "usage_event_id",
+        "subagent_id",
+        "provider",
+        "model",
+        "family",
+        "mode",
+        "request_digest",
+        "chunk_hashes_json",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "llm_usage_events": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "turn_id",
+        "reason",
+        "agent_type",
+        "provider",
+        "model",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "streamed",
+        "created_at",
+        "receipt_json",
+        "receipt_state",
+        "response_digest",
+        "outcome_code",
+        "settled_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "local_oidc_config_revisions": {
+      "columns": [
+        "id",
+        "config_id",
+        "revision",
+        "snapshot_json",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "local_oidc_configs": {
+      "columns": [
+        "id",
+        "team_id",
+        "status",
+        "revision",
+        "metadata_url",
+        "authorization_endpoint",
+        "token_endpoint",
+        "userinfo_endpoint",
+        "client_id",
+        "client_secret_encrypted",
+        "scopes_json",
+        "email_claim",
+        "require_verified_email",
+        "join_policy",
+        "metadata_fetched_at",
+        "metadata_expires_at",
+        "security_epoch",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "mcp_oauth_pending": {
+      "columns": [
+        "state",
+        "team_id",
+        "source_id",
+        "code_verifier",
+        "redirect_uri",
+        "token_endpoint",
+        "client_id",
+        "resource",
+        "public_entry_id",
+        "created_by",
+        "expires_at",
+        "created_at"
+      ],
+      "owner_columns": [
+        "created_by"
+      ]
+    },
+    "mcp_servers": {
+      "columns": [
+        "id",
+        "user_id",
+        "workspace_id",
+        "name",
+        "transport",
+        "command",
+        "args_json",
+        "env_json",
+        "url",
+        "pinned_version",
+        "allowed_roles_json",
+        "tools_schema_json",
+        "status",
+        "last_error",
+        "created_at",
+        "updated_at",
+        "last_started_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_applied_deletion_receipts": {
+      "columns": [
+        "receipt_id",
+        "applied_at"
+      ],
+      "owner_columns": []
+    },
+    "memory_candidate_suppressions": {
+      "columns": [
+        "user_id",
+        "source_scope_key",
+        "kind",
+        "fingerprint",
+        "decision_kind",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_candidates": {
+      "columns": [
+        "id",
+        "user_id",
+        "subject_type",
+        "kind",
+        "key",
+        "value_json",
+        "reason",
+        "source_turn_id",
+        "status",
+        "decided_by",
+        "decided_at",
+        "created_at",
+        "updated_at",
+        "version",
+        "content_fingerprint",
+        "decision_kind",
+        "target_scope_type",
+        "target_workspace_id",
+        "approved_resource_type",
+        "approved_resource_id",
+        "duplicate_of_candidate_id",
+        "duplicate_count",
+        "content_redacted_at",
+        "workspace_id",
+        "expiry_warned_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_destructive_operation_items": {
+      "columns": [
+        "operation_id",
+        "group_id",
+        "group_order",
+        "resource_type",
+        "resource_id",
+        "expected_version",
+        "expected_state",
+        "action_state",
+        "error_code"
+      ],
+      "owner_columns": []
+    },
+    "memory_destructive_operations": {
+      "columns": [
+        "id",
+        "user_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "operation_type",
+        "target_id",
+        "cutoff_at",
+        "privacy_epoch",
+        "status",
+        "phase",
+        "progress_current",
+        "progress_total",
+        "attempt_count",
+        "ledger_prepared_at",
+        "last_error_code",
+        "result_json",
+        "created_at",
+        "updated_at",
+        "completed_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_entries": {
+      "columns": [
+        "id",
+        "subject_type",
+        "subject_id",
+        "kind",
+        "key",
+        "value",
+        "locked",
+        "lock_reason",
+        "source",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "workspace_id",
+        "version",
+        "memory_role",
+        "value_schema",
+        "memory_policy_version",
+        "created_source_type",
+        "created_source_turn_id",
+        "created_source_candidate_id",
+        "created_source_workspace_id",
+        "last_modified_actor_type",
+        "last_modified_actor_id",
+        "last_modified_at",
+        "memory_type",
+        "confidence",
+        "last_confirmed_at",
+        "superseded_by",
+        "previous_value",
+        "previous_value_at"
+      ],
+      "owner_columns": []
+    },
+    "memory_gc_state": {
+      "columns": [
+        "cron_name",
+        "last_run_at"
+      ],
+      "owner_columns": []
+    },
+    "memory_migration_state": {
+      "columns": [
+        "key",
+        "value",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "memory_mutation_idempotency": {
+      "columns": [
+        "user_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "result_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_note_anchors": {
+      "columns": [
+        "id",
+        "user_id",
+        "bullet_text",
+        "bullet_text_norm",
+        "canvas_id",
+        "section_id",
+        "verifier_result_hash",
+        "saved_at",
+        "status",
+        "invalidated_at",
+        "invalidation_reason"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_notes": {
+      "columns": [
+        "id",
+        "subject_type",
+        "subject_id",
+        "content",
+        "source",
+        "source_turn_id",
+        "editing_locked_until",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "verification_anchor",
+        "verification_status",
+        "version",
+        "created_source_type",
+        "created_source_turn_id",
+        "created_source_candidate_id",
+        "created_source_workspace_id",
+        "last_modified_actor_type",
+        "last_modified_actor_id",
+        "last_modified_at",
+        "editing_lock_token_hash",
+        "editing_lock_owner_type"
+      ],
+      "owner_columns": []
+    },
+    "memory_pack_snapshots": {
+      "columns": [
+        "turn_id",
+        "user_id",
+        "team_id",
+        "workspace_id",
+        "content",
+        "char_count",
+        "sections_breakdown_json",
+        "pack_version",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_privacy_state": {
+      "columns": [
+        "user_id",
+        "current_epoch",
+        "barrier_status",
+        "barrier_operation_id",
+        "barrier_started_at",
+        "last_completed_delete_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_reset_snapshot_items": {
+      "columns": [
+        "snapshot_id",
+        "restore_group_id",
+        "resource_type",
+        "resource_id",
+        "display_type",
+        "resource_version",
+        "deleted_version",
+        "payload_json",
+        "restore_state",
+        "restore_error",
+        "restored_at"
+      ],
+      "owner_columns": []
+    },
+    "memory_reset_snapshots": {
+      "columns": [
+        "id",
+        "user_id",
+        "snapshot_json",
+        "created_at",
+        "schema_version",
+        "snapshot_type",
+        "target_resource_type",
+        "target_resource_id",
+        "expires_at",
+        "consumed_at",
+        "counts_json"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_resource_deletion_tombstones": {
+      "columns": [
+        "user_id",
+        "resource_type",
+        "resource_id",
+        "deleted_through_version",
+        "deleted_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "memory_turn_requests": {
+      "columns": [
+        "user_id",
+        "turn_id",
+        "source",
+        "outcome",
+        "reason",
+        "entry_id",
+        "candidate_id",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "metrics_event_log": {
+      "columns": [
+        "id",
+        "name",
+        "user_id",
+        "attrs_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "notification_items": {
+      "columns": [
+        "id",
+        "team_id",
+        "category",
+        "type",
+        "priority",
+        "title",
+        "body",
+        "subject_type",
+        "subject_id",
+        "actor_user_id",
+        "action_url",
+        "actions_json",
+        "metadata_json",
+        "dedupe_key",
+        "state",
+        "resolved_at",
+        "resolved_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "notification_recipients": {
+      "columns": [
+        "notification_id",
+        "user_id",
+        "role",
+        "delivered_at",
+        "read_at",
+        "archived_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "oauth_state": {
+      "columns": [
+        "state",
+        "provider",
+        "next_path",
+        "public_entry_id",
+        "expires_at",
+        "created_at",
+        "flow_kind",
+        "invite_intent_hash",
+        "redirect_uri"
+      ],
+      "owner_columns": []
+    },
+    "oidc_audit_events": {
+      "columns": [
+        "id",
+        "team_id",
+        "provider_id",
+        "actor_id",
+        "event_type",
+        "result_code",
+        "request_id",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "oidc_auth_sessions": {
+      "columns": [
+        "auth_session_generation",
+        "provider_id",
+        "subject",
+        "user_id",
+        "config_revision",
+        "security_epoch",
+        "require_verified_email",
+        "created_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "oidc_callback_routes": {
+      "columns": [
+        "id",
+        "public_route_id",
+        "provider_id",
+        "public_entry_id",
+        "redirect_uri",
+        "status",
+        "created_by",
+        "created_at",
+        "tombstoned_at",
+        "tombstone_reason"
+      ],
+      "owner_columns": []
+    },
+    "oidc_client_registration_revisions": {
+      "columns": [
+        "id",
+        "client_registration_id",
+        "provider_id",
+        "revision",
+        "client_id",
+        "client_auth_method",
+        "secret_version_id",
+        "scopes_json",
+        "redirect_uris_json",
+        "config_digest",
+        "status",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "oidc_client_registrations": {
+      "columns": [
+        "id",
+        "provider_id",
+        "logical_name",
+        "active_revision_id",
+        "status",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "oidc_client_secret_versions": {
+      "columns": [
+        "id",
+        "client_registration_id",
+        "version",
+        "secret_ref",
+        "status",
+        "not_before",
+        "not_after",
+        "created_by",
+        "created_at",
+        "retired_at"
+      ],
+      "owner_columns": []
+    },
+    "oidc_identities": {
+      "columns": [
+        "provider_id",
+        "subject",
+        "user_id",
+        "claims_digest",
+        "status",
+        "linked_at",
+        "last_used_at",
+        "userinfo_encrypted",
+        "userinfo_captured_at",
+        "userinfo_schema_version"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "oidc_jwks_snapshots": {
+      "columns": [
+        "id",
+        "provider_id",
+        "metadata_snapshot_id",
+        "jwks_json",
+        "document_digest",
+        "fetched_at",
+        "fresh_until",
+        "hard_expires_at",
+        "status"
+      ],
+      "owner_columns": []
+    },
+    "oidc_login_transactions": {
+      "columns": [
+        "id",
+        "state_hash",
+        "config_id",
+        "config_revision",
+        "team_id",
+        "public_entry_id",
+        "redirect_uri",
+        "browser_binding_hash",
+        "pkce_verifier_encrypted",
+        "return_to",
+        "expires_at",
+        "consumed_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "oidc_metadata_snapshots": {
+      "columns": [
+        "id",
+        "provider_id",
+        "issuer_exact",
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+        "userinfo_endpoint",
+        "response_modes_json",
+        "code_challenge_methods_json",
+        "token_auth_methods_json",
+        "id_token_algs_json",
+        "capabilities_json",
+        "document_digest",
+        "protocol_config_digest",
+        "fetched_at",
+        "fresh_until",
+        "hard_expires_at",
+        "status"
+      ],
+      "owner_columns": []
+    },
+    "oidc_public_entry_bindings": {
+      "columns": [
+        "id",
+        "team_binding_id",
+        "provider_id",
+        "client_registration_id",
+        "public_entry_id",
+        "redirect_uri",
+        "mix_up_defense",
+        "callback_route_id",
+        "registration_status",
+        "attested_binding_revision_id",
+        "attested_client_revision_id",
+        "attested_metadata_snapshot_id",
+        "entry_updated_at",
+        "attested_by",
+        "attested_at",
+        "verified_at",
+        "last_test_result",
+        "last_tested_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "pbi_connection_legacy_0022": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "tenant_id",
+        "workspace_id",
+        "dataset_id",
+        "master_upn",
+        "per_user_rls",
+        "auth_ref",
+        "token_hint",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "personal_mcp_binding": {
+      "columns": [
+        "agent_id",
+        "revision_id",
+        "owner_user_id",
+        "tool_ids_json",
+        "version"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "personal_mcp_connection": {
+      "columns": [
+        "id",
+        "owner_user_id",
+        "name",
+        "endpoint",
+        "auth_type",
+        "auth_cipher",
+        "status",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "personal_mcp_invocation": {
+      "columns": [
+        "id",
+        "owner_user_id",
+        "turn_id",
+        "execution_id",
+        "call_id",
+        "tool_id",
+        "connection_id",
+        "connection_version",
+        "schema_digest",
+        "args_digest",
+        "args_cipher",
+        "status",
+        "created_at",
+        "expires_at",
+        "duration_ms"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "personal_mcp_manifest": {
+      "columns": [
+        "turn_id",
+        "execution_id",
+        "owner_user_id",
+        "agent_id",
+        "revision_id",
+        "binding_version",
+        "tools_json"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "personal_mcp_session_tool_allowance": {
+      "columns": [
+        "owner_user_id",
+        "session_id",
+        "connection_id",
+        "tool_id",
+        "created_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "personal_mcp_tool": {
+      "columns": [
+        "id",
+        "connection_id",
+        "remote_name",
+        "description",
+        "schema_json",
+        "schema_digest",
+        "risk",
+        "selected"
+      ],
+      "owner_columns": []
+    },
+    "personal_slack_oauth_states": {
+      "columns": [
+        "state",
+        "connection_id",
+        "owner_user_id",
+        "team_id",
+        "expires_at",
+        "created_at",
+        "redirect_uri"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "plan_steps": {
+      "columns": [
+        "id",
+        "plan_id",
+        "seq",
+        "level",
+        "agent_name",
+        "objective",
+        "deliverable",
+        "depends_on",
+        "needs_corpus",
+        "needs_web",
+        "status",
+        "origin",
+        "included",
+        "turn_id",
+        "output_section_ids",
+        "result_digest",
+        "payload_json",
+        "tokens_input",
+        "tokens_output",
+        "error",
+        "error_kind",
+        "created_at",
+        "updated_at",
+        "success_criteria",
+        "verify_json",
+        "superseded_by",
+        "input_manifest_json",
+        "agent_choice_json"
+      ],
+      "owner_columns": []
+    },
+    "plans": {
+      "columns": [
+        "id",
+        "session_id",
+        "workspace_id",
+        "user_id",
+        "title",
+        "objective",
+        "deliverable_kind",
+        "status",
+        "spec_json",
+        "current_rev",
+        "canvas_id",
+        "execution_started_at",
+        "created_at",
+        "updated_at",
+        "execution_turn_id",
+        "replan_count"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "public_entries": {
+      "columns": [
+        "id",
+        "team_id",
+        "base_url",
+        "scheme",
+        "host",
+        "port",
+        "base_path",
+        "is_default",
+        "status",
+        "verification_method",
+        "verification_token_hash",
+        "verification_expires_at",
+        "verified_at",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "public_entry_audit": {
+      "columns": [
+        "id",
+        "team_id",
+        "entry_id",
+        "action",
+        "actor_id",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "public_entry_challenge_attempts": {
+      "columns": [
+        "entry_id",
+        "peer_key",
+        "window_started_at",
+        "attempt_count"
+      ],
+      "owner_columns": []
+    },
+    "rate_limit_buckets": {
+      "columns": [
+        "bucket_key",
+        "window_start",
+        "count"
+      ],
+      "owner_columns": []
+    },
+    "ref_audit_log": {
+      "columns": [
+        "id",
+        "turn_id",
+        "user_id",
+        "workspace_id",
+        "event_type",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "refresh_tokens": {
+      "columns": [
+        "id",
+        "user_id",
+        "token_hash",
+        "expires_at",
+        "created_at",
+        "last_used_at",
+        "revoked_at",
+        "user_agent",
+        "ip"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "registered_facts": {
+      "columns": [
+        "fact_id",
+        "workspace_id",
+        "project_id",
+        "user_id",
+        "fact_key",
+        "fact_type",
+        "value_json",
+        "source",
+        "is_user_corrected",
+        "confidence",
+        "created_at",
+        "updated_at",
+        "source_session_id",
+        "source_turn_id"
+      ],
+      "owner_columns": []
+    },
+    "registered_facts_history": {
+      "columns": [
+        "history_id",
+        "fact_id",
+        "workspace_id",
+        "fact_key",
+        "fact_type",
+        "value_json",
+        "source",
+        "superseded_at",
+        "superseded_by_session_id",
+        "superseded_by_turn_id"
+      ],
+      "owner_columns": []
+    },
+    "resource_change_receipt": {
+      "columns": [
+        "team_id",
+        "actor_user_id",
+        "idempotency_key",
+        "resource_kind",
+        "resource_id",
+        "action",
+        "request_digest",
+        "impact_digest",
+        "response_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "resource_dependency_edge": {
+      "columns": [
+        "edge_key",
+        "team_id",
+        "subject_kind",
+        "subject_ref",
+        "agent_id",
+        "resource_kind",
+        "resource_ref",
+        "resource_parent_ref",
+        "resource_revision",
+        "dependency_role",
+        "evidence_level",
+        "subject_fingerprint",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "resource_dependency_subject_projection": {
+      "columns": [
+        "team_id",
+        "subject_kind",
+        "subject_ref",
+        "agent_id",
+        "subject_fingerprint",
+        "status",
+        "reason_code",
+        "compiler_version",
+        "projected_at"
+      ],
+      "owner_columns": []
+    },
+    "resource_file_cleanup_receipt": {
+      "columns": [
+        "cleanup_id",
+        "team_id",
+        "actor_user_id",
+        "idempotency_key",
+        "resource_kind",
+        "resource_id",
+        "original_path",
+        "quarantine_path",
+        "state",
+        "error_code",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "resource_grants": {
+      "columns": [
+        "id",
+        "team_id",
+        "resource_kind",
+        "resource_id",
+        "principal_type",
+        "principal_id",
+        "permission",
+        "effect",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "expires_at",
+        "revoked_at"
+      ],
+      "owner_columns": []
+    },
+    "resource_refresh_candidate": {
+      "columns": [
+        "team_id",
+        "actor_user_id",
+        "resource_id",
+        "candidate_digest",
+        "resource_state_digest",
+        "candidate_json",
+        "expires_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "scheduled_job_agent_binding": {
+      "columns": [
+        "job_id",
+        "assignment_id",
+        "agent_id",
+        "agent_source_kind",
+        "revision_ref",
+        "release_id",
+        "capability_fingerprint",
+        "dependency_fingerprint",
+        "follow_mode",
+        "state",
+        "confirmed_by",
+        "confirmed_at",
+        "row_version"
+      ],
+      "owner_columns": []
+    },
+    "scheduled_job_runs": {
+      "columns": [
+        "id",
+        "job_id",
+        "turn_id",
+        "started_at",
+        "finished_at",
+        "status",
+        "error"
+      ],
+      "owner_columns": []
+    },
+    "scheduled_jobs": {
+      "columns": [
+        "id",
+        "user_id",
+        "workspace_id",
+        "name",
+        "cron",
+        "tz",
+        "query",
+        "session_strategy",
+        "anchor_session_id",
+        "notify_channels",
+        "status",
+        "failure_count",
+        "next_run_at",
+        "last_run_at",
+        "last_turn_id",
+        "created_at",
+        "updated_at",
+        "datarc_workspace_id",
+        "public_entry_id",
+        "pause_reason",
+        "recipe_ref",
+        "run_params"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "security_key_epochs": {
+      "columns": [
+        "purpose",
+        "key_id",
+        "activated_at",
+        "retired_at",
+        "accept_until"
+      ],
+      "owner_columns": []
+    },
+    "session_attachments": {
+      "columns": [
+        "session_id",
+        "artifact_id",
+        "pinned_at",
+        "detached_at"
+      ],
+      "owner_columns": []
+    },
+    "session_lifecycle_operations": {
+      "columns": [
+        "operation_id",
+        "team_id",
+        "session_audit_ref",
+        "account_audit_ref",
+        "parent_operation_id",
+        "request_id",
+        "action",
+        "state",
+        "expected_deleted_state",
+        "new_deleted_state",
+        "expected_session_visibility_epoch",
+        "new_session_visibility_epoch",
+        "target_session_count",
+        "target_sessions_digest",
+        "materialization_cursor_team_id",
+        "materialization_cursor_session_id",
+        "next_child_ordinal",
+        "prior_detached_session_count",
+        "prior_detached_operations_digest",
+        "account_fence_epoch",
+        "account_fence_committed_at",
+        "protocol_delete_identities_digest",
+        "result_code",
+        "row_version",
+        "actor_audit_ref",
+        "operation_owner_instance_id",
+        "operation_claim_epoch",
+        "operation_lease_expires_at",
+        "operation_heartbeat_at",
+        "next_attempt_at",
+        "created_at",
+        "updated_at",
+        "committed_at"
+      ],
+      "owner_columns": []
+    },
+    "session_lifecycle_targets": {
+      "columns": [
+        "target_id",
+        "parent_operation_id",
+        "child_ordinal",
+        "team_id",
+        "session_audit_ref",
+        "required_action",
+        "dependency_operation_id",
+        "bound_operation_id",
+        "state",
+        "discovery_source_kind",
+        "source_operation_id",
+        "expected_session_audit_digest",
+        "session_audit_key_version",
+        "row_version",
+        "created_at",
+        "updated_at",
+        "committed_at"
+      ],
+      "owner_columns": []
+    },
+    "sessions": {
+      "columns": [
+        "id",
+        "workspace_id",
+        "user_id",
+        "title",
+        "started_at",
+        "last_active_at",
+        "ended_at",
+        "status",
+        "cost_usd",
+        "tokens_total",
+        "intents",
+        "skill_applied",
+        "active_turn_id",
+        "steer_buffer_json",
+        "origin",
+        "deleted_at",
+        "active_turn_protocol_version",
+        "active_turn_generation",
+        "active_turn_claim_epoch",
+        "recovery_lock_turn_id",
+        "recovery_lock_generation",
+        "recovery_lock_reason",
+        "steer_buffer_revision",
+        "steer_freeze_turn_id",
+        "steer_freeze_generation",
+        "steer_freeze_claim_epoch",
+        "steer_frozen_revision",
+        "steer_buffer_state",
+        "title_source"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "skill_instances": {
+      "columns": [
+        "id",
+        "user_id",
+        "name",
+        "source_type",
+        "source_path",
+        "version",
+        "description",
+        "enabled",
+        "source_turn_id",
+        "size_bytes",
+        "verdict",
+        "verdict_json",
+        "risk_report_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "slack_connections": {
+      "columns": [
+        "id",
+        "team_id",
+        "slack_team_id",
+        "client_id",
+        "client_secret_ref",
+        "signing_secret_ref",
+        "bot_token_ref",
+        "bot_user_id",
+        "channel_answers_enabled",
+        "status",
+        "created_by_user_id",
+        "updated_by_user_id",
+        "created_at",
+        "updated_at",
+        "slack_app_id"
+      ],
+      "owner_columns": []
+    },
+    "slack_event_dedup": {
+      "columns": [
+        "connection_id",
+        "event_id",
+        "received_at"
+      ],
+      "owner_columns": []
+    },
+    "slack_identity_bindings": {
+      "columns": [
+        "connection_id",
+        "slack_user_id",
+        "bowhead_user_id",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "bowhead_user_id"
+      ]
+    },
+    "slack_oauth_states": {
+      "columns": [
+        "state",
+        "connection_id",
+        "expires_at",
+        "created_at",
+        "redirect_uri"
+      ],
+      "owner_columns": []
+    },
+    "slack_workspace_bindings": {
+      "columns": [
+        "connection_id",
+        "conversation_id",
+        "slack_user_id",
+        "workspace_id",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "smtp_outbox": {
+      "columns": [
+        "id",
+        "to_email",
+        "subject",
+        "body",
+        "purpose",
+        "status",
+        "attempts",
+        "last_error",
+        "created_at",
+        "sent_at",
+        "next_attempt_at",
+        "team_id",
+        "html_body",
+        "public_entry_id",
+        "brand_revision_id",
+        "branding_snapshot"
+      ],
+      "owner_columns": []
+    },
+    "space_instruction_versions": {
+      "columns": [
+        "workspace_id",
+        "version",
+        "content",
+        "created_by",
+        "created_at",
+        "restored_from",
+        "source_candidate_id"
+      ],
+      "owner_columns": []
+    },
+    "subagent_resume_checkpoints": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "session_id",
+        "turn_id",
+        "run_subagent_id",
+        "profile",
+        "agent_id",
+        "agent_revision_id",
+        "tool_names_hash",
+        "task",
+        "completion",
+        "stop_reason",
+        "partial_done",
+        "partial_remaining",
+        "state",
+        "claimed_by_turn_id",
+        "ciphertext",
+        "payload_bytes",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "subagent_resume_requests": {
+      "columns": [
+        "turn_id",
+        "seq",
+        "checkpoint_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "system_agent_effective_revision": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "manifest_fingerprint",
+        "override_version",
+        "definition_json",
+        "definition_hash",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "system_agent_revision_behavior": {
+      "columns": [
+        "revision_id",
+        "team_id",
+        "agent_id",
+        "source_definition_hash",
+        "descriptor_json",
+        "behavior_fingerprint",
+        "compiler_version",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_brand_asset_metadata": {
+      "columns": [
+        "artifact_id",
+        "team_id",
+        "role_family",
+        "input_mime",
+        "canonical_mime",
+        "width",
+        "height",
+        "frame_count",
+        "content_sha256",
+        "has_alpha",
+        "analysis_json",
+        "published_at",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_branding_draft_copies": {
+      "columns": [
+        "id",
+        "team_id",
+        "source_draft_version",
+        "original_base_revision_id",
+        "schema_version",
+        "source_json",
+        "compiled_json",
+        "compile_status",
+        "defaults_json",
+        "behavior",
+        "application_name",
+        "logo_alt",
+        "logo_light_artifact_id",
+        "logo_dark_artifact_id",
+        "mark_artifact_id",
+        "favicon_artifact_id",
+        "release_note",
+        "generator_id",
+        "generator_version",
+        "validation_json",
+        "checksum",
+        "source_updated_by",
+        "source_updated_at",
+        "preserved_by",
+        "preserved_at"
+      ],
+      "owner_columns": []
+    },
+    "team_branding_drafts": {
+      "columns": [
+        "team_id",
+        "base_revision_id",
+        "draft_version",
+        "schema_version",
+        "source_json",
+        "defaults_json",
+        "behavior",
+        "application_name",
+        "logo_alt",
+        "logo_light_artifact_id",
+        "logo_dark_artifact_id",
+        "mark_artifact_id",
+        "favicon_artifact_id",
+        "release_note",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_branding_revisions": {
+      "columns": [
+        "id",
+        "team_id",
+        "revision_number",
+        "parent_revision_id",
+        "operation",
+        "configuration_type",
+        "schema_version",
+        "source_json",
+        "compiled_json",
+        "defaults_json",
+        "behavior",
+        "application_name",
+        "logo_alt",
+        "logo_light_artifact_id",
+        "logo_dark_artifact_id",
+        "mark_artifact_id",
+        "favicon_artifact_id",
+        "generator_id",
+        "generator_version",
+        "validation_json",
+        "checksum",
+        "release_note",
+        "published_by",
+        "published_at"
+      ],
+      "owner_columns": []
+    },
+    "team_branding_state": {
+      "columns": [
+        "team_id",
+        "active_revision_id",
+        "fallback_revision_id",
+        "management_mode",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_builtin_subagent_override": {
+      "columns": [
+        "team_id",
+        "name",
+        "enabled",
+        "display_name",
+        "description",
+        "model",
+        "skills_json",
+        "prompt_append",
+        "max_iterations",
+        "row_version",
+        "updated_by",
+        "created_at",
+        "updated_at",
+        "primary_capability"
+      ],
+      "owner_columns": []
+    },
+    "team_builtin_tool": {
+      "columns": [
+        "id",
+        "team_id",
+        "provider",
+        "display_name",
+        "endpoint",
+        "status",
+        "auth_ref",
+        "key_hint",
+        "scope_state",
+        "scope_json",
+        "scope_fingerprint",
+        "scope_checked_at",
+        "config_json",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "connection_revision"
+      ],
+      "owner_columns": []
+    },
+    "team_capability": {
+      "columns": [
+        "id",
+        "team_id",
+        "name_key",
+        "status",
+        "current_revision",
+        "row_version",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_capability_resource": {
+      "columns": [
+        "capability_id",
+        "revision",
+        "kind",
+        "resource_ref",
+        "grant_json"
+      ],
+      "owner_columns": []
+    },
+    "team_capability_revision": {
+      "columns": [
+        "capability_id",
+        "revision",
+        "name",
+        "description",
+        "content_hash",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_chart_style_drafts": {
+      "columns": [
+        "style_id",
+        "team_id",
+        "schema_version",
+        "based_on_revision_id",
+        "base_preset_id",
+        "base_preset_revision",
+        "base_preset_checksum",
+        "authoring_base_snapshot_json",
+        "authoring_base_snapshot_checksum",
+        "name",
+        "description",
+        "overrides_json",
+        "row_version",
+        "created_by",
+        "created_at",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_chart_style_registry_state": {
+      "columns": [
+        "team_id",
+        "registry_version",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_chart_style_revisions": {
+      "columns": [
+        "id",
+        "team_id",
+        "style_id",
+        "sequence",
+        "schema_version",
+        "token_schema_version",
+        "resolver_policy_version",
+        "name",
+        "name_normalized",
+        "description",
+        "base_preset_id",
+        "base_preset_revision",
+        "base_preset_checksum",
+        "authoring_base_snapshot_json",
+        "authoring_base_snapshot_checksum",
+        "overrides_json",
+        "resolved_snapshot_json",
+        "snapshot_checksum",
+        "revision_checksum",
+        "validation_policy_version",
+        "validation_json",
+        "operation",
+        "source_revision_id",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_chart_styles": {
+      "columns": [
+        "id",
+        "team_id",
+        "lifecycle",
+        "active_revision_id",
+        "active_name_normalized",
+        "fallback_builtin_preset_id",
+        "row_version",
+        "create_request_id",
+        "create_request_hash",
+        "created_by",
+        "created_at",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_identity_provider_binding_revisions": {
+      "columns": [
+        "id",
+        "team_binding_id",
+        "provider_id",
+        "revision",
+        "display_label",
+        "provisioning_policy",
+        "allowed_domains_json",
+        "email_assurance_policy",
+        "default_member_role",
+        "config_digest",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_identity_provider_bindings": {
+      "columns": [
+        "id",
+        "public_alias",
+        "team_id",
+        "provider_id",
+        "client_registration_id",
+        "active_revision_id",
+        "status",
+        "activated_at",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_invite_tokens": {
+      "columns": [
+        "id",
+        "team_id",
+        "team_role",
+        "invited_email",
+        "token_hash",
+        "status",
+        "invited_by",
+        "created_at",
+        "expires_at",
+        "consumed_at",
+        "revoked_at",
+        "token_version",
+        "consumed_by_user_id",
+        "satisfied_at",
+        "assignment_mode",
+        "assignment_revision",
+        "public_entry_id"
+      ],
+      "owner_columns": []
+    },
+    "team_invite_workspace_grants": {
+      "columns": [
+        "invite_id",
+        "workspace_id",
+        "role",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_license": {
+      "columns": [
+        "team_id",
+        "license_token",
+        "license_id",
+        "key_id",
+        "issued_at",
+        "expires_at",
+        "grace_period_days",
+        "max_seats",
+        "default_user_tier",
+        "tier_credits_json",
+        "features_json",
+        "deployment_mode",
+        "max_offline_lifetime_days",
+        "activated_at",
+        "last_verified_at",
+        "last_good_health",
+        "instance_fingerprint"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_apply_snapshots": {
+      "columns": [
+        "id",
+        "team_id",
+        "config_version",
+        "previous_config_version",
+        "actor_user_id",
+        "draft_semantic_hash",
+        "readiness_contract_version",
+        "decision_json",
+        "applied_at"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_capability_evidence": {
+      "columns": [
+        "id",
+        "team_id",
+        "provider_id",
+        "provider_display_name_snapshot",
+        "model_id",
+        "capability",
+        "config_signature",
+        "signature_version",
+        "testability_contract_version",
+        "probe_contract_version",
+        "probe_execution_policy_version",
+        "outcome",
+        "safe_code",
+        "safe_http_status",
+        "safe_summary_code",
+        "vector_dimension",
+        "batch_id",
+        "item_id",
+        "initiated_by",
+        "observed_at",
+        "fresh_until",
+        "duration_ms",
+        "actual_model_id"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_provider_identities": {
+      "columns": [
+        "team_id",
+        "provider_id",
+        "runtime_key",
+        "state",
+        "created_by",
+        "creation_source",
+        "created_at",
+        "activated_at",
+        "deleted_at",
+        "reservation_expires_at"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_risk_acceptance_retirements": {
+      "columns": [
+        "risk_acceptance_id",
+        "team_id",
+        "retired_at",
+        "retired_by_config_version",
+        "reason"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_risk_acceptances": {
+      "columns": [
+        "id",
+        "team_id",
+        "provider_id",
+        "model_id",
+        "capability",
+        "role_key",
+        "config_signature",
+        "testability_contract_version",
+        "risk_code",
+        "accepted_by",
+        "accepted_at",
+        "applied_config_version"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_v2_enrollments": {
+      "columns": [
+        "team_id",
+        "enrolled_config_version",
+        "enrolled_semantic_hash",
+        "assignments_json",
+        "rollout_generation",
+        "enrollment_source",
+        "enrolled_at"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_v2_migration_baseline_invalidations": {
+      "columns": [
+        "team_id",
+        "baseline_config_version",
+        "invalidated_at",
+        "invalidated_by_config_version",
+        "reason",
+        "changed_role_keys_json"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_v2_migration_baselines": {
+      "columns": [
+        "team_id",
+        "enrollment_config_version",
+        "enrollment_semantic_hash",
+        "baseline_config_version",
+        "baseline_semantic_hash",
+        "assignments_json",
+        "accepted_by",
+        "accepted_at",
+        "applied_config_version"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_verification_batches": {
+      "columns": [
+        "id",
+        "team_id",
+        "actor_user_id",
+        "plan_id",
+        "base_config_version",
+        "idempotency_key",
+        "request_hash",
+        "state",
+        "probe_context_ciphertext",
+        "cancel_requested_at",
+        "revision",
+        "created_at",
+        "started_at",
+        "completed_at"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_verification_items": {
+      "columns": [
+        "id",
+        "batch_id",
+        "team_id",
+        "ordinal",
+        "provider_id",
+        "model_id",
+        "capability",
+        "config_signature",
+        "testability_contract_version",
+        "probe_contract_version",
+        "probe_execution_policy_version",
+        "request_count",
+        "state",
+        "runner_id",
+        "lease_until",
+        "cancel_requested_at",
+        "revision",
+        "safe_code",
+        "safe_http_status",
+        "safe_summary_code",
+        "duration_ms",
+        "request_started_at",
+        "completed_at",
+        "actual_model_id"
+      ],
+      "owner_columns": []
+    },
+    "team_llm_verification_plans": {
+      "columns": [
+        "id",
+        "team_id",
+        "actor_user_id",
+        "request_hash",
+        "items_json",
+        "item_count",
+        "provider_request_count",
+        "created_at",
+        "expires_at",
+        "consumed_batch_id",
+        "consumed_at"
+      ],
+      "owner_columns": []
+    },
+    "team_members": {
+      "columns": [
+        "id",
+        "user_id",
+        "team_id",
+        "role",
+        "promoted_by",
+        "promoted_at",
+        "removed_at",
+        "removed_by",
+        "status",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_openapi_call_logs": {
+      "columns": [
+        "id",
+        "team_id",
+        "key_id",
+        "key_name",
+        "key_prefix",
+        "http_method",
+        "path",
+        "status_code",
+        "request_summary",
+        "response_summary",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_openapi_keys": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "token_hash",
+        "token_prefix",
+        "scopes_json",
+        "expires_at",
+        "status",
+        "created_at",
+        "last_used_at"
+      ],
+      "owner_columns": []
+    },
+    "team_reference_retention_policies": {
+      "columns": [
+        "team_id",
+        "version",
+        "days",
+        "updated_by",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_settings": {
+      "columns": [
+        "team_id",
+        "key",
+        "value",
+        "updated_at",
+        "updated_by"
+      ],
+      "owner_columns": []
+    },
+    "team_skill": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "display_name",
+        "description",
+        "source_path",
+        "visibility",
+        "verdict",
+        "verdict_json",
+        "risk_report_json",
+        "created_by",
+        "status",
+        "size_bytes",
+        "created_at",
+        "updated_at",
+        "approval",
+        "approved_sha256",
+        "approved_by",
+        "approved_at",
+        "rejected_reason",
+        "rejected_at",
+        "candidate_path",
+        "candidate_submitted_at",
+        "candidate_sha256",
+        "candidate_state",
+        "candidate_rejected_reason",
+        "submitted_by",
+        "import_provenance_json"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "display_name",
+        "description",
+        "system_prompt",
+        "tool_refs_json",
+        "model",
+        "max_iterations",
+        "skills_json",
+        "output_schema_json",
+        "visibility",
+        "created_by",
+        "status",
+        "created_at",
+        "updated_at",
+        "owner_user_id",
+        "row_version",
+        "audience_mode",
+        "lifecycle_state",
+        "quarantine_started_at",
+        "quarantine_expires_at",
+        "quarantine_reason",
+        "quarantined_owner_user_id",
+        "origin_mode",
+        "source_draft_id",
+        "live_revision_id",
+        "live_release_id",
+        "release_sequence",
+        "archived_at",
+        "archived_by",
+        "last_release_event_id",
+        "definition_mode"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_app_compatibility": {
+      "columns": [
+        "instance_id",
+        "reader_version",
+        "writer_version",
+        "started_at",
+        "heartbeat_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_authoring_context": {
+      "columns": [
+        "team_id",
+        "owner_user_id",
+        "session_id",
+        "state",
+        "purpose_text",
+        "purpose_prompt_count",
+        "insufficient_reprompt_count",
+        "business_clarification_count",
+        "draft_id",
+        "row_version",
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "team_subagent_capability_binding": {
+      "columns": [
+        "team_id",
+        "subagent_id",
+        "revision_id",
+        "capability_id"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_draft": {
+      "columns": [
+        "id",
+        "team_id",
+        "owner_user_id",
+        "workspace_id",
+        "create_payload_hash",
+        "source_mode",
+        "entry_mode",
+        "source_turn_id",
+        "status",
+        "validation_status",
+        "locale",
+        "purpose_text",
+        "goal_summary",
+        "definition_json",
+        "recommendations_json",
+        "assumptions_json",
+        "warnings_json",
+        "clarification_json",
+        "validation_issues_json",
+        "catalog_fingerprint",
+        "definition_fingerprint",
+        "idempotency_key_hash",
+        "mutation_id",
+        "generation_attempt",
+        "business_clarification_count",
+        "row_version",
+        "outcome_reason_code",
+        "consumed_definition_id",
+        "consumed_at",
+        "discarded_at",
+        "expired_at",
+        "expires_at",
+        "content_scrub_at",
+        "purge_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "team_subagent_draft_request": {
+      "columns": [
+        "team_id",
+        "owner_user_id",
+        "idempotency_key_hash",
+        "request_fingerprint",
+        "state",
+        "result_draft_id",
+        "outcome_code",
+        "lease_expires_at",
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "team_subagent_draft_suggestion": {
+      "columns": [
+        "id",
+        "draft_id",
+        "team_id",
+        "owner_user_id",
+        "request_key_hash",
+        "base_version",
+        "kind",
+        "status",
+        "payload_json",
+        "accepted_mutation_hash",
+        "accepted_version",
+        "created_at",
+        "updated_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "team_subagent_draft_usage": {
+      "columns": [
+        "team_id",
+        "owner_user_id",
+        "request_key_hash",
+        "state",
+        "reserved_credits",
+        "actual_credits",
+        "input_tokens",
+        "output_tokens",
+        "attempts",
+        "draft_id",
+        "reservation_ledger_id",
+        "adjustment_ledger_id",
+        "usage_event_id",
+        "lease_expires_at",
+        "created_at",
+        "updated_at",
+        "billing_rate_card_version",
+        "model_usage_json"
+      ],
+      "owner_columns": [
+        "owner_user_id"
+      ]
+    },
+    "team_subagent_fork_lineage": {
+      "columns": [
+        "id",
+        "team_id",
+        "fork_agent_id",
+        "source_agent_id",
+        "source_kind",
+        "source_revision_ref",
+        "source_release_id",
+        "source_owner_user_id",
+        "source_display_name",
+        "policy_snapshot_json",
+        "source_snapshot_hash",
+        "fork_revision_ref",
+        "dependency_gaps_json",
+        "idempotency_hash",
+        "request_hash",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_fork_policy": {
+      "columns": [
+        "team_id",
+        "source_agent_id",
+        "policy",
+        "row_version",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_notification_outbox": {
+      "columns": [
+        "id",
+        "release_event_id",
+        "recipient_user_id",
+        "notification_type",
+        "dedupe_key",
+        "payload_json",
+        "state",
+        "attempt_count",
+        "next_attempt_at",
+        "lease_owner",
+        "lease_expires_at",
+        "delivered_at",
+        "last_error_code",
+        "created_at"
+      ],
+      "owner_columns": [
+        "recipient_user_id"
+      ]
+    },
+    "team_subagent_release": {
+      "columns": [
+        "id",
+        "team_id",
+        "subagent_id",
+        "release_sequence",
+        "revision_id",
+        "predecessor_release_id",
+        "source_candidate_id",
+        "audience_snapshot_json",
+        "audience_hash",
+        "capability_fingerprint",
+        "dependency_fingerprint",
+        "risk_json",
+        "safety_report_id",
+        "eval_evidence_json",
+        "release_note",
+        "activated_by",
+        "activated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_release_candidate": {
+      "columns": [
+        "id",
+        "team_id",
+        "subagent_id",
+        "revision_id",
+        "base_live_release_id",
+        "target_audience_json",
+        "target_audience_hash",
+        "capability_fingerprint",
+        "dependency_fingerprint",
+        "risk_compiler_version",
+        "risk_json",
+        "safety_report_id",
+        "eval_evidence_json",
+        "release_note",
+        "candidate_hash",
+        "state",
+        "row_version",
+        "submitted_by",
+        "submitted_at",
+        "decided_by",
+        "decision_reason_code",
+        "self_review",
+        "decided_at",
+        "activated_release_id",
+        "updated_at",
+        "plugin_versions_json"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_release_event": {
+      "columns": [
+        "id",
+        "team_id",
+        "subagent_id",
+        "release_id",
+        "candidate_id",
+        "event_type",
+        "actor_user_id",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_revision": {
+      "columns": [
+        "id",
+        "team_id",
+        "subagent_id",
+        "sequence",
+        "revision_kind",
+        "definition_json",
+        "listing_json",
+        "definition_hash",
+        "dependency_fingerprint",
+        "capability_fingerprint",
+        "risk_compiler_version",
+        "risk_json",
+        "created_by",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_revision_behavior": {
+      "columns": [
+        "revision_id",
+        "team_id",
+        "subagent_id",
+        "source_definition_hash",
+        "descriptor_json",
+        "behavior_fingerprint",
+        "compiler_version",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_revision_extensions": {
+      "columns": [
+        "revision_ref",
+        "team_id",
+        "agent_id",
+        "definition_hash",
+        "extension_policy_digest",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_schema_meta": {
+      "columns": [
+        "singleton",
+        "schema_version",
+        "minimum_reader_version",
+        "minimum_writer_version",
+        "owner_semantics_activated_at",
+        "lifecycle_semantics_activated_at",
+        "audience_semantics_activated_at",
+        "updated_at",
+        "release_semantics_activated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_subagent_working_copy": {
+      "columns": [
+        "id",
+        "team_id",
+        "subagent_id",
+        "base_release_id",
+        "definition_json",
+        "listing_json",
+        "audience_json",
+        "validation_json",
+        "row_version",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "team_tool_call_log": {
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "source_id",
+        "tool_name",
+        "args_digest",
+        "status",
+        "error_kind",
+        "ssrf_verdict",
+        "duration_ms",
+        "upstream_status",
+        "bytes_out",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "team_tool_source": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "kind",
+        "spec_url",
+        "openapi_spec_json",
+        "selected_op_ids_json",
+        "base_url",
+        "auth_type",
+        "auth_ref",
+        "tools_schema_json",
+        "tool_overrides_json",
+        "visibility",
+        "created_by",
+        "status",
+        "created_at",
+        "updated_at",
+        "prompts_schema_json"
+      ],
+      "owner_columns": []
+    },
+    "teams": {
+      "columns": [
+        "id",
+        "name",
+        "domain",
+        "llm_config_encrypted",
+        "max_seats",
+        "default_user_tier",
+        "team_credit_balance",
+        "team_credit_quota",
+        "team_credit_period_start",
+        "tier_credits_json",
+        "status",
+        "created_at",
+        "contract_expires_at",
+        "created_by_user_id",
+        "llm_config_version",
+        "email_config_encrypted",
+        "email_config_version",
+        "report_timezone"
+      ],
+      "owner_columns": []
+    },
+    "teams_activity_dedup": {
+      "columns": [
+        "activity_id",
+        "received_at"
+      ],
+      "owner_columns": []
+    },
+    "teams_connections": {
+      "columns": [
+        "id",
+        "team_id",
+        "cloud",
+        "entra_tenant_id",
+        "microsoft_app_id",
+        "app_type",
+        "app_secret_ref",
+        "managed_identity_client_id",
+        "sso_auth_app_id",
+        "sso_audience",
+        "sso_connection_name",
+        "teams_manifest_id",
+        "allowed_scopes_json",
+        "status",
+        "secret_expires_at",
+        "created_by_user_id",
+        "updated_by_user_id",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "teams_identity_bindings": {
+      "columns": [
+        "entra_tenant_id",
+        "entra_oid",
+        "bowhead_user_id",
+        "team_id",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "bowhead_user_id"
+      ]
+    },
+    "teams_workspace_bindings": {
+      "columns": [
+        "entra_tenant_id",
+        "conversation_id",
+        "entra_oid",
+        "workspace_id",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "terminal_auth_scope_epochs": {
+      "columns": [
+        "scope_kind",
+        "team_id",
+        "scope_ref",
+        "epoch",
+        "row_version",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "terminal_protocol_deployment_attestations": {
+      "columns": [
+        "attestation_id",
+        "deployment_id",
+        "expected_instance_count",
+        "reader_capable_instance_count",
+        "old_writer_instance_count",
+        "certifier_actor_ref",
+        "certified_at",
+        "expires_at",
+        "evidence_digest"
+      ],
+      "owner_columns": []
+    },
+    "terminal_protocol_writer_lease": {
+      "columns": [
+        "lease_name",
+        "owner_instance_id",
+        "epoch",
+        "admission_state",
+        "admission_epoch",
+        "rollout_config_generation",
+        "deployment_attestation_id",
+        "lease_expires_at",
+        "heartbeat_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_agent_binding": {
+      "columns": [
+        "turn_id",
+        "team_id",
+        "user_id",
+        "assignment_id",
+        "requested_agent_id",
+        "agent_source_kind",
+        "revision_ref",
+        "release_id",
+        "binding_source",
+        "capability_fingerprint",
+        "policy_fingerprint",
+        "created_at",
+        "primary_execution_id"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "turn_agent_execution": {
+      "columns": [
+        "id",
+        "team_id",
+        "turn_id",
+        "parent_execution_id",
+        "agent_id",
+        "agent_source_kind",
+        "revision_ref",
+        "release_id",
+        "dispatch_source",
+        "dispatch_key",
+        "runtime_profile_name",
+        "capability_fingerprint",
+        "policy_fingerprint",
+        "status",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "failure_code",
+        "resolved_definition_json"
+      ],
+      "owner_columns": []
+    },
+    "turn_attachments": {
+      "columns": [
+        "turn_id",
+        "artifact_id",
+        "seq"
+      ],
+      "owner_columns": []
+    },
+    "turn_cancel_receipts": {
+      "columns": [
+        "team_id",
+        "user_id",
+        "cancel_request_id",
+        "workspace_id",
+        "turn_id",
+        "expected_execution_generation",
+        "outcome",
+        "turn_erased",
+        "created_at",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "turn_capability_execution": {
+      "columns": [
+        "id",
+        "team_id",
+        "turn_id",
+        "agent_execution_id",
+        "composition_node_id",
+        "attempt_generation",
+        "capability_id",
+        "capability_version",
+        "implementation_id",
+        "implementation_version",
+        "adapter_id",
+        "prompt_module_fingerprint",
+        "dependency_fingerprint",
+        "input_artifact_refs_json",
+        "output_contract",
+        "status",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "failure_code"
+      ],
+      "owner_columns": []
+    },
+    "turn_citations": {
+      "columns": [
+        "turn_id",
+        "seq",
+        "artifact_id",
+        "label",
+        "kind",
+        "registered_at",
+        "kb_generation_id",
+        "kb_source_check_state"
+      ],
+      "owner_columns": []
+    },
+    "turn_control_decisions": {
+      "columns": [
+        "decision_id",
+        "source_kind",
+        "source_id",
+        "turn_id",
+        "prior_generation",
+        "action",
+        "decision_digest",
+        "state",
+        "target_generation",
+        "actor_ref",
+        "authz_snapshot_digest",
+        "created_at",
+        "recorded_at",
+        "consumed_at",
+        "requester_ref",
+        "effect_principal_ref",
+        "source_projection_json",
+        "source_projection_digest",
+        "prior_receipt_id",
+        "prior_generation_transition_epoch",
+        "recovery_attempt_count",
+        "recovery_next_attempt_at",
+        "recovery_last_code",
+        "control_outcome_code"
+      ],
+      "owner_columns": []
+    },
+    "turn_decision_effects": {
+      "columns": [
+        "effect_id",
+        "decision_id",
+        "effect_kind",
+        "target_ref",
+        "payload_json",
+        "payload_digest",
+        "state",
+        "claim_owner",
+        "claim_epoch",
+        "claim_expires_at",
+        "next_attempt_at",
+        "attempt_count",
+        "last_code",
+        "resolution_code",
+        "created_at",
+        "applied_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_delivery_intents": {
+      "columns": [
+        "intent_id",
+        "receipt_id",
+        "surface",
+        "binding_ref",
+        "status",
+        "lease_owner",
+        "lease_epoch",
+        "lease_expires_at",
+        "expected_delivery_fence_epoch",
+        "expected_auth_fence_vector_digest",
+        "attempt_count",
+        "idempotency_key",
+        "created_at",
+        "delivered_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_effect_attempts": {
+      "columns": [
+        "attempt_id",
+        "turn_id",
+        "generation",
+        "claim_epoch",
+        "effect_class",
+        "provider",
+        "action_ref",
+        "idempotency_or_fence_token",
+        "non_retriable",
+        "state",
+        "row_version",
+        "started_at",
+        "settled_at",
+        "result_digest",
+        "settlement_id",
+        "retention_state"
+      ],
+      "owner_columns": []
+    },
+    "turn_effect_evidence_links": {
+      "columns": [
+        "evidence_link_id",
+        "team_id",
+        "audit_object_ref",
+        "evidence_digest",
+        "object_version_digest",
+        "retention_state",
+        "purge_request_id",
+        "purge_owner",
+        "purge_lease_epoch",
+        "purge_lease_expires_at",
+        "delete_idempotency_key",
+        "delete_outcome_digest",
+        "purge_after",
+        "purged_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_effect_retention_member_keys": {
+      "columns": [
+        "member_key_id",
+        "team_id",
+        "attempt_identity_digest",
+        "provider_token_digest",
+        "audit_key_version",
+        "tombstone_id",
+        "expires_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_effect_retention_tombstones": {
+      "columns": [
+        "tombstone_id",
+        "team_id",
+        "turn_id",
+        "generation",
+        "effect_bundle_digest",
+        "audit_key_version",
+        "attempt_count",
+        "provider_token_digests_digest",
+        "settlement_outcomes_digest",
+        "state",
+        "eligible_at",
+        "provider_dedup_horizon_at",
+        "expires_at",
+        "row_version",
+        "created_at",
+        "aggregated_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_effect_settlements": {
+      "columns": [
+        "settlement_id",
+        "attempt_id",
+        "source",
+        "outcome",
+        "settlement_code",
+        "actor_audit_ref",
+        "authz_snapshot_digest",
+        "provider_external_ref_digest",
+        "provider_external_ref_key_version",
+        "evidence_link_id",
+        "evidence_digest",
+        "evidence_recorded_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_event_proposals": {
+      "columns": [
+        "proposal_id",
+        "event_id",
+        "turn_id",
+        "generation",
+        "accept_ordinal",
+        "accepted_claim_epoch",
+        "event_type",
+        "actor_scope",
+        "phase_scope",
+        "payload_json",
+        "payload_digest",
+        "durability",
+        "state",
+        "accepted_at",
+        "persisted_at",
+        "persisted_event_seq"
+      ],
+      "owner_columns": []
+    },
+    "turn_events": {
+      "columns": [
+        "id",
+        "turn_id",
+        "seq",
+        "event_type",
+        "payload_json",
+        "occurred_at",
+        "protocol_version",
+        "generation",
+        "event_seq",
+        "actor_scope",
+        "phase_scope",
+        "payload_digest",
+        "terminal_receipt_id",
+        "source_proposal_id",
+        "accept_ordinal"
+      ],
+      "owner_columns": []
+    },
+    "turn_generations": {
+      "columns": [
+        "turn_id",
+        "generation",
+        "protocol_version",
+        "kind",
+        "prior_generation",
+        "decision_id",
+        "execution_intent_id",
+        "execution_intent_digest",
+        "opened_at",
+        "state",
+        "row_version",
+        "closing_reason",
+        "closed_at",
+        "terminal_candidate_id",
+        "terminal_receipt_id",
+        "accepted_proposal_next",
+        "closing_accepted_through",
+        "owner_instance_id",
+        "claim_epoch",
+        "writer_lease_epoch_at_claim",
+        "claimed_at",
+        "lease_expires_at",
+        "last_heartbeat_at",
+        "finalization_owner_instance_id",
+        "finalization_epoch",
+        "finalization_lease_expires_at",
+        "finalization_started_at",
+        "execution_started_at",
+        "execution_effect_class",
+        "input_tokens",
+        "output_tokens",
+        "cost_amount",
+        "cost_currency",
+        "usage_digest",
+        "recovery_started_at",
+        "recovery_reason",
+        "recovery_resolution",
+        "admission_request_digest",
+        "execution_intent_json",
+        "execution_authz_snapshot_digest",
+        "claim_authz_snapshot_digest",
+        "billing_usage_json"
+      ],
+      "owner_columns": []
+    },
+    "turn_kb_source_checks": {
+      "columns": [
+        "turn_id",
+        "file_id",
+        "generation_id",
+        "check_state",
+        "checked_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_operation_usage": {
+      "columns": [
+        "turn_id",
+        "skill_loads",
+        "tool_loads",
+        "tool_calls",
+        "recorded_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_recovery_records": {
+      "columns": [
+        "recovery_id",
+        "turn_id",
+        "generation",
+        "scope",
+        "scope_ref",
+        "kind",
+        "phase",
+        "state",
+        "candidate_id",
+        "receipt_id",
+        "resolution",
+        "discovery_identity",
+        "discovered_generation_row_version",
+        "recovery_owner_instance_id",
+        "recovery_claim_epoch",
+        "recovery_lease_expires_at",
+        "recovery_heartbeat_at",
+        "attempt_count",
+        "next_attempt_at",
+        "last_code",
+        "created_at",
+        "resolved_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_space_instructions": {
+      "columns": [
+        "turn_id",
+        "workspace_id",
+        "version",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_summaries": {
+      "columns": [
+        "turn_id",
+        "total_ms",
+        "cost_text",
+        "cost_cents",
+        "tools_count",
+        "llm_count",
+        "tokens_input",
+        "tokens_output",
+        "raw_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_candidate_events": {
+      "columns": [
+        "candidate_id",
+        "variant_key",
+        "ordinal",
+        "event_id",
+        "event_type",
+        "actor_scope",
+        "phase_scope",
+        "payload_json",
+        "payload_digest"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_candidate_variants": {
+      "columns": [
+        "candidate_id",
+        "variant_key",
+        "outcome_variant",
+        "session_variant",
+        "status",
+        "reason_code",
+        "message_key",
+        "final_answer_mode",
+        "final_answer_event_id",
+        "final_answer_digest",
+        "required_manifest_template_digest",
+        "session_mutation_template_digest",
+        "variant_digest"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_candidates": {
+      "columns": [
+        "candidate_id",
+        "turn_id",
+        "generation",
+        "candidate_origin",
+        "reserved_receipt_id",
+        "reserved_terminal_event_id",
+        "prepared_execution_claim_epoch",
+        "finalization_epoch_at_prepare",
+        "followup_admission_epoch_at_prepare",
+        "primary_status",
+        "primary_reason_code",
+        "primary_message_key",
+        "closing_accepted_through",
+        "persisted_event_highwater",
+        "terminal_event_counts_by_variant_json",
+        "candidate_projection_digest",
+        "canonicalization_version",
+        "state",
+        "session_disposition_plan_json",
+        "session_disposition_plan_digest",
+        "projection_variant_digests_json",
+        "projection_extensions_json",
+        "created_at",
+        "prepared_at",
+        "committed_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_deletion_ledgers": {
+      "columns": [
+        "deletion_id",
+        "turn_id",
+        "generation",
+        "prior_generation_state",
+        "prior_row_version",
+        "prior_execution_claim_epoch",
+        "prior_finalization_epoch",
+        "candidate_id",
+        "receipt_id",
+        "old_session_active_tuple",
+        "old_session_recovery_tuple",
+        "new_delivery_fence_epoch",
+        "unsettled_effect_count",
+        "effect_identity_digest",
+        "effect_bundle_digest",
+        "effect_audit_key_version",
+        "effect_key_required_until",
+        "resolution",
+        "actor_audit_ref",
+        "authz_snapshot_digest",
+        "policy_code",
+        "created_at",
+        "deletion_digest"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_receipts": {
+      "columns": [
+        "receipt_id",
+        "turn_id",
+        "generation",
+        "candidate_id",
+        "protocol_version",
+        "status",
+        "reason_code",
+        "message_key",
+        "final_answer_mode",
+        "final_answer_event_id",
+        "selected_variant_key",
+        "selected_outcome_variant",
+        "selected_session_variant",
+        "terminal_event_id",
+        "first_event_seq",
+        "last_event_seq",
+        "persisted_event_highwater",
+        "required_event_manifest_json",
+        "candidate_projection_digest",
+        "selected_projection_digest",
+        "selected_manifest_digest",
+        "selected_session_mutation_digest",
+        "projection_extensions_json",
+        "committed_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_terminal_session_mutations": {
+      "columns": [
+        "receipt_id",
+        "candidate_id",
+        "selected_variant_key",
+        "old_active_claim_tuple",
+        "disposition",
+        "new_active_claim_tuple",
+        "freeze_revision",
+        "buffer_identity_digest",
+        "consumed_or_retained_count",
+        "authz_snapshot_digest_at_commit",
+        "writer_admission_epoch_at_commit",
+        "mutation_projection_json",
+        "mutation_digest",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turn_trace_steps": {
+      "columns": [
+        "turn_id",
+        "seq",
+        "step_id",
+        "kind",
+        "title",
+        "tool_name",
+        "duration_ms",
+        "summary",
+        "subagent_id",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "turns": {
+      "columns": [
+        "id",
+        "session_id",
+        "seq",
+        "user_text",
+        "intent",
+        "status",
+        "started_at",
+        "ended_at",
+        "final_answer",
+        "tokens_input",
+        "tokens_output",
+        "cost_usd",
+        "digest_json",
+        "agent_type",
+        "hot_state_json",
+        "turn_schema_version",
+        "error",
+        "error_kind",
+        "terminal_protocol_version",
+        "terminal_ingress_surface",
+        "terminal_admission_cohort",
+        "protocol_admitted_at",
+        "current_generation",
+        "generation_transition_epoch",
+        "last_terminal_generation",
+        "current_terminal_receipt_id",
+        "event_sequence_next",
+        "delivery_fenced_at",
+        "delivery_fence_epoch",
+        "presentation_locale",
+        "message_catalog_version",
+        "execution_generation",
+        "generation_base_tokens_input",
+        "generation_base_tokens_output",
+        "generation_base_cost_usd",
+        "billing_rate_card_version"
+      ],
+      "owner_columns": []
+    },
+    "user_audit_log": {
+      "columns": [
+        "id",
+        "user_id",
+        "team_id",
+        "event_type",
+        "ip",
+        "user_agent",
+        "payload_json",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_federated_identities": {
+      "columns": [
+        "provider",
+        "subject",
+        "user_id",
+        "email_at_link",
+        "created_at",
+        "last_login_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_session_archives": {
+      "columns": [
+        "user_id",
+        "session_id",
+        "archived_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_session_pins": {
+      "columns": [
+        "user_id",
+        "session_id",
+        "pinned_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_session_views": {
+      "columns": [
+        "user_id",
+        "session_id",
+        "last_seen_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_settings": {
+      "columns": [
+        "user_id",
+        "key",
+        "value",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "user_store_migrations": {
+      "columns": [
+        "name",
+        "applied_at"
+      ],
+      "owner_columns": []
+    },
+    "users": {
+      "columns": [
+        "id",
+        "team_id",
+        "email",
+        "email_verified",
+        "display_name",
+        "avatar_url",
+        "password_hash",
+        "oauth_providers_json",
+        "tier",
+        "credit_balance",
+        "credit_quota",
+        "credit_period_start",
+        "locale",
+        "timezone",
+        "preferences_json",
+        "status",
+        "created_at",
+        "last_active_at",
+        "verify_token_jti",
+        "datarc_member_uid",
+        "pwd_version",
+        "session_token_version",
+        "password_change_in_progress",
+        "last_password_change_at",
+        "active_team_id"
+      ],
+      "owner_columns": []
+    },
+    "workspace_members": {
+      "columns": [
+        "workspace_id",
+        "user_id",
+        "role",
+        "invited_by",
+        "invited_at",
+        "joined_at",
+        "status",
+        "last_active_at",
+        "cached_name"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "workspace_settings": {
+      "columns": [
+        "workspace_id",
+        "key",
+        "value",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
+    "workspaces": {
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "datarc_workspace_id",
+        "description",
+        "status",
+        "created_at",
+        "updated_at",
+        "last_synced_at",
+        "name_key",
+        "revision"
+      ],
+      "owner_columns": []
+    },
+    "account_owned_artifact_writes": {
+      "columns": [
+        "write_id",
+        "user_id",
+        "path",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
+    "agent_eval_alignment_loop": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "suite_id",
+        "owner_id",
+        "session_id",
+        "words_source",
+        "owner_words",
+        "words_by",
+        "origin_turn_id",
+        "judge_prompt_version",
+        "judge_model_fingerprint",
+        "pinned_at",
+        "state",
+        "baseline_comparison_id",
+        "draft_points_json",
+        "report_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_id"
+      ]
+    },
+    "agent_eval_alignment_question": {
+      "columns": [
+        "id",
+        "loop_id",
+        "point_id",
+        "point_text_hash",
+        "card_seq",
+        "row_index",
+        "answer_ref",
+        "turn_id",
+        "source_turn_id",
+        "answer_text",
+        "task_text",
+        "answer_excerpt",
+        "judge_met",
+        "judge_quote",
+        "judge_reason",
+        "graded_prompt_version",
+        "graded_model_fingerprint",
+        "pick_reason",
+        "replacement",
+        "owner_label",
+        "label_via",
+        "labelled_at",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "agent_eval_suite_review": {
+      "columns": [
+        "suite_revision_id",
+        "prompt_version",
+        "team_id",
+        "agent_id",
+        "result_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    }
+  },
+  "secondary": {
+    "kb_files.db": {
+      "kb_files": [
+        "file_id",
+        "artifact_id",
+        "filename",
+        "mime_type",
+        "size_bytes",
+        "scope",
+        "scope_id",
+        "workspace_id",
+        "team_id",
+        "uploaded_by",
+        "uploaded_at",
+        "parse_status",
+        "parse_progress_pct",
+        "parse_layer",
+        "parse_error",
+        "parse_duration_ms",
+        "chunks_count",
+        "cite_count",
+        "last_cited_at",
+        "use_llm_marker",
+        "doc_type_id",
+        "auto_classified_doc_type_id",
+        "extracted_rows_status",
+        "summary_json",
+        "version",
+        "soft_deleted_at",
+        "parse_attempts",
+        "parse_heartbeat_at",
+        "active_generation_id",
+        "source_binding_json",
+        "source_absent",
+        "source_observation_json"
+      ],
+      "kb_file_generations": [
+        "generation_id",
+        "file_id",
+        "artifact_id",
+        "source_sha256",
+        "expected_chunk_count",
+        "index_version",
+        "state",
+        "created_at",
+        "published_at"
+      ],
+      "kb_maintenance_state": [
+        "key",
+        "value"
+      ],
+      "kb_rebuild_jobs": [
+        "job_id",
+        "team_id",
+        "workspace_id",
+        "user_id",
+        "items_json",
+        "cursor",
+        "state",
+        "outcomes_json",
+        "created_at",
+        "updated_at"
+      ],
+      "account_retention_holds": [
+        "user_id",
+        "purge_after"
+      ]
+    },
+    "kb_doc_types.db": {
+      "kb_doc_types": [
+        "doc_type_id",
+        "workspace_id",
+        "name",
+        "description",
+        "extract_schema_json",
+        "record_count",
+        "extractor_model",
+        "cross_verify_enabled",
+        "cardinality",
+        "auto_extract_enabled",
+        "sample_keywords_json",
+        "row_count",
+        "dedup_key_fields_json",
+        "graduated_from_matrix_id",
+        "graduated_from_seq",
+        "graduated_mode",
+        "copied_from_team_template_id",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "soft_deleted_at"
+      ],
+      "kb_lifespan_markers": [
+        "marker_key",
+        "value_json",
+        "updated_at"
+      ]
+    },
+    "kb_extracted_records.db": {
+      "kb_extracted_records": [
+        "record_id",
+        "doc_type_id",
+        "file_id",
+        "workspace_id",
+        "fields_json",
+        "verify_status",
+        "edited_by_user_json",
+        "extractor_model",
+        "extraction_duration_ms",
+        "extracted_at",
+        "last_modified_at",
+        "last_modified_by",
+        "soft_deleted_at",
+        "schema_version",
+        "fields_json_legacy"
+      ]
+    },
+    "kb_extracted_rows.db": {
+      "kb_extracted_rows": [
+        "row_id",
+        "doc_type_id",
+        "file_id",
+        "workspace_id",
+        "row_seq",
+        "page",
+        "row_dedup_key_hash",
+        "fields_json",
+        "verify_status",
+        "edited_by_user_json",
+        "extractor_model",
+        "extraction_attempt_id",
+        "extracted_at",
+        "last_modified_at",
+        "last_modified_by",
+        "soft_deleted_at",
+        "schema_version"
+      ]
+    },
+    "kb_per_row_jobs.db": {
+      "kb_per_row_jobs": [
+        "job_id",
+        "file_id",
+        "doc_type_id",
+        "workspace_id",
+        "status",
+        "attempt_id",
+        "total_batches",
+        "completed_batches",
+        "rows_extracted",
+        "rows_skipped_dup",
+        "error_code",
+        "error_hint",
+        "checkpoint_json",
+        "started_at",
+        "heartbeat_at",
+        "finished_at"
+      ],
+      "kb_workspace_quotas": [
+        "workspace_id",
+        "month_yyyymm",
+        "tokens_used",
+        "tokens_cap",
+        "last_reset_at",
+        "last_used_at"
+      ]
+    },
+    "kb_team_templates.db": {
+      "kb_team_templates": [
+        "entry_id",
+        "team_id",
+        "source_doc_type_id",
+        "source_workspace_id",
+        "name",
+        "description",
+        "schema_json",
+        "field_count",
+        "published_by",
+        "published_at",
+        "updated_at",
+        "revoked_at"
+      ]
+    },
+    "kb_matrix.db": {
+      "kb_matrices": [
+        "matrix_id",
+        "name",
+        "workspace_id",
+        "team_id",
+        "files_json",
+        "columns_json",
+        "template_doc_type_id",
+        "last_seq",
+        "structure_seq",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "last_run_at",
+        "soft_deleted_at"
+      ],
+      "kb_matrix_cells": [
+        "matrix_id",
+        "file_id",
+        "column_id",
+        "workspace_id",
+        "team_id",
+        "status",
+        "queued_from",
+        "variants_json",
+        "fail_reason",
+        "fail_hint",
+        "edited_by_user",
+        "verified",
+        "cached",
+        "prompt_version",
+        "file_version",
+        "content_hash",
+        "cache_key",
+        "idempotency_key",
+        "run_id",
+        "seq",
+        "created_at",
+        "updated_at",
+        "soft_deleted_at",
+        "kb_generation_id",
+        "kb_source_check_state"
+      ],
+      "kb_matrix_runs": [
+        "run_id",
+        "matrix_id",
+        "workspace_id",
+        "team_id",
+        "scope_json",
+        "status",
+        "cells_total",
+        "cells_done",
+        "cells_failed",
+        "cells_cached",
+        "skipped_edited",
+        "credits_estimated",
+        "credits_charged",
+        "tokens_input",
+        "tokens_output",
+        "error_code",
+        "initiated_by",
+        "started_at",
+        "heartbeat_at",
+        "finished_at",
+        "billing_rate_card_version"
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+# Only reviewed source enters the build context.
+.git
+.env
+.env.*
+!.env.example
+.venv
+.data
+**/node_modules
+**/.next
+**/out
+**/out-*
+**/__pycache__
+**/.pytest_cache
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+.DS_Store

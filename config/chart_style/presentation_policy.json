@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "presentationPolicyVersion": "chart-presentation/1",
+  "renderShapeVersion": "chart-shape/1",
+  "familiesByKind": {
+    "kpi": "table",
+    "line": "trend",
+    "bar": "comparison",
+    "hbar": "comparison",
+    "pie": "composition",
+    "stacked_bar": "composition",
+    "dual_axis": "trend",
+    "combo": "trend",
+    "scatter": "relationship",
+    "heatmap": "matrix",
+    "waterfall": "comparison",
+    "sankey": "flow",
+    "area_stacked": "composition",
+    "geo": "comparison",
+    "table": "table"
+  },
+  "normalization": {
+    "pivotableKinds": ["line", "area_stacked", "bar", "hbar", "stacked_bar"],
+    "transposableKinds": ["line", "area_stacked"],
+    "minimumLongTableFillRatio": 0.3333333333333333,
+    "minimumTimeColumns": 3,
+    "timeHeaderPattern": "^\\s*(?:(?:\\d{4}\\s*[-/年]\\s*)?(?:0?[1-9]|1[0-2])\\s*月|\\d{4}\\s*[-/]\\s*\\d{1,2}|[Qq][1-4])\\s*$"
+  },
+  "line": {
+    "widthPx": { "thin": 1.5, "standard": 2, "strong": 2.5 },
+    "leadDeltaPx": 0.5,
+    "dimDeltaPx": -0.5,
+    "minimumWidthPx": 1,
+    "highContrastMinimumWidthPx": 2,
+    "autoPointMaximum": 30,
+    "showPointMaximumByWidthClass": { "compact": 30, "regular": 60, "wide": 60 },
+    "hiddenHitRadiusPx": 8,
+    "minimumHoverRadiusPx": 4
+  },
+  "bar": {
+    "radiusPx": { "square": 0, "soft": 3, "round": 6 },
+    "reviewedOccupancy": 0.66
+  },
+  "grid": {
+    "quietDash": [],
+    "standardDash": []
+  },
+  "nonColor": {
+    "maximumDistinctSeriesColors": 16,
+    "colorOnlySeriesCap": 6,
+    "fillPatterns": ["solid", "diagonal", "dots", "crosshatch"],
+    "lineDashes": [[], [7, 4], [2, 3], [10, 3, 2, 3], [5, 3, 1, 3], [1, 3]],
+    "pointStyles": ["circle", "rect", "triangle", "rectRot", "crossRot", "star"],
+    "filledMarkBoundaryWidthPx": 1
+  },
+  "reasonCodes": {
+    "staticTooltip": "context.tooltip_not_applicable_static",
+    "missingExactData": "capability.tooltip_exact_data_unavailable",
+    "gridStructure": "accessibility.grid_structure_required",
+    "lineWidthMinimum": "accessibility.line_width_minimum",
+    "pointDensity": "legibility.points_density_limited",
+    "barRadiusLimited": "correctness.bar_radius_estimate_limited",
+    "nonColorRequired": "accessibility.non_color_encoding_required",
+    "paletteOverflow": "correctness.palette_overflow_non_color_encoding"
+  },
+  "adjusterRanks": { "context": 10, "accessibility": 20, "correctness": 30, "capability": 40 }
+}

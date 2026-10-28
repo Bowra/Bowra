@@ -1,0 +1,21 @@
+{
+  "skill": "analyst-method-contract-risk",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "eval_1_green_complete",
+      "query": "提供完整的并购协议，8 个风险分类都已覆盖的情况",
+      "expects": "total_coverage >= 85, verdict 包含 '绿色', high_count == 0"
+    },
+    {
+      "id": "eval_2_red_critical",
+      "query": "对赌条款、竞业限制、或有负债、MAC 条款均未定义的合同",
+      "expects": "high_count >= 3, verdict 包含 '红色警报', total_coverage <= 50"
+    },
+    {
+      "id": "eval_3_orange_partial",
+      "query": "合同涵盖了基本的陈述保证和赔偿责任，但缺交割条件、Escrow、MAC 定义",
+      "expects": "high_count >= 1, verdict 包含 '橙色', total_coverage 在 60-75 之间"
+    }
+  ]
+}

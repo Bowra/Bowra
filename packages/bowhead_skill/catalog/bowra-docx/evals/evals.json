@@ -1,0 +1,19 @@
+{
+  "skill_name": "bowra-docx",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create an editable DOCX monthly delivery review from the supplied example: 240 requests, 12-minute median turnaround and follow-up actions. Preserve the numbers and provide the actual output link.",
+      "expected_output": "A valid document.docx with the requested title, values and supported structure, plus output identity.",
+      "files": [
+        "examples/create.json"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Inspect the generated DOCX using an authorized staged copy. Report the key text or values, preserve source bytes and explain the limits of this inspection.",
+      "expected_output": "An inspection.json bound to the source SHA-256 with supported content and explicit inspection scope.",
+      "files": []
+    }
+  ]
+}

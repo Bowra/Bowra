@@ -1,0 +1,382 @@
+{
+  "blockKey": "sec_guided_steps",
+  "sectionKind": "chart",
+  "payload": {
+    "spec": {
+      "kind": "scatter",
+      "title": "Saved monthly observations",
+      "columns": [
+        {
+          "key": "month",
+          "header": "Month",
+          "type": "date"
+        },
+        {
+          "key": "revenue",
+          "header": "Revenue",
+          "type": "numeric",
+          "unit": "USD"
+        },
+        {
+          "key": "cost",
+          "header": "Cost",
+          "type": "numeric",
+          "unit": "USD"
+        }
+      ],
+      "rows": [
+        {
+          "month": "2026-04",
+          "revenue": 40,
+          "cost": 25
+        },
+        {
+          "month": "2026-01",
+          "revenue": 52.12345,
+          "cost": 30.16789
+        },
+        {
+          "month": "2026-06",
+          "revenue": 80,
+          "cost": 55
+        },
+        {
+          "month": "2026-03",
+          "revenue": null,
+          "cost": 9
+        },
+        {
+          "month": "2026-02",
+          "revenue": -5,
+          "cost": 12
+        },
+        {
+          "month": "2026-05",
+          "revenue": 0.000012345,
+          "cost": 45
+        }
+      ],
+      "row_count": 6,
+      "data_artifact_id": "art_months",
+      "presentation_plan": {
+        "version": 1,
+        "dataset": {
+          "artifact_id": "source-ref-v1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "availability": "available"
+        },
+        "evidence_notes": [],
+        "text_dependencies": {
+          "/title": {
+            "dataset": true,
+            "note_ids": []
+          },
+          "/views/0/spec/title": {
+            "dataset": true,
+            "note_ids": []
+          },
+          "/views/1/spec/title": {
+            "dataset": true,
+            "note_ids": []
+          },
+          "/views/2/spec/title": {
+            "dataset": true,
+            "note_ids": []
+          },
+          "/presentation_plan/guide_steps/0/title": {
+            "note_ids": [],
+            "dataset": true
+          },
+          "/presentation_plan/guide_steps/1/title": {
+            "note_ids": [],
+            "dataset": true
+          },
+          "/presentation_plan/guide_steps/2/title": {
+            "note_ids": [],
+            "dataset": true
+          }
+        },
+        "view_bindings": {
+          "relationship": "time.fixture",
+          "comparison": "time.fixture",
+          "detail": "time.fixture"
+        },
+        "interactions": [
+          {
+            "preset": "time_window",
+            "view_ids": [
+              "relationship",
+              "detail"
+            ],
+            "binding_id": "time.fixture"
+          },
+          {
+            "preset": "linked_focus",
+            "from_view": "detail",
+            "to_views": [
+              "relationship",
+              "comparison"
+            ],
+            "binding_id": "time.fixture"
+          },
+          {
+            "preset": "guided_steps"
+          }
+        ],
+        "bindings": {
+          "time.fixture": {
+            "kind": "time",
+            "availability": "available",
+            "time_key": "month",
+            "order": "date",
+            "dimension_keys": [
+              "month"
+            ],
+            "observation_keys": [
+              "month"
+            ],
+            "measure_keys": [
+              "revenue",
+              "cost"
+            ],
+            "eligible_views": [
+              "relationship",
+              "comparison",
+              "detail"
+            ],
+            "coverage": {
+              "artifact_rows": {
+                "available": 6,
+                "total": 6
+              },
+              "views": {
+                "relationship": {
+                  "retained_rows": 6
+                },
+                "comparison": {
+                  "retained_rows": 6
+                },
+                "detail": {
+                  "retained_rows": 6
+                }
+              }
+            }
+          }
+        },
+        "guide_steps": [
+          {
+            "title": "Read the overall trend",
+            "view_id": "relationship"
+          },
+          {
+            "title": "Compare the full period",
+            "view_id": "comparison"
+          },
+          {
+            "title": "Inspect the original values",
+            "view_id": "detail"
+          }
+        ]
+      },
+      "views": [
+        {
+          "id": "relationship",
+          "kind": "chart",
+          "spec": {
+            "kind": "line",
+            "title": "Revenue and cost over time",
+            "columns": [
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              },
+              {
+                "key": "cost",
+                "header": "Cost",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "month": "2026-04",
+                "revenue": 40,
+                "cost": 25
+              },
+              {
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "month": "2026-06",
+                "revenue": 80,
+                "cost": 55
+              },
+              {
+                "month": "2026-03",
+                "revenue": null,
+                "cost": 9
+              },
+              {
+                "month": "2026-02",
+                "revenue": -5,
+                "cost": 12
+              },
+              {
+                "month": "2026-05",
+                "revenue": 0.000012345,
+                "cost": 45
+              }
+            ],
+            "row_count": 6,
+            "data_artifact_id": "art_focus"
+          }
+        },
+        {
+          "id": "comparison",
+          "kind": "chart",
+          "spec": {
+            "kind": "hbar",
+            "title": "Revenue over the full saved period",
+            "columns": [
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "month": "2026-04",
+                "revenue": 40,
+                "cost": 25
+              },
+              {
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "month": "2026-06",
+                "revenue": 80,
+                "cost": 55
+              },
+              {
+                "month": "2026-03",
+                "revenue": null,
+                "cost": 9
+              },
+              {
+                "month": "2026-02",
+                "revenue": -5,
+                "cost": 12
+              },
+              {
+                "month": "2026-05",
+                "revenue": 0.000012345,
+                "cost": 45
+              }
+            ],
+            "row_count": 6,
+            "data_artifact_id": "art_focus"
+          }
+        },
+        {
+          "id": "detail",
+          "kind": "chart",
+          "spec": {
+            "kind": "table",
+            "title": "Monthly observations",
+            "columns": [
+              {
+                "key": "month",
+                "header": "Month",
+                "type": "date"
+              },
+              {
+                "key": "revenue",
+                "header": "Revenue",
+                "type": "numeric",
+                "unit": "USD"
+              },
+              {
+                "key": "cost",
+                "header": "Cost",
+                "type": "numeric",
+                "unit": "USD"
+              }
+            ],
+            "rows": [
+              {
+                "month": "2026-04",
+                "revenue": 40,
+                "cost": 25
+              },
+              {
+                "month": "2026-01",
+                "revenue": 52.12345,
+                "cost": 30.16789
+              },
+              {
+                "month": "2026-06",
+                "revenue": 80,
+                "cost": 55
+              },
+              {
+                "month": "2026-03",
+                "revenue": null,
+                "cost": 9
+              },
+              {
+                "month": "2026-02",
+                "revenue": -5,
+                "cost": 12
+              },
+              {
+                "month": "2026-05",
+                "revenue": 0.000012345,
+                "cost": 45
+              }
+            ],
+            "row_count": 6,
+            "data_artifact_id": "art_focus"
+          }
+        }
+      ],
+      "layout": {
+        "type": "split",
+        "children": [
+          {
+            "view": "relationship"
+          },
+          {
+            "type": "stack",
+            "children": [
+              {
+                "view": "comparison"
+              },
+              {
+                "view": "detail"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

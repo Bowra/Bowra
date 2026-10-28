@@ -1,0 +1,155 @@
+.shell {
+  display: grid;
+  min-height: 60vh;
+  padding: clamp(24px, 7vw, 72px);
+  color: var(--c-ink, #161310);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--c-accent, #b4552d) 4%, transparent),
+      transparent 42%
+    ),
+    var(--c-bg, #fbfaf8);
+  place-items: center;
+}
+
+.shell[data-surface="global"] {
+  min-height: 100vh;
+}
+
+.card {
+  position: relative;
+  width: min(100%, 620px);
+  padding: clamp(22px, 4vw, 36px);
+  overflow: hidden;
+  background: var(--c-surface, #fff);
+  border: 1px solid var(--c-line, #e5e3df);
+  border-radius: 10px;
+  box-shadow: 0 18px 55px rgb(30 25 20 / 8%);
+}
+
+.rail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--c-danger, #a93434);
+}
+
+.primary {
+  max-width: 540px;
+}
+
+.recoveryLabel {
+  margin-bottom: 12px;
+  font-family: var(
+    --font-v2-mono,
+    ui-monospace,
+    "SFMono-Regular",
+    monospace
+  );
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--c-danger, #a93434);
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(1.375rem, 4vw, 1.875rem);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.message {
+  max-width: 520px;
+  margin: 12px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.75;
+  color: var(--c-ink-3, #6b7a6f);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-height: 36px;
+  padding: 7px 15px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.primaryAction {
+  color: #fff;
+  background: var(--c-accent, #b4552d);
+  border: 1px solid var(--c-accent, #b4552d);
+}
+
+.secondaryAction {
+  color: var(--c-ink, #161310);
+  background: var(--c-surface, #fff);
+  border: 1px solid var(--c-line, #e5e3df);
+}
+
+.primaryAction:hover {
+  filter: brightness(0.94);
+}
+
+.secondaryAction:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--c-ink, #161310) 32%,
+    var(--c-line, #e5e3df)
+  );
+}
+
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible {
+  outline: 2px solid var(--c-accent, #b4552d);
+  outline-offset: 2px;
+}
+
+.diagnostics {
+  margin-top: 18px;
+  text-align: left;
+}
+
+.diagnostics > details {
+  margin-left: 0;
+}
+
+@media (max-width: 460px) {
+  .shell {
+    align-items: start;
+    padding: 18px 14px;
+  }
+
+  .card {
+    padding: 22px 18px;
+    border-radius: 8px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    width: 100%;
+  }
+}

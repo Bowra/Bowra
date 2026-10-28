@@ -1,0 +1,53 @@
+/* report-streaming B — read-only preview block for streaming body text.
+ *
+ * The goal is not prettiness but **minimal visual change when the patch lands**: align font size, line height, color
+ * and paragraph spacing with final body text so replacing the preview with a real section is barely noticeable.
+ * No border/background/skeleton shimmer, which would make it look like a different object.
+ */
+
+.sp-block {
+  margin: 18px 0;
+}
+
+.sp-text {
+  margin: 0;
+  /* Match report body font size and line height (globals.css body-text criteria). */
+  font-size: 0.9375rem;
+  line-height: 1.78;
+  color: var(--c-ink);
+  /* Streaming yields unparsed raw markdown with \n; use pre-wrap to preserve line breaks and paragraphs,
+     or the whole document becomes a lump, increasing the visual jump when the patch lands. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Caret: the only moving element. No skeleton shimmer (which says content is about to arrive,
+   whereas here it is arriving: the shimmer is simulated, the caret is real). */
+.sp-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--c-accent);
+  animation: sp-blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes sp-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-caret {
+    animation: none;
+    opacity: 0.8;
+  }
+}

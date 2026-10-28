@@ -1,0 +1,44 @@
+.bh-collaboration-trace {
+  border-top: 1px solid var(--c-line-2);
+  padding: 12px 0;
+  color: var(--c-ink);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.bh-collaboration-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bh-collaboration-heading button, .bh-collaboration-evidence button {
+  min-height: 32px;
+  padding: 4px 8px;
+  color: var(--c-ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bh-collaboration-heading button:disabled { opacity: 0.6; cursor: default; }
+.bh-collaboration-heading button:focus-visible, .bh-collaboration-evidence button:focus-visible, .bh-collaboration-topic summary:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+
+.bh-collaboration-topic summary {
+  min-height: 40px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+
+.bh-collaboration-topic summary span { display: inline; }
+.bh-collaboration-topic summary svg { display: inline; vertical-align: middle; margin: 0 4px; }
+.bh-collaboration-state { margin-inline-start: 12px; color: var(--c-ink-2); }
+.bh-collaboration-messages { list-style: none; margin: 0; padding: 0 4px 4px 20px; }
+.bh-collaboration-messages li + li { margin-top: 12px; }
+.bh-collaboration-messageLabel { color: var(--c-ink-2); font-size: 0.75rem; }
+.bh-collaboration-messages p { white-space: pre-wrap; margin: 4px 0; line-height: 1.6; }
+.bh-collaboration-evidence { color: var(--c-ink-2); font-size: 0.75rem; }
+.bh-collaboration-evidence button { text-decoration: underline; text-underline-offset: 3px; }

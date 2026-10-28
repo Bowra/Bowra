@@ -1,0 +1,96 @@
+# Financial-analyst — financial analysis specialist agent (sprint multi-agent-v1 PR-#8).
+#
+# Load relevant domain methods for analytical assignments; factual lookups use the requested evidence only.
+
+name: financial-analyst
+version: 2
+model: analyst
+trust_class: report-writer # M-C: read-mostly data discipline; writes its own report body with guarded write_report (M-B bake+owner+CAS).
+max_iterations: 100
+max_output_tokens: null # Automatic; resolved for each model request
+description: |
+  Bowhead 财务专业 agent. 杜邦分析 / 三大表分析 / 现金流分析 / 同比环比 / 财务比率.
+  返回 typed finding payload, 不直接写 canvas section.
+
+system:
+  file: financial-analyst.md
+  append: |
+    You are running as a parallel TaskAgent under Orchestrator.
+    DO NOT call subagent.spawn (you are already a leaf).
+    Return via subagent.return with the M137 payload schema.
+
+tools:
+  default_enabled: false
+  allow:
+    - bi_query
+    - bi_schema
+    # subagent-unification Phase 3: method-skills fetch detail rows → python_sandbox
+    # for deterministic ratio/QoE compute (mirrors compute.yaml; needed by the
+    # analyst-method-* scripts). MCP data sources (e.g. external peer multiples)
+    # are reached via mcp.<server>.<tool> when allowed_roles includes "analyst".
+    - bi_concept_resolve
+    - skill_read
+    - skill_invoke
+    - skill_list
+    - add_chart
+    # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
+    # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
+    # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.
+    - write_report
+    - read_report
+    - subagent_return
+
+output_schema:
+  type: object
+  additionalProperties: false
+  required: [title, insights]
+  properties:
+    title:
+      type: string
+      maxLength: 200
+    insights:
+      type: array
+      maxItems: 20
+    recommendations:
+      type: array
+      maxItems: 10
+    risk_flags:
+      type: array
+      maxItems: 10
+
+examples:
+  - event: "看下今年 Q1 营业收入和现金流, 跟去年比下滑了多少"
+    description: 财务三表 + 同比对比, 典型财务专业 query
+  - event: "净利率连续 3 月下滑, 杜邦拆解给我看是哪个环节"
+    description: 杜邦分析 (净利率 = 销售净利率 × 资产周转率 × 权益乘数)
+  - event: "应收账款周转天数变化, 现金流压力评估"
+    description: 营运资本分析
+
+# chat-v4 W2 (2026-05-17): I2 1-hop invariant migration. financial-analyst
+# previously had callable_peers=[business-analyst] (v2 multi-hop pattern). Lead
+# now calls financial-analyst directly (added to lead.yaml callable_peers), so
+# financial-analyst MUST be callable_peers: [] per I2.
+# Cross-domain analysis routes via Lead-level dispatch (Lead spawns multiple
+# specialists in parallel) or future v4.1 meta-agent. NOT via peer-to-peer call.
+callable_peers: []
+
+# WP M3-12: this agent's **contract** (its responsibility), not an incidental capability.
+# Domain expert: owns the analysis contract, so it is not drafted as a fallback for data retrieval, decks, or other roles.
+# Lead routing prose renders assignee names by role, resolving assignees from this declaration;
+# an agent with a declared contract is not used as a fallback assignee for another role.
+primary_capability: cap_analysis
+
+# Append the capability protocol blocks matching this Agent's tools (Datarc query
+# protocol, query_explain rules, ...) to its system prompt. Keep compute off: the
+# batch-2 A/B evaluation concluded it must not receive them.
+capability_protocol_block: true
+
+# Product listing (marketplace and @ list). The English name and summary are the
+# source of the agents_marketplace system_<name>_name/_summary messages; the four
+# locales live in shared-messages. Never copied into the runtime profile.
+listing:
+  listed: true
+  order: 70
+  display_name: "Financial Analyst"
+  summary: "Analyze financial statements, cash flow, key ratios, and period-over-period performance."
+  capabilities: [cap_data_query, cap_analysis, cap_report]

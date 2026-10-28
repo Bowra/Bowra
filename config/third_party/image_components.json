@@ -1,0 +1,502 @@
+{
+  "_comment": "Reviewed Community source dependencies and supported application/executor build contexts. The legacy Python sandbox image context is excluded; retained sandbox Skill source and Node dependency locks remain inventoried. Runtime image redistribution requires a separate image inventory. See docs/third-party-licenses.en-US.md.",
+  "system_packages": {
+    "7zip": {
+      "license": "LGPL-2.1-or-later AND BSD-3-Clause",
+      "note": "unRAR code carries an additional restriction"
+    },
+    "bc": {
+      "license": "GPL-3.0-or-later"
+    },
+    "curl": {
+      "license": "curl"
+    },
+    "docker.io": {
+      "license": "Apache-2.0"
+    },
+    "fd-find": {
+      "license": "MIT OR Apache-2.0"
+    },
+    "fontconfig": {
+      "license": "HPND-sell-variant"
+    },
+    "fonts-dejavu-core": {
+      "license": "Bitstream-Vera AND LicenseRef-Public-Domain"
+    },
+    "fonts-noto-cjk": {
+      "license": "OFL-1.1"
+    },
+    "fonts-noto-color-emoji": {
+      "license": "OFL-1.1"
+    },
+    "fonts-noto-core": {
+      "license": "OFL-1.1"
+    },
+    "fonts-wqy-zenhei": {
+      "license": "GPL-2.0-or-later WITH Font-exception-2.0"
+    },
+    "git": {
+      "license": "GPL-2.0-only"
+    },
+    "jq": {
+      "license": "MIT"
+    },
+    "libfreetype6": {
+      "license": "FTL OR GPL-2.0-or-later"
+    },
+    "libjpeg62-turbo": {
+      "license": "IJG AND BSD-3-Clause AND Zlib"
+    },
+    "libmagic1": {
+      "license": "BSD-2-Clause"
+    },
+    "libopenblas0": {
+      "license": "BSD-3-Clause"
+    },
+    "libpng16-16": {
+      "license": "Libpng"
+    },
+    "libreoffice-calc": {
+      "license": "MPL-2.0"
+    },
+    "libreoffice-core": {
+      "license": "MPL-2.0"
+    },
+    "libreoffice-impress": {
+      "license": "MPL-2.0"
+    },
+    "libstdc++6": {
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1"
+    },
+    "libxml2": {
+      "license": "MIT"
+    },
+    "libxslt1.1": {
+      "license": "MIT"
+    },
+    "poppler-utils": {
+      "license": "GPL-2.0-only OR GPL-3.0-only"
+    },
+    "python3": {
+      "license": "PSF-2.0",
+      "note": "Alpine apk package"
+    },
+    "ripgrep": {
+      "license": "Unlicense OR MIT"
+    },
+    "sqlite3": {
+      "license": "blessing"
+    },
+    "unzip": {
+      "license": "Info-ZIP"
+    },
+    "zip": {
+      "license": "Info-ZIP"
+    }
+  },
+  "pip_packages": {
+    "attrs": "MIT",
+    "colorama": "BSD-3-Clause",
+    "defusedxml": "PSF-2.0",
+    "jsonschema": "MIT",
+    "jsonschema-specifications": "MIT",
+    "lxml": "BSD-3-Clause",
+    "matplotlib": "PSF-2.0",
+    "numpy": "BSD-3-Clause",
+    "openpyxl": "MIT",
+    "pandas": "BSD-3-Clause",
+    "pdfplumber": "MIT",
+    "pillow": "MIT-CMU",
+    "pip": "MIT",
+    "pyarrow": "Apache-2.0",
+    "pypdf": "BSD-3-Clause",
+    "python-docx": "MIT",
+    "python-pptx": "MIT",
+    "pywin32": "PSF-2.0",
+    "referencing": "MIT",
+    "rpds-py": "MIT",
+    "scikit-learn": "BSD-3-Clause",
+    "scipy": "BSD-3-Clause",
+    "seaborn": "BSD-3-Clause",
+    "setuptools": "MIT",
+    "statsmodels": "BSD-3-Clause",
+    "typing-extensions": "PSF-2.0",
+    "wheel": "MIT"
+  },
+  "base_images": {
+    "docker": {
+      "license": "Apache-2.0",
+      "note": "official docker CLI image on Alpine (system components, including GPL ones, are aggregated as separate programs)"
+    },
+    "library/node": {
+      "license": "MIT",
+      "note": "official Node.js image on Debian (system components, including GPL ones, are aggregated as separate programs)"
+    },
+    "library/python": {
+      "license": "PSF-2.0",
+      "note": "official Python image on Debian (system components, including GPL ones, are aggregated as separate programs)"
+    }
+  },
+  "components": [
+    {
+      "name": "uv",
+      "version": "unpinned (latest at build time)",
+      "license": "MIT OR Apache-2.0",
+      "image": "bowhead-app",
+      "source": "deploy/Dockerfile.app: curl https://astral.sh/uv/install.sh",
+      "installer_match": [
+        "astral.sh/uv/install.sh"
+      ]
+    },
+    {
+      "name": "Playwright install-deps chromium system libraries",
+      "version": "Debian bookworm repository version (unpinned)",
+      "license": "LicenseRef-Mixed",
+      "image": "bowhead-app",
+      "source": "deploy/Dockerfile.app: playwright install-deps chromium",
+      "note": "Chromium runtime libraries (NSS, GTK, X11, fonts, ...) from Playwright's built-in list; package names and licenses change with the Playwright version, verify with dpkg inside the image"
+    },
+    {
+      "name": "tiktoken cl100k_base vocabulary",
+      "version": "downloaded at build time (unpinned)",
+      "license": "LicenseRef-Unknown",
+      "image": "bowhead-app",
+      "source": "deploy/Dockerfile.app: tiktoken.get_encoding('cl100k_base') warm-up download",
+      "note": "vocabulary file hosted publicly by OpenAI without a license notice at the download location; the tiktoken library itself is MIT"
+    }
+  ],
+  "vendored": [
+    {
+      "name": "Lucide icons (SVG path data vendored into source)",
+      "version": "unpinned (ported from design mockups)",
+      "license": "ISC AND MIT",
+      "license_file": "config/third_party/licenses/lucide.txt",
+      "source": "packages/bowhead_frontend/components/icons.tsx, components/chat/rho/icons.tsx, components/chat/plan-card/icons.tsx and others",
+      "note": "Lucide is ISC; icons derived from Feather are additionally MIT (see the license text)"
+    },
+    {
+      "name": "@fontsource-variable/inter (self-hosted variable fonts)",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "license_file": "config/third_party/licenses/font-inter.txt",
+      "source": "https://registry.npmjs.org/@fontsource-variable/inter/-/inter-5.3.0.tgz",
+      "note": "Unmodified font binaries verified byte-for-byte against the published package: packages/bowhead_frontend/app/_fonts/inter-latin-wght-normal.woff2 (SHA-256 3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62)"
+    },
+    {
+      "name": "@fontsource-variable/jetbrains-mono (self-hosted variable fonts)",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "license_file": "config/third_party/licenses/font-jetbrains-mono.txt",
+      "source": "https://registry.npmjs.org/@fontsource-variable/jetbrains-mono/-/jetbrains-mono-5.3.0.tgz",
+      "note": "Unmodified font binaries verified byte-for-byte against the published package: packages/bowhead_frontend/app/_fonts/jetbrains-mono-latin-wght-normal.woff2 (SHA-256 18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e)"
+    },
+    {
+      "name": "@fontsource-variable/source-serif-4 (self-hosted variable fonts)",
+      "version": "5.3.0",
+      "license": "OFL-1.1",
+      "license_file": "config/third_party/licenses/font-source-serif-4.txt",
+      "source": "https://registry.npmjs.org/@fontsource-variable/source-serif-4/-/source-serif-4-5.3.0.tgz",
+      "note": "Unmodified font binaries verified byte-for-byte against the published package: packages/bowhead_frontend/app/_fonts/source-serif-4-latin-wght-normal.woff2 (SHA-256 c1df4596be5029233ed2afbb8b2f6ea20784b3fb1aa5d6b5c6519ccd85eb3dfb), packages/bowhead_frontend/app/_fonts/source-serif-4-latin-wght-italic.woff2 (SHA-256 663e7ef3037a56dce81dfc33f68c1e6445995ffd8887991b3c0b68a7689c9da5); upstream license and reserved name verified at https://raw.githubusercontent.com/adobe-fonts/source-serif/4.004R/LICENSE.md"
+    },
+    {
+      "name": "canvas-design font: ArsenalSC",
+      "version": "Version 2.001; ttfautohint (v1.8.4.7-5d5b)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/ArsenalSC-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2012 The Arsenal Project Authors (andrij.design@gmail.com). SHA-256: ArsenalSC-Regular.ttf 65e6f89df58f68fd905b3add34a79dd6106aa3b3044df0dad9676fff53d504b9"
+    },
+    {
+      "name": "canvas-design font: BigShoulders",
+      "version": "Version 2.002",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/BigShoulders-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2019 The Big Shoulders Project Authors (https://github.com/xotypeco/big_shoulders). SHA-256: BigShoulders-Bold.ttf b43bcd198b9fdf717dd42aa61a34dba32e01aceaeae659d689afd0ca52c37ea2, BigShoulders-Regular.ttf 18a879fc71978a4447150705caf880a9da3860083c259fd29e6dc03057b6842a"
+    },
+    {
+      "name": "canvas-design font: Boldonse",
+      "version": "Version 1.000; ttfautohint (v1.8.4.7-5d5b)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Boldonse-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2024 The Boldonse Project Authors (https://github.com/googlefonts/boldonse). SHA-256: Boldonse-Regular.ttf cc2e540604565c0f90a7d8d46194a2f42fc9c45512cd2e39bf03b50eb68c35a4"
+    },
+    {
+      "name": "canvas-design font: BricolageGrotesque",
+      "version": "Version 1.001;gftools[0.9.33.dev8+g029e19f]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/BricolageGrotesque-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage). SHA-256: BricolageGrotesque-Bold.ttf a737b146fe0d77ffe8a86e3cd16700dd431d3b1e420d4fd80e142cd68a1cb50d, BricolageGrotesque-Regular.ttf 972a6d098c9867ae131d0ea99e221e63976b11a19d4b931c2c7ace525674e4f6"
+    },
+    {
+      "name": "canvas-design font: CrimsonPro",
+      "version": "Version 1.003",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/CrimsonPro-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2018 The Crimson Pro Project Authors (https://github.com/Fonthausen/CrimsonPro). SHA-256: CrimsonPro-Bold.ttf 48f191e38355c8db100eb3ce157c20f9302a3b9a37b44a660f77ecfce3986609, CrimsonPro-Italic.ttf 52318db3526b644e6efa60be0b3ca5a50e40fbe8bd026c261e0aa206f0772267, CrimsonPro-Regular.ttf 48fad08cb1917a7b2f2c6fe5135d6c07743a6663cf7631ec4481108aaf081422"
+    },
+    {
+      "name": "canvas-design font: DMMono",
+      "version": "Version 1.000; ttfautohint (v1.8.2.53-6de2)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/DMMono-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2020 The DM Mono Project Authors (https://www.github.com/googlefonts/dm-mono). SHA-256: DMMono-Regular.ttf f98ada968dc3b6b2c08d3f5caaf266977df0bfe0929372b93df5a06cf2ace450"
+    },
+    {
+      "name": "canvas-design font: EricaOne",
+      "version": "Version 1.003",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/EricaOne-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright (c) 2011 by LatinoType Limitada (info@latinotype.com),  with Reserved Font Names \"Erica\" \"Erica One\". SHA-256: EricaOne-Regular.ttf db1d89e80e33a8a01beaaac7a85df582857d24a43f1e181461aa7ff5d701476a"
+    },
+    {
+      "name": "canvas-design font: GeistMono",
+      "version": "Version 1.401",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/GeistMono-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git). SHA-256: GeistMono-Bold.ttf 75c0828d5c1ee44b9ef9f4df577bf41595ec362e2ea3f1e558590c9e92c7949d, GeistMono-Regular.ttf a55c1b51cda4afeab9e471e7947b85a20f7c8831d7e6b1470c1b7fbdc0f0f15e"
+    },
+    {
+      "name": "canvas-design font: Gloock",
+      "version": "Version 1.000; ttfautohint (v1.8.4.7-5d5b)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Gloock-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2022 The Gloock Project Authors (https://github.com/duartp/gloock). SHA-256: Gloock-Regular.ttf e86b4ce66dbd3f1f83eee8db99ec96e0da1128c3f53df0e9b3b7472025dfe960"
+    },
+    {
+      "name": "canvas-design font: IBMPlexMono",
+      "version": "Version 2.3",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/IBMPlexMono-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2017 IBM Corp. All rights reserved.. SHA-256: IBMPlexMono-Bold.ttf dbd2a2fb024579438d6400a84e57579bfd2dbe67c306c8fd9fde92a61e4f2eea, IBMPlexMono-Regular.ttf ab08018ccd276b79fb2c636bb95b9c543598f9d50505fe92506fcb4dae7810cd"
+    },
+    {
+      "name": "canvas-design font: IBMPlexSerif",
+      "version": "Version 2.6",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/IBMPlexSerif-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2020 IBM Corp. All rights reserved.. SHA-256: IBMPlexSerif-Bold.ttf b8d294e9b5c5a0940f167c3ced0f7ef2e3f57082ca3ff096ef30e86e26c1c159, IBMPlexSerif-BoldItalic.ttf da64b75f4284f53e7b5c71fa190a35b8bf3494fe19f1804c81c3a53340bca570, IBMPlexSerif-Italic.ttf b11f1048745e715a55c9d837b3f10226ca3d78867b7db7251ddad8f98dcf0f38, IBMPlexSerif-Regular.ttf 77cd233a2af8dc6b1022faea3bb3b01f3c75af68bcf530cb6aeb15982ff3dbb7"
+    },
+    {
+      "name": "canvas-design font: InstrumentSans",
+      "version": "Version 1.000;gftools[0.9.28]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/InstrumentSans-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans). SHA-256: InstrumentSans-Bold.ttf 444f85bf1c4b0e1ce1ca624f6be54bcd832207714ccaf4ea99ee531341683bdf, InstrumentSans-BoldItalic.ttf 3762f6cef95d6039489ad5ba5787d4c30f17a1ad01e9ac3c816ed69692722a68, InstrumentSans-Italic.ttf 78e85858e371b2cb4e18f617c10f0f937c0e12a0887ffee98555b24ed305b3a7, InstrumentSans-Regular.ttf a22cb26e48fd79bcb01bf2fc92d36785474dce36d9c544ab0a8868c2657c4a87"
+    },
+    {
+      "name": "canvas-design font: InstrumentSerif",
+      "version": "Version 1.000; ttfautohint (v1.8.4.7-5d5b);gftools[0.9.27]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/InstrumentSerif-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif). SHA-256: InstrumentSerif-Italic.ttf 9c86e4d5a47b50224a2463a9eca8535835257c8e85c470c2c6b454b1af6f046e, InstrumentSerif-Regular.ttf 56ac3be03ac3ba283196b3e77850ab2ffcf56cfb6fd3212c5620109a972f8c99"
+    },
+    {
+      "name": "canvas-design font: Italiana",
+      "version": "Version 001.001 ",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Italiana-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright (c) 2011 by Santiago Orozco (hi@typemade.mx) with reserved name Italiana. SHA-256: Italiana-Regular.ttf 15c4dd6ab8cf4a29ba8826f65edcbe2f6c266c557d34d081f25072dfd5605fd2"
+    },
+    {
+      "name": "canvas-design font: JetBrainsMono",
+      "version": "Version 2.211",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/JetBrainsMono-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono). SHA-256: JetBrainsMono-Bold.ttf a2349098b9e45419e7bf0e2958d6c4937a049dded37387b08be725be4c7615f3, JetBrainsMono-Regular.ttf b6b1ff4ddefe36d7f2a6174e1d001cab374e594519ee9049af028d577b64c5f5"
+    },
+    {
+      "name": "canvas-design font: Jura",
+      "version": "Version 5.106",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Jura-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2019 The Jura Project Authors (https://github.com/ossobuffo/jura). SHA-256: Jura-Light.ttf c891a381df056b2c4dfe85841e911bf45da0890fa21a7b2692cbe5ea1f505e1e, Jura-Medium.ttf c72965cb732a92872643819fd1734128238583cc36b116313859137a51d3368a"
+    },
+    {
+      "name": "canvas-design font: LibreBaskerville",
+      "version": "Version 1.051; ttfautohint (v1.8.4.7-5d5b)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/LibreBaskerville-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville). SHA-256: LibreBaskerville-Regular.ttf 2101302538d9e88adb679031c04623e4578b5745e89566284fd2c508d79acae0"
+    },
+    {
+      "name": "canvas-design font: Lora",
+      "version": "Version 3.008",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Lora-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2011 The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), with Reserved Font Name \"Lora\".. SHA-256: Lora-Bold.ttf 7d74015e950c2fb66519c7295b8155621d22200ae2ca2a4c6b43ce3c490cac87, Lora-BoldItalic.ttf 152f87e71f5ddb60d5c57ecd9132807c947e65c42977193c9164e7c5a6690081, Lora-Italic.ttf be627e595184e8afe521f08da0607eee613f1997d423bc8dadc5798995581377, Lora-Regular.ttf 7ed00e7c9cdf16ab7e2fd2361fe45d4f0b61263cd60aae398b27b7ee08108827"
+    },
+    {
+      "name": "canvas-design font: NationalPark",
+      "version": "Version 1.009",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/NationalPark-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2024 The National Park Project Authors (https://github.com/benhoepner/National-Park). SHA-256: NationalPark-Bold.ttf 69ac4c301c4a7233c6e602d12a92c54d7967b575f4449951c45ce773f7acff53, NationalPark-Regular.ttf a477338b7e18308d476650dfe31235ef86a883572665e56ffb5fb80f82009b58"
+    },
+    {
+      "name": "canvas-design font: NothingYouCouldDo",
+      "version": "Version 1.005",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/NothingYouCouldDo-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright (c) 2010, Kimberly Geswein (kimberlygeswein.com). This Font Software is licensed under the SIL Open Font License, Version 1.1.  This license available with a FAQ at:  http://scripts.sil.org/OFL. SHA-256: NothingYouCouldDo-Regular.ttf d866f985896d3280f4fce72db7e17302c24a0c1fdb0699b6b5ed3af14f944d57"
+    },
+    {
+      "name": "canvas-design font: Outfit",
+      "version": "Version 1.100;gftools[0.9.27]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Outfit-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts). SHA-256: Outfit-Bold.ttf 6654b93d21301ec61887d3cedd6c11d9df1b1dfb63f9cf45ac7995f6e2235ab1, Outfit-Regular.ttf f24945365147c9e783e91d8649959b59be6b00c9ee4ecd2f6b33afbb2dd871fe"
+    },
+    {
+      "name": "canvas-design font: PixelifySans",
+      "version": "Version 1.000",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/PixelifySans-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2021 The Pixelify Sans Project Authors (https://github.com/eifetx/Pixelify-Sans). SHA-256: PixelifySans-Medium.ttf 38397504f71c122b03d234ea6f55118e3d5bdbddffd82bedddbd7755d3b3be82"
+    },
+    {
+      "name": "canvas-design font: PoiretOne",
+      "version": "Version 1.001",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/PoiretOne-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright (c) 2011, Denis Masharov (denis.masharov@gmail.com). SHA-256: PoiretOne-Regular.ttf 9cf265b139648b36b6c0afdfeb0bf27f7e66db9a16094bc40f644d8da05bc318"
+    },
+    {
+      "name": "canvas-design font: RedHatMono",
+      "version": "Version 1.030",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/RedHatMono-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2024 The Red Hat Project Authors (https://github.com/RedHatOfficial/RedHatFont). SHA-256: RedHatMono-Bold.ttf 7ef48353f4be5ddb90f000f6fad48f2b62b3e8c27d9818d8d45ff46c201065e0, RedHatMono-Regular.ttf 452fe826871b37539f5212b20c87cf30f82f58dd2741f1c96edd1dcbdc0db6b4"
+    },
+    {
+      "name": "canvas-design font: Silkscreen",
+      "version": "Version 1.001; ttfautohint (v1.8.4.7-5d5b)",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Silkscreen-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2001 The Silkscreen Project Authors (https://github.com/googlefonts/silkscreen). SHA-256: Silkscreen-Regular.ttf 49567408600809e25147e9225ac4f37f410e2df45a750696c45027531fb65f1b"
+    },
+    {
+      "name": "canvas-design font: SmoochSans",
+      "version": "Version 1.010",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/SmoochSans-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2016 The Smooch Sans Project Authors (https://github.com/googlefonts/smooch-sans). SHA-256: SmoochSans-Medium.ttf dd76e6e77cce82f827a8654cd906e9ce58f3aaf78adda63c4a7f655b8ecb41f0"
+    },
+    {
+      "name": "canvas-design font: Tektur",
+      "version": "Version 1.005;gftools[0.9.30]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/Tektur-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2023 The Tektur Project Authors (https://www.github.com/hyvyys/Tektur). SHA-256: Tektur-Medium.ttf 52bbe8c9b057b3d2da4eeace31a524b1ea26a1375ae34319cf6900ccc57a4c82, Tektur-Regular.ttf 162e1b36c4718c5b051b36c971ad7e50d341944f35618f480422ebbe72988f98"
+    },
+    {
+      "name": "canvas-design font: WorkSans",
+      "version": "Version 2.012",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/WorkSans-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2019 The Work Sans Project Authors (https://github.com/weiweihuanghuang/Work-Sans). SHA-256: WorkSans-Bold.ttf 240d125fc9f8561363dc1ea3f513501253bd70942f41468f48f0b0cafb0c82e2, WorkSans-BoldItalic.ttf a5b2cad813df0aaa7d16621f2e93b5117c25e9bc788bc9a3ad218e9d6348ce34, WorkSans-Italic.ttf 6b7f7002e0b0c8b261fe878658ef5551e3e59d9f6b609b04efb90dde1e2c1ada, WorkSans-Regular.ttf e67985a843df0d3cdee51a3d0f329eb1774a344ad9ff0c9ab923751f1577e2a4"
+    },
+    {
+      "name": "canvas-design font: YoungSerif",
+      "version": "Version 3.003; ttfautohint (v1.8.4.7-5d5b);gftools[0.9.33]",
+      "license": "OFL-1.1",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts/YoungSerif-OFL.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design/canvas-fonts",
+      "note": "Bundled font metadata: Copyright 2023 The Young Serif Project Authors (https://github.com/noirblancrouge/YoungSerif). SHA-256: YoungSerif-Regular.ttf f8dc08f77abad753a00670af70756a8ace938e5c3f0b770f4f4c2071c4bd8fc6"
+    },
+    {
+      "name": "Anthropic Skill: canvas-design",
+      "version": "vendored source snapshot",
+      "license": "Apache-2.0",
+      "license_file": "packages/bowhead_skill/catalog/canvas-design/LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/canvas-design",
+      "note": "Preserve the bundled upstream license. Font files and embedded third-party code retain their separate terms."
+    },
+    {
+      "name": "Anthropic Skill: frontend-design",
+      "version": "vendored source snapshot",
+      "license": "Apache-2.0",
+      "license_file": "packages/bowhead_skill/catalog/frontend-design/LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/frontend-design",
+      "note": "Preserve the bundled upstream license. Font files and embedded third-party code retain their separate terms."
+    },
+    {
+      "name": "Anthropic Skill: mcp-builder",
+      "version": "vendored source snapshot",
+      "license": "Apache-2.0",
+      "license_file": "packages/bowhead_skill/catalog/mcp-builder/LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/mcp-builder",
+      "note": "Preserve the bundled upstream license. Font files and embedded third-party code retain their separate terms."
+    },
+    {
+      "name": "Anthropic Skill: theme-factory",
+      "version": "vendored source snapshot",
+      "license": "Apache-2.0",
+      "license_file": "packages/bowhead_skill/catalog/theme-factory/LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/theme-factory",
+      "note": "Preserve the bundled upstream license. Font files and embedded third-party code retain their separate terms."
+    },
+    {
+      "name": "Anthropic Skill: web-artifacts-builder",
+      "version": "vendored source snapshot",
+      "license": "Apache-2.0",
+      "license_file": "packages/bowhead_skill/catalog/web-artifacts-builder/LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/web-artifacts-builder",
+      "note": "Preserve the bundled upstream license. Font files and embedded third-party code retain their separate terms."
+    },
+    {
+      "name": "shadcn/ui source components bundled in web-artifacts-builder",
+      "version": "vendored archive snapshot",
+      "license": "MIT",
+      "license_file": "packages/bowhead_skill/catalog/web-artifacts-builder/scripts/shadcn-components.LICENSE.txt",
+      "source": "packages/bowhead_skill/catalog/web-artifacts-builder/scripts/shadcn-components.tar.gz",
+      "note": "Archive bytes unchanged; SHA-256 1296f069e825de7933de7e8ac63672495cacce3f88f2dc45554dbcddbcbca60f. Upstream copyright and license: https://github.com/shadcn-ui/ui/blob/main/LICENSE.md"
+    },
+    {
+      "name": "DejaVu Sans and Serif subsets embedded in the theme showcase",
+      "version": "2.37",
+      "license": "Bitstream-Vera AND LicenseRef-Arev",
+      "license_file": "config/third_party/licenses/font-pdf-dejavu.txt",
+      "source": "packages/bowhead_skill/catalog/theme-factory/theme-showcase.pdf",
+      "note": "Embedded font metadata preserves the Bitstream and Arev copyright/permission notices. DejaVu additions are public domain. Upstream terms: https://dejavu-fonts.github.io/License.html PDF bytes unchanged; SHA-256 3e126eca9fe99088051f7cb984c97cedb31c7d9e09ce0ba5d61bd01e70a0d253."
+    },
+    {
+      "name": "GNU FreeSans and FreeSerif subsets embedded in the theme showcase",
+      "version": "0412.4271",
+      "license": "GPL-3.0-or-later WITH Font-exception-2.0",
+      "license_file": "config/third_party/licenses/font-pdf-gnu-freefont.txt",
+      "source": "packages/bowhead_skill/catalog/theme-factory/theme-showcase.pdf",
+      "note": "Only font subsets embedded in the existing document are included; no standalone FreeFont files are distributed. The font metadata includes the document embedding exception. Upstream terms: https://www.gnu.org/s/freefont/license.html PDF bytes unchanged; SHA-256 3e126eca9fe99088051f7cb984c97cedb31c7d9e09ce0ba5d61bd01e70a0d253."
+    }
+  ],
+  "image_contexts": [
+    "bowhead-app",
+    "bowhead-sandbox-executor"
+  ]
+}

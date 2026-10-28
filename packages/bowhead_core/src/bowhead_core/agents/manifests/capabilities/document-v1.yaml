@@ -1,0 +1,38 @@
+schema_version: 1
+definitions:
+  - id: cap_template_document
+    version: 1
+    compatibility_major: 1
+    lifecycle: active
+    category: documents
+    listing_revision: 1
+    listing:
+      en-US:
+        name: Request a template document draft
+        description: Admit a private ordinary-PPTX draft for explicit preview and confirmation.
+        task_examples: [Use this uploaded PPTX as the template and replace its text with my data.]
+      zh-CN:
+        name: 申请模板文档草稿
+        description: 受理普通 PPTX 的私有草稿，预览并明确确认后才发布。
+        task_examples: [以这个上传的 PPTX 为模板，用我的数据替换文字。]
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: document.request, version: 1 }]
+    outputs: [{ contract: document.admission, version: 1 }]
+    compatibility_class: private_document_admission
+    market_visible: false
+    authoring_selectable: false
+    system_only: true
+    contract_test_family: document_admission_contract
+implementations:
+  - id: capi_template_document_native
+    version: 1
+    capability: { id: cap_template_document, version: 1 }
+    lifecycle: active
+    required_tools: [template_document_submit]
+    risk_floor: internal_artifact_write
+    effect_class: internal_artifact_write
+    availability_checks: [document_runtime_ready, principal_resource_scope_ready, team_model_ready]
+    eval_suite: document-admission-parity-v1
+    priority: 100
+    owner: platform-documents
+    review_state: reviewed

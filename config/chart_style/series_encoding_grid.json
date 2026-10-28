@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "description": "Cross-runtime parity grid for assign_series_encodings / assignSeriesEncodings. Both runtimes enumerate the same inputs, serialize every result canonically and must reproduce this sha256.",
+  "roleSets": [["bar"], ["line"], ["area"], ["segment"], ["point"], ["bar", "line"], ["area", "line"]],
+  "seriesCounts": { "from": 1, "to": 70 },
+  "capacities": [1, 2, 6, 11, 16],
+  "paletteLengths": [6, 16],
+  "colorSafe": [false, true],
+  "stacked": [false, true],
+  "caseCount": 19600,
+  "sha256": "e688a219900622cc78daf3c5724bafc66c87d48e405f4bbff495bf6856efb343"
+}

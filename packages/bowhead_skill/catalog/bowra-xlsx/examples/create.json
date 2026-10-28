@@ -1,0 +1,41 @@
+{
+  "operation": "create",
+  "sheets": [
+    {
+      "name": "Metrics",
+      "columns": [
+        "Metric",
+        "Value"
+      ],
+      "rows": [
+        [
+          "Requests",
+          240
+        ],
+        [
+          "Median minutes",
+          12
+        ]
+      ],
+      "formats": [
+        "general",
+        "integer"
+      ]
+    },
+    {
+      "name": "Follow-up",
+      "columns": [
+        "Action",
+        "Due date"
+      ],
+      "rows": [
+        [
+          "Review failures",
+          {
+            "date": "2026-10-08"
+          }
+        ]
+      ]
+    }
+  ]
+}

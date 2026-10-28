@@ -1,0 +1,39 @@
+{
+  "operation": "create",
+  "title": "Monthly delivery review",
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "Summary",
+      "level": 1
+    },
+    {
+      "type": "paragraph",
+      "text": "The pilot processed 240 requests. Median turnaround was 12 minutes."
+    },
+    {
+      "type": "table",
+      "columns": [
+        "Metric",
+        "Value"
+      ],
+      "rows": [
+        [
+          "Requests",
+          "240"
+        ],
+        [
+          "Median turnaround",
+          "12 minutes"
+        ]
+      ]
+    },
+    {
+      "type": "bullets",
+      "items": [
+        "Expand the pilot to the support team.",
+        "Review failed requests before expansion."
+      ]
+    }
+  ]
+}

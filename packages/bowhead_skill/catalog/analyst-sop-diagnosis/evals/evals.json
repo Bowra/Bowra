@@ -1,0 +1,34 @@
+{
+  "skill_name": "analyst-sop-diagnosis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "为什么 2025 年营业额下滑了",
+      "files": [],
+      "expected_behavior": [
+        "MUST-1 confirms YoY drop; skips with message if |delta| < 2%.",
+        "MUST-2 attribution via bi_query (按主维度 + 同比) returns top-1 contributing dim/value.",
+        "MUST-3 monthly trend chart rendered.",
+        "Narrative ties top-1 dim + time inflection."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "为什么 GMV 下滑，深入看量价拆解",
+      "files": [],
+      "expected_behavior": [
+        "SHOULD-1 volume × price split executed.",
+        "Narrative calls out '量降为主' or '价降为主' or '两者都'."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "A 品牌下滑原因",
+      "files": [],
+      "expected_behavior": [
+        "Filter fixed at 品牌=A.",
+        "Skips top-N attribution; goes to SHOULD-1 vol/price directly."
+      ]
+    }
+  ]
+}
