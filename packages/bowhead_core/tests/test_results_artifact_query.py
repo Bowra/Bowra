@@ -5,6 +5,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+from test_chat_reference_storage import _upgrade
 
 
 async def _store(tmp_path: Path) -> ArtifactStore:
@@ -12,20 +13,9 @@ async def _store(tmp_path: Path) -> ArtifactStore:
         db_path=str(tmp_path / "bowhead.db"),
         backend=LocalBackend(root_dir=tmp_path / "files"),
     )
+    _upgrade(Path(store.db_path))
     await store.initialize()
     async with aiosqlite.connect(store.db_path) as db:
-        await db.executescript("""
-            CREATE TABLE turns (id TEXT PRIMARY KEY, session_id TEXT);
-            CREATE TABLE turn_attachments (
-                turn_id TEXT, artifact_id TEXT,
-                PRIMARY KEY (turn_id, artifact_id)
-            );
-            CREATE TABLE session_attachments (
-                session_id TEXT, artifact_id TEXT, pinned_at TEXT, detached_at TEXT,
-                PRIMARY KEY (session_id, artifact_id)
-            );
-            CREATE TABLE canvases (id TEXT PRIMARY KEY, session_id TEXT);
-        """)
         rows = [
             (
                 "art_deliverable",
@@ -62,7 +52,7 @@ async def _store(tmp_path: Path) -> ArtifactStore:
             "UPDATE artifacts SET status='pending_upload' WHERE id='art_pending'",
         )
         await db.executemany(
-            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1',?,NULL,NULL)",
+            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1',?,'2026-08-24T00:00:00+00:00',NULL)",
             [(row[0],) for row in rows],
         )
         await db.commit()
@@ -125,7 +115,7 @@ async def test_results_artifact_query_freezes_snapshot_and_searches_literal_symb
             "VALUES ('art_new','new.csv','text/csv',1,'fixture','fixture/new','user_1','2026-08-24T12:06:00+00:00','tool_data','trusted')",
         )
         await db.execute(
-            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1','art_new',NULL,NULL)",
+            "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES ('session_1','art_new','2026-08-24T00:00:00+00:00',NULL)",
         )
         await db.commit()
 

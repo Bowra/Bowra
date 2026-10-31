@@ -28,10 +28,35 @@
 export interface AnsweredClarification {
   /** User-selected values for summary rendering; empty array on skip/dismiss. */
   values: string[];
+  /** Canonical connector identifiers, retained only to match later replay events. */
+  canonicalValues?: string[];
   /** Skip the entire card ("让模型自己判断"). */
   skipped?: boolean;
   /** 「换个问法」dismiss: prevent restoration without rendering a summary row. */
   dismissed?: boolean;
+}
+
+/** Project connector identifiers to the labels from the original question. */
+export function clarificationDisplayAnswer(
+  requestId: string,
+  values: string[],
+  pending: { clarificationId: string; kind?: string; options?: Array<{ value: string; label: string }> } | null | undefined,
+  skipped: boolean,
+): AnsweredClarification {
+  if (skipped) return { values: [], skipped: true };
+  if (pending?.clarificationId === requestId && pending.kind === "tool_context_select" && pending.options?.length) {
+    return {
+      values: values.map((value) => pending.options?.find((option) => option.value === value)?.label ?? value),
+      canonicalValues: values,
+      skipped: false,
+    };
+  }
+  const previous = getAnsweredClarification(requestId);
+  if (previous?.canonicalValues && previous.canonicalValues.length === values.length
+      && previous.canonicalValues.every((value, index) => value === values[index])) {
+    return { ...previous, skipped: false };
+  }
+  return { values, skipped: false };
 }
 
 const _answered = new Map<string, AnsweredClarification>();

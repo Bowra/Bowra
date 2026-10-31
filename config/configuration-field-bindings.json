@@ -1,0 +1,1282 @@
+{
+  "personal_appearance.density": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.density",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "dea8228d9f1c0a8640b5"
+  },
+  "personal_appearance.mode": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.mode",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f104928bcfb87a89d58d"
+  },
+  "personal_appearance.motion": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.motion",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "37f96a558b0ec9d428af"
+  },
+  "personal_appearance.radius": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.radius",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "4e126f5f592d54552cb8"
+  },
+  "personal_appearance.typeScale": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.typeScale",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "d4b732413395a52bcf86"
+  },
+  "personal_appearance.typographyProfile": {
+    "kind": "control",
+    "file": "components/settings/personal-appearance-settings.tsx",
+    "marker": "personal_appearance.typographyProfile",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "7006b118427dae66db22"
+  },
+  "space_instructions.content": {
+    "kind": "control",
+    "file": "components/settings/space-instructions.tsx",
+    "marker": "space_instructions.content",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "459069679f212e855e42"
+  },
+  "team_execution_limits.html_max_bytes": {
+    "kind": "control",
+    "file": "components/settings/execution-limits.tsx",
+    "marker": "team_execution_limits.html_max_bytes",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f0765dbf409c74f00180"
+  },
+  "team_execution_limits.sandbox_default_timeout_s": {
+    "kind": "control",
+    "file": "components/settings/execution-limits.tsx",
+    "marker": "team_execution_limits.${key}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f0765dbf409c74f00180"
+  },
+  "team_execution_limits.sandbox_max_timeout_s": {
+    "kind": "control",
+    "file": "components/settings/execution-limits.tsx",
+    "marker": "team_execution_limits.${key}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f0765dbf409c74f00180"
+  },
+  "team_model_config.kb": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "edc24b851f9ade9eee27"
+  },
+  "team_model_config.kb.active": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "e02b9b67d4b00c29003b"
+  },
+  "team_model_config.kb.active.embed": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.active.embed",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.active.rerank": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.active.rerank",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.active.row_extractor": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.active.row_extractor",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.active.vision": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.active.vision",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.models": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "52f964a3917df87226b2"
+  },
+  "team_model_config.kb.models.*.capability": {
+    "kind": "derived",
+    "reason": "Knowledge declarations are derived from original connection/model capability controls; the dimension has its own reindex control.",
+    "schema_revision": "8bbe6fe76aef81992be4"
+  },
+  "team_model_config.kb.models.*.dim": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.models.*.dim",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.kb.models.*.model": {
+    "kind": "compatibility",
+    "reason": "Legacy remote-model alias remains readable; current declarations use real_id.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.models.*.protocol": {
+    "kind": "derived",
+    "reason": "Knowledge declarations are derived from original connection/model capability controls; the dimension has its own reindex control.",
+    "schema_revision": "4e0632585c656edca880"
+  },
+  "team_model_config.kb.models.*.provider": {
+    "kind": "derived",
+    "reason": "Knowledge declarations are derived from original connection/model capability controls; the dimension has its own reindex control.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.kb.models.*.real_id": {
+    "kind": "derived",
+    "reason": "Knowledge declarations are derived from original connection/model capability controls; the dimension has its own reindex control.",
+    "schema_revision": "9ac136edb99a2063b309"
+  },
+  "team_model_config.kb.retrieval_top_k": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.retrieval_top_k",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "9354d5a3a3d49aa65597"
+  },
+  "team_model_config.media": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "ed929bc591afd0daeb09"
+  },
+  "team_model_config.media.active": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "38528ff0db11479294e4"
+  },
+  "team_model_config.media.active.image_gen": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.media.active.image_gen",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.media.models": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "9de8681d8c93b391a00e"
+  },
+  "team_model_config.media.models.*.capability": {
+    "kind": "derived",
+    "reason": "The external editor fixes the capability from the image/search section.",
+    "schema_revision": "f7c77ff30c1bef7bbfe9"
+  },
+  "team_model_config.media.models.*.model": {
+    "kind": "compatibility",
+    "reason": "Legacy remote-model alias remains readable; the current editor writes real_id.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.media.models.*.protocol": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.protocol",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "059ddbc6a3d9863bfa2b"
+  },
+  "team_model_config.media.models.*.provider": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.provider",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.media.models.*.real_id": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.real_id",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "9ac136edb99a2063b309"
+  },
+  "team_model_config.providers": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "7dbf6bfe2aec3b85548b"
+  },
+  "team_model_config.providers.*.anthropic_version": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "f832042d16c0d6442092"
+  },
+  "team_model_config.providers.*.api_version": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.api_version",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f832042d16c0d6442092"
+  },
+  "team_model_config.providers.*.base_url": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.base_url",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "373775e2684867f4d2a8"
+  },
+  "team_model_config.providers.*.context_window": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "61ec9d06041eadcfd79c"
+  },
+  "team_model_config.providers.*.display_name": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.display_name",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "287e7044ce74a8bea59f"
+  },
+  "team_model_config.providers.*.endpoint": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.base_url",
+    "reason": "Azure endpoint maps to the existing shared service-address input; no separate input is added.",
+    "schema_revision": "4dc643733e7098b0eea2"
+  },
+  "team_model_config.providers.*.max_output_tokens": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "61ec9d06041eadcfd79c"
+  },
+  "team_model_config.providers.*.messages_path": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.messages_path",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "bf755a26f981bdc0c6fa"
+  },
+  "team_model_config.providers.*.models": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "6412f611e5afc2fc51b2"
+  },
+  "team_model_config.providers.*.models.*.api_surface": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.api_surface",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "75be7901f457b7af2fee"
+  },
+  "team_model_config.providers.*.models.*.capabilities": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.capabilities",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "5cf00f2fa28c9f9317dc"
+  },
+  "team_model_config.providers.*.models.*.capability_transports": {
+    "kind": "derived",
+    "reason": "Capability transport references are derived by the original connection workflow; transport-template and authentication editing remain manual.",
+    "schema_revision": "3f161562db4a72379426"
+  },
+  "team_model_config.providers.*.models.*.context_policy": {
+    "kind": "container",
+    "reason": "Model context policy groups the original typed child controls.",
+    "schema_revision": "a41b168515cb6e726690"
+  },
+  "team_model_config.providers.*.models.*.context_policy.enabled": {
+    "kind": "control",
+    "reason": "The original model editor exposes the typed context preference with its registered field guidance.",
+    "schema_revision": "7cb541e84f226754a46c",
+    "file": "components/settings/models/context-policy-fields.tsx",
+    "marker": "team_model_config.providers.*.models.*.context_policy.enabled"
+  },
+  "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": {
+    "kind": "control",
+    "reason": "The original model editor exposes the typed context preference with its registered field guidance.",
+    "schema_revision": "123534dc55db3ff47eae",
+    "file": "components/settings/models/context-policy-fields.tsx",
+    "marker": "team_model_config.providers.*.models.*.context_policy.${field}"
+  },
+  "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": {
+    "kind": "control",
+    "reason": "The original model editor exposes the typed context preference with its registered field guidance.",
+    "schema_revision": "123534dc55db3ff47eae",
+    "file": "components/settings/models/context-policy-fields.tsx",
+    "marker": "team_model_config.providers.*.models.*.context_policy.${field}"
+  },
+  "team_model_config.providers.*.models.*.context_window": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.context_window",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "61ec9d06041eadcfd79c"
+  },
+  "team_model_config.providers.*.models.*.credit_rates": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "2ccb2399fa9f86e6025b"
+  },
+  "team_model_config.providers.*.models.*.credit_rates.cached_input": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.credit_rates.${kind}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.providers.*.models.*.credit_rates.input": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.credit_rates.${kind}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.providers.*.models.*.credit_rates.output": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.credit_rates.${kind}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.providers.*.models.*.deployment": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.deployment",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "bf755a26f981bdc0c6fa"
+  },
+  "team_model_config.providers.*.models.*.id": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.id",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "52ba84a4bbf396ba7a35"
+  },
+  "team_model_config.providers.*.models.*.max_output_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/output-budget-field.tsx",
+    "marker": "team_model_config.providers.*.models.*.max_output_tokens",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "61ec9d06041eadcfd79c"
+  },
+  "team_model_config.providers.*.models.*.outbound_params": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "26bdc612e1780586b989"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.max_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "ccbaf0e7e663ee9b7b5b"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.max_tokens.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.max_tokens.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.temperature": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.temperature.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.temperature.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.top_p": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.top_p.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.outbound_params.top_p.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The existing repeated outbound control exposes the rule, mode and value together.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.models.*.protocol": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.protocol",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "f090cb615c84d7324e2e"
+  },
+  "team_model_config.providers.*.models.*.public_name": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "287e7044ce74a8bea59f"
+  },
+  "team_model_config.providers.*.models.*.request_body_overrides": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.models.*.request_body_overrides",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "788838d987811cc41ce5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "c9a6cd1fcdac08b69481"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "fc341b0eda14571af159"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "cf6b3ac0002c6c625a16"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.advanced": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.advanced",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e7a3640ae54632c5440"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "8ca2fabd27a413c10ad4"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7abce6e11efb9f4815bf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "ead3650f102aeda4a24b"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7cb541e84f226754a46c"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "00ce7a45415afa42dd0e"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "47be1a3053bfb5f3cbf2"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "bd2c031c4a940cb05413"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "4e0f9e3778c3a41fa2b1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.reasoning_effort": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.reasoning_effort",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e33008aad9c3e204a3a"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_budget": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_budget",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_mode": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_mode",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "cb003d3bb108d057c7b8"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "cf6b3ac0002c6c625a16"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.advanced": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.advanced",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e7a3640ae54632c5440"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "8ca2fabd27a413c10ad4"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7abce6e11efb9f4815bf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "ead3650f102aeda4a24b"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7cb541e84f226754a46c"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "00ce7a45415afa42dd0e"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "47be1a3053bfb5f3cbf2"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "bd2c031c4a940cb05413"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "4e0f9e3778c3a41fa2b1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.reasoning_effort": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.reasoning_effort",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e33008aad9c3e204a3a"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_budget": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_budget",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_mode": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_mode",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "cb003d3bb108d057c7b8"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "cf6b3ac0002c6c625a16"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.advanced": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.advanced",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e7a3640ae54632c5440"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "8ca2fabd27a413c10ad4"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7abce6e11efb9f4815bf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "ead3650f102aeda4a24b"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7cb541e84f226754a46c"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "00ce7a45415afa42dd0e"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "47be1a3053bfb5f3cbf2"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "bd2c031c4a940cb05413"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "4e0f9e3778c3a41fa2b1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.reasoning_effort": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.reasoning_effort",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e33008aad9c3e204a3a"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_budget": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_budget",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_mode": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_mode",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "cb003d3bb108d057c7b8"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "cf6b3ac0002c6c625a16"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.advanced": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.advanced",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e7a3640ae54632c5440"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params": {
+    "kind": "container",
+    "reason": "Policy container rendered through the existing scope selector and its individually bound child controls.",
+    "schema_revision": "8ca2fabd27a413c10ad4"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7abce6e11efb9f4815bf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "ead3650f102aeda4a24b"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7cb541e84f226754a46c"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "00ce7a45415afa42dd0e"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "47be1a3053bfb5f3cbf2"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "bd2c031c4a940cb05413"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.mode": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.value": {
+    "kind": "control",
+    "file": "components/settings/models/outbound-params-section.tsx",
+    "marker": "${guidancePath}.${key}",
+    "reason": "The repeated outbound parameter control exposes the rule, mode and value together; scope is supplied by the existing runtime editor.",
+    "schema_revision": "4e0f9e3778c3a41fa2b1"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.reasoning_effort": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.reasoning_effort",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "8e33008aad9c3e204a3a"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_budget": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_budget",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "2a1379ebe9f4b632fbdf"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_mode": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${policyPath}.thinking_mode",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "cb003d3bb108d057c7b8"
+  },
+  "team_model_config.providers.*.models.*.runtime_parameters.profile": {
+    "kind": "control",
+    "file": "components/settings/models/runtime-parameters-section.tsx",
+    "marker": "${guidancePath}.profile",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "b1ad357b0fc24e85cf39"
+  },
+  "team_model_config.providers.*.outbound_params": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "26bdc612e1780586b989"
+  },
+  "team_model_config.providers.*.outbound_params.max_tokens": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "ccbaf0e7e663ee9b7b5b"
+  },
+  "team_model_config.providers.*.outbound_params.max_tokens.mode": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "429fd1817c1a9add4fb1"
+  },
+  "team_model_config.providers.*.outbound_params.max_tokens.value": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.outbound_params.parallel_tool_calls": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.outbound_params.parallel_tool_calls.mode": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.outbound_params.parallel_tool_calls.value": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.outbound_params.temperature": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.outbound_params.temperature.mode": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.outbound_params.temperature.value": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.outbound_params.top_p": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "356d7294df24d0cf9b7f"
+  },
+  "team_model_config.providers.*.outbound_params.top_p.mode": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "7c644a8cd6e0375ab8e5"
+  },
+  "team_model_config.providers.*.outbound_params.top_p.value": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "ff501796d3fbe386db4c"
+  },
+  "team_model_config.providers.*.timeout_sec": {
+    "kind": "preserved",
+    "reason": "The current connection editor preserves this source field but has no dedicated input; the Agent schema describes it without adding a page control.",
+    "schema_revision": "51191a0deca7c91017e9"
+  },
+  "team_model_config.providers.*.type": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.providers.*.type",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "3a5050a897ba7b34f2ef"
+  },
+  "team_model_config.search": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "641accb04ae36878fabe"
+  },
+  "team_model_config.search.active": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "683fe61157228383b0ad"
+  },
+  "team_model_config.search.active.web_search": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.search.active.web_search",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.search.models": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "dc91b1005ce038deea63"
+  },
+  "team_model_config.search.models.*.capability": {
+    "kind": "derived",
+    "reason": "The external editor fixes the capability from the image/search section.",
+    "schema_revision": "6b217eece1b23ed3cd19"
+  },
+  "team_model_config.search.models.*.model": {
+    "kind": "compatibility",
+    "reason": "Legacy remote-model alias remains readable; the current editor writes real_id.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.search.models.*.protocol": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.protocol",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "541bed2b7046a2ab4c9a"
+  },
+  "team_model_config.search.models.*.provider": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.provider",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.search.models.*.real_id": {
+    "kind": "control",
+    "file": "components/settings/models/external-capability-editor.tsx",
+    "marker": "${fieldPrefix}.real_id",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "9ac136edb99a2063b309"
+  },
+  "team_model_config.tiers": {
+    "kind": "container",
+    "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
+    "schema_revision": "eb64e995408292be7482"
+  },
+  "team_model_config.tiers.fast": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.fast",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "494ae5abdc9ff09c190d"
+  },
+  "team_model_config.tiers.fast.follow": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.fast",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "09ba3ae49432b28d4aa3"
+  },
+  "team_model_config.tiers.fast.model": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.fast",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.fast.provider": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.fast",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.judge": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.judge",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "3ad4c4a3bfb15c365022"
+  },
+  "team_model_config.tiers.judge.auto": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.judge",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "a19aaf95fa40fff2540b"
+  },
+  "team_model_config.tiers.judge.model": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.judge",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.judge.provider": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.judge",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.primary": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "93ea065db8c0c9fcee41"
+  },
+  "team_model_config.tiers.primary.model": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.primary.provider": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.primary_fallback": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary_fallback",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "5130a17123efab12c2c2"
+  },
+  "team_model_config.tiers.primary_fallback.*.model": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary_fallback",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_config.tiers.primary_fallback.*.provider": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.tiers.primary_fallback",
+    "reason": "The existing assignment selector edits a connection/model pair or its supported mode; its help includes child meanings.",
+    "schema_revision": "00404e686415370f1711"
+  },
+  "team_model_retry.max_retries": {
+    "kind": "control",
+    "file": "components/settings/models/retry-setting-section.tsx",
+    "marker": "team_model_retry.max_retries",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "18e43a31e6af71d4bc62"
+  },
+  "team_run_limits.model_call_time_limit_s": {
+    "kind": "control",
+    "file": "components/settings/agent-run-limits.tsx",
+    "marker": "team_run_limits.model_call_time_limit_s",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "77a2341e41f033eaf809"
+  },
+  "team_run_limits.step_limit": {
+    "kind": "control",
+    "file": "components/settings/agent-run-limits.tsx",
+    "marker": "team_run_limits.step_limit",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "e1b0a65e2594e0fbb567"
+  },
+  "team_run_limits.tool_call_limit": {
+    "kind": "control",
+    "file": "components/settings/agent-run-limits.tsx",
+    "marker": "team_run_limits.tool_call_limit",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "906b40adf99fd9b61dc5"
+  },
+  "team_run_limits.turn_time_limit_s": {
+    "kind": "control",
+    "file": "components/settings/agent-run-limits.tsx",
+    "marker": "team_run_limits.turn_time_limit_s",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "ab20535bb751c5ab4fac"
+  },
+  "user_language.output_language": {
+    "kind": "control",
+    "file": "components/settings/profile.tsx",
+    "marker": "user_language.output_language",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "d7d7d771e4070295ed89"
+  },
+  "workspace_i18n.default_data_language": {
+    "kind": "control",
+    "file": "components/settings/workspace-i18n.tsx",
+    "marker": "workspace_i18n.${field}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "a43cb5bcea89e313e269"
+  },
+  "workspace_i18n.week_start_day": {
+    "kind": "control",
+    "file": "components/settings/workspace-i18n.tsx",
+    "marker": "workspace_i18n.${field}",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "a30707969c1eef64637e"
+  },
+  "workspace_metadata.description": {
+    "kind": "control",
+    "file": "components/settings/space-general.tsx",
+    "marker": "workspace_metadata.description",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "fdd7e4cf9c1b9639228a"
+  },
+  "workspace_metadata.name": {
+    "kind": "control",
+    "file": "components/settings/space-general.tsx",
+    "marker": "workspace_metadata.name",
+    "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
+    "schema_revision": "3098a7851f6704a71d94"
+  }
+}

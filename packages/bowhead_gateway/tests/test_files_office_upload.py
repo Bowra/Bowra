@@ -188,7 +188,7 @@ async def test_office_upload_never_schedules_classification_or_auto_index(ctx, m
     art = await store.get(response.json()["file_id"])
     assert art.category is None and art.retention_hint is None and art.inject == "full"
     # A queued callback admitted before the policy changed must also defer.
-    await files._classify_then_maybe_index(client.app, art)
+    await files._classify_uploaded_artifact(client.app, art)
     client.app.state.user_store.get_user.assert_not_awaited()
     reader.assert_not_awaited()
 
@@ -198,7 +198,7 @@ async def test_non_office_classification_and_explicit_office_content_still_work(
     # Exercise the real background handler deterministically; no background
     # sleep/polling. Existing categories/retention are never cleared by policy.
     text = await store.put_bytes(content=b"short reference", filename="notes.txt", mime="text/plain", source="upload", created_by="u_owner")
-    await files._classify_then_maybe_index(client.app, text)
+    await files._classify_uploaded_artifact(client.app, text)
     assert (await store.get(text.id)).category == "other"
     assert client.app.state.user_store.get_user.await_count == 1
     client.app.state.user_store.get_user.reset_mock()
@@ -209,7 +209,7 @@ async def test_non_office_classification_and_explicit_office_content_still_work(
         source="upload",
         created_by="u_owner",
     )
-    await files._classify_then_maybe_index(client.app, source)
+    await files._classify_uploaded_artifact(client.app, source)
     assert client.app.state.user_store.get_user.await_count == 0
     # Current authorized preview still uses the real Word extractor.
     content = client.get(f"/api/v1/files/{source.id}/preview")

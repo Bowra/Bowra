@@ -140,6 +140,8 @@ function workbenchElement(
 }
 
 beforeEach(() => {
+  // Results navigation writes the browser URL; isolate each layout scenario.
+  window.history.replaceState(null, "", "/");
   canvasState.sections = [];
   canvasState.canvasId = null;
   canvasState.sessionId = null;

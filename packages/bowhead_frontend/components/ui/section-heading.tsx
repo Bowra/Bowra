@@ -63,11 +63,11 @@ export function CanvasSection({ children, label, labelledBy }: { children: React
 }
 
 /** C6 · setting row (switches and segments apply immediately; text fields use the save bar). */
-export function FieldRow({ title, description, control, titleId, className }: { title: ReactNode; description?: ReactNode; control: ReactNode; titleId?: string; className?: string }) {
+export function FieldRow({ title, description, control, titleId, className, help }: { title: ReactNode; help?: ReactNode; description?: ReactNode; control: ReactNode; titleId?: string; className?: string }) {
   return (
     <div className={className ? `${styles.row} ${className}` : styles.row}>
       <span className={styles.rowText}>
-        <span className={styles.rowTitle} id={titleId}>{title}</span>
+        <span className={styles.labelRow}><span className={styles.rowTitle} id={titleId}>{title}</span>{help}</span>
         {description ? <span className={styles.rowDescription}>{description}</span> : null}
       </span>
       <span className={styles.rowControl}>{control}</span>

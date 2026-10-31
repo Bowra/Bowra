@@ -78,6 +78,10 @@ export function parseDocumentJob(value: unknown, jobId: string): DocumentJob {
     text(value.request_text) &&
     typeof value.can_confirm === "boolean" &&
     (value.can_revise === undefined || typeof value.can_revise === "boolean") &&
+    (value.superseded_by_job_id === undefined ||
+      (id(value.superseded_by_job_id) && value.superseded_by_job_id !== value.id &&
+        value.state === "cancelled" && !value.can_confirm && value.can_revise !== true &&
+        digest(value.draft_digest) && record(value.draft))) &&
     (value.can_revise !== true ||
       (value.state === "review" && value.can_confirm && digest(value.draft_digest))) &&
     (value.draft_digest == null || digest(value.draft_digest)) &&
@@ -90,12 +94,17 @@ export function parseDocumentJob(value: unknown, jobId: string): DocumentJob {
     const draft = value.draft;
     valid =
       record(draft) &&
+      (draft.requires_full_review === undefined || typeof draft.requires_full_review === "boolean") &&
       (draft.output_stem === undefined || text(draft.output_stem)) &&
       record(draft.files) &&
       Object.values(draft.files).every(
         (file) => record(file) && id(file.artifact_id) && digest(file.sha256),
       ) &&
       record(draft.manifest) &&
+      (draft.manifest.comparison === undefined || draft.manifest.comparison === "observed_object_facts" || draft.manifest.comparison === "unavailable") &&
+      ((draft.manifest.schema_version === undefined && draft.profile !== "pptx-script-worker-v1") ||
+        (draft.manifest.schema_version === 2 && draft.profile === "pptx-script-worker-v1" &&
+          draft.kind === "authoring_draft" && draft.semantic_status === "unapproved" && draft.requires_full_review === true)) &&
       arrayOf(
         draft.manifest.changes,
         (change) =>

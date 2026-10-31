@@ -52,6 +52,7 @@ async def results_capabilities(
     except Exception:  # noqa: S110 - observability must not break negotiation
         pass
     return ResultsCapabilitiesResponseV1(
+        interactive_html=capabilities.interactive_html,
         workspace=capabilities.workspace,
         complete_list=capabilities.complete_list,
         scale_nav=capabilities.scale_nav,
@@ -235,6 +236,7 @@ async def owner_results_query(
             "results_anchor_not_in_view": status.HTTP_409_CONFLICT,
             "results_filter_unavailable": status.HTTP_409_CONFLICT,
             "results_read_model_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "results_artifact_contract_unsupported": status.HTTP_409_CONFLICT,
         }
         record_results_query_metrics(
             started_at=started_at,

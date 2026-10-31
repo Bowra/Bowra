@@ -348,6 +348,23 @@ function buildScenario(message, turnId, sessionId) {
   // DF-04 fault injection: python automatically projects code_block, but the final hide frame is lost and
   // by-session still returns this auxiliary section. The frontend must guard the Report surface independently,
   // preventing a raw workspace section from opening an empty report; explicit Data focus can still open the workspace.
+  if (/presentfiles/i.test(message)) {
+    const output = { artifact_id: "art_calc", filename: "calc.md", mime: "text/markdown", size: 17,
+      title: "计算说明", description: "复用已保存的原文件" };
+    const metadata = { output_artifacts: [output], artifact_presentation: {
+      contract: "artifact-presentation.v1", origin: "explicit_tool", items: [{ artifact_id: "art_calc", title: output.title }],
+    } };
+    return {
+      responseKind: "chat", finalSections: [], sourceRefs: [],
+      events: [
+        ...sandboxStepEvents(turnId).map((event) => ({ ...event, payload: { ...event.payload,
+          ...(event.type === "step_started" ? { tool_name: "present_artifacts", header_zh: "交付已有文件" } : {}),
+          ...(["tool_result", "step_done"].includes(event.type) ? { tool_name: "present_artifacts", result_inline: null, result_meta: metadata } : {}),
+        } })),
+        { type: "step_list_card_finalized", payload: { card_id: turnId, state: "completed", step_count: 1 } },
+      ],
+    };
+  }
   if (/pythondata|sandboxdata/i.test(message)) {
     const codeSection = sec("sec_python_stdout", "code_block", {
       lang: "python",

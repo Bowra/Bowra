@@ -262,7 +262,8 @@ async def test_unreviewed_schema_blocks_erasure_before_blob_deletion(store: User
         assert (await (await db.execute("SELECT last_code FROM account_deletions")).fetchone())[0] == "account_erasure_unreviewed_table"
 
 
-async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(document_ctx, tmp_path: Path) -> None:
+@pytest.mark.parametrize("with_canvas", [False, True])
+async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(document_ctx, tmp_path: Path, with_canvas: bool) -> None:
     from unittest.mock import AsyncMock
 
     from bowhead_core.account_deletion_ledger import AccountDeletionLedger
@@ -273,9 +274,17 @@ async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(do
     from test_document_store import SCOPE, _sql
 
     ctx = document_ctx
-    receipt = await ctx.submit()
+    if with_canvas:
+        from test_document_canvas_inputs import admit_canvas, freeze_canvas, setup_canvas
+
+        canvas = await setup_canvas(ctx)
+        receipt, _ = await admit_canvas(ctx, canvas)
+        await freeze_canvas(ctx, canvas, receipt.job_id)
+    else:
+        receipt = await ctx.submit()
     await DocumentInputStore(ctx.artifacts).freeze(scope=SCOPE, job_id=receipt.job_id)
     input_paths = [row[0] for row in await _sql(ctx, "SELECT path FROM document_input_copies")]
+    input_paths += [row[0] for row in await _sql(ctx, "SELECT path FROM document_canvas_inputs")]
     with pytest.raises(aiosqlite.IntegrityError, match="retained"):
         await _sql(ctx, "DELETE FROM document_jobs WHERE id=?", (receipt.job_id,))
     ledger = AccountDeletionLedger(tmp_path / "outside.db", secret="synthetic-secret")
@@ -294,7 +303,14 @@ async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(do
     await service.request(SCOPE.user_id)
     service.clock = lambda: now
     assert await service.run_once() == {"completed": 1, "failed": 0}
-    for table in ("document_jobs", "document_input_sets", "document_input_copies", "document_artifact_refs", "document_command_receipts"):
+    for table in (
+        "document_jobs",
+        "document_input_sets",
+        "document_input_copies",
+        "document_canvas_inputs",
+        "document_artifact_refs",
+        "document_command_receipts",
+    ):
         assert (await _sql(ctx, f"SELECT COUNT(*) FROM {table}"))[0][0] == 0
     assert not Path(ctx.artifact.path).exists()
     for path in input_paths:

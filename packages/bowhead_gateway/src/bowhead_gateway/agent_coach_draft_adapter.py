@@ -27,7 +27,6 @@ _FIELDS = frozenset(
         "description",
         "system_prompt",
         "model",
-        "max_iterations",
         "output_schema",
         "tool_refs",
         "skill_grants",

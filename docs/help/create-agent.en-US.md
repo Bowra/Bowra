@@ -94,7 +94,7 @@ When the configuration offers Skills, select the specific document Skill your Ag
 - **PowerPoint documents** (`bowra-pptx`): new editable title, bullet and table slides.
 - **Excel workbooks** (`bowra-xlsx`): value/date worksheets and cell inspection; formulas are not calculated.
 
-These are standard built-in Skills. Selecting one does not grant file access or change an already published Agent. Save and apply the new Agent version through the existing process. These basic Skills do not preserve an uploaded Office template; use the available template-draft workflow when you need that.
+These are standard built-in Skills. Selecting one does not grant file access or change an already published Agent. Save and apply the new Agent version through the existing process. These basic Skills do not preserve an uploaded Office template; template-preserving edits are not provided by these Community Skills.
 
 In Bowra Community, a successful document creation appears as a downloadable file in the conversation. A filename mentioned in an answer is not confirmation that a file was created. For PowerPoint, request a new basic text/table deck. If you supply a template to preserve, the Agent should explain the limitation and ask whether a separate new deck is acceptable before generating it. Inspect the downloaded file before sharing; slide rendering and template fidelity are not provided by this Skill.
 
@@ -256,3 +256,11 @@ If someone else changed the saved resource, choose **Reload saved version** in i
 After opening a draft, narrowing or widening the window preserves unsaved editor input and unsent Chat text. If saving fails, follow the saved-result check or retry shown by the page; resizing does not mean the draft was saved. An explicitly requested name should stay unchanged. Interface language does not automatically determine the Agent's future answer language; review its generated instructions before adopting them.
 
 For short answers with one item per line, ask for the desired line format in the instructions. Chat preserves paragraph line breaks during generation and when you reopen the conversation.
+
+## Knowledge sources
+
+When the editor offers Knowledge sources, choose readable knowledge in the current context or selected files in the original configuration view. Select the knowledge-reading Plugin or relevant Tools first; choosing sources does not add Tools or grant file permissions. Each user of a shared Agent still needs access to its selected files.
+
+Search and select the files to include. Removing the last file means no knowledge files may be read; explicitly choosing current-context reading broadens the scope. Optionally set the number of search results, or leave it empty for the Team default. Save the draft and review it through the original release flow. Unavailable sources appear as numbered placeholders; restore access or revise the selection before saving.
+
+These settings govern knowledge reading and do not add uploaded task attachments to the knowledge base. Task attachments retain their original authorization.

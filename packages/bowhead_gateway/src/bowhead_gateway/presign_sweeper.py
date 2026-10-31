@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 from bowhead_core.artifact_store import _open_db
+from bowhead_core.documents.canvas_inputs import cleanup_canvas_inputs
 from bowhead_core.documents.inputs import cleanup_document_inputs
 from bowhead_core.documents.upload_confirmation import cleanup_confirmations, has_confirmation_schema
 
@@ -66,6 +67,7 @@ async def _sweep_once(
     # This protection is a storage invariant, not a generation-feature switch.
     await cleanup_confirmations(artifact_store, now=datetime.fromisoformat(now_iso).timestamp())
     await cleanup_document_inputs(artifact_store, now=datetime.fromisoformat(now_iso).timestamp())
+    await cleanup_canvas_inputs(artifact_store, now=datetime.fromisoformat(now_iso).timestamp())
     async with _open_db(artifact_store.db_path) as db:
         db.row_factory = aiosqlite.Row
         confirmation_guard = (

@@ -1,13 +1,14 @@
-"""Lead-only request admission. The receipt is not a completed document."""
+"""Exact Agent request admission. The receipt is not a completed document."""
 
 import json
+import os
 
 from bowhead_router.types import ToolSchema
 from pydantic import ValidationError
 
 from bowhead_core.documents.continuation import DocumentPlanningFailure, DocumentPlanningPause, DocumentPlanningReview
 from bowhead_core.documents.request import DOCUMENT_TOOL_ARGUMENTS, DocumentProposal, DocumentRequestError, document_tool_schema
-from bowhead_core.documents.turn_policy import ORIGINAL_REQUEST_QUOTE_GUIDANCE, DocumentTurnState, terminal_message
+from bowhead_core.documents.turn_policy import ORIGINAL_REQUEST_QUOTE_GUIDANCE, DocumentTurnState, pending_source_action_message, terminal_message
 from bowhead_core.tool_registry import ToolSpec
 
 
@@ -76,6 +77,8 @@ def register_document_tool(registry, *, service):
                 "role",
                 "current_message_position",
                 "requested_outputs",
+                "canvas",
+                "section_ids",
                 "job_id",
             }
             errors = []
@@ -112,6 +115,7 @@ def register_document_tool(registry, *, service):
                 "document_evidence_ambiguous",
                 "document_reference_ambiguous",
                 "document_revision_required",
+                "document_canvas_selection_invalid",
             }
             conflict = exc.code in {"document_command_conflict", "document_revision_conflict"}
             result = {
@@ -122,13 +126,25 @@ def register_document_tool(registry, *, service):
                 "hint": (
                     "Use action=revise with only current-request evidence; the canonical request already binds the exact draft."
                     if exc.code == "document_revision_required"
+                    else "An explicitly selected connector operation has no durable completed result. Complete that original operation before requesting a document draft. No document job was admitted."
+                    if exc.code == "document_source_action_pending"
+                    else "Choose only exact available current-Canvas section IDs, or use canvas={} to let the document author read current visible content. Do not invent IDs or transcribe data."
+                    if exc.code == "document_canvas_selection_invalid"
+                    else "The Canvas changed before its input was saved. Ask the user to check current content and submit a new request. No new draft was admitted."
+                    if exc.code == "document_canvas_changed"
+                    else "The source Canvas or its data is unavailable in this Chat or no longer readable. Ask the user to reopen the source Chat and check access before a new request."
+                    if exc.code in {"document_canvas_unavailable", "document_canvas_source_unavailable", "document_canvas_input_unavailable"}
+                    else "Canvas source access could not be checked. Ask the administrator to check the source projection service before a new request."
+                    if exc.code == "document_canvas_access_unavailable"
                     else "The existing request was not replaced. Do not retry with changed arguments or infer publication from this conflict."
                     if conflict
                     else ORIGINAL_REQUEST_QUOTE_GUIDANCE
                     + "Copy exact, unique quotations from the current user message, not history or file contents. Use exact available artifact IDs; the server resolves current files and existing session pins. Do not invent file positions."
                 ),
                 "document_terminal": not repairable or state.attempts >= 2,
-                "message": terminal_message(ctx, accepted=False, conflict=conflict),
+                "message": pending_source_action_message(ctx)
+                if exc.code == "document_source_action_pending"
+                else terminal_message(ctx, accepted=False, conflict=conflict),
             }
             if exc.field is not None:
                 result["field_errors"] = [{"field": exc.field, "issue": "exact_current_quote_required"}]
@@ -169,8 +185,17 @@ def register_document_tool(registry, *, service):
                     "For action=generate, evidence is REQUIRED at the top level: {text: an exact quotation from the current user request}. "
                     "Also copy exact current user quotations for each input role and exact artifact IDs. The server resolves file positions; do not supply them. "
                     "Use each artifact only once with one role and exactly one template. Values supplied by the user need no separate data file; never repeat the template as data. "
-                    "Data may be JSON, CSV, XLSX values, or UTF-8 text. Complex charts and embedded objects are not supported. "
-                    "The service admits a private request and reports only its observed state, NOT a published file. Publication requires user review and explicit confirmation. "
+                    "Data may be JSON, CSV, XLSX values, or UTF-8 text. "
+                    "For content from this Chat's Canvas, add canvas={} for its current visible content, or use section_ids only when exact IDs are already available; "
+                    "the server passes saved data directly to the worker. Do not transcribe Canvas rows into the request or upload a replacement data file. "
+                    "For a requested draft, submit the original request and admitted files directly. The private worker reads the template and data itself; "
+                    "a preparatory inspection or edit plan from another Agent is unnecessary. "
+                    + (
+                        "The private authoring worker supports local text, ordinary tables, qualified native charts and raster-image changes, and selecting/reordering existing source pages. Use this same draft path for an analytical report based on selected existing template pages; pass the original request and sources, not an edit plan. Arbitrary vendor-object editing, cross-deck composition and blank creation are not yet supported. "
+                        if os.environ.get("FEATURE_DOCUMENT_SCRIPT_AUTHORING", "0") == "1"
+                        else "Complex charts and embedded objects are not supported. "
+                    )
+                    + "The service admits a private request and reports only its observed state, NOT a published file. Publication requires user review and explicit confirmation. "
                     "Never fall back to recreating template slides or claim delivery from this receipt."
                     " For an explicitly bound document revision, use action=revise with only evidence copied from the current request."
                     " The server binds the reviewed draft and its frozen inputs; do not supply parent IDs, inputs or output modes."
@@ -184,7 +209,7 @@ def register_document_tool(registry, *, service):
             handler=submit,
             needs_approval=False,
             risk_level="low",
-            allowed_for_roles=frozenset({"lead"}),
+            allowed_for_roles=frozenset({"lead", "analyst"}),
             visible_to_llm=True,
         )
     )

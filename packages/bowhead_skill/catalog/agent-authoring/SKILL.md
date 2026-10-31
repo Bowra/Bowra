@@ -1,7 +1,7 @@
 ---
 name: agent-authoring
 description: Create or improve Agents, maintain personal Skills and shared Plugins, and inspect evaluation evidence through the admitted Coach tools.
-version: 1.36.0
+version: 1.39.0
 title: Agent authoring
 title_zh: 智能体创作
 category: platform
@@ -33,6 +33,10 @@ lookup can use the common rules below without loading an editing method.
 - Preserve the user's requested scope and unrelated content. A dependency or
   validation failure is not permission to widen a narrow edit or remove a required
   behavior. Ask only when a necessary decision is genuinely missing.
+- Preserve answer scope as well as read/write scope. Resolve identities internally;
+  a criterion-only question returns its criterion, not the object's full contract,
+  budgets or revision IDs. A question about sufficient evidence is not a request
+  for an exhaustive historical audit. Stop once the actual question is answered.
 - Tools supply current identities, baselines, supported fields and authority.
   Copy exact references; never invent IDs, advance versions or silently retarget a
   changed object. Later Canvas selection does not retarget an admitted request.
@@ -45,10 +49,25 @@ lookup can use the common rules below without loading an editing method.
 - Retain original receipts and request IDs. Identical retries recover original
   intent; changed intent needs a new request. Unknown outcomes require original
   operation recovery, not a new write. A later failure does not erase an earlier save.
-- For a receipt/view follow-up, use `agent_operation_get` and, when requested,
-  `agent_operation_open` on the original `operation_ref`. Do not regenerate work to
-  show it. `agent_resource_open` opens a discovered resource's original editor;
+- To show/open an original result on the page, call `agent_operation_open` directly
+  with the original `operation_ref`: it already reads and authorizes. Use
+  `agent_operation_get` for status-only inspection or a necessary selection decision.
+  A successful read alone does not fulfill an open request. `view_action` is an
+  available next action, not proof of delivery. Do not substitute quoted content
+  or opening instructions, or ask again for an already requested read-only open.
+  `view_delivery=event_emitted` means
+  a view request was sent, never proof that the browser displayed it; preserve
+  `not_confirmed`. Do not regenerate work to show it. `agent_resource_open` opens a discovered resource's original editor;
   opening, switching or closing a view neither saves nor cancels anything.
+- A case receipt can show bounded saved-change excerpts, separate from current
+  decision status and today's tests. Do not promise a complete comparison or
+  untruncated content; detailed adoption stays in the original Configure view.
+- Case reading, suggestion saving and adoption do not run evaluations.
+  `executed_by_this_call=false` describes this call, not historical run absence.
+  Legacy `evaluation=not_run` supplies no historical evidence either. For case
+  content-only questions, report content and stop; read existing evaluation
+  evidence only when the question requires it. Keep historical runs and current
+  applicability separate.
 - New resources do not expand the current execution's tools or permissions. Use
   only admitted operations; preserve the original goal and explain unsupported
   actions. Do not spawn helpers, create a report or rewrite Coach's own policy.

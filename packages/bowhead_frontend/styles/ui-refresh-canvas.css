@@ -1738,7 +1738,7 @@
 
 /* ── R7 · Object detail: the viewer is the results card's content, not a card inside it. No border / shadow / tinted header band;
  * header = title 13/600 + meta 12 ink-3 and the action row, closed by a hairline; the content frame below is the only boxed area. ── */
-:root:root :is(.result-file-viewer > .artifact-viewer, .result-file-viewer > .artifact-details) {
+:root:root :is(.result-file-viewer > .artifact-viewer:not(.artifact-viewer--fullscreen), .result-file-viewer > .artifact-details) {
   border: 0;
   border-radius: 0;
   background: transparent;

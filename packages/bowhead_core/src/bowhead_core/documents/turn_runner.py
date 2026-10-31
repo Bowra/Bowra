@@ -110,12 +110,21 @@ async def _read_inputs(delivery, scope, job_id):
         await _input_digest(db, job_id)
         async with db.execute("SELECT artifact_id,filename,role FROM document_input_copies WHERE job_id=? ORDER BY input_index", (job_id,)) as cursor:
             rows = await cursor.fetchall()
-    return tuple(
+    inputs = tuple(
         [
             WorkerInput(row["filename"], row["role"], await inputs_store.read(scope=scope, job_id=job_id, artifact_id=row["artifact_id"]))
             for row in rows
         ]
     )
+    from bowhead_core.documents.canvas_inputs import CanvasInputStore
+    from bowhead_core.documents.canvas_material import FILENAME
+
+    canvas = await CanvasInputStore(delivery.artifacts).read(scope=scope, job_id=job_id)
+    if canvas is not None:
+        inputs += (WorkerInput(FILENAME, "canvas", canvas),)
+    if sum(len(item.content) for item in inputs) > 128 * 1024 * 1024:
+        raise DocumentRequestError("document_inputs_too_large")
+    return inputs
 
 
 async def run_document_turn(

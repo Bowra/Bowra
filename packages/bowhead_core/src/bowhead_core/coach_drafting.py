@@ -146,7 +146,7 @@ Place operations that must take effect together in one atomic group. Preserve un
 
 Use add, replace or remove at these canonical authoring paths:
 /definition/system_prompt, /definition/tool_refs, /definition/skill_grants, /definition/capability_ids, /definition/builtin_plugin_ids,
-/definition/model, /definition/max_iterations, /definition/output_schema, /definition/runtime_extensions,
+/definition/model, /definition/output_schema, /definition/runtime_extensions,
 /listing/display_name, /listing/name, /listing/description, /listing/category, /listing/tags,
 /audience/effective_mode, /audience/user_ids, /audience/group_ids.
 Use replace only for a field present in the original document; use add for an absent supported field.

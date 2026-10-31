@@ -479,7 +479,7 @@ async def _restore_reference_mcp_prompt_results_in_connection(
             or row["kind"] != "composition"
             or row["idempotency_key"] != MCP_PROMPT_RESULT_IDEMPOTENCY_KEY
             or row["source_turn_id"] != primary.source.turn_id
-            or row["created_generation"] not in ((1, 2) if lead else (1,))
+            or (row["created_generation"] < 1 if lead else row["created_generation"] != 1)
             or row["execution_id"] != composition.execution_id
             or row["composition_json"] != saved.canonical_json()
             or row["composition_digest"] != saved.digest
@@ -490,6 +490,8 @@ async def _restore_reference_mcp_prompt_results_in_connection(
             or [(item.node_id, item.resource) for item in saved.results] != [(item.node_id, item.resource) for item in composition.prompts]
         ):
             raise ValueError
+        if lead and row["created_generation"] > 2:
+            await _require_late_prompt_origin_in_connection(db, primary=primary, composition=composition, generation=row["created_generation"])
         restored: list[PreparedMcpPromptExpansion] = []
         documents: list[McpPromptExpansionDocument] = []
         parameters = _prompt_parameters(primary)
@@ -526,6 +528,76 @@ async def _restore_reference_mcp_prompt_results_in_connection(
         return ReferenceMcpPromptMaterialization(saved, tuple(restored), tuple(documents), True, row["resolution_seq"])
     except Exception:
         raise ValueError("reference_mcp_prompt_result_changed") from None
+
+
+async def _require_first_prompt_material_in_connection(
+    db: aiosqlite.Connection, *, primary: ReferencePrimaryInput, composition: ReferenceMcpPromptPrimaryComposition, generation: int
+) -> None:
+    """Allow first expansion only before this exact Lead primary is dispatched."""
+    _transaction(db)
+    lead = primary.plan.orchestration_contract == "lead-delegation.v1"
+    if generation == 1:
+        if lead and primary.binding.status != "admitted":
+            raise ValueError("reference_mcp_prompt_result_unavailable")
+        return
+    if not lead or primary.binding.status != "admitted":
+        raise ValueError("reference_mcp_prompt_result_unavailable")
+    from bowhead_core.chat_reference_lead_continuation import all_answers, require_resume
+    from bowhead_core.clarification_rounds import history_contexts, read_history, resume_generation_bounds
+
+    row = await require_resume(db, turn_id=primary.source.turn_id, generation=generation)
+    if row["primary_execution_id"] != composition.execution_id or row["composition_digest"] != composition.digest:
+        raise ValueError("reference_mcp_prompt_result_unavailable")
+    # Decode the original answers through their original codec. A marker or
+    # resolved status alone cannot replace the retained user material.
+    await all_answers(db, row)
+    if "question_round" not in json.loads(row["resume_context_json"]):
+        if generation != 2:
+            raise ValueError("reference_mcp_prompt_result_unavailable")
+        return
+    history = await read_history(
+        db, turn_id=primary.source.turn_id, **{key: row["original_" + key] for key in ("user_id", "workspace_id", "session_id")}
+    )
+    contexts = history_contexts(history)
+    if not history or history[-1]["request_id"] != row["request_id"] or any(card["status"] != "resolved" for card in history):
+        raise ValueError("reference_mcp_prompt_result_unavailable")
+    for index, card in enumerate(history):
+        lower, upper = resume_generation_bounds(contexts, index)
+        upper = generation if upper is None else upper
+        consumed = await _row(
+            db,
+            "SELECT MAX(json_extract(payload_json,'$.execution_generation')) FROM turn_events "
+            "WHERE turn_id=? AND event_type='turn.resumed' AND json_valid(payload_json) "
+            "AND json_type(payload_json,'$.execution_generation')='integer' "
+            "AND json_extract(payload_json,'$.execution_generation')>? "
+            "AND json_extract(payload_json,'$.execution_generation')<=? "
+            "AND json_extract(payload_json,'$.request_id')=?",
+            (primary.source.turn_id, lower, upper, card["request_id"]),
+        )
+        if consumed[0] != upper:
+            raise ValueError("reference_mcp_prompt_result_unavailable")
+
+
+async def _require_late_prompt_origin_in_connection(
+    db: aiosqlite.Connection, *, primary: ReferencePrimaryInput, composition: ReferenceMcpPromptPrimaryComposition, generation: int
+) -> None:
+    """Reuse late material only at its proven original primary generation."""
+    if primary.binding.status == "admitted":
+        await _require_first_prompt_material_in_connection(db, primary=primary, composition=composition, generation=generation)
+        return
+    from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+    post = await _row(
+        db,
+        "SELECT request_id FROM clarification_requests WHERE turn_id=? AND CASE WHEN json_valid(resume_context_json) "
+        "THEN json_extract(resume_context_json,'$.reference_continuation.contract') END='reference-lead-postdispatch.v1'",
+        (primary.source.turn_id,),
+    )
+    origin = await read_question_origin_in_tx(
+        db, turn_id=primary.source.turn_id, postdispatch_card_id=post["request_id"] if post is not None else None
+    )
+    if origin.generation != generation or origin.execution_id != composition.execution_id:
+        raise ValueError("reference_mcp_prompt_result_unavailable")
 
 
 async def _require_prompt_runtime_in_connection(
@@ -642,10 +714,7 @@ async def materialize_reference_mcp_prompt_results(
                 return existing
             # Only an answered pre-dispatch Lead turn may expand for the first
             # time after a pause. Missing post-dispatch material never refetches.
-            if expected_generation != 1 and not (
-                expected_generation == 2 and primary.plan.orchestration_contract == "lead-delegation.v1" and primary.binding.status == "admitted"
-            ):
-                raise ValueError("reference_mcp_prompt_result_unavailable")
+            await _require_first_prompt_material_in_connection(db, primary=primary, composition=composition, generation=expected_generation)
             parameters = _prompt_parameters(primary)
             requests = tuple((item.resource, parameters[item.node_id], item.source_revision) for item in composition.prompts)
         finally:
@@ -686,6 +755,9 @@ async def materialize_reference_mcp_prompt_results(
                     )
                     if existing is not None:
                         return existing
+                    await _require_first_prompt_material_in_connection(
+                        db, primary=current_primary, composition=current_composition, generation=expected_generation
+                    )
                 finally:
                     await db.rollback()
         candidates.append(await fetch(resource, dict(arguments), source_revision))
@@ -717,6 +789,7 @@ async def materialize_reference_mcp_prompt_results(
             if existing is not None:
                 await db.rollback()
                 return existing
+            await _require_first_prompt_material_in_connection(db, primary=primary, composition=composition, generation=expected_generation)
             resolution, expansions, documents = _result_resolution(
                 primary=primary,
                 composition=composition,

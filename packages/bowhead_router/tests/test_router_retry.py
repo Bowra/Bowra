@@ -283,6 +283,60 @@ async def test_stream_idle_timeout_before_visible_chunk_is_fallback_safe() -> No
 
 
 @pytest.mark.asyncio
+async def test_empty_stream_frames_do_not_renew_the_progress_deadline(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr("bowhead_router.router.monotonic", lambda: now[0])
+
+    class Adapter:
+        provider_name = "provider"
+
+        async def stream(self, req):
+            for _ in range(10):
+                now[0] += 100
+                yield LLMChunk()
+
+    with pytest.raises(StreamingTargetsExhaustedError) as caught:
+        async for _ in _router_for(Adapter()).stream(
+            "lead",
+            LLMRequest(model="", messages=[]),
+            idle_timeout_s=300,
+            progress_idle=True,
+            retry_policy=RetryPolicy(max_attempts_per_target=1),
+        ):
+            pass
+    assert caught.value.failures[0].kind is ProviderFailureKind.TIMEOUT
+    assert now[0] == 300
+
+
+@pytest.mark.asyncio
+async def test_progressing_stream_can_exceed_the_idle_interval(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr("bowhead_router.router.monotonic", lambda: now[0])
+
+    class Adapter:
+        provider_name = "provider"
+
+        async def stream(self, req):
+            for _ in range(4):
+                now[0] += 200
+                yield LLMChunk(thinking_delta="progress")
+            yield LLMChunk(finish_reason="stop")
+
+    chunks = [
+        chunk
+        async for chunk in _router_for(Adapter()).stream(
+            "lead",
+            LLMRequest(model="", messages=[]),
+            idle_timeout_s=300,
+            progress_idle=True,
+            retry_policy=RetryPolicy(max_attempts_per_target=1),
+        )
+    ]
+    assert now[0] == 800
+    assert chunks[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
 async def test_unregistered_target_is_a_typed_configuration_failure() -> None:
     router = Router(_Registry({}))  # type: ignore[arg-type]
     router.bind(AgentBinding(agent_type="lead", primary=("missing", "model")))

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import {
   useCallback,
@@ -179,6 +181,7 @@ export function PersonalAppearanceSettings() {
           compact
           title={t("mode.title")}
           description={t("mode.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.mode" label={t("mode.title")} />}
           source={resource.sources.mode}
           hasOverride={resource.overrides.mode !== undefined}
           busy={controlsBusy}
@@ -248,6 +251,7 @@ export function PersonalAppearanceSettings() {
           testId="personal-appearance-typography"
           title={t("typography.title")}
           description={t("typography.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.typographyProfile" label={t("typography.title")} />}
           source={resource.sources.typographyProfile}
           hasOverride={resource.overrides.typographyProfile !== undefined}
           busy={controlsBusy}
@@ -273,6 +277,7 @@ export function PersonalAppearanceSettings() {
           testId="personal-appearance-type-scale"
           title={t("typeScale.title")}
           description={t("typeScale.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.typeScale" label={t("typeScale.title")} />}
           source={resource.sources.typeScale}
           hasOverride={resource.overrides.typeScale !== undefined}
           busy={controlsBusy}
@@ -296,6 +301,7 @@ export function PersonalAppearanceSettings() {
           testId="personal-appearance-density"
           title={t("density.title")}
           description={t("density.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.density" label={t("density.title")} />}
           source={resource.sources.density}
           hasOverride={resource.overrides.density !== undefined}
           busy={controlsBusy}
@@ -319,6 +325,7 @@ export function PersonalAppearanceSettings() {
           testId="personal-appearance-radius"
           title={t("radius.title")}
           description={t("radius.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.radius" label={t("radius.title")} />}
           source={resource.sources.radius}
           hasOverride={resource.overrides.radius !== undefined}
           busy={controlsBusy}
@@ -340,6 +347,7 @@ export function PersonalAppearanceSettings() {
           testId="personal-appearance-motion"
           title={t("motion.title")}
           description={t("motion.desc")}
+          help={<ConfigurationFieldHelp contract={resource.field_contract} field="personal_appearance.motion" label={t("motion.title")} />}
           source={resource.sources.motion}
           hasOverride={resource.overrides.motion !== undefined}
           busy={controlsBusy}
@@ -528,6 +536,7 @@ function SettingRow({
   testId,
   compact = false,
   title,
+  help,
   description,
   source,
   hasOverride,
@@ -539,6 +548,7 @@ function SettingRow({
   testId?: string;
   compact?: boolean;
   title: string;
+  help?: ReactNode;
   description: string;
   source: PersonalAppearanceSource;
   hasOverride: boolean;
@@ -556,7 +566,7 @@ function SettingRow({
     >
       <div className={`${styles.settingHead} pa-setting-head`}>
         <div>
-          <h3>{title}</h3>
+          <div className="configuration-field-label"><h3>{title}</h3>{help}</div>
           <p>{description}</p>
         </div>
         <div className={`${styles.inheritance} pa-inheritance`}>

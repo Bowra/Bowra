@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/auth-session-context", () => ({
 }));
 
 function negotiated(
-  values: Partial<{ workspace: boolean; complete_list: boolean; scale_nav: boolean }> = {},
+  values: Partial<{ workspace: boolean; complete_list: boolean; scale_nav: boolean; interactive_html: boolean }> = {},
 ): Response {
   return new Response(JSON.stringify({
     dto_version: 1,
@@ -58,6 +58,7 @@ describe("useResultsWorkspaceCapability", () => {
       workspace: false,
       completeList: false,
       scaleNav: false,
+      interactiveHtml: false,
       resolved: false,
       error: null,
     });
@@ -65,9 +66,28 @@ describe("useResultsWorkspaceCapability", () => {
       workspace: true,
       completeList: true,
       scaleNav: true,
+      interactiveHtml: false,
       resolved: true,
       error: null,
     }));
+  });
+
+  it.each([true, false, "true", null, undefined])("admits interactive HTML only for a boolean true: %s", async (flag) => {
+    appFetchMock.mockResolvedValue(new Response(JSON.stringify({
+      dto_version: 1, workspace: true, complete_list: false, scale_nav: false, max_page_size: 50, interactive_html: flag,
+    })));
+    const { result } = renderHook(() => useResultsCapabilities());
+    await waitFor(() => expect(result.current.resolved).toBe(true));
+    expect(result.current.interactiveHtml).toBe(flag === true);
+  });
+
+  it("revokes interactive execution on authenticated capability refresh", async () => {
+    appFetchMock.mockResolvedValueOnce(negotiated({ interactive_html: true }))
+      .mockResolvedValueOnce(negotiated({ interactive_html: false }));
+    const { result } = renderHook(() => useResultsCapabilities());
+    await waitFor(() => expect(result.current.interactiveHtml).toBe(true));
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(result.current.interactiveHtml).toBe(false));
   });
 
   it("falls back to health for the parent only on an old backend", async () => {
@@ -97,6 +117,7 @@ describe("useResultsWorkspaceCapability", () => {
       workspace: false,
       completeList: false,
       scaleNav: false,
+      interactiveHtml: false,
       resolved: false,
       error: "unavailable",
     });
@@ -222,6 +243,7 @@ describe("useResultsWorkspaceCapability", () => {
       workspace: true,
       completeList: true,
       scaleNav: true,
+      interactiveHtml: false,
       error: null,
     });
   });
@@ -292,6 +314,7 @@ describe("useResultsWorkspaceCapability", () => {
       resolved: true,
       workspace: true,
       scaleNav: true,
+      interactiveHtml: false,
     });
   });
 

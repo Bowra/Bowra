@@ -44,7 +44,7 @@ When a model call fails, the failure card shows the recorded cause, the HTTP sta
 - **You can leave the page.** The task keeps running; open the conversation again to see the result. If the connection drops, the page reconnects and shows a failure only once the task has really stopped.
 - **Progress.** When no new step has appeared for a minute, the running band says which agent is working, at which step, and how long the turn has run, for example “Still running · Data analyst · step 37 · 18 min”.
 - **Completion popups.** When a task ends while you are not in its conversation, a popup appears at the bottom right; choose **Open** to return to it. The first popup asks whether to send system notifications while the tab is in the background; this is only available on secure (HTTPS) sites.
-- **Partially completed, and Continue.** When a task reaches a run limit set by your Team, the agent returns what it finished and the step list shows which agent stopped at which limit. Select **Continue** below the answer: the same agent picks up the unfinished part with all of its earlier progress instead of starting over. You can also type a follow-up or “continue”. Each continuation gets your Team's current limits again. Saved progress is kept for 30 days. If it has expired, or the agent or its tools changed in the meantime, a new agent starts the original task again and the step list says why. If credit ran out, add credit before selecting Continue.
+- **Partially completed, and Continue.** When a task reaches a run limit set by your Team, the agent returns what it finished and the step list shows which agent stopped at which limit. Select **Continue** below the answer: the same agent picks up the unfinished part with all of its earlier progress instead of starting over. You can also type a follow-up or “continue”. Each continuation gets your Team's current limits again. Saved progress is kept for 30 days. If it has expired, or the agent or its available tools changed in the meantime (for example, a connected service became unavailable), a new agent starts the original task again and the step list says why. If credit ran out, add credit before selecting Continue.
 
 ## Agent collaboration details
 
@@ -68,6 +68,8 @@ When Lead asks you a clarification question, answer the existing question card. 
 
 ## Citation markers
 
+Web references in AI answers use a page title or source name when available. Links written as a complete web address display the hostname instead, including in earlier conversations. Click to open the original page. Hover over a hostname to see the complete address, or right-click and choose your browser's copy-link action; on a phone, press and hold the link. Code-formatted URLs remain fully visible. If you need complete addresses in an answer, ask for the URLs as code.
+
 Numbered citation markers in answers keep their position, number, and source. Sources you can't access, or that are no longer available, show an outlined marker with a strikethrough.
 
 When asking about code or a message format, paste the complete example and put it in a code block or inline backticks. When the answer quotes your example, its code formatting is preserved. Only an actual question card asks you to submit a clarification.
@@ -84,7 +86,11 @@ To answer a question card:
 
 When a document task needs more information, the card reads "More information needed · Document draft" and its main button is **Continue generating**. After you answer, the original request, template and data are kept and checked again.
 
+When a Datarc query asks you to choose a workspace, select the intended source and continue on that card. Waiting for this choice does not mean the query returned no data. The same task continues with your selected source after access is checked.
+
 If submitting an answer fails, the card keeps your choice and explains what happened. If it says the result is unconfirmed, refresh the conversation to check whether your choice was saved before submitting again. Otherwise follow the offered recovery action. If the question expired or was already handled, **Ask again** restores the original question for editing; it does not send automatically.
+
+If you send a follow-up while a question is still pending, the assistant can use the recent original request, questions and saved answers to understand the topic. For example, “Make it a report instead” can refer to the weather presentation you just requested. This does not resume the earlier task; use its original card to continue that task.
 
 Where bounded clarification is available, the assistant may ask another necessary question before starting the work, up to three rounds. Answer the newest card; previous answers remain part of the same task. An Agent selected with `@` stays selected. Repeating a submission on an older card does not start the task again. This three-round flow applies before execution.
 
@@ -115,6 +121,7 @@ When an Agent has read your attached Word or PowerPoint file and asks a question
 - On a computer, the divider between the conversation and the results shows a handle when you hover over it; drag it to change the widths.
 - When the results area is enlarged, a narrow bar stays on the left; select it to return to the conversation. When the results area is closed, the narrow bar on the right reopens it.
 - On a phone, use **Chat / Results** at the top of the page to switch between the two. Results include data tables and files as well as reports.
+- In a file preview, **Full view** fills the browser content area on computers and phones. Select **Close** or press Esc to return; keyboard focus returns to **Full view**. For HTML, environments with interactive preview offer **Interactive / Reading**. Interactive supports offline page controls such as filtering, tabs, calculations, charts and games. External connections, submissions and dependencies are blocked. Reading shows available static content. Switching views or reloading restarts the page; Full view keeps its current state. If a script fails or a dependency is blocked, switch to Reading or download the unchanged original file.
 
 Dragging files into the conversation, resizing and enlarging from the keyboard, and the dot for new results are described in [Drag and drop, shortcuts, and hints on the conversation page](conversation-workbench-actions.en-US.md).
 
@@ -128,9 +135,11 @@ A document that is waiting for clarification or could not finish does not automa
 
 In the **+** menu, under **Document Drafts in This Chat**, select a document to review its preview and changes. The acknowledgment and **Confirm and publish** stay in the review footer. The object tabs (a title switcher on narrow screens) and the tab’s close button × remain above the review; closing the view does not cancel the document.
 
-The review separates original text, updated text and sources. Open **About this preview** for rendering details and the font warning for any substituted fonts. Only changed pages must be viewed: a changed page counts as viewed after its full preview has been shown for about a second. The progress bar shows how many remain, and **Next change** jumps to the next unviewed changed page. After that you can tick **I’ve reviewed the changes, sources and preview** and use **Confirm and publish**; unchanged pages are optional.
+The review separates original text, updated text and available sources. Open **About this preview** for rendering details and the font warning for any substituted fonts. A page counts as viewed after its full preview has been shown for about a second. Some drafts require every page to be reviewed because the change list cannot verify all formatting and content; follow the remaining-page count. Other drafts require only changed pages. After reviewing the required pages, tick **I’ve reviewed the changes, sources and preview** and use **Confirm and publish**. Check reporting periods, old sample content and related table/chart values yourself; a generated file is not proof that those choices are correct.
 
 After publication, choose **Open PPTX** or **Open PDF** to open that exact file in Results, where the existing download action is available. An unnamed draft uses a short presentation label and stable suffix. A separate request excerpt helps you recognize it; expand **Your request** in the editor to read the full original request. **New Agent** appears in Agent creation editors.
+
+When native chart creation is available, describe the measure, units and intended position for each chart. A template without an existing chart can use a supported new editable chart. Check titles, axis scales, negative values and missing observations in the preview; chart images remain pictures. Availability depends on your environment's presentation capabilities.
 
 To change an unpublished review draft, choose **Revise in chat** when available. This selects that exact draft in the existing input box without sending anything. Describe the change and send it; the new draft starts from the selected version and keeps its earlier edits. Review the new preview before confirming publication. Published files are not changed by this action.
 
@@ -164,6 +173,8 @@ Agent drafts save automatically, so closing the tab does not ask. Only while a s
 
 ## Reports
 
+On desktop, open the report toolbar’s **More actions** menu and choose **Use narrower margins and wider text** to give the report more room. Choose **Restore standard margins and text width** to return to the default. This reading preference stays in the current browser and does not change the saved report or its exports. The divider between the conversation and Results can also be dragged to adjust their relative widths.
+
 Tables in chart answers, reports and browser exports use the same open reading surface without an outer frame. Choose Table through the existing chart-type button. Chart settings fit narrow screens and scroll when needed.
 
 Regional time-series figures can link the same period or original row across lines, scatter and Table. Narrowing the period keeps the saved series names and order; missing observations remain blank rather than showing zero. Ask about selected observations carries their complete original keys and exact values.
@@ -192,6 +203,11 @@ Regional time-series figures can link the same period or original row across lin
 - The source card that opens from the source line under a chart is no longer cut off by the edge of the report or hidden under the toolbar. On phones, it slides up from the bottom of the screen.
 - You can ask for a trend chart and a trend Table over the same prepared regional time series, with start/end values, changes, sparklines and original-row details. A monthly dataset without an entity column uses a regular Table. State each measure’s unit; percentage levels use `%`, with their storage shape declared separately.
 - PDF figure captions and short warnings about previously generated figures stay with the associated visual, including the final chart or Table in a larger figure.
+- You can ask the Agent to show a date column in a supported format, for example `20261028` instead of `2026-10-28`. The source values and their order stay unchanged. If the requested format needs unavailable detail or would make different dates look identical, the Agent retains the existing format and explains what needs correction.
+- Dates already supplied as eight digits, such as `20261028`, can also be displayed with separators. Hover keeps the available source value and unit; a Table with otherwise indistinguishable unit columns keeps their original units.
+- You can also ask for a different number of decimal places on a chart or Table. For a percentage or currency, the Agent uses the known source meaning; changing display precision does not change the original values or units.
+- For a complete standalone chart with one measure, you can ask the Agent to switch between a line, bar, horizontal bar and Table. Some complex or incomplete figures cannot be switched through this edit and retain their current view.
+- If a chart edit cannot be completed, the Agent can retry it or explain the problem. During the same live turn, the report is protected from a replacement or rewrite used as a fallback; you can separately request a replacement in a new message.
 - If an AI-generated arrangement cannot be used, all valid charts appear vertically in order, retaining their measures, original values and sources. An unverifiable source or measure still needs correction; guessed values are not substituted.
 - In a linked figure, click or tap a point/bar or a Table row to highlight the same observation in its linked views. Focus the plot and use arrow keys to select, or press Enter/Space on a Table row. **Clear selection** or Esc clears focus. Selection stays local and does not save or run a query; reload or a data/revision change clears it. A selected observation outside another view's displayed range is indicated instead of invented. Report downloads keep the saved full scope.
 - When a figure offers **Start** and **End**, choose actual saved dates to view that period in its participating charts and Table. **Show full period** restores all saved observations. Other views keep their own scope. A range change clears point selection; reload or a version/access change restores the saved full period. This browsing action does not save or run a query. Report exports keep the full saved period; individual PNG/CSV downloads use the displayed period and include it in their filenames. The PNG also displays the period.
@@ -221,7 +237,8 @@ Regional time-series figures can link the same period or original row across lin
 
 ## Text and layout
 
-- Answers, report text, and Help articles share one body text size and line spacing, and lines are kept short so long paragraphs are easier to read: about 75 characters for English, German, and French text, and about 40 characters for Chinese text (a Chinese answer gets the Chinese line length even when the interface is in another language). Charts, tables, and metric cards still use the full width.
+- Long web addresses and identifiers in your messages wrap to fit the conversation area. Their original text stays unchanged when copied or brought back for editing.
+- Answers, report text, and Help articles share one body text size and line spacing. Reports use a wider reading measure than answers and Help; the desktop report menu also offers a wider option. Charts, tables, and metric cards use the available content width.
 - Report titles and section titles use a sans-serif font by default. If you choose **Serif display** as the font under **Personal Settings › Appearance**, only report titles and section titles switch to a serif font; body text stays the same.
 - In answer and report text, a little space is added automatically between Chinese characters and English words or numbers (in recent browsers). Copied text is unchanged.
 - The product logo appears once, at the top of the left sidebar: the home page no longer shows the logo or watermark, and answers show only the time above them. The version number moved to the last line of the account menu in the lower-left corner; click it to copy.

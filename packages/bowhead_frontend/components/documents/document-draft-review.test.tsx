@@ -62,6 +62,39 @@ function confirmButton() {
   }) as HTMLButtonElement;
 }
 
+it("requires every page when comparison is unavailable without claiming no changes", async () => {
+  const job: DocumentJob = { ...draft, draft: { ...draft.draft!, requires_full_review: true,
+    manifest: { ...draft.draft!.manifest, comparison: "unavailable", changes: [] },
+    preview: { ...draft.draft!.preview, pages: [{ name: "page-1.png" }, { name: "page-2.png" }] },
+  } };
+  const onConfirm = vi.fn();
+  render(view(job, onConfirm));
+  expect(screen.getByText(messages.documents.comparison_unavailable)).toBeTruthy();
+  expect(screen.queryByText("No changes on this slide.")).toBeNull();
+  const first = await screen.findByRole("img", { name: "Slide 1 of 2" });
+  view_(first);
+  expect(blocked(confirmButton())).toBe(true);
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it("requires every page of a script-authored draft without marking unchanged pages as edited", async () => {
+  const job: DocumentJob = { ...draft, draft: { ...draft.draft!, requires_full_review: true, preview: {
+    ...draft.draft!.preview, pages: [{ name: "page-1.png" }, { name: "page-2.png" }],
+  } } };
+  const onConfirm = vi.fn();
+  render(view(job, onConfirm));
+  const first = await screen.findByRole("img", { name: "Slide 1 of 2" });
+  view_(first);
+  fireEvent.click(screen.getByRole("checkbox"));
+  expect(blocked(confirmButton())).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Next unviewed page" }));
+  const second = await screen.findByRole("img", { name: "Slide 2 of 2" });
+  view_(second);
+  await waitFor(() => expect(blocked(confirmButton())).toBe(false));
+  fireEvent.click(confirmButton());
+  expect(onConfirm).toHaveBeenCalledWith(draft.draft_digest);
+});
+
 /** A page counts as viewed once its loaded preview stays visible for the dwell time (decision D5). */
 function view_(image: HTMLElement) {
   fireEvent.load(image);

@@ -5,7 +5,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 UV ?= uv
 FRONTEND_DIR := packages/bowhead_frontend
-PY_GUARDS := scripts/check_theme_surface_coverage.py scripts/check_chart_style_registry.py scripts/check_third_party_notices.py scripts/check_configuration_coverage.py
+PY_GUARDS := scripts/check_theme_surface_coverage.py scripts/check_chart_style_registry.py scripts/check_third_party_notices.py scripts/check_configuration_coverage.py scripts/check_configuration_field_guidance.py
 
 .PHONY: help install install-frontend frontend-assemble run-gateway run-frontend fmt lint test typecheck-frontend build-frontend third-party-notices
 
@@ -37,6 +37,7 @@ fmt: frontend-assemble ## Format source and documentation
 
 lint: frontend-assemble ## Verify shared contracts, notices and Python formatting
 	$(UV) run python scripts/check_configuration_coverage.py --check
+	$(UV) run python scripts/check_configuration_field_guidance.py
 	$(UV) run python scripts/check_theme_surface_coverage.py --check
 	$(UV) run python scripts/check_chart_style_registry.py --check
 	$(UV) run python scripts/check_third_party_notices.py --check

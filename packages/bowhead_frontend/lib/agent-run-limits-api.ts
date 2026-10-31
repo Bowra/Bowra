@@ -1,7 +1,9 @@
+import { parseFieldContract, type FieldContract } from "./configuration-field-guidance";
 import { ApiError, apiJson } from "./api-client";
 
 /** Team agent run limits (`/api/v1/team-settings/agent-run-limits`). `stepLimit: null` means unlimited. */
 export interface AgentRunLimits {
+  field_contract?: FieldContract;
   turnTimeLimitS: number;
   stepLimit: number | null;
   toolCallLimit: number;
@@ -9,6 +11,7 @@ export interface AgentRunLimits {
   wrapUpReserveS: number;
   isDefault: boolean;
   version: string;
+  runtimeControls?: { systemStepLimit: number | null; effectiveStepLimit: number | null; stallTimeoutS: number };
   defaults: { turnTimeLimitS: number; stepLimit: number | null; toolCallLimit: number; modelCallTimeLimitS?: number | null };
   ranges: {
     turnTimeLimitS: { min: number; max: number };
@@ -47,7 +50,15 @@ function limitsOf(value: unknown): AgentRunLimits {
   const defaults = v.defaults as Record<string, unknown> | null;
   const ranges = v.ranges as Record<string, unknown> | null;
   if (!defaults || !ranges) invalid();
+  const runtime = v.runtime_controls as Record<string, unknown> | undefined;
+  if (runtime !== undefined && (!runtime || runtime.contract !== "agent-runtime-controls.v1")) invalid();
   return {
+    ...(runtime ? { runtimeControls: {
+      systemStepLimit: runtime.system_step_limit === null ? null : int(runtime.system_step_limit),
+      effectiveStepLimit: runtime.effective_step_limit === null ? null : int(runtime.effective_step_limit),
+      stallTimeoutS: int(runtime.stall_timeout_s),
+    } } : {}),
+    field_contract: parseFieldContract(v.field_contract),
     turnTimeLimitS: int(v.turn_time_limit_s),
     stepLimit: v.step_limit === null ? null : int(v.step_limit),
     toolCallLimit: int(v.tool_call_limit),

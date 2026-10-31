@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from contextvars import ContextVar
 
-DEFAULT_HTML_PREVIEW_BYTES = 5 * 1024 * 1024
+DEFAULT_HTML_PREVIEW_BYTES = 25 * 1024 * 1024
 MAX_HTML_PREVIEW_BYTES = 50 * 1024 * 1024
 HTML_PREVIEW_LIMIT_HEADER = "X-Bowhead-HTML-Max-Bytes"
 html_preview_policy: ContextVar[int | None] = ContextVar("html_preview_policy", default=None)

@@ -317,6 +317,14 @@
 .mset .proto-hint code{font-family:var(--f-mono);font-size:0.65625rem;color:var(--c-ink-3)}
 .mset .fld{display:flex;flex-direction:column}
 .mset .fld .inp{font-family:var(--f-sans);font-size:0.78125rem;color:var(--c-ink);background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--mset-r1);padding:9px 11px;width:100%}
+/* Context preferences reuse the editor controls and remain usable with enlarged text. */
+:root:root .mset .model-editor-connection .mset-context-policy{display:block;min-width:0}
+.mset .mset-context-policy>.fld{width:100%;min-width:0}
+.mset .mset-context-policy .mset-runtime__content{display:grid;gap:12px;min-width:0}
+.mset .mset-context-policy .inp{min-width:0;max-width:100%;box-sizing:border-box}
+.mset .mset-context-policy .mset-runtime__text-action{justify-self:start;text-align:start;white-space:normal}
+.mset .mset-context-policy details{margin-top:12px}
+:root:root .mset .model-editor-connection .mset-context-policy .settings-field__hint{color:var(--c-ink-2);font-size:.8125rem;line-height:1.5}
 .mset .fld .inp.mono{font-family:var(--f-mono);font-size:0.71875rem}
 .mset .fld .inp::placeholder{color:var(--c-ink-4)}
 .mset .fld .inp:focus-visible{border-color:var(--c-accent);box-shadow:var(--mset-focus);outline:none}
@@ -905,3 +913,9 @@
 .mset .mset-output-budget__policy{color:var(--c-ink);font-variant-numeric:tabular-nums}
 .mset .mset-output-budget__policy strong{font-weight:500}
 :root:root .mset .model-editor-connection .mset-output-budget.medit-setting-row .mset-output-budget__help{color:var(--c-ink)}
+
+.overview-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

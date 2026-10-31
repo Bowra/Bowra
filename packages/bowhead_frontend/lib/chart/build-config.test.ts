@@ -36,6 +36,46 @@ const pluginIds = (cfg: ReturnType<typeof buildChartJSConfig>) =>
 /** Production-shaped theme: CSS compresses `--c-surface` to three digits. */
 const PROD_SHAPE_THEME = { ...STUB_THEME, surface: "#fff" };
 
+test.each(["line", "bar", "hbar", "combo", "dual_axis"] as const)("%s uses a declared date pattern without changing data", (kind) => {
+  const spec: ChartSpec = {
+    kind, title: "Dates", row_count: 2,
+    columns: [
+      { key: "date", header: "Date", type: "date", date_pattern: "yyyyMMdd" },
+      { key: "value", header: "Value", type: "numeric" },
+      { key: "other", header: "Other", type: "numeric" },
+    ],
+    rows: [{ date: "2026-10-28", value: 12, other: 10 }, { date: "2026-10-29", value: 21, other: 15 }],
+  };
+  const before = JSON.stringify(spec);
+  const cfg = buildChartJSConfig(spec, STUB_THEME as any);
+  expect(cfg.data.labels).toEqual(["20261028", "20261029"]);
+  expect(JSON.stringify(spec)).toBe(before);
+});
+
+test("uses the selected axis column's pattern when date observations match", () => {
+  const spec: ChartSpec = {
+    kind: "bar", title: "Dates", row_count: 2,
+    columns: [
+      { key: "first", header: "First", type: "date" },
+      { key: "second", header: "Second", type: "date", date_pattern: "yyyyMMdd" },
+      { key: "value", header: "Value", type: "numeric" },
+    ],
+    rows: [{ first: "2026-10-28", second: "2026-10-28", value: 12 }, { first: "2026-10-29", second: "2026-10-29", value: 21 }],
+  };
+  expect(buildChartJSConfig(spec, STUB_THEME as any).data.labels).toEqual(["2026-10-28", "2026-10-29"]);
+  spec.columns[0] = { ...spec.columns[0]!, date_pattern: "yyyy/MM/dd" };
+  expect(buildChartJSConfig(spec, STUB_THEME as any).data.labels).toEqual(["2026/10/28", "2026/10/29"]);
+});
+
+test("formats valid compact source dates without changing stored rows", () => {
+  const spec: ChartSpec = { kind: "line", title: "Dates", row_count: 2,
+    columns: [{ key: "date", header: "Date", type: "date", date_pattern: "yyyy-MM-dd" },
+      { key: "value", header: "Value", type: "numeric" }],
+    rows: [{ date: "20260102", value: 1 }, { date: "20260128", value: 2 }] };
+  expect(buildChartJSConfig(spec, STUB_THEME as any).data.labels).toEqual(["2026-01-02", "2026-01-28"]);
+  expect(spec.rows![0]!.date).toBe("20260102");
+});
+
 describe("source values and readable display magnitudes", () => {
   let originalLocale: string;
   beforeEach(() => { originalLocale = document.documentElement.lang; document.documentElement.lang = "zh-CN"; });
@@ -70,13 +110,41 @@ describe("source values and readable display magnitudes", () => {
     const text = hover.call({} as TooltipModel<ChartType>, {
       dataset, dataIndex: 0, parsed: { x: 0.0009, y: 0.0009 }, chart: { options: cfg.options },
     } as unknown as TooltipItem<ChartType>);
-    expect(text).toBe("Loss: 90,000元");
+    expect(text).toBe("Loss: 0.0009亿元");
     if (kind === "dual_axis") {
       const right = cfg.options.scales!.y1 as any;
       expect(right.title.text).toContain("%");
       expect(right.ticks.callback(0.1)).toBe("10");
     }
     expect(JSON.stringify(spec)).toBe(before);
+  });
+
+  test("hover retains each source unit when compatible series share an axis", () => {
+    const spec: ChartSpec = { kind: "line", title: "Amounts", row_count: 1,
+      columns: [{ key: "date", header: "Date", type: "date" },
+        { key: "a", header: "A", type: "numeric", unit: "亿元" },
+        { key: "b", header: "B", type: "numeric", unit: "元" }],
+      rows: [{ date: "2026-01-02", a: 0.0009, b: 90000 }] };
+    const cfg = buildChartJSConfig(spec, STUB_THEME as any);
+    const dataset = { ...(cfg.data.datasets[0] as any) };
+    const hover = cfg.options.plugins!.tooltip!.callbacks!.label!;
+    const text = hover.call({} as TooltipModel<ChartType>, {
+      dataset, dataIndex: 0, parsed: { y: 90000 }, chart: { options: cfg.options },
+    } as unknown as TooltipItem<ChartType>);
+    expect(text).toBe("A: 0.0009亿元");
+  });
+
+  test("hover preserves percentage observations using their declared scale", () => {
+    const spec: ChartSpec = { kind: "line", title: "Rate", row_count: 1,
+      columns: [{ key: "date", header: "Date", type: "date" },
+        { key: "rate", header: "Rate", type: "numeric", unit: "%", percent_scale: "fraction" }],
+      rows: [{ date: "2026-01-02", rate: 0.123456 }] };
+    const cfg = buildChartJSConfig(spec, STUB_THEME as any);
+    const dataset = { ...(cfg.data.datasets[0] as any) };
+    const hover = cfg.options.plugins!.tooltip!.callbacks!.label!;
+    expect(hover.call({} as TooltipModel<ChartType>, {
+      dataset, dataIndex: 0, parsed: { y: 0.123456 }, chart: { options: cfg.options },
+    } as unknown as TooltipItem<ChartType>)).toBe("Rate: 12.3456%");
   });
 
   test("scatter axes use independent currency magnitudes", () => {
@@ -145,7 +213,7 @@ describe("native mark observation readouts", () => {
     const result = callback.call({} as TooltipModel<ChartType>, {
       dataset: cfg.data.datasets[0], dataIndex: 0, raw: cfg.data.datasets[0].data[0],
     } as unknown as TooltipItem<ChartType>);
-    expect(result).toContain("USD 1,234.57");
+    expect(result).toContain("USD 1,234.56789");
   });
 
   test("scatter reads each axis independently with its own unit", () => {
@@ -157,7 +225,7 @@ describe("native mark observation readouts", () => {
     const result = callback.call({} as TooltipModel<ChartType>, {
       dataset: cfg.data.datasets[0], dataIndex: 0, parsed: { x: 1234.56789, y: 17 }, chart: { options: cfg.options },
     } as unknown as TooltipItem<ChartType>);
-    expect(result).toContain("Amount USD 1,234.57");
+    expect(result).toContain("Amount USD 1,234.56789");
     expect(result).toContain("People 17people");
   });
 
@@ -2526,7 +2594,7 @@ describe("同轴百分比统一档位", () => {
     const dataset = cloned.datasets.find((ds) => ds.label === "利润率")!;
     const callback = (cfg.options as any).plugins.tooltip.callbacks.label;
     expect(callback({ dataset, dataIndex: 0, parsed: { y: dataset.data[0] }, chart: { options: cfg.options } }))
-      .toBe("利润率: 19.87%");
+      .toBe("利润率: 19.87352816409153%");
     expect(mixedSpec().rows![0].利润率).toBe(0.1987352816409153);
   });
 
@@ -2949,7 +3017,7 @@ describe("mixed native charts compare observed values in one tooltip", () => {
     const tooltip = (cfg.options as any).plugins.tooltip;
     expect(tooltip).toMatchObject({ mode: "index", axis: "x", intersect: false });
     const values = cfg.data.datasets.map((dataset) => tooltip.callbacks.label({ dataset: { ...dataset }, dataIndex: 1, parsed: { y: dataset.data[1] }, chart: { options: cfg.options } }));
-    expect(values.join(" | ")).toContain("634,567.8");
+    expect(values.join(" | ")).toContain("63.45678CNY 10k");
     expect(values.join(" | ")).toContain("CNY");
     expect(values).toContain("Margin: 43.25%");
     expect(spec.rows![1].margin).toBe(0.4325);

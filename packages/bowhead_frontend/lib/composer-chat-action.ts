@@ -282,6 +282,11 @@ export async function lookupComposerChatAction(
 // invoked.  Terminal protocol/admission/generation codes are intentionally not
 // listed: several of them can be projected after the action was committed.
 const DEFINITIVE_PRE_ADMISSION_REJECTION_CODES = new Set([
+  "context_maintenance_unsupported",
+  "context_maintenance_inputs_unsupported",
+  "context_conversation_head_changed",
+  "context_maintenance_session_busy",
+  "context_maintenance_pending_operation",
   "access_context_denied",
   "attachment_bundle_mismatch",
   "attachment_metadata_stale",

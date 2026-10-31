@@ -116,6 +116,7 @@ class OrdinaryContinuationCard:
     snapshot: OrdinaryLeadResumeContext
     consumed_generation: int | None
     consumed_owner_id: str | None
+    source_db_path: str | None = None
 
     def creation_worker(self) -> DocumentTurnOwner:
         snapshot = self.snapshot
@@ -238,6 +239,12 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
 
     if type(capture) is not OrdinaryLeadCapture:
         raise OrdinaryContinuationUnavailable()
+    source = json.loads(capture.checkpoint.request_json).get("datarc_selection")
+    if source is not None:
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+        DatarcSelectionSnapshot.model_validate(source)
+        await require_datarc_context_migration(db)
     if not ordinary_multi_helper_question_enabled():
         checkpoint = capture.checkpoint
         extended = checkpoint.contract in {
@@ -247,6 +254,8 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
             "ordinary-lead-loop.v8",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }
         if checkpoint.contract == "ordinary-lead-loop.v9":
             helpers = checkpoint.helper_materials()
@@ -285,9 +294,22 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
     validate_questions(capture.questions)
     payload = capture.checkpoint.encode()
     scope = ReferenceScope(**worker.model_dump(exclude={"turn_id", "generation", "owner_id"}), policy_epoch=0)
-    ciphertext = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", "")).seal(
-        scope=scope, purpose="ordinary-lead-question.v1", identity=card.request_id, content=payload
-    )
+    cipher = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", ""))
+    sealed_content = payload
+    if capture.checkpoint.storage_format is not None:
+        from bowhead_core.continuation_payload import seal_payload, write_payload_in_tx
+
+        sealed_content, segments = seal_payload(
+            payload,
+            kind="ordinary",
+            turn_id=worker.turn_id,
+            scope=scope,
+            identity=card.request_id,
+            purpose="ordinary-lead-question.v1",
+            cipher=cipher,
+        )
+        await write_payload_in_tx(db, manifest=sealed_content, ciphertexts=segments, scope=scope, identity=card.request_id)
+    ciphertext = cipher.seal(scope=scope, purpose="ordinary-lead-question.v1", identity=card.request_id, content=sealed_content)
     return OrdinaryLeadResumeContext.model_validate(
         {
             "__schema_version": 4,
@@ -313,18 +335,31 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
     ).model_dump(by_alias=True)
 
 
-def reopen_ordinary_checkpoint(record: OrdinaryContinuationCard) -> OrdinaryLeadCheckpoint:
+def reopen_ordinary_checkpoint(record: OrdinaryContinuationCard, *, db_path=None) -> OrdinaryLeadCheckpoint:
     from bowhead_core.chat_reference_storage import ReferenceCipher
     from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadCheckpoint
 
     snapshot = record.snapshot
     continuation = snapshot.continuation
     try:
-        payload = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", "")).open(
+        cipher = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", ""))
+        payload = cipher.open(
             scope=_cipher_scope(snapshot),
             purpose="ordinary-lead-question.v1",
             identity=record.card.request_id,
             ciphertext=continuation.checkpoint_ciphertext,
+        )
+        from bowhead_core.continuation_payload import open_payload
+
+        payload = open_payload(
+            payload,
+            db_path=db_path or record.source_db_path,
+            kind="ordinary",
+            turn_id=snapshot.turn_id,
+            scope=_cipher_scope(snapshot),
+            identity=record.card.request_id,
+            purpose="ordinary-lead-question.v1",
+            cipher=cipher,
         )
         if hashlib.sha256(payload).hexdigest() != continuation.checkpoint_hash:
             raise OrdinaryContinuationUnavailable()
@@ -336,13 +371,17 @@ def reopen_ordinary_checkpoint(record: OrdinaryContinuationCard) -> OrdinaryLead
         raise OrdinaryContinuationUnavailable() from error
 
 
-def ordinary_resume_request_material(card: ClarificationRequest) -> tuple[OrdinaryLeadCheckpoint, dict]:
+def ordinary_resume_request_material(card: ClarificationRequest, *, db_path=None) -> tuple[OrdinaryLeadCheckpoint, dict]:
     """Decrypt server-authored routing; database/worker checks still precede use."""
     snapshot = decode_clarification_context(card)
     if not isinstance(snapshot, OrdinaryLeadResumeContext):
         raise OrdinaryContinuationUnavailable()
-    checkpoint = reopen_ordinary_checkpoint(OrdinaryContinuationCard(card, snapshot, None, None))
+    checkpoint = reopen_ordinary_checkpoint(OrdinaryContinuationCard(card, snapshot, None, None), db_path=db_path)
     context = json.loads(checkpoint.request_json)
+    if isinstance(context, dict) and context.get("datarc_selection") is not None:
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot
+
+        DatarcSelectionSnapshot.model_validate(context["datarc_selection"])
     if not isinstance(context, dict) or (
         context.get("user_id"),
         context.get("team_id"),
@@ -397,7 +436,9 @@ async def read_ordinary_card_in_tx(db: aiosqlite.Connection, *, card_id: str, do
     generation, owner = row["continuation_generation"], row["continuation_owner_id"]
     if (generation is None) != (owner is None) or (generation is None) != (card.injected_at is None):
         raise OrdinaryContinuationUnavailable()
-    return OrdinaryContinuationCard(card, snapshot, generation, owner)
+    async with db.execute("PRAGMA database_list") as cursor:
+        source_db_path = next((item[2] for item in await cursor.fetchall() if item[1] == "main"), None)
+    return OrdinaryContinuationCard(card, snapshot, generation, owner, source_db_path)
 
 
 async def require_live_worker_in_tx(db: aiosqlite.Connection, *, worker: DocumentTurnOwner) -> None:

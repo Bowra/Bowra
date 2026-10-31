@@ -22,9 +22,9 @@ import pytest
 from bowhead_bi_bridge.types import CutResult, CutToken
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
 
-_UNFILTERED = "没有任何业务过滤条件"
+_UNFILTERED = "contains no `filters` field"
 _LIMITED = "按请求里的条数限制截断了结果"
-_INLINE_CUT = "只给你看了"
+_INLINE_CUT = "Only a preview of the returned rows is shown"
 
 _NO_FILTER = {"models": ["门店表"], "measures": ["营业额"], "dimensions": ["市", "各月"]}
 _WITH_FILTER = {"models": ["门店表"], "measures": ["营业额"], "filters": ["上海"]}

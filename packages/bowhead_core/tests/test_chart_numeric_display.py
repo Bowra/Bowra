@@ -2,8 +2,18 @@
 
 import pytest
 from bowhead_core.canvas_tools import _add_chart, _parse_csv_with_types
-from bowhead_core.chart.numeric_display import currency_identity, numeric_display
+from bowhead_core.chart.numeric_display import currency_identity, numeric_display, numeric_format_kinds
 from test_canvas_chart_units import _ctx_with_source
+
+
+def test_numeric_precision_kinds_require_explicit_percent_or_currency_facts():
+    assert numeric_format_kinds({"type": "numeric", "header": "Revenue"}) == ["number"]
+    assert numeric_format_kinds({"type": "numeric", "percent_scale": "fraction"}) == ["number", "percent"]
+    assert numeric_format_kinds({"type": "numeric", "unit": "pp"}) == ["number"]
+    assert numeric_format_kinds({"type": "numeric", "currency_code": "CAD"}) == ["number", "currency"]
+    assert numeric_format_kinds({"type": "numeric", "unit": "$"}) == ["number"]
+    assert numeric_format_kinds({"type": "numeric", "currency_code": "CAD", "percent_scale": "fraction"}) == ["number"]
+    assert numeric_format_kinds({"type": "numeric", "currency_code": "CAD", "unit": "USD"}) == ["number"]
 
 
 @pytest.mark.unit

@@ -19,6 +19,22 @@ Suggested tests show their questions and available answer criteria. Choose **Add
 
 You can also ask Coach to revise a saved test. The proposal marks it as a change to an existing test. Choose **Update these tests**, or **Save these test changes** when the set also adds tests. Expand **Review or adjust tests** to compare original and proposed content. Adoption keeps the same test and its history; it does not run it. Delete tests on **Evaluate**.
 
+While the evaluation suites load, saving the suggestions is temporarily unavailable. If they cannot be loaded, choose **Retry**; your suggested changes and edits stay in place. A read failure does not mean the suite changed. If access is no longer available, ask the Agent's owner to check it and reload the page.
+
+New test suggestions also have a short receipt in Chat. **Review suggestions** opens their original pending area in **Configure**. Accepted or dismissed suggestions say what was decided and link to **View current tests** on **Evaluate**. Opening the receipt or following its link does not adopt suggestions or start a run. The original suggestion and today's saved tests may differ.
+
+In the result view, expand **View saved changes** to read the original questions and available answer-criterion excerpts, including after acceptance or dismissal. Missing, shortened or omitted details are identified. The excerpt stays separate from today's tests and does not add another review step.
+
+## Reopen a recent operation
+
+In the same conversation, ask **@Coach** to open a recent operation, for example: “Open the test change I just accepted.” Coach requests the original saved result view. A result arriving while you edit or after you select another object stays available without replacing your work. Opening it does not save another change, run tests or publish the Agent.
+
+If several operations could match, Coach may ask which one you mean. Older or unavailable records may not be recoverable from the conversation; use the Agent's existing page and recorded history to review what is available. Current access permissions still apply.
+
+Reading or saving test content does not run it. A result saying no test was started by that action does not mean the suite has never run; ask Coach about recorded results or inspect **Evaluate** when you need that history.
+
+Earlier runs keep the questions and criteria they used. If those have changed, an earlier result does not verify the new content. Identical content saved again may still have useful historical evidence, but that does not mean another test ran. A partial history read cannot establish that no matching run exists, or how all historical answers were graded.
+
 ## Manage your test cases
 
 Suite results count runs started from **Run this suite** or **Save and run**. Results from **Test this change** compare versions and remain on **Release**. Earlier answers keep their recorded questions and expectations even after you edit the suite.

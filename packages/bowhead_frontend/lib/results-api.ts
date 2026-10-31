@@ -120,6 +120,7 @@ export type ResultsApiErrorCode =
   | "results_snapshot_stale"
   | "results_anchor_not_in_view"
   | "results_filter_unavailable"
+  | "results_artifact_contract_unsupported"
   | "results_read_model_unavailable"
   | "results_scope_unavailable"
   | "results_response_invalid"
@@ -132,6 +133,7 @@ const SERVER_ERROR_CODES = new Set<ResultsApiErrorCode>([
   "results_snapshot_stale",
   "results_anchor_not_in_view",
   "results_filter_unavailable",
+  "results_artifact_contract_unsupported",
   "results_read_model_unavailable",
   "results_scope_unavailable",
 ]);

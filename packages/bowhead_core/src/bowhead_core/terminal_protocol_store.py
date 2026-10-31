@@ -156,6 +156,9 @@ from bowhead_core.user_store import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from bowhead_core.context_activity import ContextActivity
+    from bowhead_core.context_publication import StagedTerminalContext
+
 _REQUIRED_TURN_COLUMNS = frozenset(
     {
         "terminal_protocol_version",
@@ -438,10 +441,14 @@ WEB_START_ADMITTED_RESOLUTION_KEYS = frozenset(
     {
         "active_datarc_project",
         "member_uid",
+        "datarc_selection",
         "preferred_model",
         "preferred_provider",
     }
 )
+# Historical admissions predate the explicit Datarc source snapshot. Lookup
+# preserves their exact projection; it must not invent current source evidence.
+_WEB_START_LEGACY_RESOLUTION_KEYS = WEB_START_ADMITTED_RESOLUTION_KEYS - {"datarc_selection"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,12 +477,19 @@ class WebChatActionLookup:
     # None means the envelope cannot prove the snapshot; replay fails closed.
     admitted_resolution: Mapping[str, object] | None = None
     agent_draft_target: Mapping[str, object] | None = None
+    context_maintenance: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.agent_draft_target is not None:
             AgentDraftSendTarget.model_validate(dict(self.agent_draft_target))
             if self.action_kind != "start":
                 raise ValueError("draft targets require a start action")
+        if self.context_maintenance is not None:
+            from bowhead_core.context_action import ContextMaintenanceAction
+
+            ContextMaintenanceAction.model_validate(dict(self.context_maintenance))
+            if self.action_kind != "start" or self.agent_draft_target is not None:
+                raise ValueError("maintenance requires its own start action")
         if not isinstance(self.action_id, str) or not self.action_id:
             raise ValueError("chat action identity is invalid")
         if self.action_kind not in {"start", "steer"}:
@@ -509,7 +523,8 @@ class WebChatActionLookup:
         if self.language_context is not None and not isinstance(self.language_context, Mapping):
             raise TypeError("chat action language snapshot is invalid")
         if self.admitted_resolution is not None and (
-            not isinstance(self.admitted_resolution, Mapping) or set(self.admitted_resolution) != WEB_START_ADMITTED_RESOLUTION_KEYS
+            not isinstance(self.admitted_resolution, Mapping)
+            or set(self.admitted_resolution) not in (WEB_START_ADMITTED_RESOLUTION_KEYS, _WEB_START_LEGACY_RESOLUTION_KEYS)
         ):
             raise TypeError("chat action resolution snapshot is invalid")
 
@@ -653,6 +668,7 @@ class TerminalReceiptSummary:
     last_event_seq: int
     persisted_event_highwater: int
     committed_at: str
+    operation_kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1233,6 +1249,9 @@ class TerminalProtocolStore:
                     "user_text": execution_intent.get("text"),
                     "workspace_id": execution_intent.get("workspace_id"),
                 }
+                maintenance = await _read_context_maintenance_source(connection, turn_id=access_scope.turn_id)
+                if maintenance is not None:
+                    execution_source["context_maintenance"] = execution_intent.get("context_maintenance")
                 admission_digest = canonical_admission_request_digest(
                     execution_intent=execution_intent,
                     request_id=action_id,
@@ -1267,14 +1286,15 @@ class TerminalProtocolStore:
                     ),
                     workspace_id=access_scope.workspace_id,
                     request_digest=admission_digest,
+                    context_maintenance=source.context_maintenance.model_dump() if source.context_maintenance is not None else None,
                     agent_draft_target=execution_intent.get("agent_draft_target"),
                     paradigm_v2=execution_intent.get("paradigm_v2"),
                     expected_plan_revision=execution_intent.get("expected_plan_revision"),
                     language_context=execution_intent.get("language_context"),
                     viewer_time_zone=(execution_intent["viewer_time_zone"] if isinstance(execution_intent.get("viewer_time_zone"), str) else ""),
                     admitted_resolution=(
-                        {key: execution_intent[key] for key in WEB_START_ADMITTED_RESOLUTION_KEYS}
-                        if set(execution_intent) >= WEB_START_ADMITTED_RESOLUTION_KEYS
+                        {key: execution_intent[key] for key in WEB_START_ADMITTED_RESOLUTION_KEYS if key in execution_intent}
+                        if set(execution_intent) >= _WEB_START_LEGACY_RESOLUTION_KEYS
                         else None
                     ),
                     planning_mode=(
@@ -1545,7 +1565,9 @@ class TerminalProtocolStore:
                 SELECT t.current_generation,t.generation_transition_epoch,
                        t.current_terminal_receipt_id,t.terminal_protocol_version,
                        g.state AS generation_state,g.terminal_receipt_id AS generation_receipt_id,
-                       r.status AS receipt_status,w.team_id,t.session_id
+                       r.status AS receipt_status,
+                  r.operation_kind AS receipt_operation_kind,
+                  t.operation_kind AS turn_operation_kind,w.team_id,t.session_id
                 FROM turns t
                 JOIN sessions s ON s.id=t.session_id
                 JOIN workspaces w ON w.id=s.workspace_id
@@ -3543,6 +3565,13 @@ class TerminalProtocolStore:
                     if replay is not None:
                         await connection.rollback()
                         return replay
+                    if request.execution_intent.get("datarc_selection") is not None:
+                        from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+                        await require_datarc_context_migration(connection)
+                        source = DatarcSelectionSnapshot.model_validate(request.execution_intent["datarc_selection"])
+                        if (source.team_id, source.user_id) != (request.context.team_id, request.context.actor):
+                            raise TerminalProtocolMalformedError("Datarc source identity differs from admission")
                     if not _typed_execution_context_matches(
                         request.execution_intent,
                         request.presentation_locale,
@@ -4091,6 +4120,47 @@ class TerminalProtocolStore:
             context.scope,
             claim_epoch=claim_epoch,
         )
+
+    async def read_context_maintenance_action(self, context: ExecutionGenerationContext):
+        """Resolve only the original admitted source under its running owner."""
+        async with open_terminal_protocol_connection(self._db_path) as connection:
+            connection.row_factory = aiosqlite.Row
+            await connection.execute("BEGIN")
+            await require_live_execution_in_connection(connection, context=context, now=self._now())
+            return await _read_context_maintenance_source(connection, turn_id=context.scope.turn_id)
+
+    async def read_recovery_operation_kind(self, context: RecoveryProcessingContext) -> str | None:
+        """Resolve maintenance identity without granting recovery publication rights."""
+        if not isinstance(context, RecoveryProcessingContext):
+            raise TypeError("Operation recovery requires an original capability")
+        async with open_terminal_protocol_connection(self._db_path) as connection:
+            connection.row_factory = aiosqlite.Row
+            await connection.execute("BEGIN")
+            generation = await _read_generation_claim_row(connection, context.scope)
+            recovery = await _read_active_recovery(connection, context.recovery_id)
+            if not _recovery_processing_matches(generation, recovery, context, self._now()):
+                raise TerminalProtocolMalformedError("context recovery ownership changed")
+            action = await _read_context_maintenance_source(connection, turn_id=context.scope.turn_id)
+            return "context_maintenance" if action is not None else None
+
+    async def read_recovery_context_completions(self, context: RecoveryProcessingContext) -> tuple[ContextActivity, ...]:
+        """Read context-only completion evidence under the original recovery fence."""
+        from bowhead_core.context_activity import missing_context_completions_in_connection
+
+        if not isinstance(context, RecoveryProcessingContext):
+            raise TypeError("Context completion recovery requires an original capability")
+        async with open_terminal_protocol_connection(self._db_path) as connection:
+            connection.row_factory = aiosqlite.Row
+            await connection.execute("BEGIN")
+            generation = await _read_generation_claim_row(connection, context.scope)
+            recovery = await _read_active_recovery(connection, context.recovery_id)
+            if not _recovery_processing_matches(generation, recovery, context, self._now()):
+                raise TerminalProtocolMalformedError("context recovery ownership changed")
+            return await missing_context_completions_in_connection(
+                connection,
+                turn_id=context.scope.turn_id,
+                generation=context.scope.generation,
+            )
 
     async def read_recovery_auth_fence_digest(
         self,
@@ -7805,6 +7875,7 @@ class TerminalProtocolStore:
         selected_variant_key: str | None,
         authz_snapshot_digest: str,
         writer_admission_epoch: int,
+        context_publication: StagedTerminalContext | None = None,
     ) -> CommittedReceipt:
         """在一个 transaction 中提交 selected terminal batch、receipt 与 Session ledger。"""
 
@@ -7868,6 +7939,7 @@ class TerminalProtocolStore:
                     writer_admission_epoch=writer_admission_epoch,
                     committed_at=_iso_utc(now),
                     fault_injector=self._inject,
+                    context_publication=context_publication,
                 )
                 self._inject(TerminalProtocolFaultPoint.TERMINAL_BEFORE_COMMIT)
                 await connection.commit()
@@ -8769,6 +8841,8 @@ class TerminalProtocolStore:
                   r.generation AS receipt_generation,
                   r.protocol_version AS receipt_protocol_version,
                   r.status AS receipt_status,
+                  r.operation_kind AS receipt_operation_kind,
+                  t.operation_kind AS turn_operation_kind,
                   r.reason_code AS receipt_reason_code,
                   r.message_key AS receipt_message_key,
                   r.final_answer_mode AS receipt_final_answer_mode,
@@ -9152,6 +9226,8 @@ async def _read_checkpoint_row(
           r.receipt_id,r.turn_id AS receipt_turn_id,r.generation AS receipt_generation,
           r.candidate_id AS receipt_candidate_id,
           r.protocol_version AS receipt_protocol_version,r.status AS receipt_status,
+                  r.operation_kind AS receipt_operation_kind,
+                  t.operation_kind AS turn_operation_kind,
           r.reason_code AS receipt_reason_code,r.message_key AS receipt_message_key,
           r.final_answer_mode AS receipt_final_answer_mode,
           r.final_answer_event_id AS receipt_final_answer_event_id,
@@ -9338,6 +9414,7 @@ async def _validate_checkpoint_dependencies(
     )
     expected_done_payload = {
         "candidate_id": receipt.candidate_id,
+        **({"operation_kind": receipt.operation_kind} if receipt.operation_kind is not None else {}),
         "generation": receipt.generation,
         "message_key": receipt.message_key,
         "protocol": 1,
@@ -12455,6 +12532,7 @@ async def _load_terminal_candidate(
                 final_answer_mode=FinalAnswerMode(variant_row["final_answer_mode"]),
                 final_answer_event_id=variant_row["final_answer_event_id"],
                 final_answer_digest=variant_row["final_answer_digest"],
+                operation_kind=variant_row["operation_kind"],
                 session_mutation_template=template,
                 events=events,
             )
@@ -12484,6 +12562,10 @@ async def _load_terminal_candidate(
             "candidate.canonicalization_version",
         ),
     )
+    source = await _read_context_maintenance_source(connection, turn_id=scope.turn_id)
+    operation_kind = "context_maintenance" if source is not None else None
+    if any(variant.operation_kind != operation_kind for variant in plan.variants):
+        raise TerminalProtocolMalformedError("terminal candidate operation source changed")
     if plan.candidate_projection_digest != candidate["candidate_projection_digest"]:
         raise TerminalProtocolMalformedError("terminal candidate reconstruction digest mismatch")
     return plan
@@ -12940,6 +13022,7 @@ def _validate_candidate_plan_envelopes(plan: TerminalCandidatePlan) -> None:
             raise TerminalProtocolMalformedError("normal terminal candidate done phase is invalid")
         expected_payload = {
             "candidate_id": plan.candidate_id,
+            **({"operation_kind": variant.operation_kind} if variant.operation_kind is not None else {}),
             "generation": plan.scope.generation,
             "message_key": variant.message_key,
             "protocol": 1,
@@ -13251,6 +13334,10 @@ async def _insert_terminal_candidate(
     plan: TerminalCandidatePlan,
     prepared_at: str,
 ) -> None:
+    source = await _read_context_maintenance_source(connection, turn_id=plan.scope.turn_id)
+    operation_kind = "context_maintenance" if source is not None else None
+    if any(variant.operation_kind != operation_kind for variant in plan.variants):
+        raise TerminalProtocolMalformedError("terminal candidate operation source mismatch")
     primary = plan.primary_variant
     counts = {variant.variant_key: len(variant.events) for variant in plan.variants}
     variant_digests = {variant.variant_key: variant.variant_digest for variant in plan.variants}
@@ -13303,8 +13390,8 @@ async def _insert_terminal_candidate(
               candidate_id,variant_key,outcome_variant,session_variant,status,
               reason_code,message_key,final_answer_mode,final_answer_event_id,
               final_answer_digest,required_manifest_template_digest,
-              session_mutation_template_digest,variant_digest
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+              session_mutation_template_digest,variant_digest,operation_kind
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 plan.candidate_id,
@@ -13320,6 +13407,7 @@ async def _insert_terminal_candidate(
                 variant.required_manifest_template_digest,
                 variant.session_mutation_template_digest,
                 variant.variant_digest,
+                variant.operation_kind,
             ),
         )
         for ordinal, event in enumerate(variant.events, start=1):
@@ -13446,6 +13534,7 @@ async def _validate_stored_candidate(
                 "required_manifest_template_digest": variant.required_manifest_template_digest,
                 "session_mutation_template_digest": variant.session_mutation_template_digest,
                 "variant_digest": variant.variant_digest,
+                "operation_kind": variant.operation_kind,
             }
             if variant is not None
             else {}
@@ -13776,6 +13865,11 @@ async def _insert_followup_turn(
     execution_intent = next_turn.get("execution_intent")
     if not isinstance(execution_intent, Mapping):
         raise TerminalProtocolMalformedError("followup execution intent is invalid")
+    if execution_intent.get("datarc_selection") is not None:
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+        DatarcSelectionSnapshot.model_validate(execution_intent["datarc_selection"])
+        await require_datarc_context_migration(connection)
     intent_copy = _canonical_mapping_copy(execution_intent)
     canonical_intent = {
         "execution_intent": intent_copy,
@@ -13997,8 +14091,14 @@ async def _update_turn_terminal_projection(
     if cost_amount < 0:
         raise TerminalProtocolMalformedError("generation cost is invalid")
     if status is TerminalStatus.COMPLETED:
-        if final_answer is None:
+        source = await _read_context_maintenance_source(connection, turn_id=plan.scope.turn_id)
+        operation_kind = "context_maintenance" if source is not None else None
+        if selected.operation_kind != operation_kind:
+            raise TerminalProtocolMalformedError("terminal operation source changed")
+        if final_answer is None and operation_kind is None:
             raise TerminalProtocolMalformedError("completed terminal projection is missing final answer")
+        if operation_kind is not None and final_answer is not None:
+            raise TerminalProtocolMalformedError("maintenance terminal projection cannot contain an answer")
         update = await connection.execute(
             """
             UPDATE turns SET status='completed',ended_at=?,intent=?,final_answer=?,
@@ -14115,6 +14215,7 @@ async def _commit_terminal_candidate(
     writer_admission_epoch: int,
     committed_at: str,
     fault_injector: Callable[[TerminalProtocolFaultPoint], None],
+    context_publication: StagedTerminalContext | None = None,
 ) -> CommittedReceipt:
     if selected.session_variant is SessionVariant.FOLLOWUP and (
         plan.session_disposition_plan.get("writer_admission_epoch") != writer_admission_epoch
@@ -14139,6 +14240,20 @@ async def _commit_terminal_candidate(
         selected=selected,
     )
     final_answer = precommitted_text or _terminal_answer_text(selected)
+    context_extensions = [item for item in plan.projection_extensions if item.get("kind") == "model_context_publication_v1"]
+    if context_extensions:
+        from bowhead_core.context_publication import StagedTerminalContext, TerminalContextProjection
+
+        if len(context_extensions) != 1:
+            raise TerminalProtocolMalformedError("context publication projection is duplicated")
+        TerminalContextProjection.model_validate(dict(context_extensions[0]))
+        if selected.outcome_variant is CandidateOutcome.PRIMARY and selected.status is TerminalStatus.COMPLETED:
+            if not isinstance(context_publication, StagedTerminalContext):
+                raise TerminalProtocolMalformedError("context publication validation is unavailable")
+            await context_publication.adopt(connection, context=context, plan=plan, selected=selected, final_answer=final_answer)
+    elif context_publication is not None:
+        raise TerminalProtocolMalformedError("context publication was not frozen in the candidate")
+
     event_sequence_next = _positive_int(row["event_sequence_next"], "turns.event_sequence_next")
     if event_sequence_next != plan.persisted_event_highwater + 1:
         raise TerminalProtocolMalformedError("terminal event allocator moved after candidate prepare")
@@ -14195,6 +14310,7 @@ async def _commit_terminal_candidate(
     }
     selected_manifest_digest = canonical_digest_v1(selected_manifest_projection)
     receipt_projection = {
+        **({"operation_kind": selected.operation_kind} if selected.operation_kind is not None else {}),
         "candidate_id": plan.candidate_id,
         "candidate_projection_digest": plan.candidate_projection_digest,
         "message_key": selected.message_key,
@@ -14219,8 +14335,8 @@ async def _commit_terminal_candidate(
           terminal_event_id,first_event_seq,last_event_seq,persisted_event_highwater,
           required_event_manifest_json,candidate_projection_digest,
           selected_projection_digest,selected_manifest_digest,
-          selected_session_mutation_digest,projection_extensions_json,committed_at
-        ) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          selected_session_mutation_digest,projection_extensions_json,committed_at,operation_kind
+        ) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             plan.reserved_receipt_id,
@@ -14246,6 +14362,7 @@ async def _commit_terminal_candidate(
             mutation.mutation_digest,
             canonical_json_v1([dict(value) for value in plan.projection_extensions]),
             committed_at,
+            selected.operation_kind,
         ),
     )
     for event in staged_rows:
@@ -14439,6 +14556,7 @@ async def _commit_terminal_candidate(
         )
     return CommittedReceipt(
         receipt_id=plan.reserved_receipt_id,
+        operation_kind=selected.operation_kind,
         candidate_id=plan.candidate_id,
         candidate_projection_digest=plan.candidate_projection_digest,
         selected_projection_digest=receipt_digest,
@@ -14529,7 +14647,8 @@ async def _read_committed_receipt(
         None,
     )
     if selected is None or (
-        row["status"] != selected.status.value
+        row["operation_kind"] != selected.operation_kind
+        or row["status"] != selected.status.value
         or row["reason_code"] != selected.reason_code
         or row["message_key"] != selected.message_key
         or row["final_answer_mode"] != selected.final_answer_mode.value
@@ -14708,6 +14827,7 @@ async def _read_committed_receipt(
     if selected_manifest_digest != row["selected_manifest_digest"]:
         raise TerminalProtocolMalformedError("terminal receipt selected manifest digest mismatch")
     receipt_projection = {
+        **({"operation_kind": selected.operation_kind} if selected.operation_kind is not None else {}),
         "candidate_id": candidate_id,
         "candidate_projection_digest": candidate_projection_digest,
         "message_key": row["message_key"],
@@ -14741,6 +14861,7 @@ async def _read_committed_receipt(
         first_event_seq=_positive_int(row["first_event_seq"], "receipt.first_event_seq"),
         last_event_seq=_positive_int(row["last_event_seq"], "receipt.last_event_seq"),
         status=status,
+        operation_kind=selected.operation_kind,
     )
 
 
@@ -14839,6 +14960,7 @@ def _typed_execution_context_matches(
     }
     actual_keys = set(execution_intent)
     optional_keys = {
+        "context_maintenance",
         "agent_draft_target",
         "billing_rate_card_version",
         "effect_contract_version",
@@ -14846,9 +14968,21 @@ def _typed_execution_context_matches(
         "plan_execution_id",
         "expected_plan_revision",
         "viewer_time_zone",
+        "datarc_selection",
     }
     if not required_keys <= actual_keys or not actual_keys - required_keys <= optional_keys:
         return False
+    if "context_maintenance" in execution_intent:
+        from bowhead_core.context_action import ContextMaintenanceAction
+
+        try:
+            ContextMaintenanceAction.model_validate(execution_intent["context_maintenance"])
+        except (ValueError, TypeError):
+            return False
+        if any(
+            execution_intent.get(key) for key in ("text", "attachments", "attachment_refs", "parts", "agent_draft_target", "plan_execution_id")
+        ) or execution_intent.get("planning_mode") not in (None, "off"):
+            return False
     if "viewer_time_zone" in execution_intent and (
         execution_intent["language_context"] is not None
         or not isinstance(execution_intent["viewer_time_zone"], str)
@@ -14917,6 +15051,15 @@ def _typed_execution_context_matches(
     ):
         return False
 
+    if "datarc_selection" in execution_intent:
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot
+
+        try:
+            source = DatarcSelectionSnapshot.model_validate(execution_intent["datarc_selection"])
+        except ValueError:
+            return False
+        if (source.datarc_workspace_id, source.member_uid) != (active_datarc_project, member_uid):
+            return False
     raw = execution_intent["language_context"]
     if raw is None:
         return presentation_locale == "zh-CN"
@@ -15229,6 +15372,8 @@ async def _read_decision_protocol_row(
                t.generation_transition_epoch,t.current_terminal_receipt_id,t.event_sequence_next,
                g.state AS generation_state,g.terminal_receipt_id AS generation_receipt_id,
                r.status AS receipt_status,
+                  r.operation_kind AS receipt_operation_kind,
+                  t.operation_kind AS turn_operation_kind,
                s.active_turn_id,s.active_turn_protocol_version,s.active_turn_generation,
                s.active_turn_claim_epoch,s.recovery_lock_turn_id,s.recovery_lock_generation,
                s.recovery_lock_reason,s.steer_buffer_json,s.steer_buffer_state,
@@ -16687,6 +16832,10 @@ async def _append_or_replay_steer(
     accepted_at: str,
 ) -> TerminalAdmissionResult:
     protocol_version, generation, claim_epoch = _active_protocol_tuple(session)
+    async with connection.execute("SELECT operation_kind FROM turns WHERE id=?", (session["active_turn_id"],)) as cursor:
+        active_operation = await cursor.fetchone()
+    if active_operation is not None and active_operation[0] == "context_maintenance":
+        return _admission_rejection(request.context, request_digest, AdmissionCode.SESSION_TURN_ACTIVE)
     if not request.allow_steer:
         return _admission_rejection(request.context, request_digest, AdmissionCode.SESSION_TURN_ACTIVE)
     exact_v1_steer = request.expected_execution_generation is not None
@@ -16877,7 +17026,7 @@ async def _insert_admitted_turn(
         """,
         (request.context.session_id, request.context.session_id),
     )
-    if seq == 1:
+    if seq == 1 and (request.user_source is None or request.user_source.context_maintenance is None):
         lines = request.user_text.strip().splitlines()
         title = (lines[0][:40] if lines else "") or "新对话"
         await connection.execute(
@@ -17161,6 +17310,72 @@ async def _read_generation_claim_row(
         return await cursor.fetchone()
 
 
+async def _read_context_maintenance_source(connection, *, turn_id: str):
+    async with connection.execute(
+        "SELECT t.operation_kind,s.context_maintenance_json FROM turns t LEFT JOIN chat_turn_user_sources s ON s.turn_id=t.id WHERE t.id=?",
+        (turn_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None or row[0] not in (None, "context_maintenance") or (row[0] is None) != (row[1] is None):
+        raise TerminalProtocolMalformedError("terminal operation source is invalid")
+    if row[0] is None:
+        return None
+    source = await _read_chat_turn_user_source_in_tx(connection, turn_id=turn_id)
+    if source is None or source.context_maintenance is None:
+        raise TerminalProtocolMalformedError("terminal maintenance source is missing")
+    return source.context_maintenance
+
+
+async def require_live_execution_in_connection(
+    connection: aiosqlite.Connection,
+    *,
+    context: ExecutionGenerationContext,
+    now: datetime | None = None,
+) -> None:
+    """Check the original running capability inside a caller-owned transaction.
+
+    This authorizes context staging only; it does not grant source access or
+    finalization authority, renew either lease, or mutate lifecycle state.
+    """
+    if not connection.in_transaction or not isinstance(context, ExecutionGenerationContext):
+        raise TypeError("Live execution validation requires a transaction and capability")
+    previous_factory = connection.row_factory
+    connection.row_factory = aiosqlite.Row
+    try:
+        observed_at = now if now is not None else datetime.now(UTC)
+        row = await _read_generation_claim_row(connection, context.scope)
+        if row is None or not _execution_context_matches(row, context, observed_at):
+            raise TerminalProtocolMalformedError("context execution ownership changed")
+        if not await _writer_lease_matches_execution(connection, context=context, now=observed_at):
+            raise TerminalProtocolMalformedError("context writer lease is unavailable")
+    finally:
+        connection.row_factory = previous_factory
+
+
+async def require_context_finalization_in_connection(
+    connection: aiosqlite.Connection,
+    *,
+    context: PreparedFinalizationContext,
+    now: datetime | None = None,
+) -> None:
+    """Retain the original prepared-finalization fence for context adoption."""
+    if not connection.in_transaction or not isinstance(context, PreparedFinalizationContext):
+        raise TypeError("Context publication requires a prepared finalization transaction")
+    previous_factory = connection.row_factory
+    connection.row_factory = aiosqlite.Row
+    try:
+        row = await _read_generation_claim_row(connection, context.finalization.scope)
+        if (
+            row is None
+            or not _finalization_context_matches(row, context.finalization, now if now is not None else datetime.now(UTC))
+            or row["terminal_candidate_id"] != context.candidate_id
+            or row["terminal_receipt_id"] is not None
+        ):
+            raise TerminalProtocolMalformedError("context finalization ownership changed")
+    finally:
+        connection.row_factory = previous_factory
+
+
 async def _writer_lease_matches_claim(
     connection: aiosqlite.Connection,
     *,
@@ -17432,10 +17647,14 @@ def _receipt_from_row(row: aiosqlite.Row, current_generation: int) -> TerminalRe
         row["receipt_final_answer_event_id"],
         "receipt.final_answer_event_id",
     )
-    if not validate_final_answer_mode(
-        status=status,
-        mode=final_answer_mode,
-        final_answer_event_id=final_answer_event_id,
+    if (
+        not validate_final_answer_mode(
+            status=status,
+            mode=final_answer_mode,
+            final_answer_event_id=final_answer_event_id,
+            operation_kind=row["receipt_operation_kind"],
+        )
+        or row["receipt_operation_kind"] != row["turn_operation_kind"]
     ):
         raise TerminalProtocolMalformedError("receipt final answer mode is malformed")
     first_seq = _positive_int(row["first_event_seq"], "receipt.first_event_seq")
@@ -17452,6 +17671,7 @@ def _receipt_from_row(row: aiosqlite.Row, current_generation: int) -> TerminalRe
         message_key=_nonempty(row["receipt_message_key"], "receipt.message_key"),
         final_answer_mode=final_answer_mode,
         final_answer_event_id=final_answer_event_id,
+        operation_kind=row["receipt_operation_kind"],
         selected_variant_key=_nonempty(
             row["receipt_selected_variant_key"],
             "receipt.selected_variant_key",

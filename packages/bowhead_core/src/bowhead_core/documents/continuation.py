@@ -15,7 +15,7 @@ from typing import Literal
 
 import aiosqlite
 from bowhead_router.invocation import PhysicalInvocationSpec
-from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, ValidationError, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, ValidationError, model_serializer, model_validator
 
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
 from bowhead_core.document_chat_continuation import Digest, DocumentPlanningAttemptRef, DocumentPlanningCheckpointRef, DocumentTurnOwner
@@ -55,11 +55,32 @@ class DocumentLanguageSnapshot(BaseModel):
 class DocumentRuntimeSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     image_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     model_config_version: int = Field(ge=0)
-    planner_profile: PlannerProfile
+    planner_profile: PlannerProfile | Literal["pptx-script-worker-v1"]
     language: DocumentLanguageSnapshot
+    authoring_system: str | None = Field(default=None, min_length=1, max_length=64_000)
+    authoring_limits: dict | None = None
+
+    @model_validator(mode="after")
+    def _version_matches_profile(self):
+        authoring = self.planner_profile == "pptx-script-worker-v1"
+        if (
+            (self.schema_version == 2) != authoring
+            or (authoring and (self.authoring_system is None or self.authoring_limits is None))
+            or (not authoring and (self.authoring_system is not None or self.authoring_limits is not None))
+        ):
+            raise ValueError("Document runtime version and profile must agree")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _preserve_legacy_shape(self, handler):
+        data = handler(self)
+        if self.schema_version == 1:
+            data.pop("authoring_system", None)
+            data.pop("authoring_limits", None)
+        return data
 
 
 @dataclass(frozen=True)
@@ -118,6 +139,12 @@ class _CheckpointPayload(BaseModel):
     question_digest: Digest
 
 
+class _AuthoringCheckpointPayload(_CheckpointPayload):
+    schema_version: Literal[2]
+    last_call_no: int = Field(ge=1)
+    response: str = Field(min_length=1, max_length=512_000)
+
+
 @dataclass(frozen=True)
 class DocumentCallRef:
     job_id: str
@@ -135,7 +162,7 @@ def current_document_call() -> DocumentCallRef | None:
 
 @contextmanager
 def document_call_scope(call: DocumentCallRef):
-    if type(call.attempt_no) is not int or call.attempt_no not in (1, 2) or type(call.call_no) is not int or call.call_no not in (1, 2):
+    if type(call.attempt_no) is not int or call.attempt_no not in (1, 2) or type(call.call_no) is not int or call.call_no < 1:
         raise DocumentRequestError("document_execution_fenced")
     token = _DOCUMENT_CALL.set(call)
     try:
@@ -228,17 +255,25 @@ async def _input_digest(connection, job_id: str) -> str:
         )
     ):
         raise DocumentRequestError("document_input_unavailable")
-    return _digest(
-        _json(
-            [
-                {
-                    key: row[key]
-                    for key in ("input_index", "artifact_id", "source_artifact_id", "role", "filename", "mime", "path", "sha256", "size_bytes")
-                }
-                for row in copies
-            ]
+    material = [
+        {key: row[key] for key in ("input_index", "artifact_id", "source_artifact_id", "role", "filename", "mime", "path", "sha256", "size_bytes")}
+        for row in copies
+    ]
+    job = await _one(connection, "SELECT team_id,workspace_id,requested_by FROM document_jobs WHERE id=?", (job_id,))
+    from bowhead_core.documents.canvas_inputs import read_canvas_input_in_tx, validate_canvas_row
+
+    scope = DocumentScope(team_id=job[0], workspace_id=job[1], user_id=job[2])
+    canvas = await read_canvas_input_in_tx(connection, scope=scope, job_id=job_id)
+    if canvas is not None:
+        validate_canvas_row(canvas, scope, frozen=True)
+        material.append(
+            {
+                "kind": "canvas",
+                **{key: canvas[key] for key in ("artifact_id", "path", "sha256", "size_bytes")},
+                "manifest_sha256": _digest(canvas["manifest_json"]),
+            }
         )
-    )
+    return _digest(_json(material))
 
 
 async def begin_document_planning_in_tx(connection, *, worker: DocumentTurnOwner, job_id: str, instruction: str) -> None:
@@ -270,7 +305,8 @@ def _validated_context(value, instruction: str, *, profile: str) -> dict:
     ):
         raise DocumentRequestError("document_checkpoint_unavailable")
     try:
-        if _digest(planning_system_prompt(profile) + "\n" + value["payload"]) != value["digest"]:
+        system = profile if profile == "pptx-script-worker-v1" else planning_system_prompt(profile)
+        if _digest(system + "\n" + value["payload"]) != value["digest"]:
             raise DocumentRequestError("document_checkpoint_unavailable")
         payload = json.loads(value["payload"])
     except (ValueError, TypeError, OfficePackageError) as exc:
@@ -344,7 +380,8 @@ async def retain_document_question_in_tx(
     )
     if (
         type(last_call_no) is not int
-        or last_call_no not in (1, 2)
+        or last_call_no < 1
+        or (runtime.schema_version == 1 and last_call_no not in (1, 2))
         or not isinstance(question, str)
         or question != question.strip()
         or not 1 <= len(question) <= 200
@@ -371,7 +408,7 @@ async def retain_document_question_in_tx(
     if _json(context) != execution["context_json"] or attempt["inputs_digest"] != await _input_digest(connection, job_id):
         raise DocumentRequestError("document_checkpoint_unavailable")
     payload = {
-        "schema_version": 1,
+        "schema_version": runtime.schema_version,
         "job_id": job_id,
         "attempt_no": 1,
         "source_hash": dispatch["source_hash"],
@@ -414,14 +451,15 @@ async def load_document_checkpoint_in_tx(
     ):
         raise DocumentRequestError("document_checkpoint_unavailable")
     try:
-        payload = _CheckpointPayload.model_validate_json(attempt["checkpoint_json"]).model_dump()
+        payload_type = _AuthoringCheckpointPayload if runtime.schema_version == 2 else _CheckpointPayload
+        payload = payload_type.model_validate_json(attempt["checkpoint_json"]).model_dump()
         context = _validated_context(json.loads(attempt["context_json"]), attempt["instruction"], profile=runtime.planner_profile)
     except (ValueError, TypeError) as exc:
         raise DocumentRequestError("document_checkpoint_unavailable") from exc
     if _digest(_json(payload)) != checkpoint.checkpoint_digest:
         raise DocumentRequestError("document_checkpoint_unavailable")
     if (
-        payload["schema_version"] != 1
+        payload["schema_version"] != runtime.schema_version
         or payload["job_id"] != checkpoint.job_id
         or payload["attempt_no"] != 1
         or payload["source_hash"] != checkpoint.source_hash
@@ -640,6 +678,10 @@ async def consume_document_attempt_in_tx(
     initial = await document_instruction_in_tx(connection, worker=creation, job_id=checkpoint.job_id)
     if initial.text != previous["instruction"]:
         raise DocumentRequestError("document_checkpoint_unavailable")
+    if material.runtime_snapshot.schema_version == 2:
+        from bowhead_core.documents.authoring_context import prepare_authoring_answer_context
+
+        prepare_answer_context = prepare_authoring_answer_context
     resumed = prepare_answer_context(
         PlanningContext(**json.loads(previous["context_json"])),
         question=material.question,
@@ -675,7 +717,7 @@ async def consume_document_attempt_in_tx(
 
 
 async def link_physical_receipt_in_tx(connection, *, call: DocumentCallRef, spec: PhysicalInvocationSpec, receipt_id: str) -> None:
-    if type(call.attempt_no) is not int or call.attempt_no not in (1, 2) or type(call.call_no) is not int or call.call_no not in (1, 2):
+    if type(call.attempt_no) is not int or call.attempt_no not in (1, 2) or type(call.call_no) is not int or call.call_no < 1:
         raise DocumentRequestError("document_execution_fenced")
     await validate_document_worker_in_tx(connection, worker=call.worker, job_id=call.job_id)
     attempt = await _one(connection, "SELECT * FROM document_planning_attempts WHERE job_id=? AND attempt_no=?", (call.job_id, call.attempt_no))

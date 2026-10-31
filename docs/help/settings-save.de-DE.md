@@ -2,6 +2,8 @@
 
 Persönliche Einstellungen, Team- und Bereichseinstellungen nach Themen gruppiert. Jede Gruppe hat eine Karte, jede Einstellung eine Zeile: links Name und Kurzbeschreibung, rechts die änderbaren Werte. Auf Smartphones stehen sie untereinander.
 
+Wenn neben einer Einstellung ein Fragezeichen erscheint, zeigen Darüberfahren oder Fokussieren eine Vorschau; Klicken oder Tippen hält die Erklärung offen. Sie erläutert Zweck, Werttyp, Bereich oder Optionen. Escape schließt die Erklärung, während der Editor geöffnet bleibt. Das Lesen ändert und speichert keine Eingaben; die bisherigen Hinweise und Prüfschritte gelten weiterhin.
+
 ## Zwei Arten, Einstellungen zu speichern
 
 - **Schalter und einzelne Auswahlen gelten sofort**: Wenn Sie einen Schalter ein- oder ausschalten oder eine Option auswählen, wird die Änderung unmittelbar gespeichert. Sie müssen nichts weiter auswählen.

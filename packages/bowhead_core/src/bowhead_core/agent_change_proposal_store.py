@@ -17,6 +17,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_automation_context import AutomationAuthority
 from bowhead_core.agent_behavior_authoring import default_agent_behavior_authoring_service
 from bowhead_core.agent_eval_store import EvalCaseDraft, append_eval_suite_cases_conn
+from bowhead_core.agent_knowledge_policy import KnowledgeAccessError, require_policy_preserved, require_supported_knowledge_access
 from bowhead_core.agent_revision_store import (
     AgentAudience,
     AgentPublicationBlockedError,
@@ -50,6 +51,7 @@ _ALLOWED_EXACT_PATHS = {
     "/definition/max_iterations",
     "/definition/output_schema",
     "/definition/runtime_extensions",
+    "/definition/knowledge_access",
     "/definition/description",
     "/definition/model_policy",
     "/definition/tool_refs_json",
@@ -345,6 +347,7 @@ class AgentChangeProposalStore:
         from bowhead_core.agent_runtime_extensions import require_extension_policy_preserved
 
         require_extension_policy_preserved(base["definition"], result["definition"])
+        require_policy_preserved(base["definition"], result["definition"])
         await self._validate_document_conn(db, team_id=team_id, document=result)
         if validate_candidate is not None:
             await validate_candidate(result)
@@ -460,6 +463,7 @@ class AgentChangeProposalStore:
             from bowhead_core.agent_runtime_extensions import require_extension_policy_preserved
 
             require_extension_policy_preserved(base["definition"], result["definition"])
+            require_policy_preserved(base["definition"], result["definition"])
             await self._validate_document_conn(db, team_id=team_id, document=result)
             changed = sorted({str(item["path"]) for item in patch if _value_at(base, str(item["path"])) != _value_at(result, str(item["path"]))})
         return {
@@ -635,6 +639,7 @@ class AgentChangeProposalStore:
         from bowhead_core.agent_runtime_extensions import require_extension_policy_preserved
 
         require_extension_policy_preserved(ours["definition"], merged["definition"])
+        require_policy_preserved(ours["definition"], merged["definition"])
         await self._validate_document_conn(db, team_id=team_id, document=merged)
         await self._write_working_conn(db, working=working, document=merged, actor_user_id=actor_user_id, timestamp=timestamp)
         changed = await db.execute(
@@ -674,6 +679,12 @@ class AgentChangeProposalStore:
         actor_user_id: str,
         timestamp: str,
     ) -> None:
+        if require_supported_knowledge_access(document["definition"]) is not None:
+            if self._revision_store is None:
+                raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
+            await self._revision_store._validate_knowledge_write(
+                db, document["definition"], team_id=str(working["team_id"]), actor_user_id=actor_user_id
+            )
         definition_json, _ = _canonical_document(document["definition"], name="definition")
         listing_json, _ = _canonical_document(document["listing"], name="listing")
         audience = AgentAudience.from_mapping(document["audience"])
@@ -904,6 +915,7 @@ class AgentChangeProposalStore:
                     from bowhead_core.agent_runtime_extensions import require_extension_policy_preserved
 
                     require_extension_policy_preserved(current["definition"], document["definition"])
+                    require_policy_preserved(current["definition"], document["definition"])
                     await self._validate_document_conn(db, team_id=team_id, document=document)
                     await self._write_working_conn(db, working=working, document=document, actor_user_id=actor_user_id, timestamp=timestamp)
                     async with db.execute(
@@ -990,6 +1002,7 @@ class AgentChangeProposalStore:
                 from bowhead_core.agent_runtime_extensions import require_extension_policy_preserved
 
                 require_extension_policy_preserved(current["definition"], document["definition"])
+                require_policy_preserved(current["definition"], document["definition"])
                 await self._validate_document_conn(db, team_id=team_id, document=document)
                 await self._write_working_conn(db, working=working, document=document, actor_user_id=actor_user_id, timestamp=timestamp)
                 decision_ids = []

@@ -1,3 +1,4 @@
+import { type FieldContract } from "./configuration-field-guidance";
 import { ApiError, apiJson } from "./api-client";
 
 export interface ExecutionLimitsValues {
@@ -7,6 +8,7 @@ export interface ExecutionLimitsValues {
 }
 
 export interface ExecutionLimits extends ExecutionLimitsValues {
+  field_contract?: FieldContract;
   defaults: ExecutionLimitsValues;
   ranges: Record<keyof ExecutionLimitsValues, { min: number; max: number }>;
   is_default: boolean;

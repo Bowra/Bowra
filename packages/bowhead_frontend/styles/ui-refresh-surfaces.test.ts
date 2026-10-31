@@ -307,7 +307,6 @@ describe("弹窗与面板（已定取舍 2；Component Spec「弹窗 · 确认�
     ".am-dialog",
     ".am-fork-dialog",
     ".am-filter-sheet",
-    ".artifact-viewer-modal-panel",
     ".rc-inspect-panel",
     ".discovery-picker",
     ".verification-selector",

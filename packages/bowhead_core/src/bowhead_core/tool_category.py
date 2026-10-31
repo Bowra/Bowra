@@ -76,6 +76,8 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "canvas_add_html_artifact": "write",
     "canvas_add_external_iframe": "write",
     "remove_chart": "write",
+    "read_chart": "lookup",
+    "edit_chart": "write",
     # Report writing: reading canvas is read-only metadata (no LLM finding); adding sections is write (section ID result, no summarizable numbers).
     # Previously unregistered ⇒ default compute fallback ⇒ finding-eligible.
     "read_report": "lookup",
@@ -170,7 +172,7 @@ def is_canvas_add_tool(tool_name: str) -> bool:
 #: Canvas write tools without `canvas_` prefix that do not add a physical item (canvas-update-turn batch B2-2).
 #: Missing these has the same consequence: revision turns only removing charts keep `_drew_canvas` False ⇒ judged as no deliverable content,
 #: contradicting `canvas_changes.removed_charts` in the same result.
-_UNPREFIXED_CANVAS_EDIT_TOOLS: Final[frozenset[str]] = frozenset({"remove_chart"})
+_UNPREFIXED_CANVAS_EDIT_TOOLS: Final[frozenset[str]] = frozenset({"remove_chart", "edit_chart"})
 
 
 def is_canvas_tool(tool_name: str) -> bool:

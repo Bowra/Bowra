@@ -138,17 +138,24 @@ class AgentCoachEvidence:
             """SELECT count(*) AS count,max(id) AS last_id,max(finished_at) AS finished_at,
                       sum(CASE WHEN status='queued' THEN 1 ELSE 0 END) AS queued,
                       sum(CASE WHEN status='running' THEN 1 ELSE 0 END) AS running,
-                      (SELECT count(*) FROM agent_eval_snapshot WHERE team_id=? AND agent_id=?) AS snapshot_count
+                      (SELECT count(*) FROM agent_eval_snapshot WHERE team_id=? AND agent_id=?) AS snapshot_count,
+                      (SELECT coalesce(sum(row_version),0) FROM agent_eval_suite
+                       WHERE team_id=? AND agent_id=? AND agent_source_kind='team') AS suite_versions
                FROM agent_eval_run WHERE team_id=? AND agent_id=? AND agent_source_kind='team'""",
-            (team_id, target["agent_id"], team_id, target["agent_id"]),
+            (team_id, target["agent_id"], team_id, target["agent_id"], team_id, target["agent_id"]),
         )
         state = dict(await marker.fetchone())
-        token = _fingerprint({"team_id": team_id, "agent_id": target["agent_id"], "state": state})
+        token = _fingerprint({"projection": "suite_history_v3", "team_id": team_id, "agent_id": target["agent_id"], "state": state})
         _page_check(expected, token, offset)
         cursor = await db.execute(
             """SELECT r.id,r.status,r.suite_revision_id,r.candidate_id,r.release_id,r.created_at,
+                      suite.id AS suite_id,suite.name AS suite_name,
                       l.execution_id,l.subject_side,s.id AS snapshot_id,s.snapshot_hash
-               FROM agent_eval_run r LEFT JOIN agent_eval_comparison_run l ON l.run_id=r.id
+               FROM agent_eval_run r
+               LEFT JOIN agent_eval_suite_revision revision ON revision.id=r.suite_revision_id
+               LEFT JOIN agent_eval_suite suite ON suite.id=revision.suite_id
+                 AND suite.team_id=r.team_id AND suite.agent_id=r.agent_id AND suite.agent_source_kind=r.agent_source_kind
+               LEFT JOIN agent_eval_comparison_run l ON l.run_id=r.id
                LEFT JOIN agent_eval_snapshot s ON s.execution_id=l.execution_id
                WHERE r.team_id=? AND r.agent_id=? AND r.agent_source_kind='team'
                ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?""",
@@ -171,6 +178,14 @@ class AgentCoachEvidence:
             ],
             "fingerprint": token,
             "next_offset": offset + limit if len(rows) > limit else None,
+            "coverage": {
+                "scope": "agent_history",
+                "total_runs": int(state["count"]),
+                "offset": offset,
+                "returned_runs": len(rows[:limit]),
+                "complete": offset == 0 and len(rows[:limit]) == state["count"],
+                "includes_answer_quality": False,
+            },
         }
 
     async def _run(self, db, target, offset, limit, expected, excerpts):
@@ -203,7 +218,42 @@ class AgentCoachEvidence:
             and run["status"] not in {"queued", "running"}
             else None
         )
-        token = _fingerprint({"projection": "answer_quality_v1", "run_id": run["id"], "status": run["status"], "totals": totals})
+        cursor = await db.execute(
+            """SELECT e.state,e.current_run_id,e.stale_reason FROM agent_eval_evidence_state e
+               JOIN agent_eval_suite_revision r ON r.suite_id=e.suite_id
+               WHERE r.id=? AND e.team_id=? AND e.agent_id=? AND e.agent_source_kind='team'""",
+            (run["suite_revision_id"], run["team_id"], run["agent_id"]),
+        )
+        evidence_row = await cursor.fetchone()
+        evidence = dict(evidence_row) if evidence_row else None
+        cursor = await db.execute(
+            """SELECT current.id,current.case_set_hash,suite.state FROM agent_eval_suite_revision current
+               JOIN agent_eval_suite suite ON suite.id=current.suite_id
+               JOIN agent_eval_suite_revision original ON original.suite_id=suite.id
+               WHERE original.id=? AND suite.team_id=? AND suite.agent_id=? AND suite.agent_source_kind='team'
+               ORDER BY current.sequence DESC LIMIT 1""",
+            (run["suite_revision_id"], self.team_id, target["agent_id"]),
+        )
+        current = await cursor.fetchone()
+        current_suite = {
+            "revision_id": current["id"] if current else None,
+            "state": current["state"] if current else None,
+            "case_set_hash": current["case_set_hash"] if current else None,
+            "exact_revision_match": current["id"] == run["suite_revision_id"] if current else None,
+            "case_set_match": current["case_set_hash"] == run["case_set_hash"]
+            if current and current["case_set_hash"] and run["case_set_hash"]
+            else None,
+        }
+        token = _fingerprint(
+            {
+                "projection": "answer_quality_v2",
+                "run_id": run["id"],
+                "status": run["status"],
+                "totals": totals,
+                "recorded_evidence": evidence,
+                "current_suite": current_suite,
+            }
+        )
         _page_check(expected, token, offset)
         held_out = await _held_out_results(db, run_ids=[run["id"]])
         # Held-out cases reach Coach only as counts (alignment loop A6); their rows are never listed.
@@ -241,13 +291,6 @@ class AgentCoachEvidence:
                     "raw_trace": "not_exposed",
                 }
             )
-        cursor = await db.execute(
-            """SELECT e.state,e.current_run_id,e.stale_reason FROM agent_eval_evidence_state e
-               JOIN agent_eval_suite_revision r ON r.suite_id=e.suite_id
-               WHERE r.id=? AND e.team_id=? AND e.agent_id=? AND e.agent_source_kind='team'""",
-            (run["suite_revision_id"], run["team_id"], run["agent_id"]),
-        )
-        evidence = await cursor.fetchone()
         # A comparison run is one side of a release comparison; the outcome is in release_check.
         cursor = await db.execute("SELECT execution_id,subject_side FROM agent_eval_comparison_run WHERE run_id=?", (run["id"],))
         link = await cursor.fetchone()
@@ -270,9 +313,14 @@ class AgentCoachEvidence:
                 )
             },
             "status": run["status"],
-            "recorded_evidence": dict(evidence) if evidence else None,
+            "recorded_evidence": evidence,
+            "current_suite": current_suite,
             "applicability": "recorded_current"
-            if evidence and evidence["current_run_id"] == run["id"] and evidence["state"] == "valid"
+            if evidence
+            and evidence["current_run_id"] == run["id"]
+            and evidence["state"] == "valid"
+            and current_suite["state"] == "active"
+            and current_suite["case_set_match"] is True
             else "historical_or_incomplete",
             "cost": totals,
             "items": items,

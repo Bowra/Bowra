@@ -158,3 +158,29 @@ async def test_physical_admission_is_required_before_tickets_even_without_a_term
         )
     assert tickets == []
     assert "PRIVATE_SOURCE_DETAILS" not in "".join(traceback.format_exception(error.value))
+
+
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+async def test_owned_capacity_recovery_targets_only_the_selected_fallback(mode):
+    guard = Guard()
+    router, request, primary, fallback = setup(guard, ["primary must not be restarted"])
+    if mode == "invoke":
+        result = (await router.invoke("analyst", request, target=("fallback", "small"))).content
+    else:
+        result = "".join([chunk.delta async for chunk in router.stream("analyst", request, target=("fallback", "small"))])
+    assert result == "fallback"
+    assert primary.calls == []
+    assert len(fallback.calls) == 1
+    assert guard.calls[0][1] == {"provider": "fallback", "model": "small", "context_window": 1000}
+
+
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+async def test_owned_target_cannot_bypass_the_admitted_route(mode):
+    guard = Guard()
+    router, request, primary, fallback = setup(guard, ["primary"])
+    with pytest.raises(LLMInputAdmissionError, match="target_not_configured"):
+        if mode == "invoke":
+            await router.invoke("analyst", request, target=("fallback", "unconfigured"))
+        else:
+            _ = [chunk async for chunk in router.stream("analyst", request, target=("fallback", "unconfigured"))]
+    assert primary.calls == fallback.calls == guard.calls == []

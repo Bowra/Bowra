@@ -310,7 +310,6 @@ describe("CreateSubagentCard edit mode", () => {
     await screen.findByText(toolDisplay("bi_query").label);
     fireEvent.click(screen.getByText(/下一步 · 配置/));
     expect(screen.getByRole("combobox", { name: "模型" })).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "最多工作轮次" }) as HTMLInputElement).value).toBe("12");
   });
 
   it("prefills the name and display name the user stated in chat", () => {
@@ -432,7 +431,6 @@ describe("CreateSubagentCard edit mode", () => {
       description: "分析销售数据",
       system_prompt: "你是销售分析师",
       tool_refs: ["bi_query"],
-      max_iterations: 12,
       output_schema: null,
     });
     // PATCH must NOT carry name or visibility (immutable / not patchable)
@@ -1418,7 +1416,6 @@ it("recovers consumed creation metadata from the authorized Agent reader after r
     onReceiptLabel={receiptLabel} onCreated={created} onClose={vi.fn()} />);
   await screen.findByRole("heading", { name: /Dogfood UI 1004/ });
   expect(screen.getByText("1 个工具")).toBeTruthy();
-  expect(screen.getByText("最多 6 轮")).toBeTruthy();
   expect(screen.queryByText("0 个工具")).toBeNull();
   expect(getSubagentManagerMock).toHaveBeenCalledWith("osa_actual", consumed.requestContext);
   expect(receiptLabel).toHaveBeenCalledWith("Dogfood UI 1004");
@@ -1488,7 +1485,6 @@ it("retries unreadable created configuration without repeating creation or inven
   fireEvent.click(retry);
   await waitFor(() => expect(screen.getByTestId("agent-creation-receipt").textContent).toContain("Saved Analyst"));
   expect(await screen.findByText("3 个工具")).toBeTruthy();
-  expect(screen.getByText("6 轮")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "重新读取配置" })).toBeNull();
   expect(getSubagentManagerMock).toHaveBeenLastCalledWith("osa_saved", consumed.requestContext);
   expect(receiptLabel).toHaveBeenLastCalledWith("Saved Analyst");

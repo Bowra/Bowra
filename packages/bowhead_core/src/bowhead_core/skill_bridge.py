@@ -333,6 +333,23 @@ def register_skill_tools(
 
         return read
 
+    def record_presentation(tool_name, handler):
+        async def invoke(args, ctx):
+            from bowhead_core.artifact_presentation import normalize_producer_declaration
+
+            result = await handler(args, ctx)
+            try:
+                return await normalize_producer_declaration(tool_name, args, result, ctx)
+            except Exception:
+                # Generation has finished. Preserve its files and outcome;
+                # uncertainty in presentation must never invite regeneration.
+                logger.warning("artifact_presentation.producer_verification_failed tool=%s", tool_name, exc_info=True)
+                if isinstance(result, dict):
+                    return {**result, "artifact_presentation_error": "artifact_presentation_verification_unavailable"}
+                return result
+
+        return invoke
+
     registered: list[str] = []
     for d in defs:
         handler = d.handler
@@ -354,6 +371,7 @@ def register_skill_tools(
             # wrapper metadata and never changes arguments or returned values.
             handler = _wrap_sandbox_stdout_marking(handler)
             handler = _wrap_sandbox_inputs_normalization(d.name, handler)
+            handler = record_presentation(d.name, handler)
         if d.name in {"skill_read", "skill_list", FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL}:
             handler = record_material(d.name, handler)
         registry.register(

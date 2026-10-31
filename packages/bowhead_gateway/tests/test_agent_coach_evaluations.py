@@ -15,6 +15,73 @@ from test_agents_routes import app_client as app_client
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("with_history", [False, True], ids=["no_history", "recorded_history"])
+async def test_case_reads_report_call_effects_without_claiming_history_absence(app_client, monkeypatch, with_history):
+    from bowhead_core.agent_eval_product import AgentEvalProductStore
+
+    client, db_path = app_client
+    adapter = await setup(client, db_path, monkeypatch)
+    created = await client.post("/api/v1/agents/osa_1/eval-suites", json={"name": "Quality", "cases": [{**case_spec(), "task": "Explain the total"}]})
+    assert created.status_code == 200
+    target = (await adapter.suites(agent_id="osa_1", offset=0, limit=10))["items"][0]["target"]
+    if with_history:
+        store = AgentEvalStore(str(db_path))
+        subject = await AgentEvalProductStore(str(db_path)).resolve_team_subject(
+            team_id="team_1", agent_id="osa_1", model_config_hash="sha256:" + "1" * 64
+        )
+        run = await store.create_run(
+            subject=subject.subject,
+            suite_revision_id=target["revision_id"],
+            trigger_kind="manual",
+            idempotency_key="recorded-history",
+            actor_user_id="user_1",
+        )
+        await store.mark_run_running(run.run_id)
+        revision = await store.read_suite_revision(target["revision_id"])
+        await store.record_case_result(
+            run_id=run.run_id,
+            case_revision_id=revision.cases[0].case_revision_id,
+            attempt=1,
+            status="passed",
+            deterministic={"passed": True, "scorers": []},
+            cost_microusd=0,
+        )
+        await store.mark_run_terminal(run.run_id, status="passed", summary={"case_count": 1})
+    listed = await adapter.suites(agent_id="osa_1", offset=0, limit=10)
+    content = await adapter.suite(target=target, offset=0, limit=10)
+    proposed = await adapter.propose(
+        target=target,
+        cases=[{"id": "one", "task": "Check an empty answer", "failure_mode": "Fabricated total", "case_spec": case_spec()}],
+        rationale="Cover missing data",
+        request_id="case-effect",
+        turn_id="turn_owner",
+    )
+    recovered = await adapter.get(agent_id="osa_1", proposal_id=proposed["proposal"]["id"])
+    for result in (listed, content, proposed, recovered):
+        assert result.get("executed_by_this_call") is False
+        assert "evaluation" not in result
+    pointer = {"kind": "eval_cases", "agent_id": "osa_1", "proposal_id": proposed["proposal"]["id"]}
+    receipt = await adapter.resources.operations.get(pointer)
+    assert receipt["view_action"] == {"tool": "agent_operation_open", "arguments": {"reference": pointer}}
+    assert receipt["effects_applied_by_this_read"] is False
+    if with_history:
+        evidence = await adapter.call(
+            "agent_eval_evidence_get",
+            {
+                "target": {"kind": "agent_eval_overview", "agent_id": "osa_1"},
+                "offset": 0,
+                "limit": 10,
+                "fingerprint": None,
+                "include_failure_excerpts": False,
+            },
+            turn_id="turn_owner",
+        )
+        assert evidence["items"][0]["id"] == run.run_id and evidence["items"][0]["status"] == "passed"
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT count(*) FROM agent_eval_run").fetchone()[0] == int(with_history)
+        assert db.execute("SELECT count(*) FROM team_subagent_working_copy").fetchone()[0] == 0
+
+
 def case_spec():
     return {
         "case_key": "quality.empty",
@@ -59,7 +126,7 @@ async def test_case_proposal_roundtrip_preserves_owner_edits_and_original_scope(
     target = listed["items"][0]["target"]
     read = await adapter.suite(target=target, offset=0, limit=1)
     assert read["case_count"] == 1 and read["next_offset"] is None
-    assert read["content_role"] == "untrusted_evaluation_data" and read["evaluation"] == "not_run"
+    assert read["content_role"] == "untrusted_evaluation_data" and read["executed_by_this_call"] is False
     cases = [{"id": "empty", "task": "Explain an empty result", "failure_mode": "Invented data", "case_spec": case_spec()}]
     intent = {"target": target, "cases": cases, "rationale": "Cover absent results", "request_id": "case-only", "turn_id": "turn_owner"}
     result = await adapter.propose(**intent)

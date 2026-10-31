@@ -255,8 +255,8 @@ def test_replacing_package_after_capture_does_not_change_schema_or_text(tmp_path
     ref = _ref(root)
     capture = material._capture
 
-    def changed(path):
-        result = capture(path)
+    def changed(path, **kwargs):
+        result = capture(path, **kwargs)
         (root / "SKILL.md").write_text("---\nname: dupont\nread_only_entry: BAD_REPLACEMENT\n---\nNEW_BODY")
         (root / "references/method.md").write_text("NEW_TEXT")
         return result

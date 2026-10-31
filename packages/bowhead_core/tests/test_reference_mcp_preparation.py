@@ -69,13 +69,13 @@ class _McpResultClient:
         return SimpleNamespace(is_error=False, structured_content={"ok": True, "data": {"margin": 42}}, content=[])
 
 
-async def _enable_mcp_agent(case, *, sequence: int = 2):
+async def _enable_mcp_agent(case, *, sequence: int = 2, document_tool: bool = False):
     stable_ref = "teammcp.ots_finance.getMargin"
     revision_id, release_id = await _insert_release(
         case.fixture,
         sequence=sequence,
         prompt="MCP reader",
-        definition_overrides={"tool_refs": [stable_ref]},
+        definition_overrides={"tool_refs": [stable_ref, *(["template_document_submit"] if document_tool else [])]},
     )
     _insert_source(
         case.fixture.db_path,
@@ -155,8 +155,8 @@ async def _enable_mcp_agent(case, *, sequence: int = 2):
     return case, scope, agent, index, source, read, write, AccessControlStore(case.fixture.db_path)
 
 
-async def _case(tmp_path):
-    return await _enable_mcp_agent(await _team_admission_case(tmp_path))
+async def _case(tmp_path, *, document_tool: bool = False):
+    return await _enable_mcp_agent(await _team_admission_case(tmp_path), document_tool=document_tool)
 
 
 async def _prompt_case(tmp_path, *, prompt_count: int = 1):
@@ -999,8 +999,8 @@ async def test_prompt_composition_rejects_changed_primary_base_atomically(tmp_pa
         assert db.execute("SELECT COUNT(*) FROM chat_reference_resolutions WHERE turn_id=?", (turn_id,)).fetchone() == (0,)
 
 
-async def _claimed_runtime(tmp_path, *, turn_id: str, fail_remote: bool = False, fixed_year: int = 2025):
-    case, scope, agent, index, source_metadata, read, write, access = await _case(tmp_path)
+async def _claimed_runtime(tmp_path, *, turn_id: str, fail_remote: bool = False, fixed_year: int = 2025, document_tool: bool = False):
+    case, scope, agent, index, source_metadata, read, write, access = await _case(tmp_path, document_tool=document_tool)
     document = _document(
         agent,
         (source_metadata.resource, "Finance source", {}),

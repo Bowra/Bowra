@@ -85,6 +85,8 @@ describe("promoteFileToKb", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       artifact_id: "art_1",
       scope: "space",
+      knowledge_intent: "add_to_knowledge",
+      action_id: expect.any(String),
     });
   });
 

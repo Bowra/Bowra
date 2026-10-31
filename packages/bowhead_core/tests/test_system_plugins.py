@@ -133,18 +133,21 @@ def test_valid_registry_loads(tmp_path):
 
 def test_general_plugins_cover_selectable_visible_tools():
     from bowhead_core.agents._generated.tool_kinds import USER_VISIBLE_TOOLS
+    from bowhead_core.system_plugins import latest_builtin_plugin
 
-    general = [plugin for plugin in builtin_plugins() if plugin.family == "general"]
+    general = [latest_builtin_plugin(name) for name in dict.fromkeys(plugin.name for plugin in builtin_plugins() if plugin.family == "general")]
     assert [plugin.name for plugin in general] == [
         "data-analysis",
         "reports-canvas",
         "designs",
         "knowledge-base",
+        "knowledge-management",
         "web-research",
         "code-computation",
         "image-generation",
         "google-delivery",
         "email",
+        "document-authoring",
     ]
     tools = [tool for plugin in general for tool in plugin.tools]
     assert len(tools) == len(set(tools))
@@ -158,6 +161,13 @@ def test_general_plugins_cover_selectable_visible_tools():
     assert all(plugin.selectable for plugin in general)
     assert all(item.use_when and item.example for plugin in general for item in (plugin.listing or {}).values())
     assert not any(plugin.selectable for plugin in builtin_plugins() if plugin.family == "settings")
+
+
+def test_reports_canvas_adds_native_file_presentation_in_a_new_retained_version():
+    original = builtin_plugin("builtin:reports-canvas@1")
+    current = builtin_plugin("builtin:reports-canvas@2")
+    assert "present_artifacts" not in original.tools
+    assert current.tools == (*original.tools[:2], "present_artifacts", *original.tools[2:])
 
 
 def test_general_plugin_prompt_modules_exist():

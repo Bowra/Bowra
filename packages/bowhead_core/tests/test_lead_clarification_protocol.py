@@ -16,7 +16,7 @@ from test_reference_http_start import enable_lead_writer, rows, settled
 from test_reference_http_start import http_start as http_start
 from test_reference_http_start import receiver_case as receiver_case
 from test_reference_http_start import start_case as start_case
-from test_stray_clarification_ask import ARGUMENT_TEXT, MALFORMED_CALL, SELF_CLOSING_CALL, TRUNCATED_CALL
+from test_stray_clarification_ask import ARGUMENT_TEXT, BARE_QUESTIONS, MALFORMED_CALL, SELF_CLOSING_CALL, TRUNCATED_CALL
 
 pytestmark = [
     pytest.mark.integration,
@@ -97,12 +97,19 @@ async def test_user_example_and_runtime_guidance_keep_separate_roles(http_start,
 
 
 @pytest.mark.parametrize(
-    "text", [ARGUMENT_TEXT, MALFORMED_CALL, SELF_CLOSING_CALL, TRUNCATED_CALL], ids=["arguments", "xml", "self-closing", "truncated"]
+    "text",
+    [ARGUMENT_TEXT, MALFORMED_CALL, SELF_CLOSING_CALL, TRUNCATED_CALL, BARE_QUESTIONS, "<tool_call><name>kb_add_file</name></tool_call>"],
+    ids=["arguments", "xml", "self-closing", "truncated", "bare-questions", "native-tool-xml"],
 )
 @pytest.mark.parametrize("limit,read_first", [(4, False), (1, False), (4, True)], ids=["budget", "iteration-limit", "after-read"])
 async def test_invalid_clarification_fails_without_a_card_or_replaying_work(
-    http_start: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, text: str, limit: int, read_first: bool
+    http_start: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, text: str, limit: int, read_first: bool, request
 ) -> None:
+    from bowhead_core.agent_run_limits import get_runtime_controls
+
+    monkeypatch.setenv("BOWHEAD_AGENT_MAX_STEPS", str(limit))
+    get_runtime_controls.cache_clear()
+    request.addfinalizer(get_runtime_controls.cache_clear)
     case = http_start
     enable_lead_writer(case, monkeypatch)
     registry = case.app.state.orchestrator.tool_registry
@@ -116,7 +123,7 @@ async def test_invalid_clarification_fails_without_a_card_or_replaying_work(
     registry.register(
         ToolSpec(schema=ToolSchema(name="kb_search", description="Read synthetic evidence", input_schema={"type": "object"}), handler=read)
     )
-    monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("clarification_ask", "kb_search"), max_iterations=limit))
+    monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("clarification_ask", "kb_search")))
     calls = []
 
     def respond(request: httpx2.Request) -> httpx2.Response:
@@ -148,7 +155,7 @@ async def test_invalid_clarification_fails_without_a_card_or_replaying_work(
         await settled(turn_id)
     turn = await case.fixture.case.store.get_turn(turn_id)
     assert turn.status == "failed"
-    assert len(calls) == (2 if limit == 1 else 4 if read_first else 3)
+    assert len(calls) == (1 if limit == 1 else 4 if read_first else 3)
     assert reads == ([turn_id] if read_first else [])
     assert not [row for row in rows(case, "clarification_requests") if row["turn_id"] == turn_id]
     assert not any(marker in (turn.final_answer or "") for marker in ("questions=", "clarification_ask", "fallback_text="))
@@ -156,5 +163,6 @@ async def test_invalid_clarification_fails_without_a_card_or_replaying_work(
     done = [json.loads(row["payload_json"]) for row in events if row["event_type"] == "done"]
     assert len(done) == 1 and done[0]["status"] == "error"
     assert done[0]["narrative_superseded"] is True
-    assert done[0]["reason_code"] == turn.error == "lead_internal_error"
+    reason = "agent_step_limit" if limit == 1 else "lead_internal_error"
+    assert done[0]["reason_code"] == turn.error == reason
     assert not any(row["event_type"] == "clarification_required" for row in events)

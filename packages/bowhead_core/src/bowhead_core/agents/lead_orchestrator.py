@@ -39,7 +39,6 @@ from bowhead_core.agent_run_limits import (
     set_tool_call_budget,
 )
 from bowhead_core.analysis_payload import is_short_answer_payload
-from bowhead_core.env_utils import env_float
 from bowhead_core.events import TerminalDurabilityAbort, raise_if_terminal_bus_failed
 from bowhead_core.language_context import RESUME_LANGUAGE_KEY, add_resume_time_zone, language_context_snapshot
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
@@ -64,6 +63,7 @@ from ._lead_context import (
     set_turn_deadline,
 )
 from .clarification_tool import (
+    collect_clarification_sentinels,
     extract_clarification_event_payload,
     is_clarification_sentinel,
     normalize_clarification_questions,
@@ -95,6 +95,9 @@ _IN_FLIGHT_TURNS: dict[str, asyncio.Task] = {}
 # are collapsed to an already-localized public reason.
 _PUBLIC_TURN_FAILURE_CODES = frozenset(
     {
+        "agent_step_limit",
+        "agent_tool_call_limit",
+        "agent_stalled",
         "wallclock_exceeded",
         "hop_cap_exceeded",
         "peer_depth_exceeded",
@@ -124,6 +127,10 @@ _PUBLIC_TURN_FAILURE_CODES = frozenset(
     }
 )
 _LEGACY_RESULT_ERROR_PREFIX_TO_PUBLIC_CODE = {
+    "run_limit_step_limit": "agent_step_limit",
+    "run_limit_tool_call_limit": "agent_tool_call_limit",
+    "run_limit_time_limit": "wallclock_exceeded",
+    "run_limit_agent_stalled": "agent_stalled",
     "peer_no_commit_force_bail": "peer_dispatch_network_error",
     "peer_no_progress": "peer_dispatch_network_error",
     "peer_total_failures": "peer_dispatch_network_error",
@@ -220,7 +227,7 @@ _DATA_ART_STRIP_RE = re.compile(r"\[data:art_[a-fA-F0-9_-]+\]")  # legacy strip-
 # "(artifact art_b2b09aeb963a)". Strip those too — never user-meaningful.
 # Allow optional "artifact " prefix + optional surrounding parens / brackets.
 _BARE_ART_RE = re.compile(
-    r"\s*[\(（\[【]?\s*(?:artifact\s+)?art_[a-fA-F0-9]{8,}\s*[\)）\]】]?",
+    r"\s*[\(（\[【]?\s*(?:artifact(?:_id)?\s*[=:：]\s*|artifact\s+)?art_[a-fA-F0-9]{8,}\s*[\)）\]】]?",
     re.IGNORECASE,
 )
 # prod-bug-bash-039 #6 (0.39.2 citation reform): [cite:N] is the NEW LLM-facing
@@ -1806,18 +1813,10 @@ async def run_turn(
     # _drain_payloads_and_compose() (specified tech-design r3 §3.1)—deferred to
     # omicron+1 canonical-pipeline refactor sprint.
 
-    # ξ A5b r2 (post-prod prod trace t_cdff89be43ca): hard wallclock timeout on
-    # _lead_loop. Production verified: subagent.py emits error on LLM TimeoutError, but
-    # _lead_loop sd.finalize() or substep may hang → run_turn.try never returns,
-    # finally never reached, fallback done emission fails. asyncio.wait_for hard cap protects.
-    # ω-E (0.12.1): 30-minute hard cap (was 900s). Unified env_utils: inline float() formerly
-    # raised ValueError during turn on invalid env values; now falls back to default.
-    _ξ_lead_loop_timeout = env_float("BOWHEAD_LEAD_LOOP_HARD_TIMEOUT_SEC", 1800.0)
-    # Agent run limits (FEATURE_AGENT_RUN_LIMITS): the Team's turn time limit replaces the
-    # environment value; the snapshot is shared with every subagent through a ContextVar.
-    _run_limits = getattr(runtime.parent_ctx, "agent_run_limits", None)
-    if _run_limits is not None:
-        _ξ_lead_loop_timeout = float(_run_limits.turn_time_limit_s)
+    from bowhead_core.agent_run_limits import DEFAULT_LIMITS
+
+    _run_limits = getattr(runtime.parent_ctx, "agent_run_limits", None) or DEFAULT_LIMITS
+    _ξ_lead_loop_timeout = float(_run_limits.turn_time_limit_s)
     _durable_fail_stop = False
     try:
         ordinary_state = getattr(runtime.parent_ctx, "ordinary_lead_state", None)
@@ -1831,7 +1830,7 @@ async def run_turn(
         runtime.parent_ctx._ordinary_lead_deadline = _turn_deadline
         _deadline_token = set_turn_deadline(_turn_deadline)
         _run_limits_token = set_run_limits(_run_limits)
-        _tool_budget_token = set_tool_call_budget(TurnToolCallBudget(_run_limits.tool_call_limit) if _run_limits is not None else None)
+        _tool_budget_token = set_tool_call_budget(TurnToolCallBudget(_run_limits.tool_call_limit))
         try:
             from bowhead_core.execution_limits import execution_limits_scope
 
@@ -2423,9 +2422,8 @@ async def _gather_lead_peers(
         effective_display_name,
         effective_primary_capability,
     )
-    from bowhead_core.subagent import RETIRED_SUBAGENT_NAMES
+    from bowhead_core.subagent import PROFILES, RETIRED_SUBAGENT_NAMES
 
-    from .bi_capability import profile_can_fetch_bi
     from .prompts.peer_block import PeerEntry
 
     peers: list[Any] = []
@@ -2460,15 +2458,13 @@ async def _gather_lead_peers(
             tool_names = tuple(
                 getattr(getattr(m, "tools", None), "allow", ()) or (),
             )
-            capabilities = agent_capabilities(tool_names)
             if not tool_names:
                 # Lightweight test/legacy registry adapters may expose only a
                 # description. Derive from the executable profile rather than
                 # introducing a prompt-side name map.
-                from .bi_capability import profile_can_fetch_bi
-
-                if profile_can_fetch_bi(name):
-                    capabilities = capabilities | {"cap_data_query"}
+                tool_names = tuple(getattr(PROFILES.get(name), "tool_whitelist", ()) or ())
+            available_tool_names = frozenset(tool_names) - unconfigured_capability_tools
+            capabilities = agent_capabilities(available_tool_names)
             primary_capability = effective_primary_capability(
                 getattr(m, "primary_capability", None),
                 _ov,
@@ -2487,7 +2483,7 @@ async def _gather_lead_peers(
                     description=_desc,
                     source="system",
                     can_fetch_bi="cap_data_query" in capabilities,
-                    tool_names=frozenset(tool_names) - unconfigured_capability_tools,
+                    tool_names=available_tool_names,
                     unavailable_tools=frozenset(tool_names) & unconfigured_capability_tools,
                     primary_capability=primary_capability or "",
                     agent_id=f"system:{name}",
@@ -2537,7 +2533,8 @@ async def _gather_lead_peers(
             seen.add(nm)
             # _refs = native tools and vetted Power BI connection tool names (other teammcp.* filtered).
             # Its comment says roster display/routing only—selecting data-fetch peer is routing, compliant use.
-            capabilities = agent_capabilities(_refs)
+            available_tool_names = frozenset(_refs or ()) - unconfigured_capability_tools
+            capabilities = agent_capabilities(available_tool_names)
             agent_id, display_name = team_agent_metadata.get(nm, ("", ""))
             peers.append(
                 PeerEntry(
@@ -2545,7 +2542,7 @@ async def _gather_lead_peers(
                     description=desc,
                     source="team",
                     can_fetch_bi="cap_data_query" in capabilities,
-                    tool_names=frozenset(_refs or ()) - unconfigured_capability_tools,
+                    tool_names=available_tool_names,
                     agent_id=agent_id,
                     display_name=display_name,
                 )
@@ -2566,16 +2563,14 @@ async def _gather_lead_peers(
                     logger.info("peer_block.dedup_drop name=%s tier=user shadows_higher", nm)
                 continue
             seen.add(nm)
+            available_tool_names = frozenset(getattr(c, "allowed_tools", ()) or ()) - unconfigured_capability_tools
             peers.append(
                 PeerEntry(
                     name=nm,
                     description=getattr(c, "description", "") or "",
                     source="user",
-                    can_fetch_bi="cap_data_query" in agent_capabilities(getattr(c, "allowed_tools", ()) or ()),
-                    tool_names=frozenset(
-                        getattr(c, "allowed_tools", ()) or (),
-                    )
-                    - unconfigured_capability_tools,
+                    can_fetch_bi="cap_data_query" in agent_capabilities(available_tool_names),
+                    tool_names=available_tool_names,
                     agent_id=str(getattr(c, "id", "") or ""),
                     display_name=str(getattr(c, "display_name", "") or ""),
                 )
@@ -2874,34 +2869,6 @@ def _plan_fallback_report_payload(final_steps: list[Any]) -> dict[str, Any] | No
     }
 
 
-async def _midrun_binding_lookup(
-    umem: Any,
-    *,
-    user_id: str,
-    session_id: str,
-    accessible: tuple,
-) -> tuple[str, str] | None:
-    """批2 D3 拾取判据: binding store 直读 + in-set 校验(batch2-hitl-design §1-D3).
-
-    bi_availability() 是 turn 构造期快照的纯函数, mid-turn 永不翻转(review P0-3)——
-    必须直读 user_memory:先 explicit 永久默认, 缺则读 session 覆盖层(「不记住」,
-    只认同 session)。选了不可及 ws 不算(in-set 对照 ctx 快照)。
-    返回 (workspace_id, name) 或 None。纯查询, 不回填 ctx(caller 责任)。
-    """
-    if umem is None:
-        return None
-    val = await umem.get_tool_context(user_id, "datarc")
-    if not val:
-        sv = await umem.get_tool_context(user_id, "datarc", session_scoped=True)
-        if sv and str(sv.get("session_id") or "") == (session_id or ""):
-            val = sv
-    cid = str((val or {}).get("id") or "")
-    ids = {str((w.get("id") if isinstance(w, dict) else getattr(w, "id", "")) or "") for w in accessible}
-    if not cid or cid not in ids:
-        return None
-    return (cid, str((val or {}).get("name") or ""))
-
-
 async def _put_datarc_picker_card(
     *,
     bus: Any,
@@ -2911,6 +2878,7 @@ async def _put_datarc_picker_card(
     prompt_prefix: str,
     resume_context: dict[str, Any],
     log_tag: str,
+    parent_ctx: Any = None,
 ) -> str:
     """建 datarc 工作区 picker 卡(put + resume_context + clarification_required emit).
 
@@ -2919,6 +2887,13 @@ async def _put_datarc_picker_card(
     返回 clar_id;store 不可用/无选项/写失败 → ""(caller 出兜底文案, 不发无主卡:
     FE 契约=clarification_required 需要 clarification_id 才建卡)。
     """
+
+    from bowhead_core.datarc_selection import current_datarc_selection
+
+    if parent_ctx is not None:
+        source = current_datarc_selection(parent_ctx)
+        if source.binding is not None:
+            resume_context = {**resume_context, "datarc_selection": source.snapshot(team_id=parent_ctx.team_id or "").model_dump(mode="json")}
 
     def _wid(w: Any) -> str:
         return str((w.get("id") if isinstance(w, dict) else getattr(w, "id", "")) or "")
@@ -2944,9 +2919,9 @@ async def _put_datarc_picker_card(
             multi_select=False,
             session_id=getattr(sctx, "session_id", None) or None,
             tool="datarc",
+            resume_context=resume_context,
         )
         clar_id = _req.request_id
-        await clarification_store.set_resume_context(clar_id, resume_context)
     except Exception:
         logger.exception("datarc_picker.clar_store_failed %s turn=%s", log_tag, sctx.turn_id)
         return ""
@@ -3120,6 +3095,7 @@ async def _plan_context_preflight(
         prompt_prefix="你在北极九章有",
         resume_context={"plan_reapprove_plan_id": plan_id, "session_id": getattr(sctx, "session_id", None) or ""},
         log_tag=f"plan_preflight plan={plan_id}",
+        parent_ctx=ctx,
     )
     if _clar_id:
         _text = f"执行前需要先选择北极九章工作区({len(_bi)} 步依赖 BI 数据)——请在上方选择,选择后计划会自动继续。"
@@ -3441,7 +3417,6 @@ async def _run_plan_execution_turn(
     if _midrun_on:
         _mr_clar_store = getattr(runtime.parent_ctx, "clarification_store", None)
         _mr_accessible = tuple(getattr(runtime.parent_ctx, "accessible_datarc_workspaces", ()) or ())
-        _mr_umem = getattr(runtime.parent_ctx, "user_memory_store", None)
         # Boundary (batch2 review P2-9): FE runner clarificationPending is single-slot—
         # per-(tool,scope) aggregation ensures at most one card per turn; second (tool,scope) producer
         # must wait until FE supports multiple slots.
@@ -3463,6 +3438,7 @@ async def _run_plan_execution_turn(
                     prompt_prefix="计划执行中发现需要选择:你在北极九章有",
                     resume_context={"plan_midrun_plan_id": plan_id, "session_id": getattr(sctx, "session_id", None) or ""},
                     log_tag=f"plan_midrun plan={plan_id}",
+                    parent_ctx=runtime.parent_ctx,
                 )
                 # Implementation review P1-2: register aggregation gate only **after successful card creation**—polluting
                 # _mr_asked on failed put blocks later cards and falsely claims choice received at convergence.
@@ -3472,29 +3448,23 @@ async def _run_plan_execution_turn(
                 logger.warning("plan_midrun.card_failed plan=%s err=%s", plan_id, _me)
 
         async def _mr_revive(candidates: list) -> list:
-            """拾取三件套(review P0-3): binding store 直读 + in-set 校验 + 回填 ctx。
-
-            bi_availability() 是 turn 构造期快照的纯函数, mid-turn 永不翻转——必须
-            直读 user_memory;且必须回填 parent_ctx.active_datarc_project, 否则重派
-            步带 stale ctx 再撞 sentinel = 烧 token 死循环。exception-proof。
-            """
+            """Reauthorize the shared saved selection and publish its coherent identity."""
             try:
                 if not _mr_accessible:
                     return []
-                hit = await _midrun_binding_lookup(
-                    _mr_umem,
-                    user_id=sctx.user_id,
-                    session_id=getattr(sctx, "session_id", None) or "",
-                    accessible=_mr_accessible,
-                )
+                service = getattr(runtime.parent_ctx, "datarc_context_switcher", None)
+                hit = await service.resolve_saved_selection() if service is not None else None
                 if hit is None:
                     return []
                 cid, _nm = hit
-                # Backfill ctx—redispatched step needs project (review P0-3, third part);
-                # ToolExecutionContext not frozen; dispatch replace copy carries new value.
-                runtime.parent_ctx.active_datarc_project = cid
-                if _nm:
-                    runtime.parent_ctx.active_datarc_workspace_name = _nm
+                from bowhead_core.datarc_selection import ensure_datarc_run, project_datarc_scope
+
+                owner = ensure_datarc_run(runtime.parent_ctx)
+                async with owner.lock:
+                    prepared = await runtime.parent_ctx.datarc_context_switcher.prepare_selection(cid, _nm, current=owner.current.selection)
+                    scope = owner.publish(prepared)
+                    project_datarc_scope(runtime.parent_ctx, scope)
+                    runtime.parent_ctx.datarc_execution_scope = None
                 logger.info("plan_midrun.revive plan=%s ws=%s steps=%d", plan_id, cid, len(candidates))
                 return [c.id for c in candidates]
             except Exception as _re:
@@ -3507,11 +3477,9 @@ async def _run_plan_execution_turn(
     budget = int(_os.environ.get("BOWHEAD_PLANNING_TOKEN_BUDGET", "40000"))
     # Plan wallclock cap below loop hard timeout → driver self-stops FAILED at level boundary,
     # instead of run_turn wait_for cancelling and orphaning RUNNING plan card (CTO P2-6).
-    _loop_cap = int(_os.environ.get("BOWHEAD_LEAD_LOOP_HARD_TIMEOUT_SEC", "1800") or 1800)
-    from bowhead_core.agent_run_limits import get_run_limits as _get_run_limits
+    from bowhead_core.agent_run_limits import DEFAULT_LIMITS, get_run_limits
 
-    if (_plan_limits := _get_run_limits()) is not None:
-        _loop_cap = _plan_limits.turn_time_limit_s
+    _loop_cap = (get_run_limits() or DEFAULT_LIMITS).turn_time_limit_s
 
     async def _on_step_composed_hook(_step: Any, _all_steps: list[Any]) -> tuple[str, ...]:
         """plan-report-assembly 批 1-c: 步写回前做一次**槽位序**装订。
@@ -5476,14 +5444,17 @@ async def _compose_turn_output_unchecked(
 
 def _clarification_resume_context(sctx: SerializableTurnContext, user_text: str, parent_ctx: Any) -> dict[str, Any]:
     """Identity and original request for the existing clarification resume route."""
+    from bowhead_core.datarc_selection import current_datarc_selection
+
+    selection = current_datarc_selection(parent_ctx)
     context = {
         "user_text": user_text,
         "parent_turn_id": sctx.turn_id,
         "session_id": getattr(sctx, "session_id", None),
         "snapshot_at": utc_now_iso(),
-        "member_uid": getattr(parent_ctx, "member_uid", "") or "",
+        "member_uid": selection.member_uid,
         "workspace_id": getattr(parent_ctx, "workspace_id", "") or "",
-        "active_datarc_project": getattr(parent_ctx, "active_datarc_project", None),
+        "active_datarc_project": selection.datarc_workspace_id,
         "user_id": getattr(parent_ctx, "user_id", "") or "",
         "team_id": getattr(parent_ctx, "team_id", None),
         "access_context": getattr(parent_ctx, "access_context", None),
@@ -5492,6 +5463,8 @@ def _clarification_resume_context(sctx: SerializableTurnContext, user_text: str,
         "preferred_provider": getattr(parent_ctx, "preferred_provider", None),
         "preferred_model": getattr(parent_ctx, "preferred_model", None),
     }
+    if selection.binding is not None or getattr(parent_ctx, "datarc_source_evidence", None) is not None:
+        context["datarc_selection"] = selection.snapshot(team_id=getattr(parent_ctx, "team_id", "") or "").model_dump(mode="json")
     language = language_context_snapshot(parent_ctx)
     if language is not None:
         context[RESUME_LANGUAGE_KEY] = language
@@ -5749,12 +5722,16 @@ async def _lead_loop(
     # runner hard gate always delegated. Read flag once per turn/shared snapshot discipline
     # (P3-3 / F-9) disappears—nothing switchable, no flip window between reads.
     _space_instructions_block = getattr(getattr(runtime.parent_ctx, "space_instructions", None), "block", "") or ""
+    from bowhead_core.kb_search_budget import admit_knowledge_reading
+
+    admit_knowledge_reading(runtime.parent_ctx, resuming=_is_resume)
     lead_prompt = build_lead_system_prompt(
         sctx.workspace_id,
         output_language=_effective_lang(bus=runtime.parent_bus, language_context=getattr(runtime.parent_ctx, "language_context", None)),
         project_id=getattr(sctx, "project_id", None),
         facts=facts,
         peers=lead_peers,
+        knowledge_direct_use=runtime.parent_ctx.knowledge_direct_use,
         # Built-in subagent management: remove disabled built-ins from named prompt paragraphs (review P1-3)
         team_tools=_team_tool_entries,
         custom_skills=_custom_skill_entries,
@@ -5789,6 +5766,16 @@ async def _lead_loop(
             "For existing owned Agents, Coach can inspect the exact working copy and save a version-bound proposal for Owner review. "
             "Delegate a single authoring goal to one Coach at a time. Do not dispatch overlapping write tasks in parallel. "
             "When a proposal or resource operation is already saved, pass its full original IDs to any follow-up and request only the unfinished action. "
+            "Preserve the user's output scope and stopping condition in the delegated task: a criterion-only question asks only for the saved criterion, "
+            "not the full question, scoring configuration, budgets, timestamps or revision IDs. Necessary identity resolution stays internal. "
+            "A question about whether existing evidence is sufficient does not request a complete historical audit or every scorer's distribution. "
+            "Request the minimum relevant saved identity and recorded evidence; require full-history totals only when the user actually asks for them. "
+            "Do not generalize sampled judgments to all history; an overview lists execution records, not detailed answer-quality coverage. "
+            "Preserve the user's requested action: an explicit request to open/show an original result needs Coach's agent_operation_open, "
+            "not an equivalent read, quoted content or instructions for opening it. Do not ask again when that read-only opening is already requested. "
+            "Status/content-only questions do not require opening; a genuinely unresolved original target still needs clarification. "
+            "Retain actual view_delivery in closeout: a returned view_action is not an invocation, and event_emitted is not proof of browser rendering. "
+            "Keep those delivery distinctions internally; use a brief ordinary-language acknowledgment without raw IDs, protocol values or routine permission disclaimers. "
             "A follow-up to read or open an editor must not repeat the completed creation, edit or case-proposal goal. "
             "Proposal creation does not apply changes. Resource creation and evaluations require separately supported domain actions.\n"
             "</agent_authoring_support>"
@@ -6094,11 +6081,35 @@ async def _lead_loop(
     except Exception as _fm_e:
         logger.warning("failed_attachments_hint_inject_failed turn=%s err=%s", sctx.turn_id, _fm_e)
 
+    # One scoped pointer pool, independent of generic history/digest switches.
+    if not _is_resume and getattr(getattr(runtime.parent_ctx, "ordinary_lead_state", None), "checkpoint", None) is None:
+        from bowhead_core.chat_reference_scope import ReferenceRequestScope
+        from bowhead_core.coach_operation_history import CoachOperationHistory, context_token_budget, render_history
+
+        _operation_store = getattr(runtime, "session_store", None)
+        _operation_reader = getattr(_operation_store, "load_coach_operation_history", None)
+        _operation_ctx = runtime.parent_ctx
+        if callable(_operation_reader) and all(getattr(_operation_ctx, key, "") for key in ("user_id", "team_id", "workspace_id", "session_id")):
+            _operation_scope = ReferenceRequestScope(
+                user_id=_operation_ctx.user_id,
+                team_id=_operation_ctx.team_id,
+                workspace_id=_operation_ctx.workspace_id,
+                session_id=_operation_ctx.session_id,
+            )
+            try:
+                _operation_ctx.coach_operation_history = await _operation_reader(_operation_scope, sctx.turn_id)
+            except Exception:  # noqa: BLE001 — optional historical metadata cannot block the current goal
+                logger.warning("coach.operation_history unavailable turn=%s", sctx.turn_id)
+                _operation_ctx.coach_operation_history = CoachOperationHistory(_operation_scope, sctx.turn_id, "unavailable")
+            _add_turn_block(
+                render_history(_operation_ctx, max_tokens=context_token_budget(runtime.router, "lead", _operation_ctx)), zero_evidence=False
+            )
+
     _lead_mark("prompt_blocks")
 
     # Context engineering batch3—turn history replaces digest **content** (BOWHEAD_CTX_TURN_HISTORY, default 1).
     # Full user request + final answer per turn, append-only before current task, prefix cached;
-    # completed nonempty: full pair; cancelled/aborted/failed: request+fixed marker (r7, 116 fifth turn); clarification_pending/running omitted.
+    # Completed: full pair; unfinished: original request plus status/data; running omitted.
     # Bounded: over cap drops oldest whole turns, hysteresis to 0.75; never truncate within-turn text.
     # 📏 docs/sprints/context-engineering-2026-09-04/tech-design.md batch3 (r3).
     _history_msgs = None
@@ -6108,7 +6119,21 @@ async def _lead_loop(
     from bowhead_core.context_history_flags import turn_history_enabled as _turn_history_enabled
 
     _hist_on = _turn_history_enabled()
-    if _hist_on:
+    from bowhead_core.context_history import context_history_available, load_conversation_context
+
+    _context_history = None
+    _context_lead_binding = None
+    if context_history_available(runtime.parent_ctx, runtime.router):
+        from bowhead_core.context_history import prepare_context_lead
+
+        _context_lead_binding = await prepare_context_lead(runtime.parent_ctx, runner=runtime.subagent_runner, bus=runtime.parent_bus, task=user_text)
+        if _context_lead_binding is not None:
+            _context_history = await load_conversation_context(runtime.parent_ctx)
+            runtime.parent_ctx._model_context_history = _context_history
+            _history_msgs = _context_history.messages
+            _history_incomplete = _context_history.incomplete_turns
+            _hist_on = True
+    if _hist_on and _context_history is None:
         try:
             _ss_hist = getattr(runtime, "session_store", None)
             _sid_hist = getattr(sctx, "session_id", None)
@@ -6142,6 +6167,23 @@ async def _lead_loop(
                     pass
                 # Review fix: fetch only latest 200 turns, not entire never-ending IM session into memory.
                 _turns_all = await _ss_hist.list_turns(session_id=_sid_hist, limit=200)
+                _clarifications_by_turn = {}
+                _clarification_reader = getattr(_ss_hist, "load_clarification_history", None)
+                if callable(_clarification_reader) and any(getattr(t, "status", None) == "clarification_pending" for t in _turns_all):
+                    from bowhead_core.chat_reference_scope import ReferenceRequestScope
+
+                    try:
+                        _clarifications_by_turn = await _clarification_reader(
+                            ReferenceRequestScope(
+                                user_id=runtime.parent_ctx.user_id,
+                                team_id=runtime.parent_ctx.team_id,
+                                workspace_id=runtime.parent_ctx.workspace_id,
+                                session_id=_sid_hist,
+                            ),
+                            sctx.turn_id,
+                        )
+                    except Exception:  # noqa: BLE001 — keep the original request and an unavailable-data marker
+                        logger.warning("lead.clarification_history_unavailable turn=%s", sctx.turn_id)
                 # r4: render dispatch/result back into history (subagent_spawn tool_calls + summary). 116 R6:
                 # request+answer alone teaches Lead direct answer, claiming recalculation without dispatch.
                 # Query latest 60 eligible turns (completed nonempty, or r7 incomplete; not current); unavailable →old two-message shape, nonblocking.
@@ -6188,6 +6230,7 @@ async def _lead_loop(
                     make_message=lambda role, content: _HMessage(role=role, content=content),
                     strip=_hist_strip,
                     spawns=_spawns_by_turn,
+                    clarifications=_clarifications_by_turn,
                     make_tool_calls_message=lambda calls: _HMessage(
                         role="assistant",
                         content="",
@@ -6798,8 +6841,9 @@ async def _lead_loop(
 
         if cause == "clarification_protocol_text":
             return (
-                "Your answer contains clarification tool syntax, but no native tool was invoked; prose alone does not pause the task. "
-                "Use the native tool-call interface with the advertised schema if a question is required. "
+                "Your answer contains native tool syntax as text; prose alone neither executes an operation nor pauses the task. "
+                "Use the native tool-call interface with the advertised schema for the intended authorized action. "
+                "If a question is required, use clarification_ask through that interface. "
                 "When the requested domain workflow owns the missing input, invoke that workflow instead. "
                 "Do not print tool calls or argument assignments. If the user requested a code explanation, explain it normally "
                 "and quote examples as Markdown code without executing them. Keep all existing permissions and clarification limits."
@@ -6807,7 +6851,7 @@ async def _lead_loop(
         return final_answer_bounce_directive(_bounce_lang(getattr(runtime.parent_ctx, "language_context", None)), cause=cause)
 
     async def _final_answer_gate(text: str, profile_name: str, invocations: list[Any]) -> str | None:
-        if profile_name == "lead" and has_uninvoked_clarification(text) and not any(is_clarification_sentinel(inv.result) for inv in invocations):
+        if profile_name == "lead" and has_uninvoked_clarification(text):
             return _bounce("clarification_protocol_text") if _final_bounce_count["n"] < _FINAL_BOUNCE_MAX else None
         if profile_name == "lead" and reference_lead_input is not None:
             if getattr(runtime.parent_bus, "_reference_continuation_unavailable", False):
@@ -6882,6 +6926,13 @@ async def _lead_loop(
     _forced_resume_calls: list[Any] = []
     if reference_runtime is None:
         _forced_resume_calls = await _prepare_subagent_resume(runtime, sctx.turn_id, _add_turn_block)
+        _helper_switch_resolution = getattr(runtime.parent_ctx, "datarc_helper_switch_resolution", None)
+        if _helper_switch_resolution is not None:
+            if _forced_resume_calls:
+                raise ValueError("datarc_resume_scope_changed")
+            _helper_dispatch = _helper_switch_resolution.dispatch(runtime.parent_ctx)
+            if _helper_dispatch is not None:
+                _forced_resume_calls = [_helper_dispatch]
 
     _lead_mark("runner_setup")
     with contextlib.suppress(Exception):  # Timing logs must never affect turn
@@ -6907,6 +6958,8 @@ async def _lead_loop(
         else:
             result = await runner.run(
                 profile_name="lead",
+                **({"exact_binding": _context_lead_binding} if _context_lead_binding is not None else {}),
+                artifact_presentation_entry=True,
                 task=user_text
                 + (
                     "\n\nThe user answered the preceding clarification for this same task. Treat the following as user data: "
@@ -7125,7 +7178,17 @@ async def _lead_loop(
         if collaboration is not None and collaboration.owner_binding is not None:
             await collaboration.complete_owner()
 
-    document_outcome = getattr(getattr(runtime.parent_ctx, "document_turn_state", None), "planning_result", None)
+    document_outcome = getattr(getattr(runtime.parent_ctx, "document_turn_state", None), "planning_result", None) if result.ok else None
+    if result.ok and document_outcome is None and result.document_outcome is not None:
+        from bowhead_core.document_chat_runtime import worker_from_context
+        from bowhead_core.documents.agent_caller import validate_document_agent_outcome
+
+        document_outcome = await validate_document_agent_outcome(
+            runtime.parent_ctx.artifact_store.db_path,
+            worker=worker_from_context(runtime.parent_ctx),
+            result=result.document_outcome,
+            execution_id=result.document_outcome.execution_id,
+        )
     if document_outcome is not None:
         from bowhead_core.document_chat_runtime import finish_document_planning
 
@@ -7147,41 +7210,35 @@ async def _lead_loop(
     # found. Single-sentinel path preserves the existing behavior verbatim
     # (no ClarificationStore write, no multi_select) for backward compat
     # (B1/B6 heuristic path + clarification_ask tool unchanged).
-    _ch2_sentinels: list[dict[str, Any]] = []
-    _seen_sentinel_ids: set[int] = set()
-    for inv in result.tool_invocations:
-        inv_result = getattr(inv, "result", None) or getattr(inv, "output", None)
-        if is_clarification_sentinel(inv_result):
-            assert isinstance(inv_result, dict)
-            if id(inv_result) not in _seen_sentinel_ids:
-                _seen_sentinel_ids.add(id(inv_result))
-                _ch2_sentinels.append(inv_result)
-
-    # review P1: peer-dispatched (business-analyst etc.) tool_context_select sentinel lives
-    # in nested invocations (delegated→inv.nested / nondelegated→
-    # ctx._last_nested_invocations, same compose L3993/fabrication L3278 gathering);
-    # top-level scan misses, silently disables peer picker, yielding wrong insufficient-data answer.
-    # Fetch only tool_context_select (new sprint flag-gated shape), preserve other sentinels'
-    # live behavior (OFF never produces this shape →zero change).
-    def _is_tool_context_select(_r: Any) -> bool:
-        return isinstance(_r, dict) and isinstance(_r.get("clarification"), dict) and _r["clarification"].get("kind") == "tool_context_select"
-
     _nested_pool: list[Any] = list(getattr(runtime.parent_ctx, "_last_nested_invocations", None) or [])
+    _ch2_sentinels = collect_clarification_sentinels(
+        result.tool_invocations,
+        nested_invocations=_nested_pool,
+    )
     for inv in result.tool_invocations:
         _nested_pool.extend(getattr(inv, "nested", None) or [])
-    for _ninv in _nested_pool:
-        _nr = getattr(_ninv, "result", None) or getattr(_ninv, "output", None)
-        if is_clarification_sentinel(_nr) and _is_tool_context_select(_nr) and isinstance(_nr, dict) and id(_nr) not in _seen_sentinel_ids:
-            _seen_sentinel_ids.add(id(_nr))
-            _ch2_sentinels.append(_nr)
 
+    # Native format feedback creates no card and performs no task action.
+    # Keep it in the transcript/budget, but let a corrected question retain
+    # the original bounded pause contract. Other rejected Tools still count.
+    _question_actions = [
+        inv
+        for inv in result.tool_invocations
+        if not (
+            inv.tool_name == "clarification_ask"
+            and not inv.nested
+            and isinstance(inv.result, dict)
+            and inv.result.get("_clarification_pending") is False
+            and inv.result.get("error_kind") == "schema_invalid"
+        )
+    ]
     _reference_lead_predispatch_question = bool(
         reference_lead_input is not None
         and (reference_runtime.generation == 1 or _bounded_questions_available)
         and len(_ch2_sentinels) == 1
-        and len(result.tool_invocations) == 1
-        and getattr(result.tool_invocations[0], "tool_name", None) == "clarification_ask"
-        and not getattr(result.tool_invocations[0], "nested", None)
+        and len(_question_actions) == 1
+        and _question_actions[0].tool_name == "clarification_ask"
+        and not _question_actions[0].nested
         and not _nested_pool
     )
     _postdispatch_nested = list(getattr(result.tool_invocations[0], "nested", None) or []) if len(result.tool_invocations) == 1 else []
@@ -7196,12 +7253,13 @@ async def _lead_loop(
     )
     _reference_lead_postdispatch_question = bool(
         reference_lead_input is not None
-        and reference_runtime.generation == 1
         and len(_ch2_sentinels) == 1
         and len(result.tool_invocations) == 1
         and getattr(result.tool_invocations[0], "tool_name", None) == "subagent_spawn"
         and _postdispatch_nested_safe
     )
+    if _reference_lead_postdispatch_question:
+        _reference_lead_postdispatch_question = await reference_runtime.can_capture_primary_question()
     if reference_lead_input is not None and _ch2_sentinels and not (_reference_lead_predispatch_question or _reference_lead_postdispatch_question):
         # Only a question before any other action can restart the Lead safely.
         result.ok = False
@@ -7218,15 +7276,17 @@ async def _lead_loop(
         and (reference_runtime is None or _reference_lead_predispatch_question)
         and len(_ch2_sentinels) == 1
         and (
-            (len(result.tool_invocations) == 1 and result.tool_invocations[0].tool_name == "clarification_ask")
+            (len(_question_actions) == 1 and _question_actions[0].tool_name == "clarification_ask")
             or (
                 reference_runtime is None
                 and reference_lead_input is None
-                and empty_lookup_before_question(result.tool_invocations, getattr(runtime.parent_ctx, "document_turn_state", None))
+                and empty_lookup_before_question(_question_actions, getattr(runtime.parent_ctx, "document_turn_state", None))
             )
         )
         and not _nested_pool
     )
+    if _reference_lead_postdispatch_question and reference_runtime.generation > 1:
+        _bounded_question = _bounded_questions_available
     _ordinary_checkpoint = result.ordinary_lead_checkpoint
     if _is_resume and _ch2_sentinels and not _bounded_question:
         logger.info(
@@ -7287,6 +7347,7 @@ async def _lead_loop(
             _merged_option_pairs: list[dict[str, str]] = []
             _seen_pair_values: set[str] = set()  # review P2: dedup option_pairs too
             _merged_remember = False
+            _merged_remember_default: bool | None = None
             # connector-context T1#6: connector discriminator first nonempty wins (like _merged_clar_kind).
             # Both keys written together by same producer (tool_registry sentinel gate/switch handler
             # clarification dict includes kind+tool); cannot come from inconsistent different sentinels.
@@ -7316,6 +7377,10 @@ async def _lead_loop(
                     _merged_tool = str(_payload["tool"])
                 if _payload.get("remember_option"):
                     _merged_remember = True
+                if _merged_remember_default is None and _payload.get("remember_default") is True:
+                    _merged_remember_default = True
+                if _payload.get("remember_default") is False:
+                    _merged_remember_default = False
                 if _merged_fallback is None and _payload.get("fallback_text"):
                     _merged_fallback = _payload.get("fallback_text")
                 if _merged_clar_id is None and _payload.get("clarification_id"):
@@ -7408,6 +7473,18 @@ async def _lead_loop(
                         "tool": _merged_tool,
                     }
                     _resume_context = _clarification_resume_context(sctx, user_text, runtime.parent_ctx)
+                    if _merged_clar_kind == "tool_context_select" and _n_sentinels == 1 and reference_runtime is None:
+                        from bowhead_core.datarc_switch_continuation import capture_datarc_switch_call
+
+                        _switch_call = capture_datarc_switch_call(result.tool_invocations)
+                        if _switch_call is not None:
+                            _resume_context["datarc_switch_call"] = _switch_call
+                        else:
+                            from bowhead_core.datarc_helper_switch_continuation import capture_datarc_helper_switch_call
+
+                            _helper_switch_call = capture_datarc_helper_switch_call(result.tool_invocations)
+                            if _helper_switch_call is not None:
+                                _resume_context["datarc_helper_switch_call"] = _helper_switch_call
                     if _bounded_question:
                         # Persist the localized questions with the card so GET
                         # /clarifications/{id} can render it (hashes use question text only).
@@ -7471,6 +7548,7 @@ async def _lead_loop(
                 "kind": _merged_clar_kind or "options",
                 "options": _merged_option_pairs or None,
                 "remember_option": _merged_remember,
+                **({"remember_default": _merged_remember_default} if _merged_remember_default is not None else {}),
                 # connector-context T1#6: discriminator carried by event (live=persisted=replay,
                 # log_sink auto-persists turn_events). Generic None (same nullable
                 # fallback_text precedent); FE passes through, no rendering branch.
@@ -7685,6 +7763,7 @@ async def _lead_loop(
             carrier=runtime.parent_bus,
             reason_code=reason_code,
             turn_id=sctx.turn_id,
+            step_usage=result.step_usage,
         )
         logger.warning(
             "lead_loop subagent not_ok turn_id=%s occurrence_id=%s reason_code=%s",
@@ -8768,7 +8847,7 @@ async def _prepare_subagent_resume(runtime: Any, turn_id: str, add_block: Callab
     db_path = getattr(getattr(ctx, "session_store", None), "db_path", None)
     session_id = str(getattr(ctx, "session_id", "") or "")
     user_id = str(getattr(ctx, "user_id", "") or "")
-    if not sr.subagent_resume_enabled() or not isinstance(db_path, str) or not session_id or not user_id:
+    if not isinstance(db_path, str) or not session_id or not user_id:
         return []
     try:
         requested = await sr.requested_checkpoint_ids(db_path, turn_id=turn_id)

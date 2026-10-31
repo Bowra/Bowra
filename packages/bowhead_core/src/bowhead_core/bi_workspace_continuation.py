@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 from bowhead_router.types import Message, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from bowhead_core.agent_run_limits import MAX_STEP_LIMIT, persisted_step_limit
+from bowhead_core.agent_run_limits import MAX_STEP_LIMIT, AgentLoopBudget, persisted_step_limit
 from bowhead_core.chat_references import decode_reference_json
 
 if TYPE_CHECKING:
@@ -40,6 +40,7 @@ def _capture_workspace_call(
     tool_deny: frozenset[str],
     effective_tools: frozenset[str],
     max_iterations: int,
+    loop_budget: AgentLoopBudget | None = None,
 ) -> dict | None:
     if binding is None or profile == "lead" or iteration != 0 or len(invocations) != 1 or len(messages) != 3:
         return None
@@ -88,7 +89,8 @@ def _capture_workspace_call(
         task_hash="sha256:" + hashlib.sha256(task.encode()).hexdigest(),
         tool_deny=tuple(sorted(tool_deny)),
         effective_tools=tuple(sorted(effective_tools)),
-        max_iterations=max_iterations,
+        max_iterations=persisted_step_limit(max_iterations) if loop_budget is not None else max_iterations,
+        loop_budget=loop_budget,
         assistant_text=messages[1].content,
         tool_call_id=call.id,
         arguments_json=encoded_arguments,
@@ -114,6 +116,7 @@ class BiWorkspaceContinuation(BaseModel):
     tool_deny: tuple[str, ...]
     effective_tools: tuple[str, ...]
     max_iterations: int | None = Field(ge=1, le=MAX_STEP_LIMIT)
+    loop_budget: AgentLoopBudget | None = Field(default=None, exclude_if=lambda value: value is None)
     assistant_text: str = Field(max_length=131072)
     tool_call_id: str = Field(min_length=1, max_length=256)
     arguments_json: str = Field(max_length=65536)

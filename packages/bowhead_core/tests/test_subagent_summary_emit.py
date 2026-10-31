@@ -90,6 +90,8 @@ class _FakeCtx:
         # reads it directly for the document review gate (0ea29d766).
         self.document_turn_state = None
         self.collaboration_runtime = None
+        self.knowledge_scope = None
+        self.knowledge_source_uses = []
 
 
 @pytest.fixture(autouse=True)
@@ -333,6 +335,46 @@ async def test_empty_answer_is_failed_in_every_peer_projection() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("valid_selection,peer_ok", [(True, True), (False, True), (True, False)])
+async def test_context_selection_preserves_pause_and_usage_without_masking_failure(valid_selection: bool, peer_ok: bool) -> None:
+    selection = {
+        "ok": False,
+        "error_kind": "needs_clarification",
+        "clarification": {
+            "kind": "tool_context_select",
+            "tool": "datarc",
+            "prompt": "Choose a workspace.",
+            "options": [{"value": "1", "label": "Source A"}] if valid_selection else [],
+        },
+    }
+    result = SubagentResult(
+        profile="compute",
+        subagent_id="x",
+        ok=peer_ok,
+        final_answer="",
+        tool_invocations=[_FakeInv("bi_schema", selection)],
+        tokens_input=17,
+        tokens_output=9,
+        tokens_cached=3,
+    )
+    bus = _FakeBus()
+    ctx = _FakeCtx(bus)
+    ctx.subagent_runner = _FakeRunner(result)
+    registry = ToolRegistry()
+    register_subagent_tool(registry)
+    invocation = await registry.execute("subagent_spawn", arguments={"profile": "compute", "task": "Inspect sales."}, ctx=ctx)
+    assert invocation.error is None
+    if valid_selection and peer_ok:
+        assert invocation.result["clarification"] is selection["clarification"]
+        assert [invocation.result[key] for key in ("tokens_input", "tokens_output", "tokens_cached")] == [17, 9, 3]
+        assert invocation.nested[0].result == selection
+        assert not any(event.event_type in {"peer_dispatch_failed", "lead.subagent_summary"} for event in bus.events)
+    else:
+        assert invocation.result["ok"] is False
+        assert any(event.event_type == "peer_dispatch_failed" for event in bus.events)
+
+
+@pytest.mark.unit
 async def test_summary_succeeded_with_warnings_on_caveats() -> None:
     """ok=True but payload.caveats non-empty → succeeded_with_warnings."""
     result = SubagentResult(
@@ -513,6 +555,46 @@ async def test_failed_canvas_call_does_not_count_as_delivered() -> None:
     )
     res = await _spawn(result)
     assert "没有产出任何可交付内容" in res["directive"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("tool_result", "error", "delivered"),
+    [
+        ({"section_id": "sec_1", "rev": 2}, None, "payload"),
+        ({"error": "invalid_chart_change"}, None, "none"),
+        (None, "unknown outcome", "none"),
+        ({}, None, "none"),
+    ],
+)
+async def test_chart_edit_receipt_counts_only_confirmed_writes(tool_result, error, delivered) -> None:
+    from bowhead_core.types import ToolInvocation
+
+    result = SubagentResult(
+        profile="compute",
+        subagent_id="peer",
+        ok=True,
+        final_answer="",
+        payload={"exec_summary": "Chart update", "insights": [], "kpis": [], "recommendations": []},
+        tool_invocations=[ToolInvocation(tool_name="edit_chart", arguments={}, result=tool_result, error=error)],
+    )
+    res = await _spawn(result)
+    assert res["delivered"] == delivered
+    if delivered == "payload":
+        assert "confirmed edit receipt" in res["directive"]
+        assert "没有产出任何可交付内容" not in res["directive"]
+        assert "最关键的发现" not in res["directive"]
+
+
+def test_chart_edits_do_not_appear_as_new_sections() -> None:
+    from bowhead_core.subagent import _canvas_sections_from_invocations
+    from bowhead_core.types import ToolInvocation
+
+    edits = [
+        ToolInvocation(tool_name="edit_chart", arguments={}, result={"section_id": "sec_1", "rev": 2}),
+        ToolInvocation(tool_name="edit_chart", arguments={}, result={"section_id": "sec_1", "error": "invalid_chart_change"}),
+    ]
+    assert _canvas_sections_from_invocations(edits) == []
 
 
 @pytest.mark.unit
@@ -956,3 +1038,76 @@ async def test_a_run_stopped_at_a_limit_is_reported_as_partial_not_failed() -> N
 
     again = await registry.execute("subagent_spawn", arguments={"profile": "compute", "task": "compare quarters"}, ctx=ctx)
     assert again.result["error_kind"] == "run_limit_partial"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", ["llm_context_overflow", "llm_unavailable"])
+async def test_model_failure_preserves_successful_tool_receipt_counts(reason: str) -> None:
+    from bowhead_core.types import ToolInvocation
+
+    result = SubagentResult(
+        profile="compute",
+        subagent_id="sub_receipts",
+        ok=False,
+        final_answer="",
+        error=reason,
+        llm_reason_code=reason,
+        tool_invocations=[
+            ToolInvocation(tool_name="python_sandbox", arguments={}, result={"ok": True, "stdout": "14535"}),
+            ToolInvocation(tool_name="python_sandbox", arguments={}, result={"ok": False, "error": "script_failed"}),
+            ToolInvocation(tool_name="web_fetch", arguments={}, error="network_error"),
+        ],
+    )
+    response = await _spawn(result)
+    assert response["ok"] is False
+    assert response["tool_count"] == 3
+    assert response["failure_stage"] == "model_request"
+    assert response["llm_reason_code"] == reason
+    assert response["tool_execution"] == {
+        "recorded": 3,
+        "succeeded": 1,
+        "failed": 2,
+        "non_failure": 0,
+        "unconfirmed": 0,
+        "by_tool": {
+            "python_sandbox": {"succeeded": 1, "failed": 1, "non_failure": 0, "unconfirmed": 0},
+            "web_fetch": {"succeeded": 0, "failed": 1, "non_failure": 0, "unconfirmed": 0},
+        },
+    }
+    assert "tool_execution" in response["directive"]
+    assert "does not undo" in response["directive"]
+    assert "stdout" not in response["tool_execution"]
+
+
+@pytest.mark.unit
+async def test_failure_receipts_do_not_promote_pauses_or_missing_outcomes_to_success() -> None:
+    from bowhead_core.types import ToolInvocation
+
+    response = await _spawn(
+        SubagentResult(
+            profile="compute",
+            subagent_id="sub_receipts",
+            ok=False,
+            final_answer="",
+            error="subagent_execution_uncertain",
+            ordinary_completion_reason="tool_unknown",
+            tool_invocations=[
+                ToolInvocation(tool_name="python_sandbox", arguments={}, result={"ok": True}),
+                ToolInvocation(tool_name="web_fetch", arguments={}, result={"error": "denied"}),
+                ToolInvocation(
+                    tool_name="bi_query",
+                    arguments={},
+                    result={"ok": False, "error_kind": "needs_clarification", "clarification": {"options": ["a", "b"]}},
+                ),
+                ToolInvocation(tool_name="external_write", arguments={}),
+                ToolInvocation(tool_name="subagent_spawn", arguments={}, result={"ok": False, "execution_outcome": "unknown"}),
+            ],
+        )
+    )
+    assert response["execution_outcome"] == "unknown"
+    assert "failure_stage" not in response
+    assert response["tool_execution"]["succeeded"] == 1
+    assert response["tool_execution"]["failed"] == 1
+    assert response["tool_execution"]["non_failure"] == 1
+    assert response["tool_execution"]["unconfirmed"] == 2
+    assert response["tool_execution"]["recorded"] == 5

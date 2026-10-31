@@ -40,6 +40,20 @@ afterEach(() => {
 });
 
 describe("AgentRunLimitsSettings", () => {
+  it("shows the saved effective deployment policy without adding it to writable fields", async () => {
+    const initial = limits({ stepLimit: 200, runtimeControls: { systemStepLimit: 100, effectiveStepLimit: 100, stallTimeoutS: 300 } });
+    saveMock.mockResolvedValue({ ...initial, stepLimit: null });
+    render(<AgentRunLimitsSettings initial={initial} />);
+    expect(screen.getByText(/effective_policy:/).textContent).toContain('"effective":100');
+    expect((screen.getByLabelText("steps_input_label") as HTMLInputElement).value).toBe("200");
+    fireEvent.click(screen.getByRole("radio", { name: "steps_unlimited" }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
+    expect(saveMock.mock.calls[0][0]).not.toHaveProperty("runtimeControls");
+    expect(saveMock.mock.calls[0][0].stepLimit).toBeNull();
+    await screen.findByText("saved");
+    expect(screen.getByText(/effective_policy:/).textContent).toContain('"effective":100');
+  });
   it("saves an explicit model call deadline and allows following the turn again", async () => {
     const initial = limits({ modelCallTimeLimitS: null, ranges: {
       ...limits().ranges, modelCallTimeLimitS: { min: 30, max: 36000 },

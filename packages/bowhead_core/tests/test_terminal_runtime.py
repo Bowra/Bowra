@@ -3154,13 +3154,17 @@ async def test_certified_followup_commits_child_before_single_worker_spawn(
     member_identity_drift: bool,
     fault_point: TerminalProtocolFaultPoint | None,
     drain_before_followup: bool,
+    datarc_source_change: bool = False,
 ) -> None:
+    from bowhead_core.datarc_selection import DatarcConnectionBinding, DatarcExecutionScope, DatarcRunState, DatarcSelection
+
     db_path = _create_db(tmp_path)
     store = TerminalProtocolStore(db_path, _clock=lambda: _NOW)
     spawned: list[TurnRequest] = []
     worker_done = asyncio.Event()
     fresh_admission_ready = True
     triggered: list[str] = []
+    source_binding = DatarcConnectionBinding("team_1", "dc_one", "revision_one", object()) if datarc_source_change else None
 
     async def trigger_recovery(_scope: object, reason: str) -> None:
         triggered.append(reason)
@@ -3208,6 +3212,9 @@ async def test_certified_followup_commits_child_before_single_worker_spawn(
             team_kb_retriever=object(),
             resume_turn_id=parent_scope.turn_id,
             terminal_auth_fence_vector_digest=current_digest,
+            active_datarc_project=intent.get("active_datarc_project"),
+            datarc_binding=source_binding,
+            datarc_source_evidence=intent.get("datarc_selection"),
         )
 
     injected = False
@@ -3254,6 +3261,11 @@ async def test_certified_followup_commits_child_before_single_worker_spawn(
         presentation_locale="en-US",
     )
     await runtime.start_execution()
+    if datarc_source_change:
+        source = DatarcSelection(source_binding, "u_1", "source_a", "Source A", "m_1", source_binding.client)
+        owner = DatarcRunState(DatarcExecutionScope(source, 0), team_id="team_1")
+        runtime.bus.bind_datarc_run(owner)
+        owner.publish(replace(source, datarc_workspace_id="source_b", name="Source B", member_uid="member_b"))
     await factory.steer_web_turn(
         team_id="team_1",
         session_id="s_1",
@@ -3383,6 +3395,11 @@ async def test_certified_followup_commits_child_before_single_worker_spawn(
     template = await store.read_committed_followup_template(runtime.bus.receipt)
     assert template is not None
     assert template["turn_id"] == child_request.turn_id
+    if datarc_source_change:
+        assert child_request.active_datarc_project == "source_b"
+        assert child_request.member_uid == "member_b"
+        assert template["execution_intent"]["datarc_selection"] == child_request.datarc_source_evidence
+        assert child_request.datarc_source_evidence["datarc_workspace_id"] == "source_b"
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "UPDATE turns SET user_text='tampered' WHERE id=?",
@@ -3394,6 +3411,11 @@ async def test_certified_followup_commits_child_before_single_worker_spawn(
         match="committed child envelope changed",
     ):
         await store.read_committed_followup_template(runtime.bus.receipt)
+
+
+@pytest.mark.anyio
+async def test_followup_persists_current_root_source_after_switch(tmp_path):
+    await test_certified_followup_commits_child_before_single_worker_spawn(tmp_path, False, None, False, datarc_source_change=True)
 
 
 @pytest.mark.anyio

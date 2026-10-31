@@ -125,7 +125,7 @@ def followup_dependencies(monkeypatch):
             "session_id": "s_1",
             "pinned_project": "project_1",
         }
-        return SimpleNamespace(
+        return datarc_context.DatarcTurnContext(
             datarc_client=datarc_client,
             datarc_project_for_calls="project_1",
             datarc_unavailable=False,
@@ -240,6 +240,7 @@ async def test_queued_steer_turn_keeps_the_parent_viewer_zone(followup_dependenc
     from bowhead_core.terminal_runtime_factory import _add_followup_time_zone
 
     parent = SimpleNamespace(
+        datarc_source_evidence=None,
         language_context=LanguageContext().with_time_zone("America/Los_Angeles") if parent_has_language_snapshot else None,
         viewer_time_zone="" if parent_has_language_snapshot else "America/Los_Angeles",
     )
@@ -259,7 +260,7 @@ async def test_queued_steer_turn_without_a_parent_zone_uses_the_deploy_clock(fol
     from bowhead_core.terminal_runtime_factory import _add_followup_time_zone
 
     template = _template()
-    _add_followup_time_zone(template["execution_intent"], SimpleNamespace(language_context=None, viewer_time_zone=""))
+    _add_followup_time_zone(template["execution_intent"], SimpleNamespace(language_context=None, viewer_time_zone="", datarc_source_evidence=None))
     assert "time_zone" not in template["execution_intent"]
 
     request = await pending_execution.resolve_terminal_followup_request(_app(), template, _scope())
@@ -320,7 +321,7 @@ async def test_production_followup_resolver_fails_closed_without_exact_team_runt
     from bowhead_gateway import datarc_context
 
     async def resolve_datarc(_app, **_kwargs):
-        return SimpleNamespace(
+        return datarc_context.DatarcTurnContext(
             datarc_client=None,
             datarc_project_for_calls="",
             datarc_unavailable=True,
@@ -374,12 +375,14 @@ async def test_pending_clarification_recovery_matches_web_resume_capabilities(
     monkeypatch,
     snapshot: dict[str, str] | None,
     expected_output: str | None,
+    native_choice: bool = False,
 ) -> None:
     switcher = object()
     captured: list[object] = []
     clarification = SimpleNamespace(
         request_id="clarify_1",
         turn_id="t_parent",
+        session_id="s_1",
         workspace_id="ws_1",
         user_id="u_1",
         status="resolved",
@@ -444,8 +447,39 @@ async def test_pending_clarification_recovery_matches_web_resume_capabilities(
 
     from bowhead_gateway import datarc_context, turn_service
 
+    if native_choice:
+        from bowhead_core.datarc_selection import DatarcConnectionBinding, DatarcSelectionSnapshot
+
+        source_client = object()
+        binding = DatarcConnectionBinding("team_1", "dc_1", "revision_1", source_client)
+        clarification.chosen_value = "sales"
+        clarification.chosen_values = ["sales"]
+        clarification.tool = "datarc"
+        clarification.candidates = [SimpleNamespace(value="sales", label="Retail")]
+        clarification.resume_context["datarc_selection"] = DatarcSelectionSnapshot(
+            state="unselected", team_id="team_1", user_id="u_1", connection_id="dc_1", connection_revision="revision_1"
+        ).model_dump(mode="json")
+        clarification.resume_context["datarc_switch_call"] = {
+            "contract": "datarc-switch-call.v1",
+            "call_id": "original_switch",
+            "arguments": {"name": "Retail", "remember": False},
+        }
+
+        async def recover_source(*_args, **kwargs):
+            assert kwargs["selected_project"] == "sales"
+            return datarc_context.DatarcTurnContext(
+                connection_binding=binding,
+                datarc_client=source_client,
+                active_datarc_project="sales",
+                datarc_project_for_calls="sales",
+                active_datarc_workspace_name="Retail",
+                accessible_datarc_workspaces=({"id": "sales", "name": "Retail"},),
+            ), "member_sales"
+
+        monkeypatch.setattr(datarc_context, "resolve_datarc_recovery_context", recover_source)
+
     async def resolve_datarc(*_args, **_kwargs):
-        return SimpleNamespace(
+        return datarc_context.DatarcTurnContext(
             datarc_client=None,
             datarc_project_for_calls="",
             datarc_unavailable=False,
@@ -495,6 +529,11 @@ async def test_pending_clarification_recovery_matches_web_resume_capabilities(
     opened_request, request = captured
     assert opened_request.text == request.text
     assert request.terminal_runtime is not None
+    if native_choice:
+        assert request.datarc_switch_resolution.call_id == "original_switch"
+        assert request.datarc_switch_resolution.source.datarc_workspace_id == "sales"
+        assert request.accessible_datarc_workspaces == ({"id": "sales", "name": "Retail"},)
+        return
     assert "tool_switch_context" in request.text
     assert "销售域（销售数据）" in request.text
     assert "__bowhead_clarification_skip__" not in request.text
@@ -505,6 +544,12 @@ async def test_pending_clarification_recovery_matches_web_resume_capabilities(
         return
     assert request.language_context.ui_language == "zh-CN"
     assert request.language_context.output_language == expected_output
+
+
+async def test_pending_native_switch_recovery_restores_the_selected_outcome(monkeypatch):
+    await test_pending_clarification_recovery_matches_web_resume_capabilities(
+        monkeypatch, snapshot={"ui_language": "en-US", "output_language": "en-US"}, expected_output="en-US", native_choice=True
+    )
 
 
 @pytest.mark.asyncio

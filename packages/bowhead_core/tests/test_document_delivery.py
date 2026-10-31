@@ -61,7 +61,9 @@ async def test_stale_confirmation_cannot_publish(ctx):
 async def test_cancel_fences_confirmation_and_private_preview(ctx):
     delivery, job_id, draft, _ = await _review(ctx)
     await ctx.store.cancel(scope=SCOPE, job_id=job_id, command_id="cancel", expected_proposal_revision=1)
-    assert (await delivery.get(scope=SCOPE, job_id=job_id))["state"] == "cancelled"
+    cancelled = await delivery.get(scope=SCOPE, job_id=job_id)
+    assert cancelled["state"] == "cancelled"
+    assert "superseded_by_job_id" not in cancelled and "draft" not in cancelled
     with pytest.raises(DocumentRequestError):
         await delivery.confirm(scope=SCOPE, job_id=job_id, command_id="confirm", draft_digest=draft["draft_digest"])
     with pytest.raises(DocumentRequestError):

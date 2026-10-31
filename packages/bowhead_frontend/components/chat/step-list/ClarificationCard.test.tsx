@@ -148,6 +148,19 @@ describe("ClarificationCard · several questions", () => {
 });
 
 describe("ClarificationCard · remember, errors, unavailable", () => {
+  it("defaults a temporary workspace choice to session-only and lets the user override it", () => {
+    const onSingle = vi.fn();
+    renderIntl(<ClarificationCard questions={QUESTIONS} showRemember rememberDefault={false} onSubmitSingle={onSingle} onSubmitMulti={vi.fn()} />);
+    const box = screen.getByRole("checkbox", { name: "记住我的选择（下次直接使用）" }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(screen.getAllByRole("radio")[1]);
+    fireEvent.click(continueButton());
+    expect(onSingle).toHaveBeenLastCalledWith(expect.anything(), { remember: false });
+    fireEvent.click(box);
+    fireEvent.click(continueButton());
+    expect(onSingle).toHaveBeenLastCalledWith(expect.anything(), { remember: true });
+  });
+
   it("defaults Remember my choice to checked and sends it with the answer", () => {
     const onSingle = vi.fn();
     renderIntl(<ClarificationCard questions={QUESTIONS} showRemember onSubmitSingle={onSingle} onSubmitMulti={vi.fn()} />);
@@ -187,6 +200,32 @@ describe("ClarificationCard · remember, errors, unavailable", () => {
     expect(screen.getByRole("alert").textContent).toContain("没能提交回答，你的选择已保留。");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(onSingle).toHaveBeenCalledWith(expect.objectContaining({ answer: "华东大区" }), undefined);
+  });
+
+  it("keeps a rejected native workspace card selectable without submitting hidden custom text", () => {
+    const onSingle = vi.fn();
+    const message = "该回答不属于此卡片的候选工作区。请从列出的工作区中选择后继续。选择卡已保留。";
+    renderIntl(
+      <ClarificationCard
+        questions={QUESTIONS}
+        restoredAnswers={[{ question: QUESTIONS[0].question, source: "custom", answer: "Unavailable source" }]}
+        showRemember
+        rememberDefault={false}
+        allowCustomAnswers={false}
+        error={message}
+        onSubmitSingle={onSingle}
+        onSubmitMulti={vi.fn()}
+      />,
+    );
+    expect(screen.queryByPlaceholderText("其他，自己输入…")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain(message);
+    expect((screen.getByRole("button", { name: "重试" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("radio")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(onSingle).toHaveBeenCalledWith(
+      { question: QUESTIONS[0].question, source: "candidate", answer: "华东大区", option_index: 1 },
+      { remember: false },
+    );
   });
 
   it("spins Continue while submitting and locks the options", () => {

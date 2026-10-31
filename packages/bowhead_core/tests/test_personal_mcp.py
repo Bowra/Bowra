@@ -172,6 +172,25 @@ async def test_owner_consent_is_required_and_is_single_use(personal, monkeypatch
     assert "sensitive-personal-token" not in canonical(await personal.registry.connections(personal.ctx.user_id))
 
 
+async def test_execution_queues_calls_within_the_shared_turn_budget(personal):
+    from bowhead_core.agent_run_limits import TurnToolCallBudget
+
+    manifest = await personal.registry.manifest(personal.ctx.user_id, personal.binding)
+    tool = json.loads(manifest["tools_json"])[0]
+    budget = TurnToolCallBudget(limit=25)
+    calls = []
+    for index in range(budget.limit):
+        assert budget.admit("personal_search")
+        call = await personal.registry.enqueue(personal.ctx.user_id, manifest, tool, f"call_{index}", {"query": "synthetic"})
+        calls.append(call)
+    assert not budget.admit("personal_search")
+    assert len({call["id"] for call in calls}) == 25
+    assert all(call["status"] == "pending" and call["owner_user_id"] == personal.ctx.user_id for call in calls)
+    replay = await personal.registry.enqueue(personal.ctx.user_id, manifest, tool, "call_24", {"query": "synthetic"})
+    assert replay["id"] == calls[-1]["id"]
+    assert len(await personal.registry.rows("SELECT * FROM personal_mcp_invocation")) == 25
+
+
 async def test_rejection_and_disabled_connection_do_not_dispatch(personal, monkeypatch):
     calls = _remote(monkeypatch)
     spec = (await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx))[0]

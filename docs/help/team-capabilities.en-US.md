@@ -10,7 +10,7 @@ Members can open **Capability Center → Plugins** to see enabled Plugins. **Bui
 
 **Team Plugins** shows the team's enabled selections and their contents; the section appears only when your team has team Plugins. When creating or editing your own Agent, open **What it can use**, select a team Plugin, and save. You can also select individual Tools and Skills.
 
-Agents use the latest contents on their next run. A run already in progress keeps the selection it started with. If a Plugin is turned off, Agents that use it keep running without the Tools and Skills it provided; Tools you selected individually are not affected.
+Agents use the latest contents on their next run. A run already in progress keeps the selection it started with. If a Plugin is turned off, Agents that use it keep running without the Tools and Skills it provided; Tools and Skills you selected individually are not affected. A Plugin may also include read-only method instructions; reading a method does not grant permission to run its scripts. If its method version is unavailable or conflicts with a separate Skill selection, the check names the affected Skill and the action needed before saving.
 
 A Plugin helps select resources. Whether a Tool or Skill can actually run still depends on the current user, Agent, and resource permissions and availability.
 

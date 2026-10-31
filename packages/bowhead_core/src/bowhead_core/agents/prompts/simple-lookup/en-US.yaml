@@ -35,7 +35,8 @@ artifact_exception: "  - Apply the simple lookup exception in §⑤ to a few hea
 lead_scope: "For a simple metric lookup, keep `task` and `data_hint` limited to the requested metrics, period and comparisons. Prior artifacts
   are available evidence, not additional requirements: do not add brand/store breakdowns, attribution, rankings or longer time series merely because
   those files exist. Ask the peer to return once the requested facts are verified; add comparisons only when requested or already present in the
-  matching summary, without extra exploration. "
+  matching summary, without extra exploration. In the final answer, do not add a derived comparison that has not been verified. For a requested
+  comparison, rely on evidence that identifies the compared value, baseline and calculation; have the data agent verify any missing calculation. "
 lead_example: '- "last month’s revenue and foot traffic" → subagent_spawn(profile="{data}", task="verify last month’s revenue and foot traffic;
   reuse the matching summary if available and return the core values immediately; do not add brand/store analysis", data_hint=["revenue last month",
   "foot traffic last month"])'

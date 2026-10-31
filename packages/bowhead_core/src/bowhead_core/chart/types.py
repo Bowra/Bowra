@@ -76,6 +76,7 @@ class ChartColumn:
     unit: str | None = None  # Stored quantity unit.
     currency_code: str | None = None
     display: NumericDisplay | None = None
+    date_pattern: str | None = None
     # Percentage shape must come from source facts or a producer declaration.
     # Unknown shape is an ordinary number; names and ranges never establish it.
     percent_scale: str | None = None

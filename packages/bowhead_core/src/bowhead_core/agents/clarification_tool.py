@@ -69,6 +69,44 @@ def is_clarification_sentinel(tool_result: Any) -> bool:
 SUPPORTED_QUESTION_TYPES = frozenset({"single_select", "multi_select", "free_text"})
 
 
+def is_tool_context_selection(tool_result: Any) -> bool:
+    """Recognize the existing domain-owned context picker, not a model question."""
+    return (
+        is_clarification_sentinel(tool_result)
+        and isinstance(tool_result.get("clarification"), dict)
+        and tool_result["clarification"].get("kind") == "tool_context_select"
+    )
+
+
+def collect_clarification_sentinels(invocations: list[Any], *, nested_invocations: list[Any] | None = None) -> list[dict[str, Any]]:
+    """Collect native pauses, including forwarded domain selections, once.
+
+    A spawn envelope adds usage without changing its child's selection object.
+    Only domain-owned context selections may be lifted from nested calls;
+    nested model questions retain their separate continuation admission.
+    """
+    sentinels: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    nested = list(nested_invocations or [])
+
+    def append(result: Any) -> None:
+        if not is_clarification_sentinel(result):
+            return
+        identity = id(result["clarification"] if is_tool_context_selection(result) else result)
+        if identity not in seen:
+            seen.add(identity)
+            sentinels.append(result)
+
+    for invocation in invocations:
+        append(getattr(invocation, "result", None) or getattr(invocation, "output", None))
+        nested.extend(getattr(invocation, "nested", None) or [])
+    for invocation in nested:
+        result = getattr(invocation, "result", None) or getattr(invocation, "output", None)
+        if is_tool_context_selection(result):
+            append(result)
+    return sentinels
+
+
 def _normalize_question_type(raw_type: Any) -> str:
     """把 `type` 归一到前端能渲染的选项或自由输入形态。
 
@@ -137,7 +175,10 @@ def normalize_clarification_questions(raw_questions: Any) -> list[dict[str, Any]
         # persisted rows and non-tool producers.
         options = [str(opt).strip()[:80] for opt in raw_options if isinstance(opt, str) and opt.strip()][:MAX_OPTIONS_PER_QUESTION]
         q_type = _normalize_question_type(raw.get("type"))
-        if (q_type == "free_text" and raw.get("options") != []) or (q_type != "free_text" and not options):
+        if q_type == "free_text":
+            # The explicit input type wins; stray choices must not erase the question.
+            options = []
+        elif not options:
             continue
         out.append(
             {
@@ -149,6 +190,26 @@ def normalize_clarification_questions(raw_questions: Any) -> list[dict[str, Any]
         if len(out) >= 3:
             break
     return out
+
+
+def _question_format_errors(questions: Any) -> list[str]:
+    """Reject only question sets that normalization cannot render completely."""
+    if not isinstance(questions, list) or not 1 <= len(questions) <= 3:
+        return ["questions must be an array containing 1-3 complete questions."]
+    errors = []
+    for index, question in enumerate(questions):
+        path = f"questions[{index}]"
+        if not isinstance(question, dict):
+            errors.append(f"{path} must be an object with question, options and type.")
+            continue
+        text = question.get("question")
+        if not isinstance(text, str) or not text.strip() or len(text) > 200:
+            errors.append(f"{path}.question must be nonempty text of at most 200 characters.")
+        kind = _normalize_question_type(question.get("type"))
+        options = question.get("options")
+        if kind != "free_text" and (not isinstance(options, list) or not any(isinstance(option, str) and option.strip() for option in options)):
+            errors.append(f"{path}.options requires choices; use free_text with options=[] for a missing value.")
+    return errors
 
 
 def _flatten_question_candidates(questions: list[dict[str, Any]]) -> list[str]:
@@ -241,6 +302,7 @@ def extract_clarification_event_payload(tool_result: Any) -> dict[str, Any]:
         "clar_kind": clar.get("kind"),
         "option_pairs": option_pairs,
         "remember_option": bool(clar.get("remember_option", False)),
+        **({"remember_default": clar["remember_default"]} if isinstance(clar.get("remember_default"), bool) else {}),
         # connector-context T1#6: forward connector discriminator faithfully (previously lost on the first hop,
         # forcing resolution to hardcode datarc: B1 broken chain). Nonconnector card = None.
         "tool": clar.get("tool"),
@@ -544,6 +606,19 @@ async def _clarification_ask(
             SENTINEL_CLARIFICATION_PENDING: False,
             "error_kind": "schema_invalid",
             "error_message": ("clarification_ask requires at least one of {questions, candidates, fallback_text}"),
+        }
+
+    format_errors = _question_format_errors(questions) if "questions" in args else []
+    if format_errors:
+        return {
+            SENTINEL_CLARIFICATION_PENDING: False,
+            "ok": False,
+            "error_kind": "schema_invalid",
+            "error_message": (
+                "Invalid clarification questions; nothing was shown or saved. "
+                + " ".join(format_errors)
+                + " Correct the indicated fields and call clarification_ask again with the complete question set."
+            ),
         }
 
     over_limit = _questions_over_option_limit(questions)

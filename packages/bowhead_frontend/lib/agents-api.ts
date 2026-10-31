@@ -1238,6 +1238,8 @@ export interface AgentReleaseCandidateDetail {
     tool_set_changed: boolean;
     skill_set_changed: boolean;
     runtime_extensions_changed?: boolean;
+    knowledge_access_changed?: boolean;
+    knowledge_access_expanded?: boolean;
     primary_capability_changed: boolean;
     capability_protocol_block_changed?: boolean;
     behavior_changed: boolean;
@@ -2644,4 +2646,10 @@ export function setManagedAgentResourceStatus(
       body: JSON.stringify({ status, acknowledged_warning_codes: [] }),
     },
   );
+}
+
+export function getAgentKnowledgeSources(agentId: string, query: string, selected: string[], offset = 0, signal?: AbortSignal) {
+  const params = new URLSearchParams({ q: query, offset: String(offset), limit: "20" });
+  selected.forEach((id) => params.append("selected", id));
+  return json<import("./agent-knowledge-sources").KnowledgeSourceCatalog>(`/api/v1/agents/${encodeURIComponent(agentId)}/knowledge-sources?${params}`, { signal });
 }

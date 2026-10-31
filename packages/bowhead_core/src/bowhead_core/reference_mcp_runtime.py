@@ -456,13 +456,37 @@ async def require_saved_mcp_reads(db: aiosqlite.Connection, *, checkpoint, scope
     """Reopen only the exact successful receipts in this sealed continuation."""
     if not db.in_transaction:
         raise ValueError("reference_transaction_required")
-    for receipt in checkpoint.mcp_receipts():
+    receipts = checkpoint.mcp_receipts()
+    if not receipts:
+        return
+    from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+    actual = await _row(
+        db,
+        "SELECT created_generation FROM chat_reference_resolutions WHERE turn_id=? AND execution_id=? AND resolution_seq=2",
+        (checkpoint.turn_id, checkpoint.execution_id),
+    )
+    generation = 1
+    if actual is not None and actual["created_generation"] != 1:
+        post = await _row(
+            db,
+            "SELECT request_id FROM clarification_requests WHERE turn_id=? AND CASE WHEN json_valid(resume_context_json) "
+            "THEN json_extract(resume_context_json,'$.reference_continuation.contract') END='reference-lead-postdispatch.v1'",
+            (checkpoint.turn_id,),
+        )
+        origin = await read_question_origin_in_tx(
+            db, turn_id=checkpoint.turn_id, postdispatch_card_id=post["request_id"] if post is not None else None
+        )
+        if origin.execution_id != checkpoint.execution_id:
+            raise ValueError("reference_continuation_changed")
+        generation = origin.generation
+    for receipt in receipts:
         row = await _row(
             db,
             "SELECT * FROM chat_reference_mcp_calls WHERE turn_id=? AND execution_id=? AND call_id=? "
-            "AND created_generation=1 AND status='completed' AND result_ok=1 AND retention_state='available' "
+            "AND created_generation=? AND status='completed' AND result_ok=1 AND retention_state='available' "
             "AND julianday(expires_at)>julianday('now')",
-            (checkpoint.turn_id, checkpoint.execution_id, receipt["call_id"]),
+            (checkpoint.turn_id, checkpoint.execution_id, receipt["call_id"], generation),
         )
         if row is None or any(row[key] != value for key, value in receipt.items()):
             raise ValueError("reference_continuation_changed")

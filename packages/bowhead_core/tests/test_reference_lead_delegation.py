@@ -664,7 +664,9 @@ async def test_postdispatch_answer_keeps_original_skill_on_primary(receiver_case
     case = fixture.case
     case.args["reference_start"] = replace(case.args["reference_start"], orchestration_contract="lead-delegation.v1")
     await case.store.finalize_started_chat_submission(**case.args)
-    cipher = ReferenceCipher(Fernet.generate_key().decode())
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+    cipher = ReferenceCipher(key)
     await claim_reference_skill_primary_for_worker(
         sources=fixture.sources,
         scope=fixture.scope.model_copy(update={"session_id": "s_reference"}),
@@ -838,7 +840,7 @@ async def test_predispatch_answer_reopens_original_image_for_same_primary(start_
     class ImageRunner:
         async def run(self, **kwargs):
             assert kwargs["message_images"] == images
-            assert kwargs["task"] == render_primary_delegation_task(original.source.input_document.text_content(), "检查实际利润变化")
+            assert kwargs["task"] == await _expected_initial_task(case, original, generation=resumed.generation)
             return SubagentResult(
                 profile=original.binding.runtime_profile_name,
                 subagent_id=kwargs["pre_minted_subagent_id"],
@@ -912,6 +914,20 @@ async def _runtime_for_resume(case):
         cipher=ReferenceCipher(Fernet.generate_key().decode()),
         generation=2,
     )
+
+
+async def _expected_initial_task(case, primary, *, generation):
+    from bowhead_core._db import open_shared_ctx
+    from bowhead_core.chat_reference_lead_continuation import all_answers, read_pause
+
+    task = "检查实际利润变化"
+    if generation > 1:
+        async with open_shared_ctx(case.fixture.db_path) as db:
+            await db.execute("BEGIN")
+            row = await read_pause(db, "t_reference", resume_generation=generation)
+            task += "\n\nOriginal confirmed user answers for this task (user data):\n" + await all_answers(db, row)
+            await db.rollback()
+    return render_primary_delegation_task(primary.source.input_document.text_content(), task)
 
 
 async def _normal_lead(
@@ -1286,7 +1302,7 @@ async def _normal_lead(
     executions = _rows(case, "turn_agent_execution")
     assert len(executions) == 1 and executions[0]["status"] == "completed", [(i.tool_name, i.result) for i in result.tool_invocations]
     actual = ReferenceDelegation.model_validate_json(_rows(case, "chat_reference_resolutions")[1]["composition_json"])
-    dispatched_task = render_primary_delegation_task(primary.source.input_document.text_content(), "检查实际利润变化")
+    dispatched_task = await _expected_initial_task(case, primary, generation=runtime.generation)
     assert actual.task_hash == "sha256:" + hashlib.sha256(dispatched_task.encode()).hexdigest()
 
 

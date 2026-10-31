@@ -72,7 +72,15 @@ async def test_exact_revision_preserves_candidate_bytes_and_recovers_one_success
     arguments = await admit_source(ctx, source)
     one, two = await asyncio.gather(*(ctx.store.submit_revision_from_turn(**arguments) for _ in range(2)))
     assert one == two
-    assert (await delivery.get(scope=SCOPE, job_id=parent))["state"] == "cancelled"
+    predecessor = await delivery.get(scope=SCOPE, job_id=parent)
+    assert predecessor["state"] == "cancelled"
+    assert predecessor["superseded_by_job_id"] == one.job_id
+    assert predecessor["draft"] == draft["draft"]
+    assert predecessor["can_confirm"] is False and predecessor["can_revise"] is False
+    assert (await delivery.read_file(scope=SCOPE, job_id=parent, name="page-1.png", preview=True))[0] == output.files["page-1.png"]
+    for name in ("candidate.pptx", "candidate.pdf"):
+        with pytest.raises(DocumentRequestError, match="document_not_found"):
+            await delivery.read_file(scope=SCOPE, job_id=parent, name=name, preview=False)
     successor = await delivery.get(scope=SCOPE, job_id=one.job_id)
     assert successor["request_text"] == INSTRUCTION
     inputs = DocumentInputStore(ctx.artifacts)
@@ -91,6 +99,32 @@ async def test_exact_revision_preserves_candidate_bytes_and_recovers_one_success
         for table in ("document_revisions", "document_dispatches"):
             async with db.execute(f"SELECT count(*) FROM {table}") as cursor:
                 assert (await cursor.fetchone())[0] == 1
+
+
+async def test_superseded_preview_rechecks_current_access_after_read(ctx, monkeypatch):
+    delivery, parent, draft, _ = await _review(ctx)
+    arguments = await admit_source(ctx, revision_source(ctx, parent, draft["draft_digest"]))
+    await ctx.store.submit_revision_from_turn(**arguments)
+    other = SCOPE.model_copy(update={"user_id": "u_other"})
+    with pytest.raises(DocumentRequestError, match="document_not_found"):
+        await delivery.get(scope=other, job_id=parent)
+    with pytest.raises(DocumentRequestError, match="document_not_found"):
+        await delivery.read_file(scope=other, job_id=parent, name="page-1.png", preview=True)
+    original_read = ctx.artifacts.backend.read_bounded
+    reads = []
+
+    async def revoke_after_read(path, *, limit):
+        content = await original_read(path, limit=limit)
+        reads.append(path)
+        async with open_shared_ctx(ctx.path) as db:
+            await db.execute("DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?", (SCOPE.workspace_id, SCOPE.user_id))
+            await db.commit()
+        return content
+
+    monkeypatch.setattr(ctx.artifacts.backend, "read_bounded", revoke_after_read)
+    with pytest.raises(DocumentRequestError, match="document_not_found"):
+        await delivery.read_file(scope=SCOPE, job_id=parent, name="page-1.png", preview=True)
+    assert len(reads) == 1
 
 
 async def test_failed_successor_commit_rolls_back_link_receipt_and_supersession(ctx):

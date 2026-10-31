@@ -170,7 +170,7 @@ def test_owner_coach_receives_the_canonical_resource_authoring_contract():
         json.dumps(
             {
                 "verdict": "edit",
-                "operations": [{"op": "replace", "path": "/definition/max_iterations", "value": 12}],
+                "operations": [{"op": "replace", "path": "/definition/system_prompt", "value": "Use the selected model to complete the task."}],
                 "atomic_groups": [{"id": "limits", "operation_indexes": [0]}],
                 "suggested_cases": [
                     {
@@ -194,13 +194,13 @@ def test_owner_coach_receives_the_canonical_resource_authoring_contract():
         draft_agent_change_proposal(
             router,
             agent_id="osa_original",
-            goal="Allow twelve steps",
-            config_surface={"definition": {"max_iterations": 10, "tool_refs": [], "skill_grants": [], "capability_ids": [], "model": "analyst"}},
+            goal="Clarify the task instructions",
+            config_surface={"definition": {"tool_refs": [], "skill_grants": [], "capability_ids": [], "model": "analyst"}},
         )
     )
     assert result.draft is not None
     instructions = router.requests[0][1].system
-    for field in ("tool_refs", "skill_grants", "capability_ids", "model", "max_iterations", "output_schema"):
+    for field in ("tool_refs", "skill_grants", "capability_ids", "model", "runtime_extensions", "output_schema"):
         assert f"/definition/{field}" in instructions
 
 

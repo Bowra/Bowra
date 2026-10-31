@@ -9,3 +9,14 @@ def retrieval_top_k(kb: dict) -> int:
     if type(value) is not int or not 1 <= value <= MAX_TOP_K:
         raise ValueError(f"kb.retrieval_top_k must be an integer from 1 to {MAX_TOP_K}")
     return value
+
+
+def retrieval_top_k_schema() -> dict:
+    return {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": MAX_TOP_K,
+        "default": DEFAULT_TOP_K,
+        "description": "Number of knowledge results retrieved before answer generation; higher counts add context and processing cost.",
+        "x-bowhead-field": {"unit": "count"},
+    }

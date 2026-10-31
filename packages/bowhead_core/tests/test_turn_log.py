@@ -434,6 +434,35 @@ async def test_durable_event_id_is_insert_once_and_suppresses_duplicate_live_del
     assert [(row.id, row.event_type) for row in rows] == [(event_id, "clarification.resolved")]
 
 
+@pytest.mark.parametrize("conflict", [False, True])
+async def test_owned_transaction_event_delivery_keeps_canonical_cursor_and_rejects_conflicts(tmp_path: Path, conflict: bool) -> None:
+    store = TurnLogStore(db_path=str(tmp_path / "log.db"))
+    await store.initialize()
+    payload = {"phase": "committed", "seq": 40, "evt_seq": 40}
+    await store.record(turn_id="tt", event_type="agent.context", payload=payload, event_id="evt_committed")
+    bus = TurnEventBus(log_sink=OrderedTurnLogSink(store), persist_before_live=True)
+    event = OrchestratorEvent(
+        event_type="agent.context",
+        turn_id="tt",
+        payload={"phase": "skipped" if conflict else "committed"},
+        durable_event_id="evt_committed",
+        persist_before_delivery=True,
+        deliver_existing_durable=True,
+    )
+    if conflict:
+        with pytest.raises(TerminalDurabilityAbort):
+            await bus.emit(event)
+        assert bus.snapshot() == []
+        return
+    assert await bus.emit(event)
+    assert event.seq == 40 and event.payload == payload
+    assert await bus.emit(OrchestratorEvent("done", "tt", {"status": "completed"}))
+    assert [item.seq for item in bus.snapshot()] == [40, 41]
+    assert not await bus.emit(event)
+    assert len(bus.snapshot()) == 2
+    assert len(await store.list_events("tt")) == 2
+
+
 async def test_terminal_diagnostics_survive_persist_and_replay_unchanged(
     tmp_path: Path,
 ) -> None:

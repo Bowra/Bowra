@@ -145,6 +145,7 @@ class KbWorker:
         kb_model_registry: object | None = None,  # for resolving extractor_model catalog name → ModelSpec
         active_per_row_tasks_ref: dict | None = None,  # app.state dict for strong-ref task tracking
         ingestion_gate: object | None = None,
+        ingestion_authorizer: Callable | None = None,
     ) -> None:
         self._files = files_store
         self._store = store
@@ -175,6 +176,7 @@ class KbWorker:
         # app.state strong task ref (same Sprint 2 backfill pattern)
         self._active_per_row_tasks_ref = active_per_row_tasks_ref
         self._ingestion_gate = ingestion_gate
+        self._ingestion_authorizer = ingestion_authorizer
 
     async def parse_and_index(self, file_id: str, *, allow_terminal: bool = False, authorize: Callable[..., Awaitable[bool]] | None = None) -> None:
         auth_token = _PARSE_AUTHORIZER.set(authorize)
@@ -196,7 +198,7 @@ class KbWorker:
         if file is None:
             logger.warning("parse_and_index: file_id=%s not found", file_id)
             return
-        if generation_writes_enabled() or getattr(file, "active_generation_id", None):
+        if generation_writes_enabled() or getattr(file, "ingestion_action_id", None) or getattr(file, "active_generation_id", None):
             from datetime import UTC, datetime, timedelta
 
             generations = KbGenerationStore(self._files._db_path)
@@ -305,7 +307,15 @@ class KbWorker:
             logger.warning("parse_and_index: file_id=%s not found", file_id)
             return
         authorize = _PARSE_AUTHORIZER.get()
+        if file.ingestion_action_id and authorize is None:
+            authorize = self._ingestion_authorizer
+            if authorize is None:
+                await self._files.fail_unstarted_ingestion(file, reason="knowledge_current_authorization_unavailable")
+                return
+            _PARSE_AUTHORIZER.set(authorize)
         if authorize is not None and not await authorize(file):
+            if file.ingestion_action_id:
+                await self._files.fail_unstarted_ingestion(file, reason="knowledge_current_authorization_denied")
             return
         if not await self._files.claim_parse_start(file_id, allow_terminal=allow_terminal):
             logger.info("parse_and_index: file_id=%s not claimable (running, finished or deleted)", file_id)
@@ -315,7 +325,7 @@ class KbWorker:
         if file is None or file.soft_deleted_at:
             return
 
-        if generation_writes_enabled() or getattr(file, "active_generation_id", None):
+        if generation_writes_enabled() or getattr(file, "ingestion_action_id", None) or getattr(file, "active_generation_id", None):
             _PARSE_OWNER.set((file_id, file.version, file.parse_attempts))
         try:
             if authorize is not None and not await authorize(file):
@@ -335,7 +345,7 @@ class KbWorker:
                     audit_error=PARSE_ERROR_TIMEOUT,
                 )
                 return
-            if load_result is None or _PARSE_AUTHORIZER.get() is not None:
+            if load_result is None or (_PARSE_AUTHORIZER.get() is not None and not file.ingestion_action_id):
                 return
             # Writes used reread file row (scope may change during parse); structured extraction follows same row.
             file = await self._files.get(file_id) or file
@@ -364,7 +374,7 @@ class KbWorker:
         await self._update_status(file_id, "failed", parse_error=parse_error)
         emit_audit("kb.parse_failed", {"file_id": file_id, "error": audit_error or parse_error})
         current = await self._files.get(file_id)
-        if not generation_writes_enabled() and not (current and current.active_generation_id):
+        if not generation_writes_enabled() and not (current and (current.active_generation_id or current.ingestion_action_id)):
             await self._purge_file_chunks(file_id)
 
     async def _purge_file_chunks(self, file_id: str) -> None:
@@ -512,7 +522,7 @@ class KbWorker:
         await self._update_status(file_id, "embedding")
         embeddings = await self._embed_all(docs)
 
-        if generation_writes_enabled() or getattr(file, "active_generation_id", None):
+        if generation_writes_enabled() or getattr(file, "ingestion_action_id", None) or getattr(file, "active_generation_id", None):
             published = await self._publish_generation(file, docs, embeddings, load_result, int((time.time() - t0) * 1000))
             return load_result if published else None
 
@@ -1273,7 +1283,9 @@ class KbWorker:
 
         load_result = None
         for attempt in range(_PARSE_MAX_ATTEMPTS):
-            fingerprint = generation_writes_enabled() or bool(getattr(file, "active_generation_id", None))
+            fingerprint = generation_writes_enabled() or bool(
+                getattr(file, "ingestion_action_id", None) or getattr(file, "active_generation_id", None)
+            )
             before = await self._source_identity(file) if fingerprint else None
             file_path = await self._fetch_artifact_path(file)
             try:
@@ -1288,7 +1300,7 @@ class KbWorker:
                     # to user); no transient flag → no retry.
                     return _bomb_load_result(bomb)
                 source_sha256 = None
-                if generation_writes_enabled() or getattr(file, "active_generation_id", None):
+                if generation_writes_enabled() or getattr(file, "ingestion_action_id", None) or getattr(file, "active_generation_id", None):
                     from bowhead_core.kb.source_integrity import hash_path
 
                     source_sha256 = await asyncio.to_thread(hash_path, file_path)

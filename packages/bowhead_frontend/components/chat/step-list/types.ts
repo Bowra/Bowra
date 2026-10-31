@@ -68,6 +68,8 @@ export interface SubStepResult {
 export interface StepOutputArtifact {
   artifactId: string;
   filename?: string;
+  title?: string;
+  description?: string;
   mime?: string;
   size?: number;
   dataRole?: "stdout" | "structured";

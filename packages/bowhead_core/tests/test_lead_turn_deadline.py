@@ -64,7 +64,6 @@ async def _run_with_probe(monkeypatch: pytest.MonkeyPatch, ctx: Any) -> dict[str
 
 @pytest.mark.asyncio
 async def test_turn_deadline_is_the_lead_loop_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BOWHEAD_LEAD_LOOP_HARD_TIMEOUT_SEC", "1800")
     seen = await _run_with_probe(monkeypatch, SimpleNamespace())
 
     assert seen["matches_loop_deadline"] is True
@@ -75,7 +74,6 @@ async def test_turn_deadline_is_the_lead_loop_deadline(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_retries_and_confirmations_stay_available_after_three_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A transient provider error 200 s into a turn is still retried; confirmations get a real window."""
-    monkeypatch.setenv("BOWHEAD_LEAD_LOOP_HARD_TIMEOUT_SEC", "1800")
     seen = await _run_with_probe(monkeypatch, SimpleNamespace())
 
     assert seen["late_retry_admitted"] is True
@@ -86,7 +84,6 @@ async def test_retries_and_confirmations_stay_available_after_three_minutes(monk
 @pytest.mark.asyncio
 async def test_resumed_turn_uses_its_remaining_turn_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """A checkpoint's legacy action deadline of 0 no longer removes the resumed turn's retries."""
-    monkeypatch.setenv("BOWHEAD_LEAD_LOOP_HARD_TIMEOUT_SEC", "1800")
     checkpoint = SimpleNamespace(remaining_wallclock_s=600.0, remaining_action_deadline_s=0.0)
     ctx = SimpleNamespace(ordinary_lead_state=SimpleNamespace(checkpoint=checkpoint))
     seen = await _run_with_probe(monkeypatch, ctx)

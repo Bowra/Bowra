@@ -4,8 +4,8 @@ At compute peer subagent_return, scan tool_invocations for sandbox-derived
 artifacts that smell like a small numeric table but have no associated
 add_chart call. Emit auto-chart only when 5 conditions hold (AND-gate).
 
-Caller wires via ``self.tool_registry.execute("add_chart", payload, ctx)``
-in ``subagent.py`` peer-return path. See §4.2 in tech-r2.
+The subagent peer-return path requires an advertised ``add_chart`` and uses
+the guarded tool execution path. See §4.2 in tech-r2.
 """
 
 from __future__ import annotations
@@ -112,8 +112,8 @@ def collect_auto_chart_candidates(
 
     for inv in invs:
         args = inv.arguments if isinstance(inv.arguments, dict) else {}
-        # python_sandbox consumed inputs (skill_invoke arguments map)
-        inputs = args.get("inputs")
+        sandbox_args = _sandbox_arguments(inv)
+        inputs = sandbox_args.get("inputs") if sandbox_args is not None else None
         if isinstance(inputs, dict):
             for spec in inputs.values():
                 if isinstance(spec, dict) and spec.get("artifact_id"):
@@ -128,11 +128,9 @@ def collect_auto_chart_candidates(
     for inv in invs:
         if inv.error or not inv.result:
             continue
-        # Batch 5ⓑ: `python_exec` is the flat sandbox entrance, used by compute;
-        # failing to recognize it disables ι's auto-chart fallback for compute.
-        if inv.tool_name not in ("python_sandbox", "skill_invoke", "python_exec"):
+        if _sandbox_arguments(inv) is None:
             continue
-        # skill_invoke wraps the sandbox; its result.outputs has the same shape.
+        # Only the sandbox Skill shares the native sandbox output protocol.
         result = inv.result if isinstance(inv.result, dict) else {}
         outputs = result.get("outputs") or []
         if not isinstance(outputs, list):
@@ -177,6 +175,16 @@ def collect_auto_chart_candidates(
                     logger.info("auto_chart.cap_hit cap=%d", cap)
                     return candidates
     return candidates
+
+
+def _sandbox_arguments(inv: ToolInvocation) -> dict[str, Any] | None:
+    """Recognize sandbox producers and unwrap the Skill's nested inputs."""
+    args = inv.arguments if isinstance(inv.arguments, dict) else {}
+    if inv.tool_name in {"python_exec", "python_sandbox"}:
+        return args
+    if inv.tool_name == "skill_invoke" and args.get("name") == "python_sandbox":
+        return args["input"] if isinstance(args.get("input"), dict) else {}
+    return None
 
 
 def _looks_numeric_col(rows: list[list[Any]], col_idx: int) -> bool:

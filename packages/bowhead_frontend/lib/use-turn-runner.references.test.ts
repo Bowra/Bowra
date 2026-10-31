@@ -311,6 +311,7 @@ it.each(["success", "deferred", "error"])("settles reference draft cleanup befor
   await waitFor(() => expect(settled).toHaveBeenCalledWith(
     "send-original",
     mode === "success",
+    ...(mode === "success" ? [{ turnId: "t_reference", sessionId: "s_reference" }] : []),
   ));
   expect(beforeClear).toHaveBeenCalledWith("send-original", "original");
   expect(order).toEqual(mode === "success" ? ["draft", "journal"] : ["draft"]);

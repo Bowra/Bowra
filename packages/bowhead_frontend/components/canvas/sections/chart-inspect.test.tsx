@@ -68,6 +68,31 @@ afterEach(() => cleanup());
 beforeEach(() => mockEnsure.mockReset());
 
 describe("ChartInspect", () => {
+  it("discloses source and displayed units beside the data table", () => {
+    const data: ChartSpec = { kind: "line", title: "Revenue", row_count: 1,
+      columns: [{ key: "region", header: "Region", type: "categorical" }, { key: "amount", header: "Revenue", type: "numeric", unit: "万元" }],
+      rows: [{ region: "West", amount: 120.5 }] };
+    const view = render(<ChartInspect spec={data} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Data" }));
+    expect(screen.getByRole("columnheader", { name: "Revenue (元)" })).toBeInTheDocument();
+    expect(screen.getByText("1,205,000")).toBeInTheDocument();
+    expect(view.baseElement.querySelector("[data-chart-unit-note]")).toBeInTheDocument();
+  });
+  it("retains distinct source units in the data tab", () => {
+    const data: ChartSpec = { kind: "line", title: "Amounts", row_count: 1,
+      columns: [{ key: "date", header: "Date", type: "date" },
+        { key: "a", header: "Revenue (亿元)", type: "numeric", unit: "亿元" },
+        { key: "b", header: "Revenue (万元)", type: "numeric", unit: "万元" },
+        { key: "c", header: "Revenue (元)", type: "numeric", unit: "元" }],
+      rows: [{ date: "2026-01-02", a: 0.0009, b: 9, c: 90000 }] };
+    render(<ChartInspect spec={data} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Data" }));
+    expect(screen.getByRole("columnheader", { name: "Revenue (亿元)" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Revenue (万元)" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Revenue (元)" })).toBeInTheDocument();
+    expect(screen.getByText("0.0009")).toBeInTheDocument();
+  });
+
   it("★进层先补全量（排序/Top-N 基于半截数据就是假 Top10）", async () => {
     mockEnsure.mockResolvedValue({ spec: spec(98, 98), truncated: false, ok: true });
     render(<ChartInspect spec={spec(98, 50)} onClose={vi.fn()} />);

@@ -51,31 +51,32 @@ class ReferenceStartPreparationError(ValueError):
 
 
 # System Agents whose manifest grants are read on demand, as in their delegated runs.
-_ON_DEMAND_SKILL_SYSTEM_AGENTS = frozenset({"agent-coach"})
+_ON_DEMAND_SKILL_SYSTEM_AGENTS = frozenset({"agent-coach", "configuration-agent"})
 
 
 @functools.cache
-def _manifest_skill_grant_names(name: str) -> frozenset[str] | None:
+def _manifest_reference_grants(name: str) -> tuple[ExactSkillGrant, ...] | None:
+    from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
     from bowhead_core.agents.registry import AgentRegistry
-    from bowhead_core.system_skill_snapshot import parse_system_manifest_skill_grants
 
-    declared = AgentRegistry.bootstrap().get(name).skill_grants
-    return None if declared is None else frozenset(grant.name for grant in parse_system_manifest_skill_grants(declared))
+    # Use the original compiler so installed Plugin grants stay in the same contract.
+    return manifest_to_profile(AgentRegistry.bootstrap().get(name)).skill_runtime_grants
 
 
 def _only_manifest_reference_grants(name: str, definition: dict) -> bool:
-    """True when the profile's grants are exactly its system manifest's built-in reference packages."""
+    """Match the compiled manifest and its Plugins without admitting extra grants."""
     from bowhead_core.system_skill_snapshot import decode_system_skill_snapshot
 
     try:
         _, grants = decode_system_skill_snapshot(definition)
-        manifest_names = _manifest_skill_grant_names(name)
+        manifest_grants = _manifest_reference_grants(name)
     except (KeyError, ValueError):
         return False
-    if grants is None or manifest_names is None:
+    if grants is None or manifest_grants is None:
         return False
     return (
-        all(grant.kind == "builtin" and grant.distribution == "reference" for grant in grants) and {grant.name for grant in grants} == manifest_names
+        all(grant.kind == "builtin" and grant.distribution == "reference" and grant.permissions == ("read",) for grant in grants)
+        and grants == manifest_grants
     )
 
 
@@ -367,9 +368,9 @@ async def prepare_reference_system_start_admission(
             # baseline or explicit Skill selections; it cannot invent grants.
             sources = None
         elif not skills and capability is None and name in _ON_DEMAND_SKILL_SYSTEM_AGENTS and _only_manifest_reference_grants(name, definition):
-            # @Coach runs like delegated Coach: its manifest's built-in reference
-            # package is read with skill_read when needed, not injected as
-            # required input. The profile's exact read scope still applies.
+            # These specialists read their original manifest/Plugin packages on
+            # demand, as in delegated runs. Their exact read scope still applies;
+            # no package is promoted to mandatory input or granted new rights.
             sources = None
         if sources is not None:
             grants = exact_reference_skill_grants(definition)

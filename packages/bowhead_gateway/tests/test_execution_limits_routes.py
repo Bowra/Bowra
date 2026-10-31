@@ -15,9 +15,9 @@ URL = "/api/v1/team-settings/execution-limits"
 
 @pytest.fixture
 def client(app_ctx, monkeypatch):
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
     monkeypatch.setenv("BOWHEAD_SANDBOX_MAX_TIMEOUT", "600")
     monkeypatch.delenv("BOWHEAD_SKILL_WALL_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("BOWHEAD_CANVAS_HTML_MAX_BYTES", raising=False)
     app_ctx.app.include_router(team_settings.router)
     return TestClient(app_ctx.app)
 
@@ -35,6 +35,9 @@ async def test_admin_configuration_team_isolation_and_reset(client, app_ctx):
     view = client.get(URL, cookies=_as(app_ctx.owner))
     assert view.status_code == 200 and view.json()["is_default"] is True
     assert view.headers["cache-control"] == "private, no-store"
+    assert view.json()["html_max_bytes"] == 25 * 1024 * 1024
+    assert view.json()["defaults"]["html_max_bytes"] == 25 * 1024 * 1024
+    assert view.json()["ranges"]["html_max_bytes"]["max"] == 50 * 1024 * 1024
     saved = client.put(URL, cookies=_as(app_ctx.admin), json=body())
     assert saved.status_code == 200 and saved.json()["sandbox_default_timeout_s"] == 240
     assert client.get(URL, cookies=_as(app_ctx.owner)).json()["html_max_bytes"] == 8388608

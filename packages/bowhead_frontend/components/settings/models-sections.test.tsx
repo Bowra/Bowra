@@ -9,10 +9,14 @@ import {
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as bowraApi from "@/lib/bowra-connect-api";
 import { SettingsModels } from "@/components/settings/models";
 import * as configApi from "@/lib/llm-config-api";
 import * as verificationApi from "@/lib/llm-config-v2-api";
+import { ApiError } from "@/lib/api-client";
 import messages from "@/messages/zh-CN.json";
+
+vi.mock("@/lib/bowra-connect-api", () => ({ claimBowraImport: vi.fn(), startBowraConnection: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }));
 vi.mock("@/lib/config-copilot-lite", () => ({ refreshLiteState: vi.fn() }));
@@ -581,5 +585,64 @@ describe("Configuration Agent model review", () => {
     show("overview");
     await screen.findByText(messages.settings.models.configuration_proposal_stale);
     expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["config_version_conflict", "configuration_proposal_stale"],
+    ["proposal_state_conflict", "configuration_proposal_unavailable"],
+  ] as const)("explains a refused proposal read with %s", async (code, messageKey) => {
+    window.history.replaceState({}, "", "/team/settings/models/?configuration_proposal=ccd_refused");
+    vi.mocked(configApi.fetchModelConfigurationProposal).mockRejectedValue(new ApiError(409, "Proposal read refused", { code }));
+    show("overview");
+    await screen.findByText(messages.settings.models[messageKey]);
+    expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Bowra import", () => {
+  it("offers Bowra beside Add connection even without saved connections", async () => {
+    vi.mocked(configApi.fetchAdminLlmConfig).mockResolvedValue({ ...response, config: {}, features: { model_discovery_v2: true, bowra_connect: true } });
+    show("overview");
+    const button = await screen.findByRole("button", { name: "使用 Bowra 服务" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: messages.settings.models.overview.add_connection })).toBeTruthy();
+    expect(bowraApi.startBowraConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2])("stages %i models from an empty team and keeps Apply explicit", async (count) => {
+    window.history.replaceState({}, "", "/bowhead/team/settings/models?bowra_import=opaque-import");
+    vi.mocked(configApi.fetchAdminLlmConfig).mockResolvedValue({ ...response, config: {}, features: { model_discovery_v2: true, bowra_connect: true } });
+    vi.mocked(bowraApi.claimBowraImport).mockResolvedValue({ base_url: "https://api.bowra.test/custom/v1", api_key: "private-bowra-key", models: ["first", "second"].slice(0, count) });
+    show("overview");
+    await screen.findByText(messages.settings.models.bowra.imported);
+    const primary = document.querySelector<HTMLSelectElement>('select[name="primary_model"]');
+    expect(primary).not.toBeNull();
+    expect(primary?.value).toBe(count === 1 ? "bowra::first" : "");
+    expect(window.location.pathname).toBe("/bowhead/team/settings/models/");
+    expect(window.location.search).toBe("");
+    expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
+    expect(bowraApi.claimBowraImport).toHaveBeenCalledTimes(1);
+    if (count === 2) fireEvent.change(primary!, { target: { value: "bowra::second" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.models.v4.review }));
+    await waitFor(() => expect(configApi.validateAdminLlmConfig).toHaveBeenCalledWith(expect.objectContaining({
+      providers: expect.objectContaining({ bowra: expect.objectContaining({ type: "openai_compatible", base_url: "https://api.bowra.test/custom/v1", api_key: "private-bowra-key" }) }),
+      tiers: expect.objectContaining({ primary: { provider: "bowra", model: count === 1 ? "first" : "second" } }),
+    }), 7));
+    expect(configApi.saveAdminLlmConfig).not.toHaveBeenCalled();
+  });
+
+  it("keeps an existing primary and adds a distinct connection", async () => {
+    window.history.replaceState({}, "", "/team/settings/models/?bowra_import=opaque-import");
+    vi.mocked(configApi.fetchAdminLlmConfig).mockResolvedValue({ ...response, config: { ...config, providers: { ...config.providers, bowra: config.providers.corp } } });
+    vi.mocked(bowraApi.claimBowraImport).mockResolvedValue({ base_url: "https://api.bowra.test/custom/v1", api_key: "private-bowra-key", models: ["new-model"] });
+    show("overview");
+    await screen.findByText(messages.settings.models.bowra.imported);
+    expect(document.querySelector<HTMLSelectElement>('select[name="primary_model"]')?.value).toBe("corp::model-a");
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.models.v4.review }));
+    await waitFor(() => expect(configApi.validateAdminLlmConfig).toHaveBeenCalledWith(expect.objectContaining({
+      providers: expect.objectContaining({ bowra: config.providers.corp, bowra_2: expect.objectContaining({ base_url: "https://api.bowra.test/custom/v1", api_key: "private-bowra-key" }) }),
+      tiers: config.tiers,
+    }), 7));
   });
 });

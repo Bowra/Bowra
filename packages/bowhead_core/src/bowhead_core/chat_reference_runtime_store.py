@@ -439,6 +439,9 @@ REFERENCE_LEAD_RESUME_SQL = f"""EXISTS (
  AND CASE WHEN json_valid(q.resume_context_json) THEN json_extract(q.resume_context_json,'$.reference_continuation.source_hash') END=p.source_hash
  AND CASE WHEN json_valid(q.resume_context_json) THEN json_extract(q.resume_context_json,'$.reference_continuation.composition_digest') END=r.composition_digest
  AND q.session_id=d.session_id
+ AND NOT EXISTS (SELECT 1 FROM chat_reference_resolutions started
+                 WHERE started.turn_id=p.turn_id AND started.resolution_seq=2
+                 AND started.created_generation<t.execution_generation)
  AND t.execution_generation>1 AND d.lease_execution_generation=t.execution_generation
  AND d.lease_kind='resume' AND {REFERENCE_RECOVERY_DISPATCH_SQL}
 )"""
@@ -464,6 +467,24 @@ REFERENCE_LEAD_POSTDISPATCH_RESUME_SQL = f"""EXISTS (
 )"""
 
 
+def _late_lead_postdispatch_resume_sql() -> str:
+    # Import only after store initialization: the immutable migration retains
+    # the exact reviewed origin predicate and imports older store factories.
+    from importlib import import_module
+
+    origin = import_module("bowhead_core.migrations.versions.0209_reference_question_origin").late_origin_metadata_sql(
+        plan="p", original="original", actual="actual", card="q", dispatch="d"
+    )
+    return REFERENCE_LEAD_POSTDISPATCH_RESUME_SQL.replace("actual.created_generation=1", "actual.created_generation>1", 1).replace(
+        "t.execution_generation=2 AND d.lease_execution_generation=2",
+        "t.execution_generation>actual.created_generation AND d.lease_execution_generation=t.execution_generation "
+        "AND NOT EXISTS (SELECT 1 FROM chat_reference_lead_postdispatch_attempts used "
+        "WHERE used.turn_id=t.id AND used.generation<>t.execution_generation) "
+        f"AND {origin}",
+        1,
+    )
+
+
 async def is_reference_runtime_in_connection(db: aiosqlite.Connection, *, turn_id: str) -> bool:
     _transaction(db)
     if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_resolutions'", ()) is None:
@@ -475,6 +496,8 @@ async def is_reference_runtime_in_connection(db: aiosqlite.Connection, *, turn_i
     if await _row(db, f"SELECT 1 FROM turns t WHERE t.id=? AND {REFERENCE_LEAD_RESUME_SQL}", (turn_id,)) is not None:
         return True
     if await _row(db, f"SELECT 1 FROM turns t WHERE t.id=? AND {REFERENCE_LEAD_POSTDISPATCH_RESUME_SQL}", (turn_id,)) is not None:
+        return True
+    if await _row(db, f"SELECT 1 FROM turns t WHERE t.id=? AND {_late_lead_postdispatch_resume_sql()}", (turn_id,)) is not None:
         return True
     if not await installed(db):
         return False
@@ -571,7 +594,11 @@ async def settle_reference_primary_in_connection(db: aiosqlite.Connection, *, tu
     """
     _transaction(db)
     if not await is_reference_recoverable_in_connection(db, turn_id=turn_id):
-        raise ValueError("reference_recovery_not_supported")
+        from bowhead_core.documents.agent_caller import _document_reference_lifecycle_in_tx
+
+        native = await _document_reference_lifecycle_in_tx(db, turn_id=turn_id)
+        if native is None or status == "completed" and native != "consumed":
+            raise ValueError("reference_recovery_not_supported")
     row = await _row(
         db, "SELECT e.id,e.status FROM turn_agent_binding b JOIN turn_agent_execution e ON e.id=b.primary_execution_id WHERE b.turn_id=?", (turn_id,)
     )
@@ -586,6 +613,10 @@ async def settle_reference_primary_in_connection(db: aiosqlite.Connection, *, tu
         db, "SELECT e.id,e.status FROM turn_agent_binding b JOIN turn_agent_execution e ON e.id=b.primary_execution_id WHERE b.turn_id=?", (turn_id,)
     )
     if status == "clarification_pending":
+        from bowhead_core.documents.agent_caller import document_reference_pause_in_tx
+
+        if row["status"] == "completed" and await document_reference_pause_in_tx(db, turn_id=turn_id, execution_id=row["id"]):
+            return
         if row["status"] not in ("running", "admitted") or not await pause_ready(db, turn_id=turn_id):
             raise ValueError("reference_continuation_not_supported")
         return

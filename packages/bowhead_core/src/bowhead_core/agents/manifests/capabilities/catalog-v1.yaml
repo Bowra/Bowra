@@ -451,7 +451,7 @@ implementations:
     prompt_modules:
       - id: canvas-report-protocol
         version: 1
-        sha256: sha256:a5b858fd525ebbc92a9f1d55e29c7135c776ce4fe6187ce6ef9a0f4dd15c9f48
+        sha256: sha256:80d64fec0433fb0bfe3513031473d1e3ba0b2635ce36fe5c59d7920092698ab9
       # Delivery contract and body structure. `anchor_tools` separately narrows each to executors holding that tool family,
       # because this implementation has empty `required_tools` (dependencies are expressed through the Adapter's delegate_tools).
       - id: canvas-delivery-protocol

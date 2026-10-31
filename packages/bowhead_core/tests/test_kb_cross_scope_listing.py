@@ -73,8 +73,20 @@ async def test_cross_scope_listing_is_the_ordered_union_of_single_scopes(files: 
 
         assert [r.file_id for r in rows] == [r.file_id for r in expected]
         assert expected, filters
+        sample = await files.list_for_scopes_filtered(
+            team_id=TEAM, personal_owner_id="u_a", space_id="ws_a", team_scope_id=TEAM, candidate_limit=3, **filters
+        )
+        assert [r.file_id for r in sample] == [r.file_id for r in expected[:3]]
+        chosen = (expected[-1].file_id,)
+        selected = await files.list_for_scopes_filtered(
+            team_id=TEAM, personal_owner_id="u_a", space_id="ws_a", team_scope_id=TEAM, candidate_limit=1, allowed_file_ids=chosen, **filters
+        )
+        assert [r.file_id for r in selected] == list(chosen)
     assert await files.list_for_scopes_filtered(team_id=TEAM, personal_owner_id=None, space_id=None, team_scope_id=None) == []
     assert await files.list_for_scopes_filtered(team_id="", personal_owner_id="u_a", space_id="ws_a", team_scope_id=TEAM) == []
+    for limit in (0, 257, True, 1.5):
+        with pytest.raises(ValueError, match="candidate limit"):
+            await files.list_for_scopes_filtered(team_id=TEAM, personal_owner_id="u_a", space_id="ws_a", team_scope_id=TEAM, candidate_limit=limit)
 
 
 async def test_other_team_rows_are_excluded_in_sql(files: KbFilesStore) -> None:

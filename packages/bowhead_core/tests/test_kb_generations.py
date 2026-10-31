@@ -434,3 +434,22 @@ async def test_source_warning_persists_on_new_and_revised_report_sections(tmp_pa
     assert untouched.id not in {section.id for section in sections}
     await annotate_turn_report(ctx, PAUSED_NOTICE, paused=True)
     assert [s.rev for s in await canvas.list_sections_appended_by_turn("t_new", include_patches=True)] == [s.rev for s in sections]
+
+
+async def test_selected_files_constrain_each_vector_collection_before_recall(source):
+    other = await source.files.create(
+        artifact_id=str(source.path),
+        filename="other.md",
+        mime_type="text/markdown",
+        size_bytes=50,
+        scope="space",
+        scope_id="ws_test",
+        workspace_id="ws_test",
+        team_id="team_test",
+        uploaded_by="u_test",
+    )
+    await source.worker.parse_and_index(other)
+    results = await source.index.search(source.scope, [0.1, 0.2, 0.3], allowed_file_ids=(source.fid,))
+    assert results
+    assert {item["metadata"]["file_id"] for item in results} == {source.fid}
+    assert await source.index.search(source.scope, [0.1, 0.2, 0.3], allowed_file_ids=()) == []

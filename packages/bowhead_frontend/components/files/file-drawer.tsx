@@ -149,7 +149,6 @@ export function FileDrawer({
                 <dd>
                   <CategoryBadge
                     cls={cls}
-                    auto={file.in_kb && file.retention_hint === "long_term"}
                     onRemove={file.in_kb ? onRemoveFromKb : undefined}
                   />
                 </dd>

@@ -580,6 +580,41 @@ def resolve_revise_scope(units: Sequence[ScopeUnit], items: Iterable[Any]) -> tu
     return allowed, unresolved
 
 
+def user_mentions_chart_id(user_text: str, section_id: str) -> bool:
+    return bool(re.search(r"(?<![A-Za-z0-9_])" + re.escape(section_id) + r"(?![A-Za-z0-9_])", user_text))
+
+
+def resolve_chart_revise_scope(
+    sections: Sequence[Any], items: Iterable[str], *, user_text: str, this_turn_id: str | None
+) -> tuple[set[str], list[str]]:
+    """Resolve only an exact, user-named prior chart; never guess among duplicates."""
+    charts = [
+        section
+        for section in sections
+        if getattr(section, "kind", None) == "chart"
+        and not getattr(section, "superseded", False)
+        and not getattr(section, "hidden_for_chat_mode", False)
+        and is_prior_turn_section(section, this_turn_id)
+    ]
+    allowed: set[str] = set()
+    unresolved: list[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        matches = []
+        for chart in charts:
+            section_id = str(chart.id)
+            title = str((_payload(chart).get("spec") or {}).get("title") or "").strip()
+            if name not in {section_id, title} or not name:
+                continue
+            if user_mentions_chart_id(user_text, section_id) or (title and title in user_text):
+                matches.append(section_id)
+        if len(matches) == 1:
+            allowed.add(matches[0])
+        else:
+            unresolved.append(name)
+    return allowed, unresolved
+
+
 def note_revise_scope(bus: Any, allowed_ids: Iterable[str] | None) -> None:
     """记本轮修订允许改的段。同轮多个修订 spawn 取并集；**任一个没限范围 ⇒ 整轮不限**（不误伤那位 peer 的正常修订）。"""
     if bus is None:
@@ -738,21 +773,25 @@ async def emit_sections_superseded(bus: Any, *, canvas_id: str, turn_id: str | N
         logger.warning("canvas_revise.sections_superseded_emit_failed turn=%s n=%d err=%s", turn_id, len(section_ids), e)
 
 
-async def emit_section_patched(bus: Any, *, turn_id: str | None, canvas_id: str, section: Any, open_turn: bool = False) -> None:
+async def emit_section_patched(
+    bus: Any, *, turn_id: str | None, canvas_id: str, section: Any, open_turn: bool = False, require_delivery: bool = False
+) -> None:
     """`canvas.section_patched`（既有事件；契约一 update→patched）。payload 带 full section 作 patch（FE late-join upsert）
     与顶层 `seq`（IM 插入位，FE 忽略）。`open_turn` 先发一帧 `canvas.turn_streaming`（bus exactly-once）。
-    `report_tools._emit_section_patched(ctx)` 与 B1 收尾器的 chrome patch 共用。best-effort。"""
+    `report_tools._emit_section_patched(ctx)` 与 B1 收尾器的 chrome patch 共用。
+    With require_delivery, rejected updates are raised instead of logged as best effort.
+    """
     if bus is None or section is None:
         return
     from bowhead_core.events import OrchestratorEvent
 
     try:
         if open_turn:
-            with contextlib.suppress(Exception):
+            with contextlib.nullcontext() if require_delivery else contextlib.suppress(Exception):
                 await bus.emit(OrchestratorEvent(event_type="canvas.turn_streaming", turn_id=turn_id or "", payload={"turn_id": turn_id}))  # type: ignore[arg-type]
         rs = section.to_report_section()
         kind = rs.get("kind") if isinstance(rs, dict) else getattr(section, "kind", None)
-        await bus.emit(
+        sent = await bus.emit(
             OrchestratorEvent(
                 event_type="canvas.section_patched",  # type: ignore[arg-type]
                 turn_id=turn_id or "",
@@ -766,8 +805,12 @@ async def emit_section_patched(bus: Any, *, turn_id: str | None, canvas_id: str,
                 },
             )
         )
+        if require_delivery and sent is False:
+            raise RuntimeError("Canvas section update event was not accepted")
     except Exception as e:  # Emit failure must not break writes; retain a warning (review #6: original report_tools emitter warned)
         logger.warning("canvas_revise.section_patched_emit_failed turn=%s section=%s err=%s", turn_id, getattr(section, "id", None), e)
+        if require_delivery:
+            raise
 
 
 # ─── Batch B1-0: document blocks ──────────────────────────────────────────────
@@ -1992,6 +2035,8 @@ def canvas_changes_ledger(
                 removed.append({**item, "reason": "replaced"})
             elif own_turn and not getattr(s, "hidden_for_chat_mode", False):
                 added.append(item)
+            elif sid in patched_set and not getattr(s, "hidden_for_chat_mode", False):
+                patched.append({"section_id": sid, "kind": kind, "heading": item["title"]})
         elif sid in patched_set and not own_turn and not superseded:
             patched.append({"section_id": sid, "kind": kind, "heading": _section_heading(s)})
     return {

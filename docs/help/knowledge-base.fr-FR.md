@@ -40,7 +40,7 @@ Dans **Bibliothèque → Fichiers**, la colonne **Base de connaissances** indiqu
 
 L’ajout ne déplace ni ne copie le fichier ; il reste dans Fichiers.
 
-Les fichiers téléversés dans Fichiers et reconnus comme documents de référence durables (par exemple des grilles tarifaires ou des politiques internes) sont ajoutés automatiquement à votre base de connaissances personnelle et traités, afin que l’IA puisse s’y référer lorsque c’est pertinent. Si votre équipe n’a pas activé la base de connaissances ou n’a pas configuré de modèle pour celle-ci, le fichier reste uniquement dans Fichiers. Pour annuler un ajout automatique, cliquez sur **Retirer de la base de connaissances**. Le fichier lui-même n’est pas modifié.
+Téléverser dans Fichiers ou joindre un fichier au chat conserve uniquement le fichier. Sa classification comme référence durable ne l’ajoute pas à la base de connaissances. Choisissez **Ajouter à la base de connaissances**, téléversez depuis la page Connaissances ou demandez explicitement à l’Agent d’ajouter un fichier précis avec la visibilité souhaitée. L’Agent vérifie votre demande initiale et vos droits actuels ; une cible ambiguë nécessite une clarification. Le fichier devient consultable après traitement. Un ZIP joint au chat reste un seul fichier, sans décompression ni indexation ; importez ses documents depuis la page Connaissances. Le retrait de la base conserve l’original. Une ancienne demande ne l’ajoute pas à nouveau après retrait ; une nouvelle demande explicite le peut.
 
 ## État des fichiers
 

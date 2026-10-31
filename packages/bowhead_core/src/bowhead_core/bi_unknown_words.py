@@ -39,40 +39,22 @@ def denoise_unknown_words(words: Iterable[object]) -> list[str]:
 
 
 def engine_applied_no_filter(query_explain: object) -> bool:
-    """结构化口径存在、且没有 `filters` 键 ⇒ datarc 自报这一轮没有任何业务过滤条件生效。
-
-    只看**键在不在**：键名不随成员账户语言变，值才会变中英（2026-09-19 两实例实测）。
-    只有文本版的实例（没有结构化口径）返回 False——拿不到事实就不断言。
-    handler 与裁剪层共用这一个判据，别各写一份（一个概念 N 处实现）。
-    """
+    """Return whether the structured report omits its business-filter field."""
     return isinstance(query_explain, dict) and bool(query_explain) and "filters" not in query_explain
 
 
 def unfiltered_fact_note(words: Iterable[str]) -> str:
-    """交叉判定的事实句（G §2.5）：datarc 自报的实际口径里**没有任何业务过滤条件**。
-
-    只陈述事实、不下结论（用户拍板）：不说「数据错了」「不能用」，补救交给模型按既有分级处理。
-    会连「汇总」这类操作词一起命中——这句话对它们同样为真，只是噪声，由模型按分级规则忽略；
-    压掉它就得判「像不像实体」＝词表，用户已否。
-    """
-    quoted = "".join(f"「{w}」" for w in words)
-    return f"datarc 自报的实际执行口径里没有任何业务过滤条件——这一轮没有按{quoted}筛过。"
+    """Describe a missing business-filter field without inferring execution behavior."""
+    return "Datarc's structured query report contains no `filters` field."
 
 
 def unknown_words_note(words: Iterable[str]) -> str:
-    """「没认出」点名提示——bi_query handler 与裁剪层共用这一份措辞。
-
-    ⚠ 措辞只说「范围不对」，**不断言「没按它筛」**：2026-09-20 的 116 dogfood 里，
-    「省 包含 江西」这一句——值没进字典、`unknown_words` 命中，而引擎自报的执行口径
-    里**确实带着**「省包含江西」（`$like` 按字面走，不需要字典里有这个值）。
-    旧措辞「本结果没有按它筛选（会兜底返回未过滤的数据）」在这一档是假陈述。
-    真正「没筛」由 `unfiltered_fact_note` 按结构化口径的 `filters` 键确定性判定。
-    """
-    quoted = "".join(f"「{w}」" for w in words)
+    """Name parser-reported unknown words; interpretation belongs to the caller."""
+    quoted = ", ".join(f"「{word}」" for word in words)
     return (
-        f"⚠ datarc 没认出：{quoted}。它可能被整段忽略（返回的是**未过滤**的数据），"
-        "也可能作为字面条件进了查询却**一行都匹配不到**——两种情况下结果范围都不是用户问的那个。"
-        "先核对返回的维度值是不是用户问的范围；需要时用 bi_concept_resolve 或按常识展开，只用数据里有的值重查，并在结论里写明口径。"
+        f"Datarc's parser reported unrecognized words: {quoted}. "
+        "This signal alone does not establish whether those words were ignored or used as literal conditions. "
+        "Review the engine-reported query and returned values to decide whether to rephrase the query."
     )
 
 

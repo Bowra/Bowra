@@ -67,6 +67,7 @@ class _CacheEntry:
     # bi-absent-turn R3.1: empty refs reason ("no_identity" | "zero_workspaces";
     # nonempty refs = ""). Shares the refs' lifecycle (same entry, no separate caching/expiry).
     reason: str = ""
+    client: Any = field(default=None, repr=False)
     at: float = field(default_factory=time.monotonic)
 
     def fresh(self) -> bool:
@@ -80,7 +81,7 @@ class ConnectorContextService:
     def __init__(self, *, user_store: Any, user_memory_store: Any) -> None:
         self._user_store = user_store
         self._user_memory = user_memory_store
-        self._cache: dict[str, _CacheEntry] = {}
+        self._cache: dict[tuple[int, str], _CacheEntry] = {}
 
     # ── Trusted identity ladder (PRD §3.2) ─────────────────────
 
@@ -146,18 +147,22 @@ class ConnectorContextService:
         self,
         datarc_client: Any,
         user_id: str,
+        *,
+        refresh: bool = False,
     ) -> tuple[DatarcWorkspaceRef, ...]:
         """该用户可及的北极九章工作区集合（缓存后）。无身份/无账号/无工作区 → 空 tuple.
 
         bi-absent-turn R3.1: 薄壳——原因枚举见 ``accessible_workspaces_ex``。旧调用
         （picker `auth.py` + 存量测试）零改动。"""
-        refs, _reason = await self.accessible_workspaces_ex(datarc_client, user_id)
+        refs, _reason = await self.accessible_workspaces_ex(datarc_client, user_id, refresh=refresh)
         return refs
 
     async def accessible_workspaces_ex(
         self,
         datarc_client: Any,
         user_id: str,
+        *,
+        refresh: bool = False,
     ) -> tuple[tuple[DatarcWorkspaceRef, ...], str]:
         """Return accessible workspaces and the reason an authorization lookup is unavailable.
 
@@ -166,10 +171,12 @@ class ConnectorContextService:
         may still yield usable workspaces after a partial failure; those refs
         remain available to fresh turns but not authoritative for replay.
         """
-        ent = self._cache.get(user_id)
-        if ent is not None and ent.fresh():
+        cache_key = (id(datarc_client), user_id)
+        ent = self._cache.get(cache_key)
+        if ent is not None and ent.fresh() and not refresh:
             _metric("cache_hit")
             return ent.refs, ent.reason
+        self._cache = {key: entry for key, entry in self._cache.items() if entry.fresh() and key != cache_key}
         refs: tuple[DatarcWorkspaceRef, ...] = ()
         account_uid = ""
         if datarc_client is not None:
@@ -214,10 +221,12 @@ class ConnectorContextService:
                     _metric("identity_error")
                     return refs, "transient"
         reason = "" if refs else ("no_identity" if not account_uid else "zero_workspaces")
-        self._cache[user_id] = _CacheEntry(refs=refs, account_uid=account_uid, reason=reason)
+        self._cache[cache_key] = _CacheEntry(refs=refs, account_uid=account_uid, reason=reason, client=datarc_client)
         _metric("resolved" if refs else reason)
         return refs, reason
 
     def invalidate_user(self, user_id: str) -> None:
         """手动清缓存——工具面板「重新检测」（PRD §3.2 负缓存工单面）+ 撤权即时生效通道."""
-        self._cache.pop(user_id, None)
+        for key in tuple(self._cache):
+            if key[1] == user_id:
+                self._cache.pop(key, None)

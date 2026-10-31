@@ -124,7 +124,7 @@ def test_can_write_team_must_be_caller_team_admin() -> None:
     """[P0-R1] team scope_id 必须是 caller 当前 team + admin role."""
     ctx = _make_ctx(team_id="team_5")
     # admin OK
-    assert KbPermission.can_write_to_scope("team", "team_5", ctx, "ws_admin")
+    assert not KbPermission.can_write_to_scope("team", "team_5", ctx, "ws_admin")
     assert KbPermission.can_write_to_scope("team", "team_5", ctx, "team_admin")
     # Ordinary user denied even within same team.
     assert not KbPermission.can_write_to_scope("team", "team_5", ctx, "user")

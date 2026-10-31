@@ -12,7 +12,7 @@ from typing import Any, Final
 from bowhead_router.types import ToolSchema
 
 from bowhead_core.config_copilot import POLICY_GENERATED, FormRegistration, LiteApplyError, get_form
-from bowhead_core.configuration_contracts import DOMAINS, domain_enabled
+from bowhead_core.configuration_contracts import DOMAINS
 from bowhead_core.configuration_settings_target import validate_settings_target
 from bowhead_core.events import make_event
 from bowhead_core.language_context import german_ai_output_enabled
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 AGENT_NAME = "configuration-agent"
 TOOL_SUBMIT = "configuration_submit"
+MAX_SUBMISSION_CHARS = 2000
 FORM_SKILLS = {name: domain.skill for name, domain in DOMAINS.items()}
 SUPPORTED_FORMS: Final = frozenset(FORM_SKILLS)
 # Forms bound to the current Space: they need a Space in the target and their proposals stay on it.
@@ -43,40 +44,10 @@ def configuration_form_fields(form_id: str) -> frozenset[str]:
 
 def _read_schema(reg: FormRegistration, fields: dict[str, Any], choices: dict[str, list[Any]]) -> dict[str, Any]:
     """Project trusted field documentation onto this authorized read, including only reachable definitions."""
-    source = reg.schema.model_json_schema()
-    properties = {name: copy.deepcopy(prop) for name, prop in source.get("properties", {}).items() if name in fields}
-    for name, values in choices.items():
-        if name not in properties:
-            continue
-        prop = properties[name]
-        for branch in [prop, *prop.get("anyOf", [])]:
-            if "enum" in branch:
-                branch["enum"] = [value for value in branch["enum"] if value is None or value in values]
-    schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
-    required = [name for name in source.get("required", []) if name in properties]
-    if required:
-        schema["required"] = required
-    definitions = source.get("$defs", {})
-    selected: dict[str, Any] = {}
+    from bowhead_core.configuration_field_guidance import field_contract, project_schema
 
-    def include_references(node: Any) -> None:
-        if isinstance(node, dict):
-            ref = node.get("$ref", "")
-            if isinstance(ref, str) and ref.startswith("#/$defs/"):
-                name = ref.removeprefix("#/$defs/")
-                if name not in selected and name in definitions:
-                    selected[name] = copy.deepcopy(definitions[name])
-                    include_references(selected[name])
-            for value in node.values():
-                include_references(value)
-        elif isinstance(node, list):
-            for value in node:
-                include_references(value)
-
-    include_references(properties)
-    if selected:
-        schema["$defs"] = selected
-    return schema
+    schema = project_schema(reg.schema.model_json_schema(), set(fields), choices)
+    return field_contract(reg.form_id, schema)["schema"]
 
 
 def _field_constraints(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -133,6 +104,20 @@ def _target(ctx: ToolExecutionContext) -> tuple[str, ...]:
     return tuple(str(getattr(ctx, name, "") or "") for name in ("user_id", "team_id", "workspace_id", "session_id", "turn_id"))
 
 
+def _selected_canvas_recovery(selected_form: str, requested_form: str) -> dict[str, str]:
+    return {
+        "selected_form_id": selected_form,
+        "requested_form_id": requested_form,
+        "selected_page": DOMAINS[selected_form].page,
+        "requested_page": DOMAINS[requested_form].page,
+        "message": (
+            "This send is restricted to the selected settings Canvas. Close that Canvas, then send a new request "
+            "to read or open the requested settings form. Do not retry another form within this turn. "
+            "Forms can share a settings page while using separate Canvas selections; do not invent a separate page."
+        ),
+    }
+
+
 async def prepare_configuration_agent(
     ctx: ToolExecutionContext, *, form_id: str = "", intent_quote: str = ""
 ) -> tuple[ToolExecutionContext | None, str | dict[str, Any]]:
@@ -144,9 +129,13 @@ async def prepare_configuration_agent(
     admitted = getattr(ctx, "configuration_settings_target", None)
     if admitted is not None:
         if form_id and form_id != admitted.target.form_id:
-            return None, {"ok": False, "error": "configuration_target_mismatch"}
+            return None, {
+                "ok": False,
+                "error": "configuration_target_mismatch",
+                **_selected_canvas_recovery(admitted.target.form_id, form_id),
+            }
         form_id = admitted.target.form_id
-    if form_id and (form_plugin_disabled(ctx, form_id) or not domain_enabled(form_id)):
+    if form_id and (form_plugin_disabled(ctx, form_id) or form_id not in SUPPORTED_FORMS):
         return None, {"ok": False, "error": "configuration_form_unavailable"}
     target = _target(ctx)
     if not all(target[index] for index in (0, 1, 3, 4)) or (form_id in SPACE_FORMS and not target[2]):
@@ -260,6 +249,7 @@ async def _read(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, An
         "review_page": reg.review_page,
         **({"revision": result["data"][reg.lite_revision_field]} if reg.lite_revision_field else {}),
         **({"parameter_profiles": result["data"]["parameter_profiles"]} if "parameter_profiles" in result["data"] else {}),
+        **({"runtime_controls": result["data"]["runtime_controls"]} if form_id == "team_run_limits" and "runtime_controls" in result["data"] else {}),
         "field_constraints": _field_constraints(schema),
         "allowed_values": choices,
         "editable_fields": sorted(fields) if editable else [],
@@ -390,12 +380,25 @@ async def _submit_handler(args: dict[str, Any], ctx: ToolExecutionContext) -> di
     if binding is None:
         return {"ok": False, "error": "configuration_execution_not_admitted"}
     message = args.get("message")
-    if set(args) != {"message"} or not isinstance(message, str) or not message.strip() or len(message) > 2000:
+    if set(args) != {"message"} or not isinstance(message, str) or not message.strip():
         return {
             "ok": False,
             "error": "invalid_configuration_submission",
             "expected_arguments": {"message": "A non-empty receipt-based explanation of at most 2000 characters."},
             "message": "Call configuration_submit with only message. Do not pass form_id, proposal_id, status, saved or receipts.",
+        }
+    if len(message) > MAX_SUBMISSION_CHARS:
+        return {
+            "ok": False,
+            "error": "invalid_configuration_submission",
+            "reason": "message_too_long",
+            "actual_chars": len(message),
+            "max_chars": MAX_SUBMISSION_CHARS,
+            "message": (
+                f"Shorten message to at most {MAX_SUBMISSION_CHARS} characters, then call configuration_submit again. "
+                "Briefly state the result and next review step; do not repeat field schemas or JSON. "
+                "Existing receipts and the pending suggestion are preserved. Do not repeat reads or proposals."
+            ),
         }
     forms = set(binding.baselines)
     for receipt in binding.receipts:
@@ -448,9 +451,15 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
             form_id = args.get("form_id")
             if binding is None:
                 return {"ok": False, "error": "configuration_execution_not_admitted"}
-            if form_id not in SUPPORTED_FORMS or (binding.form_id and binding.form_id != form_id):
+            if form_id not in SUPPORTED_FORMS:
                 return {"ok": False, "error": "configuration_form_not_admitted"}
-            if form_plugin_disabled(ctx, form_id) or not domain_enabled(form_id):
+            if binding.form_id and binding.form_id != form_id:
+                admitted = getattr(ctx, "configuration_settings_target", None)
+                recovery = (
+                    _selected_canvas_recovery(binding.form_id, form_id) if admitted is not None and admitted.target.form_id == binding.form_id else {}
+                )
+                return {"ok": False, "error": "configuration_form_not_admitted", **recovery}
+            if form_plugin_disabled(ctx, form_id):
                 return {"ok": False, "error": "configuration_form_unavailable"}
             rejection = await validate_settings_target(ctx, form_id)
             if rejection is not None:
@@ -483,7 +492,7 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
             return {"ok": False, "error": "configuration_execution_not_admitted"}
         entries = []
         for form_id, domain in DOMAINS.items():
-            if (binding.form_id and binding.form_id != form_id) or not domain_enabled(form_id) or form_plugin_disabled(ctx, form_id):
+            if (binding.form_id and binding.form_id != form_id) or form_plugin_disabled(ctx, form_id):
                 continue
             if get_form(form_id) is None:
                 continue
@@ -588,11 +597,12 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
             TOOL_SUBMIT,
             "Mandatory final delivery for every outcome, including read-only, errors and suggestions awaiting user confirmation. "
             "Call immediately when the requested work is done; plain assistant text is not delivery. "
-            "Pass only message, grounded in actual Tool receipts. Label current values default or saved without inferring past choices. "
+            "Pass only a concise message of at most 2000 characters, grounded in actual Tool receipts; do not repeat schemas or full JSON. "
+            "Label current values default or saved without inferring past choices. "
             "For a pending suggestion, say it is saved for review and settings have not changed. "
             "For a clear unsupported request, state the limit briefly without offering other settings or follow-up work. "
             "For unspecified language, ask which setting before reading or suggesting. This does not save settings or confirm a suggestion.",
-            {"message": {"type": "string", "minLength": 1, "maxLength": 2000}},
+            {"message": {"type": "string", "minLength": 1, "maxLength": MAX_SUBMISSION_CHARS}},
             ["message"],
             _submit_handler,
         ),

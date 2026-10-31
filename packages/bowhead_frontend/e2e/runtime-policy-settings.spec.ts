@@ -20,12 +20,12 @@ for (const scenario of [
         await route.fulfill({ response, json: { ...body, effective: { ...body.effective, mode: scenario.theme } } });
       });
       const defaults = { turn_time_limit_s: 1800, step_limit: null, tool_call_limit: 300, model_call_time_limit_s: null as number | null };
-      let limits = { ...defaults, defaults, wrap_up_reserve_s: 300, is_default: true, version: "default", ranges: {
+      let limits = { ...defaults, defaults, runtime_controls: { contract: "agent-runtime-controls.v1", system_step_limit: 1000, effective_step_limit: 1000, stall_timeout_s: 300 }, wrap_up_reserve_s: 300, is_default: true, version: "default", ranges: {
         turn_time_limit_s: { min: 600, max: 36000 }, step_limit: { min: 1, max: 10000 },
         tool_call_limit: { min: 1, max: 10000 }, model_call_time_limit_s: { min: 30, max: 36000 },
       } };
       const writes: Record<string, unknown>[] = [];
-      const executionDefaults = { sandbox_default_timeout_s: 120, sandbox_max_timeout_s: 600, html_max_bytes: 5242880 };
+      const executionDefaults = { sandbox_default_timeout_s: 120, sandbox_max_timeout_s: 600, html_max_bytes: 26214400 };
       let executionLimits = { ...executionDefaults, defaults: executionDefaults, is_default: true, version: "default", ranges: {
         sandbox_default_timeout_s: { min: 5, max: 600 }, sandbox_max_timeout_s: { min: 5, max: 600 }, html_max_bytes: { min: 1, max: 52428800 },
       } };
@@ -72,6 +72,7 @@ for (const scenario of [
       await modelsPage.close();
       await page.goto("/team/settings/subagents/", { waitUntil: "domcontentloaded" });
       await page.getByRole("tab", { name: /^(Run limits|运行上限)$/ }).click();
+      await expect(page.getByText(/1000.*1000.*300/)).toBeVisible();
       const input = page.locator("#arl-model-call");
       await expect(input).toBeDisabled();
       await expect(page.getByRole("radio", { name: /^(Follow turn time|跟随单轮时长)$/ })).toHaveAttribute("aria-checked", "true");
@@ -81,6 +82,7 @@ for (const scenario of [
       await page.getByRole("button", { name: /^(Save|保存)$/ }).click();
       await expect.poll(() => writes.length).toBe(1);
       expect(writes[0].model_call_time_limit_s).toBe(900);
+      expect(writes[0]).not.toHaveProperty("runtime_controls");
       await expect(page.getByRole("button", { name: /^(Save|保存)$/ })).toBeHidden();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await input.scrollIntoViewIfNeeded();
@@ -93,7 +95,7 @@ for (const scenario of [
       const htmlMaximum = page.locator("#execution-html_max_bytes");
       await expect(sandboxDefault).toHaveValue("120");
       await expect(sandboxMaximum).toHaveValue("600");
-      await expect(htmlMaximum).toHaveValue("5");
+      await expect(htmlMaximum).toHaveValue("25");
       await sandboxMaximum.fill("60");
       await expect(sandboxDefault).toHaveAttribute("aria-invalid", "true");
       const executionSave = page.getByRole("button", { name: /^(Save sandbox and HTML limits|保存沙箱和 HTML 上限)$/ });

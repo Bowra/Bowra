@@ -1,0 +1,44 @@
+.details {
+  min-width: 0;
+}
+
+.toggle {
+  list-style: none;
+}
+
+.toggle::-webkit-details-marker {
+  display: none;
+}
+
+.details[open] > .toggle > svg {
+  transform: rotate(90deg);
+}
+
+.body {
+  display: grid;
+  gap: 16px;
+  padding-top: 12px;
+}
+
+.item {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.heading {
+  margin: 0;
+  font-weight: 600;
+}
+
+.label {
+  margin: 8px 0 4px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+
+.value {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -9530,10 +9530,6 @@ textarea {
   color: var(--c-accent);
   border-color: var(--c-accent-soft);
 }
-.cbadge.kb.auto {
-  border-style: dashed;
-  border-color: var(--c-accent);
-}
 .cbadge svg {
   flex: none;
   opacity: 0.9;
@@ -11237,7 +11233,7 @@ textarea {
   border-color: color-mix(in srgb, var(--c-warn) 42%, transparent);
   color: var(--c-warn);
 }
-.safe-html-preview-status button {
+.safe-html-preview-status > button {
   min-height: 28px;
   margin-left: auto;
   padding: 3px 8px;
@@ -11251,7 +11247,7 @@ textarea {
   cursor: pointer;
   font: 0.6875rem var(--font-v2-mono);
 }
-.safe-html-preview-status button:focus-visible {
+.safe-html-preview-status > button:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
 }
@@ -11621,13 +11617,12 @@ textarea {
 }
 .artifact-viewer-modal-panel {
   position: absolute;
-  inset: 5vh 5vw;
+  inset: 0;
   display: flex;
   flex-direction: column;
   background: var(--c-surface);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
-  box-shadow: var(--shadow-lg);
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
   z-index: 1;
 }
@@ -11892,7 +11887,10 @@ textarea {
     min-height: 44px;
     flex-wrap: wrap;
   }
-  .safe-html-preview-status button {
+  .safe-html-preview-status > button {
+    min-height: 44px;
+  }
+  .safe-html-preview-status [role="radio"] {
     min-height: 44px;
   }
   .video-artifact-stage {
@@ -11903,9 +11901,6 @@ textarea {
   }
   .video-artifact-meta select {
     min-height: 44px;
-  }
-  .artifact-viewer-modal-panel {
-    inset: 24px 10px;
   }
 }
 
@@ -23582,7 +23577,7 @@ textarea {
 }
 
 /* One report gutter and content track across split, maximized and results-reading panes.
- * Prose keeps its language-aware measure in ui-refresh-content.css; figures use the whole track.
+ * Prose uses a wider language-aware measure in ui-refresh-content.css; figures use the whole track.
  * Retained hidden reports must not change file/code gutters; the fixed export root is also excluded. */
 .v2-workspace .v2-ws-right-body:has(> .canvas-report-shell, > .results-object-surface:not([hidden]) .canvas-report-shell) {
   --report-inline-gutter: 32px;
@@ -23619,6 +23614,15 @@ textarea {
     .v2-workspace .v2-ws-right-body:has(> .canvas-report-shell, > .results-object-surface:not([hidden]) .canvas-report-shell) {
       --report-inline-gutter: 12px;
     }
+  }
+}
+@media (min-width: 1024px) {
+  .v2-workspace .v2-ws-right-body:has(.results-object-surface:not([hidden]) .canvas-report-shell[data-reading-width="wide"], > .canvas-report-shell[data-reading-width="wide"]) {
+    --report-inline-gutter: 12px;
+  }
+  .v2-workspace .canvas-report-shell[data-reading-width="wide"] {
+    max-width: none;
+    --report-content-measure: 100%;
   }
 }
 

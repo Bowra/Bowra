@@ -274,6 +274,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _configure_logging(settings.log_level, settings.log_format)
     log = structlog.get_logger()
     _load_dotenv_into_process(log)
+    from bowhead_core.agent_run_limits import get_runtime_controls
+
+    get_runtime_controls()
     log.info("gateway.starting", env=settings.env)
 
     app.state.team_model_boundary_ready = True
@@ -2064,6 +2067,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from bowhead_core.kb.ingestion_gate import TeamKbIngestionGate as _TeamKbIngestionGate
     from bowhead_core.team_kb_runtime import TeamKbRuntimeRegistry as _TeamKbRuntimeRegistry
 
+    from bowhead_gateway.knowledge_management import ingestion_authorizer
+
     _team_kb_ingestion_gate = _TeamKbIngestionGate()
     app.state.team_kb_ingestion_gate = _team_kb_ingestion_gate
     _team_kb_runtime_registry = _TeamKbRuntimeRegistry(
@@ -2079,6 +2084,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         row_extractor=_kb_row_extractor,
         active_per_row_tasks_ref=app.state.kb_per_row_tasks_by_file_id,
         ingestion_gate=_team_kb_ingestion_gate,
+        ingestion_authorizer=ingestion_authorizer(app),
     )
     await _team_kb_runtime_registry.start_background()
     app.state.team_kb_runtime_registry = _team_kb_runtime_registry
@@ -2441,6 +2447,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from bowhead_gateway.kb_authorization import kb_file_authorizer
 
     _kb_authorizer = kb_file_authorizer(user_store, access_control_store)
+    from bowhead_gateway.knowledge_management import KnowledgeManagementAccess
+
+    orchestrator.knowledge_management_access = KnowledgeManagementAccess(app)
     orchestrator.kb_file_authorizer = _kb_authorizer
     _kb_matrix_engine._file_authorizer = _kb_authorizer
     _kb_matrix_engine._artifact_store = artifact_store
@@ -4299,6 +4308,10 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(admin_llm_config_v2_routes.router, tags=["admin-llm-config-v2"])
+
+    from bowhead_gateway.routes import bowra_connect
+
+    app.include_router(bowra_connect.router)
 
     # ── Frontend static hosting (production single image: i18n dual builds + content negotiation) ──
     # BOWHEAD_FRONTEND_STATIC_DIR points to the frontend-static parent, containing:

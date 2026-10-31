@@ -19,9 +19,9 @@ def test_error_text_names_rejected_and_unauthorized():
     assert "reconcile_failed" in txt
     assert "户均" in txt and "recompute_mismatch" in txt  # Derived-value verification failed; give the reason.
     assert "43.9%" in txt and "exec_summary" in txt  # Unauthorized number; identify its field.
-    assert "重新 subagent_return" in txt  # Give the next action.
+    assert "call subagent_return again" in txt  # Give the next action.
 
 
 def test_error_text_empty_clean():
     txt = _ledger_error_text(ReconcileResult())
-    assert "reconcile_failed" in txt and "重新 subagent_return" in txt
+    assert "reconcile_failed" in txt and "call subagent_return again" in txt

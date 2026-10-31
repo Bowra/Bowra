@@ -1777,7 +1777,7 @@
 .am-ci-policies small { color: var(--c-ink-3); font-size: 0.75rem; }
 
 /* Proposals */
-.am-ci-proposals { display: grid; gap: 14px; }
+.am-ci-proposals { display: grid; gap: 14px; scroll-margin-block-start: calc(var(--theme-topbar-height, 52px) + 16px); }
 /* Pending rows (Claude Design "Agent Eval Alignment Loop" L0-d): members' shared thumbs-downs. One neutral type
    label, the question, actions at the row end and one muted meta line; hairline separators instead of cards. */
 .am-ci-pending { display: grid; gap: 4px; min-width: 0; background: var(--c-surface); border-radius: var(--r-4); box-shadow: 0 0 0 var(--hairline, 0.5px) var(--c-separator); padding: 4px 16px; }
@@ -2081,3 +2081,11 @@
 .am-create-no-space p { margin: 0; color: var(--c-ink-2); font-size: 0.8125rem; line-height: 1.6; }
 
 .am-create-no-space-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.am-knowledge-sources { display: grid; gap: 12px; min-width: 0; }
+.am-knowledge-sources > .am-release-subsection-heading { margin: 0; padding-top: 0; border-top: 0; }
+.am-knowledge-sources button { min-height: 44px; padding: 9px 13px; color: var(--c-ink); background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 10px; cursor: pointer; }
+.am-knowledge-sources button:disabled { opacity: 0.48; cursor: not-allowed; }
+.am-knowledge-sources label.am-optional-skill-selected { flex-direction: row; align-items: center; }
+.am-knowledge-sources input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--c-accent); }
+.am-knowledge-sources p { font-size: 0.75rem; line-height: 1.55; color: var(--c-ink-2); }

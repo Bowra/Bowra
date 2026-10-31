@@ -13,9 +13,11 @@ export function Field({
   style,
   className,
   suggestion,
+  help,
 }: {
   id: string;
   label: ReactNode;
+  help?: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
   children: ReactNode;
@@ -32,10 +34,11 @@ export function Field({
   const errorId = error ? `${id}-error` : undefined;
   return (
     <div className={["settings-field", className, suggestion ? styles.suggested : null].filter(Boolean).join(" ")} style={style}>
-      {suggestion ? (
+      {suggestion || help ? (
         <span className={styles.labelRow}>
           <label className="settings-field__label" htmlFor={id}>{label}</label>
-          <SuggestionBadge label={suggestion.label} onReveal={suggestion.onReveal} />
+          {help}
+          {suggestion ? <SuggestionBadge label={suggestion.label} onReveal={suggestion.onReveal} /> : null}
         </span>
       ) : (
         <label className="settings-field__label" htmlFor={id}>

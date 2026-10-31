@@ -23,6 +23,12 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_behavior_contract import AgentBehaviorDescriptor
 from bowhead_core.agent_behavior_flags import agent_behavior_m3_enabled
 from bowhead_core.agent_behavior_materializer import AgentBehaviorMaterializer, default_agent_behavior_materializer
+from bowhead_core.agent_knowledge_policy import (
+    KnowledgeAccessError,
+    require_knowledge_migration,
+    require_supported_knowledge_access,
+    source_bindings_enabled,
+)
 from bowhead_core.agent_listing_safety import scan_agent_listing
 from bowhead_core.resource_dependency_projection import (
     replace_subject_projection_conn,
@@ -105,6 +111,7 @@ class ExactAgentExecutionBinding:
     # Team Agents with Plugins: the authored (unexpanded) definition, so a run can tell directly
     # selected resources from Plugin contributions. Not part of the frozen, compared definition.
     authored_definition: dict[str, Any] | None = None
+    parent_execution_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +370,10 @@ class AgentExecutionBindingStore:
                     _require_resumable_execution(existing)
                     await db.commit()
                     return _binding_from_rows(existing, snapshot, listing=listing)
+                if source_kind == "system" and require_supported_knowledge_access(definition) is not None:
+                    if not source_bindings_enabled():
+                        raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
+                    await require_knowledge_migration(db)
                 execution_id = f"aex_{uuid4().hex}"
                 policy_fingerprint = _policy_fingerprint(
                     {
@@ -826,6 +837,10 @@ class AgentExecutionBindingStore:
                 )
                 return _binding_from_rows(existing, snapshot)
 
+            if require_supported_knowledge_access(definition_value) is not None:
+                if not source_bindings_enabled():
+                    raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
+                await require_knowledge_migration(db)
             if prepared_revision is None:
                 async with db.execute(
                     "SELECT 1 FROM system_agent_effective_revision WHERE team_id=? AND agent_id=? AND definition_hash=?",
@@ -1345,7 +1360,10 @@ class AgentExecutionBindingStore:
                 raise AgentExecutionBindingError("agent_completed_helper_changed")
             snapshot = await _team_snapshot_by_execution(db, execution)
             _validate_team_snapshot(snapshot)
-            if await _resolved_team_definition_json(db, team_id=scope.team_id, snapshot=current) != execution["resolved_definition_json"]:
+            if (
+                await _resolved_team_definition_json(db, team_id=scope.team_id, snapshot=current, admission=False)
+                != execution["resolved_definition_json"]
+            ):
                 raise AgentExecutionBindingError("agent_completed_helper_changed")
             return _binding_from_rows(execution, snapshot)
         finally:
@@ -2318,10 +2336,16 @@ async def _resolved_team_definition_json(
     *,
     team_id: str,
     snapshot: Mapping[str, Any],
+    admission: bool = True,
 ) -> str | None:
     from bowhead_core.system_plugins import BuiltinPluginSelectionError, expand_builtin_plugins
 
     definition = _decode_object(snapshot["definition_json"], "Agent definition")
+    if admission and require_supported_knowledge_access(definition) is not None:
+        if not source_bindings_enabled():
+            raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
+        await require_knowledge_migration(db)
+
     builtin_selected = bool(definition.get("builtin_plugin_ids"))
     try:
         team_selected = bool(selected_plugin_ids(definition))
@@ -2346,14 +2370,19 @@ def _binding_from_rows(
     listing: dict[str, Any] | None = None,
 ) -> ExactAgentExecutionBinding:
     source_kind = str(execution["agent_source_kind"])
+    columns = execution.keys()
     if source_kind == "team":
         # resolved_definition_json was added in 0123; old-schema rows lack it. Fall back to the snapshot definition
         # so admission reaches its *_migration_required checks instead of raising IndexError here.
         # (sqlite Row `in` compares values, not column names; call keys() first.)
-        columns = execution.keys()
         resolved = execution["resolved_definition_json"] if "resolved_definition_json" in columns else None
         definition = _decode_object(resolved if resolved is not None else snapshot["definition_json"], "Agent definition")
         authored = _decode_object(snapshot["definition_json"], "Agent definition") if resolved is not None else None
+        if authored is not None:
+            authored_policy = require_supported_knowledge_access(authored)
+            resolved_policy = require_supported_knowledge_access(definition)
+            if (authored_policy.canonical_value() if authored_policy else None) != (resolved_policy.canonical_value() if resolved_policy else None):
+                raise AgentExecutionBindingError("agent_knowledge_access_resolution_changed")
         listing_value = _decode_object(snapshot["listing_json"], "Agent listing")
     else:
         authored = None
@@ -2379,6 +2408,7 @@ def _binding_from_rows(
         status=str(execution["status"]),  # type: ignore[arg-type]
         behavior_descriptor=_behavior_descriptor_from_snapshot(snapshot),
         authored_definition=authored,
+        parent_execution_id=execution["parent_execution_id"] if "parent_execution_id" in columns else None,
     )
 
 
@@ -2439,6 +2469,11 @@ def _decode_object(value: object, name: str) -> dict[str, Any]:
         raise AgentExecutionBindingError("agent_snapshot_malformed") from exc
     if not isinstance(parsed, dict):
         raise AgentExecutionBindingError("agent_snapshot_malformed")
+    if name in {"Agent definition", "system Agent definition"}:
+        try:
+            require_supported_knowledge_access(parsed)
+        except KnowledgeAccessError as exc:
+            raise AgentExecutionBindingError(exc.code) from exc
     return parsed
 
 

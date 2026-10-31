@@ -216,6 +216,14 @@ def test_headline_post_hoc_strip() -> None:
     assert strip_response_kind_markers(text2) == "prosemore prose"
 
 
+def test_mismatched_enum_marker_agrees_live_and_persisted() -> None:
+    text = "<response_kind>chat</headline>\n\nThe file is available."
+    assert strip_response_kind_markers(text) == "The file is available."
+    assert "".join(_feed_charwise(text)) == "\n\nThe file is available."
+    repeated = "<response_kind>chat</response_kind>" + text
+    assert "".join(_feed_charwise(repeated)) == "\n\nThe file is available."
+
+
 def test_post_hoc_strip_leaves_no_leading_blank_lines() -> None:
     """Marker lines at the top used to leave "\\n\\n\\n\\n" before the answer."""
     text = "<response_kind>chat</response_kind>\n\n<headline>结论</headline>\n\n第一段。\n\n第二段。"

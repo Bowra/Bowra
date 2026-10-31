@@ -135,6 +135,37 @@ class DocumentExecutor:
         encoded = json.dumps(control, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         if len(encoded) > 256_000 or sum(len(item.content) for item in inputs) > 128 * 1024 * 1024:
             raise OfficePackageError("document_inputs_too_large")
+        directory, record = await self._dispatch(run_id, inputs, encoded, expected_image_id=expected_image_id)
+        try:
+            return await anyio.to_thread.run_sync(
+                lambda: read_result(
+                    directory / "output",
+                    image_id=record["image_id"],
+                    operation=operation,
+                    context_digest=context_digest,
+                    planner_profile=planner_profile,
+                )
+            )
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            if isinstance(exc, OfficePackageError):
+                raise
+            raise OfficePackageError("document_worker_output_invalid") from exc
+
+    async def _dispatch(
+        self,
+        run_id: str,
+        inputs: tuple[WorkerInput, ...],
+        encoded: bytes,
+        *,
+        expected_image_id: str | None,
+        profile: str = PROFILE,
+        return_failed: bool = False,
+    ) -> tuple[Path, dict]:
+        """Stage exact bytes and reconcile the original durable execution only."""
+        if re.fullmatch(r"[a-f0-9]{64}", run_id) is None or not 1 <= len(inputs) <= (9 if profile == "pptx-script-worker-v1" else 8):
+            raise OfficePackageError("document_worker_control_invalid")
+        if len(encoded) > 256_000 or sum(len(item.content) for item in inputs) > 128 * 1024 * 1024:
+            raise OfficePackageError("document_inputs_too_large")
         directory = self.root / ("document-" + run_id)
         directory.mkdir(mode=0o700, exist_ok=True)
         for path in (directory, directory / "input", directory / "output"):
@@ -154,6 +185,8 @@ class DocumentExecutor:
                 if _read_output(path, 32 * 1024 * 1024) != content:
                     raise OfficePackageError("document_worker_identity_mismatch") from None
         payload = {"run_id": run_id, "control_sha256": hashlib.sha256(encoded).hexdigest(), "expected_image_id": expected_image_id}
+        if profile != PROFILE:
+            payload["profile"] = profile
         async with httpx2.AsyncClient(headers={"X-Executor-Token": self.token}, timeout=20, follow_redirects=False, trust_env=False) as client:
             try:
                 reply = await client.post(self.url + "/document-runs", json=payload)
@@ -169,21 +202,14 @@ class DocumentExecutor:
                     reply = await client.get(self.url + "/document-runs/" + run_id)
                     reply.raise_for_status()
                     record = reply.json()
-            if record.get("run_id") != run_id or record.get("control_sha256") != payload["control_sha256"] or record.get("status") != "completed":
+            if (
+                record.get("run_id") != run_id
+                or record.get("control_sha256") != payload["control_sha256"]
+                or record.get("status") not in ({"completed", "failed"} if return_failed else {"completed"})
+            ):
                 raise OfficePackageError("document_worker_failed")
+            if profile != PROFILE and record.get("profile") != profile:
+                raise OfficePackageError("document_runtime_changed")
             if expected_image_id is not None and record.get("image_id") != expected_image_id:
                 raise OfficePackageError("document_runtime_changed")
-        try:
-            return await anyio.to_thread.run_sync(
-                lambda: read_result(
-                    directory / "output",
-                    image_id=record["image_id"],
-                    operation=operation,
-                    context_digest=context_digest,
-                    planner_profile=planner_profile,
-                )
-            )
-        except (KeyError, TypeError, ValueError, OSError) as exc:
-            if isinstance(exc, OfficePackageError):
-                raise
-            raise OfficePackageError("document_worker_output_invalid") from exc
+        return directory, record

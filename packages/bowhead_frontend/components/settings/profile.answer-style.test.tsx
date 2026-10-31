@@ -32,6 +32,7 @@ vi.mock("@/lib/auth-api", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   getUserSettings: () => getUserSettings(),
+  getUserSettingsView: async () => ({ settings: await getUserSettings() }),
   setUserSetting: (key: string, value: string) => setUserSetting(key, value),
   setWorkspaceSetting: vi.fn(),
 }));

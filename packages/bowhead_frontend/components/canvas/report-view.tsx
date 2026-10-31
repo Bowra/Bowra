@@ -159,6 +159,8 @@ export interface ReportViewHandle {
 
 export interface ReportViewProps {
   sections: ReportSection[];
+  /** Local reading layout; never persisted into the report or export. */
+  readingWidth?: "standard" | "wide";
   /** Visual/context contract only; both modes share the same editor and persistence state. */
   presentation?: "canvas" | "results-reading";
   /** Complete visible Canvas state used to validate Data/Code entries before export. */
@@ -338,6 +340,7 @@ export function gateReportSetContent(args: {
 
 export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function ReportViewImpl({
   sections: canonicalSections,
+  readingWidth = "standard",
   presentation = "canvas",
   exportSections: canonicalExportSections,
   isEditMode: forcedEditMode,
@@ -1348,6 +1351,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
         ref={reportRootRef}
         className={`canvas-report-shell${presentation === "results-reading" ? " results-reading" : ""}`}
         data-presentation={presentation}
+        data-reading-width={readingWidth}
         data-edit-mode={isEditMode ? "on" : "off"}
         data-can-edit={canEdit ? "true" : "false"}
         data-affordance-flash={affordanceFlash ? "on" : "off"}

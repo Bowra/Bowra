@@ -765,6 +765,43 @@ async def test_durable_step_started_failure_aborts_before_handler(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["reject", "raise", "close"])
+async def test_tool_result_rejection_fences_success_and_later_dispatch(failure_mode: str) -> None:
+    calls = 0
+
+    async def handler(args, ctx):
+        nonlocal calls
+        calls += 1
+        return {"ok": True, "artifact_id": "art_retained"}
+
+    class FailingResultBus(TurnEventBus):
+        async def emit(self, event):
+            if event.event_type == "tool_result":
+                if failure_mode == "raise":
+                    raise RuntimeError("result storage unavailable")
+                if failure_mode == "close":
+                    self._closed = True
+                    return await super().emit(event)
+                return False
+            return await super().emit(event)
+
+    runner = _make_runner({"produce_file": handler})
+    bus = FailingResultBus()
+    for call_id in ("first", "next"):
+        with pytest.raises(TerminalDurabilityAbort):
+            await runner._execute_tool(
+                ToolCall(id=call_id, name="produce_file", arguments={}),
+                _make_ctx(),
+                bus,
+                parent_turn_id="t_test",
+                subagent_id="entry",
+                running_profile="lead",
+            )
+    assert calls == 1
+    assert not any(event.event_type in {"tool_result", "step_done"} for event in bus._events)
+
+
+@pytest.mark.asyncio
 async def test_pbi_gate_emits_stable_code_and_typed_diagnostics() -> None:
     async def _unavailable(args: dict, ctx) -> Any:
         return {"ok": False, "error_kind": "pbi", "error_code": "pbi_connection_unavailable"}

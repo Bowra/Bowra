@@ -38,6 +38,9 @@ tools:
   allow:
     - bi_query
     - bi_schema
+    # Reuse the existing source tools when the user requests another workspace.
+    - tool_list_workspaces
+    - tool_switch_context
     # bi-hitl-cleanup B1 (2026-05-21): LLM-callable concept resolver
     # (atomic disambiguation tool, per Python source subagent.py:447).
     - bi_concept_resolve
@@ -76,6 +79,8 @@ tools:
     - web_map
     - web_crawl
     - add_chart
+    - read_chart
+    - edit_chart
     - add_image # dogfood-0708 F9: put python_sandbox matplotlib PNGs on canvas (previously no peer tool: PNGs were lost despite payload chart claims).
     # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
     # The write_report write path includes bake_report_markdown guards (M-B). read_report supports

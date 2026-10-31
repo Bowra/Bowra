@@ -16,6 +16,9 @@
  *   - logout everywhere → POST /api/v1/auth/logout-everywhere (all devices)
  */
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
+import type { FieldContract } from "@/lib/configuration-field-guidance";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AuthError, fetchMe, resendCurrentUserVerificationEmail, type MeUser } from "@/lib/auth-api";
@@ -30,7 +33,7 @@ import { FilterMenuButton } from "@/components/ui/filter-menu-button";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
 import { SaveBar } from "@/components/ui/save-bar";
-import { getUserSettings, setUserSetting } from "@/lib/api";
+import { getUserSettingsView, setUserSetting } from "@/lib/api";
 import { apiVoid } from "@/lib/api-client";
 import { AccountDeletionControl } from "@/components/settings/account-deletion";
 import { useCoachAfterEdit, type CoachAfterEdit } from "@/lib/agent-coach-after-edit";
@@ -49,6 +52,7 @@ export function SettingsProfile() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const localeT = useTranslations("locale");
+  const [fieldContract, setFieldContract] = useState<FieldContract>();
   const languagePrefs = useLanguagePreferences();
   const discardConfirm = useConfirmDialog();
 
@@ -69,7 +73,9 @@ export function SettingsProfile() {
     row?.querySelector<HTMLElement>("[data-testid='answer-language-button']")?.focus({ preventScroll: true });
   }, [accountLoaded]);
   useEffect(() => {
-    void getUserSettings().then((settings) => {
+    void getUserSettingsView().then((view) => {
+      setFieldContract(view.field_contract);
+      const settings = view.settings;
       const style = typeof settings.answer_style === "string"
         ? settings.answer_style
         : "detailed";
@@ -253,7 +259,7 @@ export function SettingsProfile() {
         </Row>
         <Row
           id="answer-language"
-          label={t("fields.answer_language")}
+          label={<span className="configuration-field-label">{t("fields.answer_language")}<ConfigurationFieldHelp contract={fieldContract} field="user_language.output_language" label={t("fields.answer_language")} /></span>}
           labelId="profile-answer-language"
           hint={t("answer_language_hint")}
         >
@@ -330,7 +336,7 @@ function Row({
   labelId,
   hint,
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
   /** Deep-link anchor (e.g. #answer-language from the account menu). */
   id?: string;

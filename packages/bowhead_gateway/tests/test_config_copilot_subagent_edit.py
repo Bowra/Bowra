@@ -118,7 +118,6 @@ async def test_revisioned_target_reads_working_copy_not_legacy_columns(
     fields = await forms._subagent_target_read(catalog)
     assert fields["system_prompt"] == "新版指令"
     assert fields["description"] == "新版说明"
-    assert fields["max_iterations"] == 15
 
 
 @pytest.mark.anyio

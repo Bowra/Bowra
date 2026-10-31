@@ -684,3 +684,27 @@ async def test_agent_skill_list_shows_only_the_agents_skills(assigned_case):
     case.ctx.skill_runtime_grants = None
     case.ctx.skill_runtime_scope = None
     assert "python_sandbox" in {entry["name"] for entry in await invoke(case, tool="skill_list", args={})}
+
+
+async def test_personal_skill_current_revision_retains_generated_cache_bytes(assigned_case):
+    import py_compile
+
+    from bowhead_core.agent_dependency_compiler import builtin_skill_bundle_revision, skill_bundle_revision
+    from bowhead_core.assigned_skill_execution import _current_revision
+
+    case = assigned_case
+    cache_path = Path(py_compile.compile(str(case.root / "scripts/run.py"), doraise=True))
+    cache = cache_path.read_bytes()
+    revision = "sha256:" + bundle_sha256(case.root)
+    assert revision == skill_bundle_revision(str(case.root))
+    assert revision != builtin_skill_bundle_revision(str(case.root))
+    assert await _current_revision(case.grant, Path(case.base.sources.instances.db_path), case.base.scope) == revision
+    read = await invoke(case, tool="skill_read", args={"name": "method"})
+    assert read["body"].strip() == "UPLOADED"
+    assert (await invoke(case))["ok"] is True
+    relative = cache_path.relative_to(case.root).as_posix()
+    assert case.calls[0]["files"][relative] == cache
+    cache_path.write_bytes(cache + b"changed cache bytes")
+    assert await _current_revision(case.grant, Path(case.base.sources.instances.db_path), case.base.scope) != revision
+    assert (await invoke(case))["ok"] is True
+    assert case.calls[1]["files"][relative] == cache + b"changed cache bytes"

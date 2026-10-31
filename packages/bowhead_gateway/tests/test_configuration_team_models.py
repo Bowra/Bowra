@@ -20,8 +20,7 @@ URL = "/api/v1/admin/llm-config"
 
 
 @pytest.fixture
-async def models(app, client, store, monkeypatch):
-    monkeypatch.setenv("FEATURE_CONFIGURATION_TEAM_SETTINGS", "1")
+async def models(app, client, store):
     await _seed_team(store)
     user = await store.create_user(team_id="team_llm", email="config@example.com", password="Passw0rd!")
     await store.set_team_creator("team_llm", user.id)
@@ -47,7 +46,7 @@ async def test_model_read_schema_and_assignment_review_use_original_apply(models
     assert read["ok"], read
     assert (
         models.config["providers"]["main"]["api_key"] not in str(read)
-        and "api_key" not in read["schema"]["$defs"]["ConfigurationProviderSettings"]["properties"]
+        and "api_key" not in read["schema"]["properties"]["providers"]["additionalProperties"]["properties"]
     )
     tiers = copy.deepcopy(read["fields"]["tiers"]["value"])
     tiers["fast"] = {"provider": "main", "model": "gpt-main"}
@@ -69,18 +68,41 @@ async def test_model_read_schema_and_assignment_review_use_original_apply(models
     assert client.get(proposal_url, cookies=models.cookies).json()["status"] == "applied"
 
 
-async def test_typed_runtime_parameters_preserve_false_and_nested_values(models, client):
+async def test_model_apply_retains_authorized_guidance_in_replacement_response(models, client):
+    before = client.get(URL, cookies=models.cookies).json()
+    candidate = copy.deepcopy(before["config"])
+    candidate["tiers"]["fast"] = {"provider": "main", "model": "gpt-main"}
+    response = _apply_config(client, URL, json={"config": candidate, "expected_version": before["version"]}, cookies=models.cookies)
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    after = client.get(URL, cookies=models.cookies).json()
+    assert set(before["field_contracts"]) == {"team_model_config", "team_model_retry"}
+    assert saved["field_contracts"] == before["field_contracts"] == after["field_contracts"]
+    assert saved["version"] == before["version"] + 1
+    assert saved["config"]["tiers"]["fast"] == candidate["tiers"]["fast"]
+
+
+@pytest.mark.parametrize(
+    "field,policy",
+    [
+        (
+            "runtime_parameters",
+            {
+                "profile": "dashscope-mixed-chat-v1",
+                "defaults": {"thinking_mode": "off", "outbound_params": {"parallel_tool_calls": {"mode": "fixed", "value": False}}},
+            },
+        ),
+        ("context_policy", {"enabled": False, "trigger_input_tokens": 90000, "keep_recent_tokens": 15000}),
+    ],
+)
+async def test_typed_model_policies_preserve_false_and_nested_values(models, client, field, policy):
     child = await child_for(models.user, "team_model_config")
     read = await call(models.app, child, "configuration_read", form_id="team_model_config")
     providers = copy.deepcopy(read["fields"]["providers"]["value"])
-    policy = {
-        "profile": "dashscope-mixed-chat-v1",
-        "defaults": {"thinking_mode": "off", "outbound_params": {"parallel_tool_calls": {"mode": "fixed", "value": False}}},
-    }
-    providers["main"]["models"][0]["runtime_parameters"] = policy
+    providers["main"]["models"][0][field] = policy
     proposal = await call(models.app, child, "configuration_propose", form_id="team_model_config", patch={"providers": providers})
     assert proposal["ok"], proposal
-    assert proposal["rows"][0]["to"]["main"]["models"][0]["runtime_parameters"] == policy
+    assert proposal["rows"][0]["to"]["main"]["models"][0][field] == policy
     review = client.get(f"/api/v1/config-proposals/{proposal['proposal_id']}/model-review", cookies=models.cookies).json()
     response = _apply_config(
         client,
@@ -90,7 +112,7 @@ async def test_typed_runtime_parameters_preserve_false_and_nested_values(models,
     )
     assert response.status_code == 200, response.text
     saved, _ = await models.store.get_team_llm_config_with_version(models.user.team_id)
-    assert saved["providers"]["main"]["models"][0]["runtime_parameters"] == policy
+    assert saved["providers"]["main"]["models"][0][field] == policy
 
 
 async def test_secret_and_changed_proposal_cannot_be_approved(models, client):
@@ -161,3 +183,14 @@ async def test_ignored_model_proposal_cannot_be_loaded_or_bound_to_save(models, 
         cookies=models.cookies,
     )
     assert response.status_code == 409 and "proposal_state_conflict" in response.text
+
+
+async def test_model_page_contracts_do_not_expose_credentials_or_change_config(models, client):
+    before, version = await models.store.get_team_llm_config_with_version(models.user.team_id)
+    response = client.get(URL, cookies=models.cookies)
+    assert response.status_code == 200
+    contracts = response.json()["field_contracts"]
+    assert set(contracts) == {"team_model_config", "team_model_retry"}
+    assert before["providers"]["main"]["api_key"] not in str(contracts)
+    assert "api_key" not in str(contracts)
+    assert await models.store.get_team_llm_config_with_version(models.user.team_id) == (before, version)

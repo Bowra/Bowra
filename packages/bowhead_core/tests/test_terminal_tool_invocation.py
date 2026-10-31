@@ -993,6 +993,30 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "_read_report_schema()",
             "TOOL_EFFECT_READ_ONLY",
         ),
+        (
+            "artifact_presentation.py",
+            "register_artifact_presentation",
+            "present_artifacts",
+            "TOOL_EFFECT_READ_ONLY",
+        ),
+        (
+            "canvas_tools.py",
+            "register_canvas_tools",
+            "read_schema()",
+            "TOOL_EFFECT_READ_ONLY",
+        ),
+        (
+            "canvas_tools.py",
+            "register_canvas_tools",
+            "edit_schema()",
+            "ToolEffectSpec(effect_class=EffectClass.SIDE_EFFECT_POSSIBLE, idempotency=ToolEffectIdempotency.NON_RETRIABLE, effect_contract_key='tool_external/v1')",
+        ),
+        (
+            "kb/management_tools.py",
+            "register_management_tools",
+            "name",
+            "TOOL_EFFECT_READ_ONLY if name == 'kb_operation_status' else ToolEffectSpec(effect_class=EffectClass.SIDE_EFFECT_POSSIBLE, idempotency=ToolEffectIdempotency.STABLE_TOKEN, effect_contract_key='tool_external/v1')",
+        ),
         # Coach Tools: every name has an explicit entry in _COACH_TOOL_EFFECTS and registration fails on a
         # missing or stale entry (no read-only default). Writers such as agent_working_copy_open keep no
         # effect contract, so they never take the read-only durable shortcut.
@@ -1010,7 +1034,7 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "configuration_agent.py",
             "register_configuration_agent_tools",
             "name",
-            "TOOL_EFFECT_READ_ONLY if name in {'configuration_read', 'configuration_result'} else TOOL_EFFECT_NONE if name in {'configuration_open', TOOL_SUBMIT} else None",
+            "TOOL_EFFECT_READ_ONLY if name in {'configuration_list', 'configuration_read', 'configuration_result'} else TOOL_EFFECT_NONE if name in {'configuration_open', TOOL_SUBMIT} else None",
         ),
         # 15f757005 (current user profile): get_current_user only reads the requester's own account.
         (
@@ -1052,7 +1076,10 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "TOOL_EFFECT_READ_ONLY",
         ),
     }
-    assert all("SIDE_EFFECT" not in effect for *_site, effect in effect_sites)
+    assert {(path, schema) for path, _owner, schema, effect in effect_sites if "SIDE_EFFECT" in effect} == {
+        ("canvas_tools.py", "edit_schema()"),
+        ("kb/management_tools.py", "name"),
+    }
     assert effect_mutations == set()
     # The forced Compute dispatch, the only ticketed dispatch outside _execute_tool, was removed;
     # every Agent Tool call now runs through SubagentRunner._execute_tool.

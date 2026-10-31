@@ -117,6 +117,67 @@ def tier_agent_bindings(config: dict[str, Any]) -> list[AgentBinding]:
     return bindings
 
 
+def tiers_schema() -> dict[str, Any]:
+    """Describe supported assignments; readiness and reference checks remain in validate_tiers."""
+    pair = {
+        "type": "object",
+        "required": ["provider", "model"],
+        "additionalProperties": False,
+        "properties": {
+            "provider": {"type": "string", "description": "Existing Team connection supplying the assigned model."},
+            "model": {"type": "string", "description": "Declared model in the selected connection, subject to capability and readiness checks."},
+        },
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            TIER_PRIMARY: {**pair, "description": "Main model for user-facing work; select an explicit connection and model."},
+            "primary_fallback": {
+                "type": "array",
+                "items": pair,
+                "description": "Ordered fallback models; exclude the primary model and duplicate pairs.",
+            },
+            TIER_FAST: {
+                "description": "Fast internal tasks use an explicit model or follow the primary assignment.",
+                "oneOf": [
+                    pair,
+                    {
+                        "type": "object",
+                        "required": ["follow"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "follow": {
+                                "type": "string",
+                                "const": TIER_PRIMARY,
+                                "description": "Follow future changes to the primary assignment without copying its current value.",
+                            }
+                        },
+                    },
+                ],
+            },
+            TIER_JUDGE: {
+                "description": "Evaluation uses an explicit model or automatic selection.",
+                "oneOf": [
+                    pair,
+                    {
+                        "type": "object",
+                        "required": ["auto"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "auto": {
+                                "type": "boolean",
+                                "const": True,
+                                "description": "Let runtime choose an evaluation model using the available Team models and fallback policy.",
+                            }
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+
 def validate_tiers(
     tiers: Any,
     providers: dict[str, Any],

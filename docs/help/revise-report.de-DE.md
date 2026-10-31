@@ -2,8 +2,6 @@
 
 Enthält das Canvas bereits einen Bericht, können Sie im selben Chat weitere Änderungen anfordern. Bowra überarbeitet dann den bestehenden Bericht, statt einen neuen zu schreiben.
 
-Neue Berichte verwenden in der Produktangabe den Community-Namen Bowra. Bereits gespeicherte Berichte und von Ihnen eingegebene Texte behalten ihren ursprünglichen Inhalt.
-
 Einige Bereitstellungen überarbeiten Berichte noch nicht direkt. Erscheint nach einer Nachfrage ein neuer Bericht im Canvas und wird der ursprüngliche in den Bereich **N frühere Berichte in dieser Sitzung** verschoben, erstellt die aktuelle Bereitstellung jedes Mal einen neuen Bericht. Die folgenden Hinweise gelten dann nicht. Geben Sie in diesem Fall in Ihrer Anfrage den gewünschten Umfang und Inhalt vollständig an.
 
 Häufige Änderungswünsche:

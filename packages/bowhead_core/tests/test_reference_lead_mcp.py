@@ -35,13 +35,16 @@ pytestmark = [
 
 @pytest.fixture
 async def mcp_case(http_start, monkeypatch):
-    case = http_start
+    return await make_mcp_case(http_start, monkeypatch)
+
+
+async def make_mcp_case(case, monkeypatch, *, document_tool=False, sequence=3):
     enable_lead_writer(case, monkeypatch)
     register_clarification_tool(case.app.state.orchestrator.tool_registry)
     monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("subagent_spawn", "clarification_ask")))
     with sqlite3.connect(case.path) as db:
         db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=NULL WHERE singleton=1")
-    _, _, agent, index, source, read, write, access = await _enable_mcp_agent(case.fixture.case, sequence=3)
+    _, _, agent, index, source, read, write, access = await _enable_mcp_agent(case.fixture.case, sequence=sequence, document_tool=document_tool)
     metadata = SimpleNamespace(current=lambda: index)
     case.app.state.reference_mcp_metadata = case.app.state.orchestrator.reference_mcp_metadata = metadata
     case.app.state.access_control_store = case.app.state.orchestrator.access_control_store = access

@@ -71,6 +71,7 @@ ResultsQueryErrorCode = Literal[
     "results_anchor_not_in_view",
     "results_filter_unavailable",
     "results_read_model_unavailable",
+    "results_artifact_contract_unsupported",
 ]
 
 
@@ -603,17 +604,27 @@ async def _query_results(
         ),
         sort_version=RESULTS_SORT_VERSION_V1,
     )
+    from bowhead_core.artifact_presentation import PresentationContractUnsupported
+
+    try:
+        await artifact_store.results_presentation_high_water(session_id=scope.session_id)
+    except PresentationContractUnsupported as exc:
+        raise ResultsQueryError("results_artifact_contract_unsupported") from exc
     if request_body.snapshot_token is None:
         if request_body.cursor is not None:
             raise ResultsQueryError("results_query_invalid")
-        high_water = await artifact_store.results_high_water(
-            session_id=scope.session_id,
-            user_id=scope.artifact_owner_id,
-            authorized_artifact_ids=scope.authorized_artifact_ids,
-        )
+        try:
+            high_water = await artifact_store.results_high_water(
+                session_id=scope.session_id,
+                user_id=scope.artifact_owner_id,
+                authorized_artifact_ids=scope.authorized_artifact_ids,
+            )
+        except PresentationContractUnsupported as exc:
+            raise ResultsQueryError("results_artifact_contract_unsupported") from exc
         artifact_snapshot = ResultsArtifactSnapshot(
             high_water_created_at=high_water.high_water_created_at,
             high_water_artifact_id=high_water.high_water_artifact_id,
+            presentation_high_water=high_water.presentation_high_water,
             membership_cutoff_at=datetime.now(tz=UTC).isoformat(
                 timespec="microseconds",
             ),
@@ -633,10 +644,12 @@ async def _query_results(
             membership_cutoff_at=artifact_snapshot.membership_cutoff_at,
             binding=binding,
             projection_digest=snapshot_projection_digest,
+            presentation_high_water=artifact_snapshot.presentation_high_water or 0,
         )
         artifact_snapshot = ResultsArtifactSnapshot(
             high_water_created_at=snapshot.high_water_created_at,
             high_water_artifact_id=snapshot.high_water_artifact_id,
+            presentation_high_water=snapshot.presentation_high_water,
             membership_cutoff_at=snapshot.membership_cutoff_at,
         )
     else:
@@ -648,6 +661,7 @@ async def _query_results(
         artifact_snapshot = ResultsArtifactSnapshot(
             high_water_created_at=snapshot.high_water_created_at,
             high_water_artifact_id=snapshot.high_water_artifact_id,
+            presentation_high_water=snapshot.presentation_high_water,
             membership_cutoff_at=snapshot.membership_cutoff_at,
         )
         membership_digest = await artifact_store.results_snapshot_membership_digest(
@@ -659,7 +673,11 @@ async def _query_results(
         snapshot_projection_digest = results_projection_digest(
             [projection.projection_digest, membership_digest],
         )
-    projection_changed = snapshot.projection_digest != snapshot_projection_digest
+    try:
+        presentation_high_water = await artifact_store.results_presentation_high_water(session_id=scope.session_id)
+    except PresentationContractUnsupported as exc:
+        raise ResultsQueryError("results_artifact_contract_unsupported") from exc
+    projection_changed = snapshot.projection_digest != snapshot_projection_digest or snapshot.presentation_high_water != presentation_high_water
     if request_body.surface == "changes":
         new_artifact_count = await artifact_store.count_new_results_for_session(
             session_id=scope.session_id,

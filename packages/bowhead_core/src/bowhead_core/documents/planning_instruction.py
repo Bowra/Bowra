@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from bowhead_core.documents.authoring_protocol import PROFILE as AUTHORING_PROFILE
 from bowhead_core.documents.executor import WorkerInput
 from bowhead_core.documents.pptx_plan import CURRENT_PROFILE
 from bowhead_core.documents.request import DocumentRequestError
@@ -32,12 +33,27 @@ def _answer_history(answers: list[dict]) -> WorkerInput:
     return WorkerInput("Document clarification history.json", "data", content)
 
 
+def _retained_history_sources(context: dict, *, instruction: str, history: WorkerInput, profile: str) -> tuple[list, dict]:
+    from bowhead_core.documents.continuation import _validated_context
+
+    _validated_context(context, instruction, profile=profile)
+    payload = json.loads(context["payload"])
+    sources = payload.get("inputs" if profile == AUTHORING_PROFILE else "sources")
+    if not isinstance(sources, list) or not sources:
+        raise DocumentRequestError("document_checkpoint_unavailable")
+    expected = {"name": history.name, "sha256": hashlib.sha256(history.content).hexdigest()}
+    if profile == AUTHORING_PROFILE:
+        if sources[-1] != {**expected, "alias": f"data-{len(sources) - 2}", "role": "data"}:
+            raise DocumentRequestError("document_checkpoint_unavailable")
+        sources = [{"name": item.get("name"), "sha256": item.get("sha256")} if isinstance(item, dict) else None for item in sources]
+    return sources, expected
+
+
 async def clarification_evidence_sources_in_tx(db: Connection, *, job) -> list[dict[str, str]]:
     """Derive display metadata after authorized job reading, without a live worker."""
     from bowhead_core.chat_turn_source import chat_turn_user_source_projection
     from bowhead_core.document_chat_continuation import DocumentTurnOwner
     from bowhead_core.document_clarification_lifecycle import prior_document_answers_in_tx
-    from bowhead_core.documents.continuation import _validated_context
     from bowhead_core.documents.store import _digest
 
     db.row_factory = aiosqlite.Row
@@ -77,10 +93,9 @@ async def clarification_evidence_sources_in_tx(db: Connection, *, job) -> list[d
             return []
         history = _answer_history(answers)
         context = json.loads(retained["context_json"])
-        payload = json.loads(context["payload"])
-        _validated_context(context, retained["instruction"], profile=payload["profile"])
-        expected = {"name": history.name, "sha256": hashlib.sha256(history.content).hexdigest()}
-        sources = payload["sources"]
+        sources, expected = _retained_history_sources(
+            context, instruction=retained["instruction"], history=history, profile=json.loads(context["payload"])["profile"]
+        )
         # The server appends canonical answers last. Ambiguous identical uploads
         # and unsupported historical encodings keep neutral source wording.
         if not isinstance(sources, list) or not sources or sources[-1] != expected or sources.count(expected) != 1:
@@ -156,8 +171,10 @@ async def document_instruction_in_tx(db: Connection, *, worker: DocumentTurnOwne
         if history is not None and retained[1] is not None:
             # The server appends this input last; a matching uploaded name grants no authority.
             try:
-                sources = json.loads(json.loads(retained[1])["payload"])["sources"]
-                if sources[-1] != {"name": history.name, "sha256": hashlib.sha256(history.content).hexdigest()}:
+                sources, expected = _retained_history_sources(
+                    json.loads(retained[1]), instruction=retained[0], history=history, profile=runtime.planner_profile
+                )
+                if sources[-1] != expected:
                     raise ValueError("Retained history differs from canonical answers")
             except (ValueError, TypeError, KeyError, IndexError) as exc:
                 raise DocumentRequestError("document_checkpoint_unavailable") from exc

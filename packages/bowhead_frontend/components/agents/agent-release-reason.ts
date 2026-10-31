@@ -41,6 +41,11 @@ export function agentReleaseReasonKey(code: string): string {
 // The Agent Eval gate is the sharp case -- it blocks the *reviewer*, but only the
 // Agent's owner can run an eval, so the copy has to name whose move it is.
 const RELEASE_ERROR_KEYS: Record<string, string> = {
+  agent_knowledge_access_admission_closed: "knowledge_sources_closed",
+  agent_knowledge_access_invalid: "knowledge_sources_unsupported",
+  agent_knowledge_access_preservation_required: "knowledge_sources_unsupported",
+  agent_knowledge_source_unavailable: "knowledge_sources_load_failed",
+  agent_knowledge_access_migration_required: "knowledge_sources_unsupported",
   agent_skill_dependency_missing: "release_error_skill_dependency_missing",
   agent_dependency_blocked: "release_error_dependency_blocked",
   agent_runtime_extension_preservation_required: "release_error_extension_preservation",

@@ -62,8 +62,8 @@ def call(call_id, name, arguments):
         "lost_key",
         "reused_call",
         "second_question",
-        "window_guard",
-        "context_overflow",
+        "legacy_window_guard",
+        "legacy_context_overflow",
         "mixed_prefix",
         "external_prefix",
         "capture_size",
@@ -111,7 +111,9 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
         monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", "0")
         mode = "question_batch"
     if mode == "capture_size":
-        monkeypatch.setattr("bowhead_core.ordinary_lead_checkpoint.MAX_CHECKPOINT_BYTES", 512)
+        from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadCheckpoint
+
+        monkeypatch.setattr(OrdinaryLeadCheckpoint, "payload_limit", property(lambda self: 512))
         caplog.set_level("INFO", logger="bowhead_core.ordinary_lead_runtime")
     protocol_repair = mode in {"protocol_repair", "self_closing_protocol_repair"}
     if mode == "capture_internal":
@@ -157,18 +159,21 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
     orchestrator = case.app.state.orchestrator
     context_reductions = []
     overflow_raised = False
-    if mode in {"window_guard", "context_overflow"}:
+    if mode in {"legacy_window_guard", "legacy_context_overflow"}:
         from bowhead_router.errors import LLMTargetFailure, ProviderFailureKind, StreamingTargetsExhaustedError
 
         from bowhead_core import context_assembly
 
+        # Readers without rendered preflight retain their accepted legacy path.
+        # Native semantic compaction has its own rendered-request regressions.
+        monkeypatch.setattr(orchestrator.router, "supports_context_maintenance", lambda *args, **kwargs: False)
         original_guard = context_assembly.guard_window
         original_stream = orchestrator.router.stream
         monkeypatch.setattr(orchestrator.router, "context_window_for", lambda *args, **kwargs: 1_000_000)
 
         def reduce_resumed_context(messages, **kwargs):
             answered = any(message.role == "tool" and message.tool_call_id == "question-native" for message in messages)
-            if answered and not context_reductions and (mode == "window_guard" or overflow_raised):
+            if answered and not context_reductions and (mode == "legacy_window_guard" or overflow_raised):
                 cleared = original_guard(messages, budget_tokens=1, extra_tokens=0, estimate=len, hysteresis=1.0)
                 assert cleared > 0
                 context_reductions.append(cleared)
@@ -178,7 +183,7 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
         async def stream_with_overflow(agent_type, request, **kwargs):
             nonlocal overflow_raised
             if (
-                mode == "context_overflow"
+                mode == "legacy_context_overflow"
                 and not overflow_raised
                 and any(message.role == "tool" and message.tool_call_id == "question-native" for message in request.messages)
             ):
@@ -480,7 +485,7 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
         ]
         retained_helper = [message for message in messages if message.get("role") == "tool" and message.get("tool_call_id") == "helper-native"]
         assert len(original_helper) == len(retained_helper) == 1
-        if mode in {"window_guard", "context_overflow"}:
+        if mode in {"legacy_window_guard", "legacy_context_overflow"}:
             assert len(context_reductions) == 1
             assert retained_helper[0]["content"] != original_helper[0]["content"]
             assert context_assembly.is_cleared(retained_helper[0]["content"])
@@ -511,7 +516,7 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             ]
             assert failures[-1]["reason"] == turn["error"]
             assert failures[-1]["diagnostics"]["retryable"] is False
-        if mode in {"window_guard", "context_overflow"}:
+        if mode in {"legacy_window_guard", "legacy_context_overflow"}:
             saved = next(row for row in rows(case, "clarification_requests") if row["request_id"] == card_id)
             assert saved["resume_context_json"] == cards[0]["resume_context_json"]
         if not refused:

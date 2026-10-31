@@ -18,13 +18,6 @@ from bowhead_gateway.routes import team_subagents as osa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-
-@pytest.fixture(autouse=True)
-def _per_agent_step_limits(monkeypatch):
-    """These tests cover per-Agent overrides with agent run limits off; the on path is tested below."""
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
-
-
 _BASE = "/api/v1/team-subagents"
 _OVERRIDE_TABLE = """
 CREATE TABLE IF NOT EXISTS team_builtin_subagent_override (
@@ -103,7 +96,7 @@ def _first_builtin(client: TestClient) -> dict:
     assert items, "manifest 基线为空 —— 内置 manifest 加载回归"
     # The first Agent whose manifest allows every override field (the listing puts
     # the Configuration Agent first, and it allows only on/off, name and description).
-    return next(item for item in items if len(item["team_overrides"]) == 8)
+    return next(item for item in items if len(item["team_overrides"]) == 7)
 
 
 # ── Reads ──
@@ -176,7 +169,7 @@ def test_list_follows_the_manifest_listing_and_its_override_fields(tmp_path):
     assert "lead" not in {item["name"] for item in items}
     by_name = {item["name"]: item for item in items}
     assert by_name["configuration-agent"]["team_overrides"] == ["enabled", "display_name", "description"]
-    assert len(by_name["compute"]["team_overrides"]) == 8
+    assert len(by_name["compute"]["team_overrides"]) == 7
 
 
 @pytest.mark.parametrize(
@@ -185,7 +178,6 @@ def test_list_follows_the_manifest_listing_and_its_override_fields(tmp_path):
         ("prompt_append", "Use a different internal policy."),
         ("model", "narrative"),
         ("skills", ["sales-sop"]),
-        ("max_iterations", 2),
         ("primary_capability", "cap_analysis"),
     ],
 )
@@ -295,10 +287,10 @@ def test_builtin_responsibility_options_and_write_guard_share_qualification(tmp_
     assert accepted.json()["primary_capability"] == "cap_data_query"
 
 
-def test_put_and_delete_roundtrip(tmp_path):
+def test_legacy_full_write_and_delete_roundtrip(tmp_path):
     client = _client(tmp_path, _user())
     base = next(item for item in client.get(f"{_BASE}/builtins").json()["items"] if item["name"] == "consultant")
-    name, ceiling = base["name"], base["defaults"]["max_iterations"]
+    name = base["name"]
 
     r = client.put(
         f"{_BASE}/builtins/{name}/override",
@@ -309,8 +301,8 @@ def test_put_and_delete_roundtrip(tmp_path):
             "model": "narrative",
             "skills": ["compliance-sop"],
             "prompt_append": "金额一律人民币。",
-            "max_iterations": max(1, ceiling - 1),
             "primary_capability": "cap_presentation",
+            "max_iterations": None,
         },
         headers={"If-Match": base["etag"]},
     )
@@ -327,7 +319,6 @@ def test_put_and_delete_roundtrip(tmp_path):
         "model",
         "skills",
         "prompt_append",
-        "max_iterations",
         "primary_capability",
     }
     assert saved["defaults"]["model"] == base["defaults"]["model"]  # Defaults unchanged.
@@ -444,31 +435,6 @@ def test_field_validation_rejects(tmp_path, payload, code):
     assert r.json()["detail"]["error"]["code"] == code
 
 
-def test_max_iterations_can_be_raised_up_to_the_platform_ceiling(tmp_path):
-    client = _client(tmp_path, _user())
-    coach = next(item for item in client.get(f"{_BASE}/builtins").json()["items"] if item["name"] == "agent-coach")
-    assert "max_iterations" in coach["team_overrides"]
-    default, ceiling = coach["defaults"]["max_iterations"], coach["defaults"]["max_iterations_ceiling"]
-    assert ceiling == 100 and default < ceiling
-
-    r = client.put(
-        f"{_BASE}/builtins/agent-coach/override",
-        json={"enabled": True, "max_iterations": ceiling + 1},
-        headers={"If-Match": coach["etag"]},
-    )
-    assert r.status_code == 422
-    assert r.json()["detail"]["error"]["code"] == "builtin_max_iterations_invalid"
-
-    r = client.put(
-        f"{_BASE}/builtins/agent-coach/override",
-        json={"enabled": True, "max_iterations": ceiling},
-        headers={"If-Match": coach["etag"]},
-    )
-    assert r.status_code == 200, r.text
-    coach = next(item for item in client.get(f"{_BASE}/builtins").json()["items"] if item["name"] == "agent-coach")
-    assert coach["max_iterations"] == ceiling
-
-
 def test_unknown_field_is_rejected(tmp_path):
     client = _client(tmp_path, _user())
     base = _first_builtin(client)
@@ -579,7 +545,6 @@ def test_hijack_wording_in_description_is_rejected_not_silently_neutralized(tmp_
 
 def test_with_run_limits_on_the_step_limit_is_not_a_per_agent_override(tmp_path, monkeypatch):
     """The Team-wide step limit replaces per-Agent values, so built-ins neither offer nor accept one."""
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "1")
     client = _client(tmp_path, _user())
     items = client.get(f"{_BASE}/builtins").json()["items"]
     coach = next(i for i in items if i["name"] == "agent-coach")

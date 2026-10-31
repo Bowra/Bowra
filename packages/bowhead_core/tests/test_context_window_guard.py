@@ -34,6 +34,22 @@ from bowhead_router import (
 _ONE = len
 
 
+@pytest.mark.unit
+def test_preflight_capacity_failure_uses_the_existing_actionable_overflow_projection() -> None:
+    from bowhead_core.llm_failure import project_llm_failure
+    from bowhead_router.output_budget import ContextCapacityError, RenderedRequestBudget
+
+    error = ContextCapacityError(
+        "Private request content must not enter diagnostics",
+        model="private-model-name",
+        budget=RenderedRequestBudget(40000, "text", 32000, "model", 4096),
+    )
+    projection = project_llm_failure(error)
+    assert projection is not None and projection.reason_code == "llm_context_overflow"
+    assert projection.attempts == 0 and not projection.retryable
+    assert "Private request" not in projection.safe_detail and "private-model-name" not in projection.safe_detail
+
+
 def _tool(content: str, i: int) -> Message:
     return Message(role="tool", content=content, tool_call_id=f"c{i}", name="t")
 
@@ -265,6 +281,7 @@ async def _run(
     windows: dict | None,
     fail_first_with: ProviderFailureKind | None = None,
     fail_first_chain: list[ProviderFailureKind] | None = None,
+    step_limit: int | None = None,
 ):
     adapter = MockAdapter(provider_name="p1")
     adapter.scripted_responses = [LLMResponse(content="直答", usage=TokenUsage(input_tokens=10, output_tokens=5))] * 3
@@ -289,6 +306,10 @@ async def _run(
 
     runner = SubagentRunner(router=router, tool_registry=build_default_registry(), backend="legacy")
     ctx = ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t", datarc=None)  # type: ignore[arg-type]
+    if step_limit is not None:
+        from bowhead_core.agent_run_limits import AgentLoopBudget
+
+        ctx.agent_runtime_budget = AgentLoopBudget(contract="agent-runtime-budget.v1", step_limit=step_limit)
     result = await runner.run(profile_name="compute", task="接线闸", parent_turn_id="t", parent_bus=TurnEventBus(), parent_ctx=ctx)
     return router, seen, result
 
@@ -333,14 +354,9 @@ async def test_wiring_other_400s_do_not_retry(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_wiring_overflow_on_the_last_iteration_does_not_retry_into_an_empty_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """review 修：最后一圈 `continue` 会让循环自然结束、落到 ok=True/final_answer="" 的成功路。"""
-    import dataclasses
-
-    from bowhead_core.subagent import PROFILES
-
-    monkeypatch.setitem(PROFILES, "compute", dataclasses.replace(PROFILES["compute"], max_iterations=0))
-    router, _, result = await _run(monkeypatch, windows=None, fail_first_with=ProviderFailureKind.CONTEXT_OVERFLOW)
-    assert router.calls == 1, "预算用尽时不该再重试"
+    """Use the current decision controller for the last admissible model call."""
+    router, _, result = await _run(monkeypatch, windows=None, fail_first_with=ProviderFailureKind.CONTEXT_OVERFLOW, step_limit=1)
+    assert router.calls == 1, "An exhausted decision budget must not admit another request"
     assert not result.ok and not (result.final_answer or "").strip()
 
 

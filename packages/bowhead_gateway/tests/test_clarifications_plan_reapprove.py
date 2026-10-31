@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch):
+async def app_ctx(tmp_path: Path, monkeypatch, completed_community_user_store):
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "dev")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "1")
 
@@ -47,8 +47,25 @@ async def app_ctx(tmp_path: Path, monkeypatch):
     await user_mem.initialize()
     proj_mem = ProjectMemoryStore(tmp_path / "m.db")
     await proj_mem.initialize()
+    # Connector authorization and persistence have their own Datarc integration suite.
+    # These cases isolate Plan lifecycle after an accepted connector selection.
+    from bowhead_gateway import datarc_switch
+
+    async def accepted_selection(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(datarc_switch, "prepare_picker_selection", accepted_selection)
+    monkeypatch.setattr(datarc_switch, "commit_picker_selection", accepted_selection)
+
     app = create_app()
     app.state.settings = Settings()
+    from test_clarifications_routes import _LegacyTeamResolver
+
+    app.state.user_store = _LegacyTeamResolver(completed_community_user_store.db_path)
+    if app.state.edition == "community":
+        from bowhead_core.entitlements import CommunityResolver
+
+        app.state.entitlements = CommunityResolver(mode="saas", user_store=app.state.user_store)
     app.state.settings.auth_mode = "dev"
     app.state.clarification_store = clarify
     app.state.user_memory_store = user_mem

@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hashlib
 import inspect
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -102,6 +103,9 @@ _CHAT_FAILURE_REASON_COMPAT = {
     "cost_cap_exceeded": "terminal_producer_timeout",
     "token_cap_exhausted": "terminal_producer_timeout",
     "peer_dispatch_timeout": "terminal_producer_timeout",
+    "agent_step_limit": "terminal_producer_timeout",
+    "agent_tool_call_limit": "terminal_producer_timeout",
+    "agent_stalled": "terminal_producer_timeout",
     "canvas_section_not_found": "terminal_projection_missing",
     "canvas_payload_invalid": "terminal_projection_missing",
     "no_safe_fields_changed": "terminal_projection_missing",
@@ -493,15 +497,21 @@ class TerminalProtocolBusAdapter:
         self._fatal_error: BaseException | None = None
         self._last_answer: EventTicket | None = None
         self._last_partial_text = ""
+        self._operation_kind: str | None = None
         self._compat_published_event_ids: set[str] = set()
         self._terminal_snapshot: dict[str, object] = {}
         self._producer_tasks: tuple[asyncio.Task[object], ...] = ()
         self._required_terminal_events: tuple[StagedTerminalEvent, ...] = ()
+        self._staged_context_publication = None
         # report-streaming P1: same TurnEventBus rule, independently implemented on **this adapter**;
         # this path persists before publish; relying only on self._live injection puts synthetic frame
         # in live ring but not turn_events: live != persist, F5 loses
         # currentTurnId. See emit().
         self._canvas_turn_streaming_sent = False
+
+    def bind_datarc_run(self, state) -> None:
+        """Keep the current root source distinct from the initial admission template."""
+        self._datarc_run_state = state
 
     @property
     def scope(self) -> TerminalScope:
@@ -939,7 +949,26 @@ class TerminalProtocolBusAdapter:
 
     async def _finalize(self, event: OrchestratorEvent) -> bool:
         self._terminal_snapshot = self._merged_terminal_payload(event.payload)
+        maintenance = await self._store.read_context_maintenance_action(self._execution)
+        self._operation_kind = "context_maintenance" if maintenance is not None else None
+        if maintenance is not None and (
+            self._last_answer is not None
+            or self._last_partial_text
+            or self._terminal_snapshot.get("final_answer")
+            or any(item.event_type == "final_answer" for item in self._required_terminal_events)
+        ):
+            raise TerminalProtocolError("context maintenance cannot publish an answer")
         status = _status_from_done(event.payload)
+        publication = self.__dict__.get("_context_publication")
+        if publication is not None and status is TerminalStatus.COMPLETED and self._staged_context_publication is None:
+            from bowhead_core.context_publication import ContextPublication
+
+            if not isinstance(publication, ContextPublication):
+                raise TypeError("Terminal context publication is invalid")
+            answers = [item for item in self._required_terminal_events if item.event_type == "final_answer"]
+            answer = answers[0] if answers else self._last_answer
+            text = json.loads(answer.payload_json).get("text", "") if answer is not None else self._candidate_answer_text()
+            self._staged_context_publication = await publication.stage_terminal(text)
         contract = await self._store.read_effect_execution_contract(
             self._execution.scope,
         )
@@ -985,6 +1014,7 @@ class TerminalProtocolBusAdapter:
             authz_snapshot_digest=self._identity.authz_snapshot_digest,
             writer_admission_epoch=self._identity.writer_admission_epoch,
             candidate_builder=self._build_candidate,
+            context_publication=self._staged_context_publication,
         )
         receipt = await (self._finalizer.finalize_cancelled(request) if status is TerminalStatus.CANCELLED else self._finalizer.finalize(request))
         self._receipt = receipt
@@ -1131,7 +1161,7 @@ class TerminalProtocolBusAdapter:
             answer_id = answer_event.event_id
             answer_digest = answer_event.payload_digest
 
-        if status is TerminalStatus.COMPLETED and not staged_answers:
+        if status is TerminalStatus.COMPLETED and not staged_answers and self._operation_kind is None:
             answer = self._last_answer
             if answer is not None and answer.event_seq <= snapshot.flush.persisted_event_highwater:
                 answer_mode = FinalAnswerMode.PRECOMMITTED
@@ -1174,6 +1204,17 @@ class TerminalProtocolBusAdapter:
                 )
             )
 
+        if status is TerminalStatus.COMPLETED and self._staged_context_publication is not None:
+            for completion in getattr(self, "_context_maintenance_completions", ()):
+                primary_events.append(
+                    StagedTerminalEvent.from_payload(
+                        event_id=completion.event_id(),
+                        event_type="agent.context",
+                        actor_scope=ActorScope.ROOT,
+                        phase_scope=PhaseScope.IN_GENERATION,
+                        payload=completion.payload(scope.turn_id),
+                    )
+                )
         primary_template: dict[str, object] = {}
         if primary_session is SessionVariant.FOLLOWUP:
             followup_turn_id = _stable_id(
@@ -1189,6 +1230,11 @@ class TerminalProtocolBusAdapter:
                 f"followup-request:{steer.buffer_identity_digest}",
             )
             execution_intent = dict(self._followup_execution_intent)
+            source_state = getattr(self, "_datarc_run_state", None)
+            if source_state is not None:
+                from bowhead_core.datarc_selection import datarc_execution_intent
+
+                execution_intent.update(datarc_execution_intent(source_state))
             execution_intent["text"] = steer.merged_text
             execution_intent["attachments"] = list(steer.merged_attachments)
             execution_intent["planning_mode"] = steer.planning_mode
@@ -1229,6 +1275,7 @@ class TerminalProtocolBusAdapter:
             required_events=tuple(primary_events),
         )
         primary = TerminalCandidateVariant(
+            operation_kind=self._operation_kind,
             variant_key=primary_key,
             outcome_variant=CandidateOutcome.PRIMARY,
             session_variant=primary_session,
@@ -1273,6 +1320,7 @@ class TerminalProtocolBusAdapter:
             required_events=tuple(recovery_events),
         )
         recovery = TerminalCandidateVariant(
+            operation_kind=self._operation_kind,
             variant_key=recovery_key,
             outcome_variant=CandidateOutcome.RECOVERY_INTERRUPT,
             session_variant=recovery_session,
@@ -1306,12 +1354,20 @@ class TerminalProtocolBusAdapter:
                 },
                 "writer_admission_epoch": (self._identity.writer_admission_epoch if primary_session is SessionVariant.FOLLOWUP else None),
             },
-            projection_extensions=(
-                effect_disclosure.projection_extensions if effect_disclosure is not None and effect_disclosure.protocol == 2 else ()
+            projection_extensions=tuple(
+                sorted(
+                    [
+                        *(effect_disclosure.projection_extensions if effect_disclosure is not None and effect_disclosure.protocol == 2 else ()),
+                        *([self._staged_context_publication.projection.model_dump()] if self._staged_context_publication is not None else []),
+                    ],
+                    key=lambda value: value["kind"],
+                )
             ),
         )
 
     def _candidate_answer_text(self) -> str:
+        if self._operation_kind == "context_maintenance":
+            return ""
         for value in (
             self._terminal_snapshot.get("final_answer"),
             self._last_partial_text,
@@ -1364,6 +1420,7 @@ class TerminalProtocolBusAdapter:
             phase_scope=PhaseScope.IN_GENERATION,
             payload={
                 "candidate_id": candidate_id,
+                **({"operation_kind": self._operation_kind} if self._operation_kind is not None else {}),
                 "generation": self.scope.generation,
                 "message_key": message_key,
                 "protocol": 1,

@@ -251,12 +251,18 @@
       "context_window": "agent",
       "max_output_tokens": "agent",
       "runtime_parameters": "agent",
-      "api_surface": "agent"
+      "api_surface": "agent",
+      "context_policy": "agent"
     },
     "execution_limits": {
       "sandbox_default_timeout_s": "agent",
       "sandbox_max_timeout_s": "agent",
       "html_max_bytes": "agent"
     }
+  },
+  "field_guidance": {
+    "bindings": "config/configuration-field-bindings.json",
+    "check": "scripts/check_configuration_field_guidance.py",
+    "scope": "Nine admitted domains; manual/workflow units keep their existing classifications."
   }
 }

@@ -59,6 +59,7 @@ vi.mock("@/lib/agents-api", () => ({
   createAgentRollback: vi.fn(),
   getAgentAuthoringCatalog: vi.fn(),
   getAgentEvalManager: vi.fn(),
+  getAgentKnowledgeSources: vi.fn().mockResolvedValue({ enabled: false, available: true, items: [], selected_items: [], total: 0, max_selected: 64 }),
   getAgentOptionalSkillCatalog: vi.fn().mockResolvedValue({ kind: "agent_optional_skill_catalog", schema_version: 1, agent_id: "osa_1", items: [], next_offset: null }),
   getAgentForkSettings: vi.fn(),
   getAgentWorkingCopy: vi.fn(),
@@ -942,6 +943,18 @@ describe("AgentReleaseManager", () => {
     expect(payload.definition.runtime_extensions).toEqual(policy);
     expect(payload.definition.skill_grants).toEqual([GRANT]);
     expect(payload.definition.tool_refs).toEqual(["bi_query"]);
+  });
+
+  it.each(["live", "working_copy"] as const)("preserves selected knowledge from %s during unrelated edits", async (source) => {
+    const policy = { schema_version: 1, mode: "selected_files", file_ids: [], defaults: { top_k: 5 } };
+    const existing = detail(source === "working_copy" ? { working_copy: structuredClone(WORKING_COPY) } : {});
+    existing[source]!.definition.knowledge_access = policy;
+    vi.mocked(getAgentWorkingCopy).mockResolvedValue(existing);
+    renderIntl(<AgentReleaseManager agentId="osa_1" />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "一句话介绍" }), { target: { value: "Updated summary." } });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    await waitFor(() => expect(saveAgentWorkingCopy).toHaveBeenCalled());
+    expect(vi.mocked(saveAgentWorkingCopy).mock.calls[0][1].definition.knowledge_access).toEqual(policy);
   });
 
   it("saves Owner-selected optional methods without changing baseline grants or tools, and blocks a shared personal method", async () => {

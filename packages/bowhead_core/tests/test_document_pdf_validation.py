@@ -10,13 +10,15 @@ import pytest
 from bowhead_core.documents.package_io import OfficePackageError
 from bowhead_core.documents.render import validate_pdf
 from pptx import Presentation
+from pptx.enum.text import MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Pt
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
 pytestmark = pytest.mark.unit
 
 
-def _source(*, width=150, height=18, horizontal=None, vertical=None, table=False, left=36, autofit=False):
+def _source(*, width=150, height=18, horizontal=None, vertical=None, table=False, left=36, autofit=False, alignment=None, anchor=None):
     deck = Presentation()
     deck.slide_width, deck.slide_height = Pt(240), Pt(180)
     slide = deck.slides.add_slide(deck.slide_layouts[6])
@@ -27,6 +29,10 @@ def _source(*, width=150, height=18, horizontal=None, vertical=None, table=False
         shape = slide.shapes.add_textbox(Pt(left), Pt(36), Pt(width), Pt(height))
         frame = shape.text_frame
     frame.text = "Quarter review"
+    if alignment is not None:
+        frame.paragraphs[0].alignment = alignment
+    if anchor is not None:
+        frame.vertical_anchor = anchor
     body = frame._txBody.bodyPr
     for name, value in (("horzOverflow", horizontal), ("vertOverflow", vertical)):
         if value is not None:
@@ -71,6 +77,37 @@ def test_visible_horizontal_overflow_is_not_clipping(overflow):
     assert validate_pdf(_source(width=35, height=40, horizontal=overflow), _pdf())["page_count"] == 1
 
 
+@pytest.mark.parametrize("overflow", [None, "overflow"], ids=["implicit-overflow", "explicit-overflow"])
+@pytest.mark.parametrize("direction", ["left", "above"])
+def test_visible_overflow_before_the_frame_is_valid(overflow, direction):
+    if direction == "left":
+        source = _source(left=120, width=50, height=40, horizontal=overflow, alignment=PP_ALIGN.RIGHT)
+        pdf = _pdf(left=170 - stringWidth("Quarter review", "Helvetica", 18))
+    else:
+        source = _source(height=8, vertical=overflow, anchor=MSO_VERTICAL_ANCHOR.BOTTOM)
+        pdf = _pdf(top=20)
+    assert validate_pdf(source, pdf)["text_and_geometry"] == "passed"
+
+
+@pytest.mark.parametrize("direction", ["left", "above"])
+def test_explicit_clipping_before_the_frame_is_still_rejected(direction):
+    if direction == "left":
+        source = _source(left=120, width=50, height=40, horizontal="clip", alignment=PP_ALIGN.RIGHT)
+        pdf = _pdf(left=170 - stringWidth("Quarter review", "Helvetica", 18))
+    else:
+        source = _source(height=8, vertical="clip", anchor=MSO_VERTICAL_ANCHOR.BOTTOM)
+        pdf = _pdf(top=20)
+    with pytest.raises(OfficePackageError, match="document_pdf_text_missing_or_clipped"):
+        validate_pdf(source, pdf)
+
+
+@pytest.mark.parametrize("direction", ["left", "above"])
+def test_overflow_does_not_match_text_wholly_before_the_frame(direction):
+    source, pdf = (_source(left=180, width=20), _pdf(left=0)) if direction == "left" else (_source(), _pdf(top=0))
+    with pytest.raises(OfficePackageError, match="document_pdf_text_missing_or_clipped"):
+        validate_pdf(source, pdf)
+
+
 @pytest.mark.parametrize(
     "options,clip",
     [
@@ -92,6 +129,32 @@ def test_extractable_text_cut_by_explicit_clip_is_rejected(options, clip):
 def test_table_text_keeps_its_cell_bounds():
     with pytest.raises(OfficePackageError, match="document_pdf_text_missing_or_clipped"):
         validate_pdf(_source(width=35, height=40, table=True), _pdf())
+
+
+@pytest.mark.parametrize(
+    "end,pdf_position",
+    [((1, 0), {"left": 40, "top": 85}), ((0, 1), {"left": 120, "top": 40}), ((1, 1), {"left": 120, "top": 85})],
+    ids=["vertical", "horizontal", "rectangle"],
+)
+@pytest.mark.parametrize("merged", [True, False], ids=["merged", "unmerged-clipping"])
+def test_table_text_uses_its_actual_merged_extent(end, pdf_position, merged):
+    deck = Presentation()
+    deck.slide_width, deck.slide_height = Pt(240), Pt(180)
+    slide = deck.slides.add_slide(deck.slide_layouts[6])
+    table = slide.shapes.add_table(2, 2, Pt(36), Pt(36), Pt(150), Pt(80)).table
+    origin = table.cell(0, 0)
+    if merged:
+        origin.merge(table.cell(*end))
+    origin.text = "Merged"
+    source = io.BytesIO()
+    deck.save(source)
+    pdf = _pdf(text="Merged", **pdf_position)
+
+    if merged:
+        assert validate_pdf(source.getvalue(), pdf)["text_and_geometry"] == "passed"
+    else:
+        with pytest.raises(OfficePackageError, match="document_pdf_text_missing_or_clipped"):
+            validate_pdf(source.getvalue(), pdf)
 
 
 @pytest.mark.parametrize(

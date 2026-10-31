@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -941,6 +942,7 @@ def validate_thin_canvas_sections(
 _NUMBER_RE = re.compile(
     r"(-?\d+(?:[,，]\d{3})*(?:\.\d+)?)\s*([%‰]|百分点|万|亿|千)?",
 )
+_ISO_DATE_RE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 
 
 def _norm_unit_value(num_str: str, unit: str | None) -> float | None:
@@ -1090,7 +1092,16 @@ def _extract_numbers_with_raw(text: str) -> list[tuple[float, str]]:
     if not text or not isinstance(text, str):
         return []
     out: list[tuple[float, str]] = []
+    dates = []
+    for match in _ISO_DATE_RE.finditer(text):
+        try:
+            date.fromisoformat(match.group())
+        except ValueError:
+            continue
+        dates.append(match.span())
     for m in _NUMBER_RE.finditer(text):
+        if any(start <= m.start(1) < end for start, end in dates):
+            continue
         v = _norm_unit_value(m.group(1), m.group(2))
         if v is None:
             continue

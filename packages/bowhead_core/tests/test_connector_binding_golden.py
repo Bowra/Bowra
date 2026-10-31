@@ -1,10 +1,6 @@
-"""T2#9 (connector-context 修正) — golden-string pin：v1 用户/LLM 可见文案逐字节冻结.
+"""Stable connector selection prompts and supported refusal contracts.
 
-表驱动参数化（ConnectorContextBinding）改造的前置安全网：本文件在改造**之前**
-对 v1 字面量文案落绿，改造后必须原样绿——任何文案漂移=红（tech-design §2.3 风险缓解②）。
-
-冻结面：sentinel prompt / no-project 裸错 / switch note 三态 / channel_not_supported
-hint / 歧义确认 prompt / no_accessible hint / schema enum。
+Switch outcomes are tested as facts in test_tool_switch_context and test_datarc_selection.
 """
 
 from __future__ import annotations
@@ -68,24 +64,6 @@ async def test_golden_no_project_error(reg: ToolRegistry) -> None:
         "workspace isn't linked to one. hint: answer from the knowledge base "
         "(kb_search / kb_query_records), or select a datarc project for this workspace."
     )
-
-
-async def test_golden_switch_note_remembered(reg: ToolRegistry) -> None:
-    ctx = _ctx(switcher=_Switcher(persisted=True))
-    inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO", "remember": True}, ctx)
-    assert inv.result["note"] == "已设为你的默认北极九章工作区（跨会话生效）。"
-
-
-async def test_golden_switch_note_persist_failed(reg: ToolRegistry) -> None:
-    ctx = _ctx(switcher=_Switcher(persisted=False))
-    inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO", "remember": True}, ctx)
-    assert inv.result["note"] == "已切换（本会话生效），但默认保存失败——稍后可以再说一次「记住」。"
-
-
-async def test_golden_switch_note_session_only(reg: ToolRegistry) -> None:
-    ctx = _ctx(switcher=_Switcher())
-    inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO"}, ctx)
-    assert inv.result["note"] == "本会话内生效；要长期使用这个北极九章工作区，请说「记住」或「以后都用它」。"
 
 
 async def test_golden_channel_not_supported_hint(reg: ToolRegistry) -> None:

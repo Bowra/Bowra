@@ -627,6 +627,13 @@ def _validate_provider_models(name: str, models: Any, *, provider_type: str | No
             # must happen here; misspellings silently executing chat are hazardous (tech-design §8.1 / C-4).
             _validate_context_window(f"providers.{name}.models[{model_id}].context_window", m.get("context_window"))
             _validate_context_window(f"providers.{name}.models[{model_id}].max_output_tokens", m.get("max_output_tokens"))
+            from bowhead_router.context_policy import ContextPolicyError, parse_context_policy
+
+            try:
+                parse_context_policy(m.get("context_policy"), path=f"providers.{name}.models[{model_id}].context_policy")
+            except ContextPolicyError as exc:
+                raise TeamLlmConfigError(str(exc)) from exc
+
             from bowhead_core.rate_card import ModelCreditRates
 
             try:
@@ -927,6 +934,67 @@ def _validate_search(search: Any, providers: dict[str, Any]) -> None:
             raise TeamLlmConfigError(f"search.active.{cap} unsupported")
         if model_name not in models:
             raise TeamLlmConfigError(f"search.active.{cap} references unknown model {model_name!r}")
+
+
+def capability_config_schema(domain: str) -> dict[str, Any]:
+    """Expose non-secret model declarations using the original domain vocabularies."""
+    from bowhead_core.kb.retrieval_policy import retrieval_top_k_schema
+    from bowhead_core.media.config_loader import MEDIA_CAPABILITIES, MEDIA_PROTOCOLS
+    from bowhead_core.search_config import SEARCH_CAPABILITIES, SEARCH_PROTOCOLS
+
+    capabilities, protocols = {
+        "kb": (SUPPORTED_KB_CAPABILITIES, KB_PROTOCOLS),
+        "media": (MEDIA_CAPABILITIES, MEDIA_PROTOCOLS),
+        "search": (SEARCH_CAPABILITIES, SEARCH_PROTOCOLS),
+    }[domain]
+    properties = {
+        "provider": {"type": "string", "description": "Existing Team connection supplying this capability model."},
+        "real_id": {"type": "string", "minLength": 1, "description": "Exact remote model identifier exposed by the provider."},
+        "model": {"type": "string", "description": "Legacy alias for the remote model identifier; existing records remain readable."},
+        "capability": {
+            "type": "string",
+            "enum": sorted(capabilities),
+            "description": "Capability supplied by this declaration; assignments must match it.",
+        },
+        "protocol": {
+            "type": "string",
+            "enum": sorted(protocols),
+            "description": "Wire protocol supported by this capability and provider; original validation checks compatibility.",
+        },
+    }
+    if domain == "kb":
+        properties["dim"] = {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Embedding vector dimension. Changing the active embedding model requires the original reindex review.",
+            "x-bowhead-field": {"unit": "count"},
+        }
+    result = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "models": {
+                "type": "object",
+                "description": "Capability model declarations keyed by their saved local model key.",
+                "additionalProperties": {"type": "object", "properties": properties},
+            },
+            "active": {
+                "type": "object",
+                "description": "Active model keys by capability; original readiness and unassignment rules apply.",
+                "additionalProperties": False,
+                "properties": {
+                    cap: {
+                        "type": "string",
+                        "description": "Select a declared model key with this capability. Use the original assignment workflow to clear or change it.",
+                    }
+                    for cap in sorted(capabilities)
+                },
+            },
+        },
+    }
+    if domain == "kb":
+        result["properties"]["retrieval_top_k"] = retrieval_top_k_schema()
+    return result
 
 
 def _validate_kb(kb: Any, providers: dict[str, Any]) -> None:  # noqa: PLR0912

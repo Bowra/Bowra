@@ -1,9 +1,15 @@
 """Skill bundle 文件契约；配置页、生成与 Agent 读取共用，不依赖 Gateway/Core。"""
 
-from pathlib import Path
+from pathlib import Path, PurePath
 
 BUNDLE_FILE_KINDS = ("references", "scripts", "evals")
 MAX_TEXT_BYTES = 1024 * 1024
+
+
+def is_python_cache_path(relative_path: str | PurePath) -> bool:
+    """Identify generated Python cache entries, not source package content."""
+    path = PurePath(relative_path)
+    return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
 
 
 class BundleFileError(ValueError):

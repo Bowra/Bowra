@@ -153,3 +153,27 @@ def test_composes_with_the_response_kind_sanitizer() -> None:
     assert "response_kind" not in out
     assert "<clarification_ask" not in out
     assert "你想比较示例商品的哪项指标？" in out
+
+
+BARE_QUESTIONS = '<questions>\n[{"question":"Which file?","options":["First","Second"],"type":"single_select"}]\n</questions>'
+NATIVE_CALL_TEXT = (
+    "<tool_call><name>kb_add_file</name><parameters><artifact_id>art_example</artifact_id><scope>personal</scope></parameters></tool_call>"
+)
+
+
+def test_bare_question_array_is_protocol_text_not_a_native_pause() -> None:
+    assert has_uninvoked_clarification(BARE_QUESTIONS)
+    assert humanize_stray_clarification_ask(BARE_QUESTIONS) == "Which file?\n- First\n- Second"
+    quoted = "```xml\n" + BARE_QUESTIONS + "\n```"
+    assert not has_uninvoked_clarification(quoted)
+    assert humanize_stray_clarification_ask(quoted) == quoted
+
+
+def test_native_call_xml_never_proves_an_executed_operation() -> None:
+    assert has_uninvoked_clarification(NATIVE_CALL_TEXT)
+    assert not has_uninvoked_clarification("```xml\n" + NATIVE_CALL_TEXT + "\n```")
+
+
+def test_malformed_quoted_tag_names_are_protocol_leakage() -> None:
+    assert has_uninvoked_clarification('<clarification_ask">\n<questions" : [{"question":"Which file?"}]</questions>')
+    assert has_uninvoked_clarification('<tool_call">kb_add_file</tool_call>')

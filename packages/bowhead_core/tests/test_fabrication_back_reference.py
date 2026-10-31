@@ -6,6 +6,7 @@ import re
 
 import pytest
 from bowhead_core.analysis_payload import (
+    _extract_numbers_with_raw,
     _extract_numbers_with_units,
     _render_caveat_number,
     build_observed_numbers,
@@ -14,6 +15,23 @@ from bowhead_core.analysis_payload import (
 )
 
 # ─── _extract_numbers_with_units / unit normalization ────────────────────
+
+
+@pytest.mark.unit
+def test_iso_date_fragments_are_not_reported_as_unverified_numbers() -> None:
+    values = _extract_numbers_with_raw("On 2026-01-02 and 2026-02-03, the result was -9.5万元.")
+    assert [raw for _, raw in values] == ["-9.5万"]
+    payload = {"insights": [{"thesis": "On 2026-01-02, revenue was -9.5万元."}]}
+    warnings = check_fabrication_back_reference(payload, {1.0}, lang="en-US")
+    assert warnings and "-9.5" in warnings[0]
+    assert "-01" not in warnings[0] and "-02" not in warnings[0]
+
+
+@pytest.mark.unit
+def test_invalid_date_like_text_does_not_hide_numeric_claims() -> None:
+    values = _extract_numbers_with_raw("2026-19-99 and -12万元")
+    assert any(raw == "-19" for _, raw in values)
+    assert any(raw == "-12万" for _, raw in values)
 
 
 @pytest.mark.unit

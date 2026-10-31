@@ -35,7 +35,10 @@ async def test_same_name_evidence_without_canonical_history_keeps_file_origin(ct
     assert (await delivery.get(scope=SCOPE, job_id=job_id))["draft_digest"] == draft["draft_digest"]
 
 
-async def test_canvas_fixture_preserves_real_projection_and_published_association(ctx):
+async def test_canvas_fixture_preserves_real_projection_and_published_association(ctx, monkeypatch):
+    # This frozen consumer fixture represents revision admission disabled.
+    # The enabled default is covered by the revision and authoring lifecycles.
+    monkeypatch.setenv("FEATURE_TEMPLATE_DOCUMENT_REUSE", "0")
     fixture = json.loads(FIXTURE.read_text())
     expected = fixture["review"]
     # Only worker content is synthetic. Scope, storage, hashes and publication are real.

@@ -380,6 +380,7 @@ function renderStreaming(text: string, _size: number, lang?: string) {
       <Markdown
         markdown={text}
         preserveLineBreaks
+        compactWebLinks
         renderArtifactChip={(artifactId, context) => <ArtifactChip artifactId={artifactId} context={context} streaming />}
       />
       <Cursor />
@@ -409,6 +410,7 @@ function renderFinalized(
       <Markdown
         markdown={text}
         preserveLineBreaks
+        compactWebLinks
         renderArtifactChip={(artifactId, context) => <ArtifactChip artifactId={artifactId} context={context} />}
         renderFigureSlot={renderFigureSlot}
       />

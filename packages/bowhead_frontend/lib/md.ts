@@ -622,10 +622,35 @@ export function repairGluedTableHeader(md: string): string {
   return changed ? lines.join("\n") : md;
 }
 
+function compactWebLinkHost(href: string | undefined, children: React.ReactNode): string | null {
+  if (!href || !/^https?:\/\//i.test(href)) return null;
+  const parts = React.Children.toArray(children);
+  if (parts.length !== 1 || typeof parts[0] !== "string") return null;
+  let label = parts[0].trim();
+  if (!/^https?:\/\//i.test(label)) return null;
+  try {
+    const destination = new URL(href);
+    if (new URL(label).href === destination.href) return destination.host;
+    // Historical URL labels sometimes include a surplus closing parenthesis.
+    // Compare the complete URL first, preserving legitimate parentheses in paths.
+    let surplus = (label.match(/\)/g)?.length ?? 0) - (label.match(/\(/g)?.length ?? 0);
+    while (surplus > 0 && label.endsWith(")")) {
+      label = label.slice(0, -1);
+      if (new URL(label).href === destination.href) return destination.host;
+      surplus -= 1;
+    }
+  } catch {
+    // Invalid or filtered destinations keep the existing Markdown presentation.
+  }
+  return null;
+}
+
 interface Props {
   markdown: string;
   /** Chat opts in to visible single line breaks; report Markdown keeps normal soft breaks. */
   preserveLineBreaks?: boolean;
+  /** Chat-only hostname labels for raw web URLs; destinations and saved text stay intact. */
+  compactWebLinks?: boolean;
   className?: string;
   /**
    * Render `![](…)` images (default true, preserving chat/reports). Untrusted text such as source excerpts passes false: use alt + link,
@@ -664,6 +689,7 @@ interface Props {
 export function Markdown({
   markdown,
   preserveLineBreaks = false,
+  compactWebLinks = false,
   className,
   enableCardCitations,
   renderArtifactChip,
@@ -692,8 +718,15 @@ export function Markdown({
   const hasFigure = Boolean(renderFigureSlot);
   const components = React.useMemo(() => {
     const out: Record<string, unknown> = {
-      a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) =>
-        React.createElement("a", { ...props, target: "_blank", rel: linkRel }),
+      a: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+        const host = compactWebLinks ? compactWebLinkHost(props.href, children) : null;
+        return React.createElement("a", {
+          ...props,
+          target: "_blank",
+          rel: linkRel,
+          ...(host ? { "data-compact-web-link": "", title: props.href, "aria-label": props.href } : {}),
+        }, host ?? children);
+      },
     };
     if (!allowImages) {
       // No <img>: show alt text and URL (filtered by react-markdown) as clickable link, letting user decide whether to open
@@ -735,7 +768,7 @@ export function Markdown({
       };
     }
     return out;
-  }, [hasChip, hasFigure, allowImages, linkRel]);
+  }, [hasChip, hasFigure, allowImages, linkRel, compactWebLinks]);
   return React.createElement(
     "div",
     { className: `v2-md ${className ?? ""}`.trim() },

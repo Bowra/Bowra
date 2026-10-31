@@ -49,7 +49,7 @@ TEXTS_HEADING = "## Copyright Notices and License Texts"
 MISSING_HEADING = "### Components without a bundled license text"
 REGENERATE_HINT = "make install-frontend && uv sync --all-packages --no-dev, then make third-party-notices"
 # Bump whenever the generated output changes for the same inputs, so --check asks for a regeneration.
-GENERATOR_VERSION = 7
+GENERATOR_VERSION = 8
 
 # Package manager -> (install subcommand, inventory bucket).
 PACKAGE_MANAGERS = {
@@ -479,7 +479,8 @@ def _unregistered_image_components() -> list[str]:
     for image, path in _inventory_dockerfiles().items():
         parsed = _parse_dockerfile(path)
         problems += [f"{image}: {error}" for error in parsed["errors"]]
-        for name in parsed["system"]:
+        for pin in parsed["system"]:
+            name = pin.split("=", 1)[0]
             if name not in registry["system_packages"]:
                 problems.append(f"{image}: system package {name} has no license registered in {registry_path}")
         for pin in parsed["pip"]:
@@ -742,10 +743,11 @@ def _collect_images() -> list[Dep]:
             name, _, tag = image_ref.partition(":")
             info = registry["base_images"][name]
             deps.append(Dep("image", f"base image {name}", tag, info["license"], image, [rel], note=info.get("note", "")))
-        for name in parsed["system"]:
+        for pin in parsed["system"]:
+            name, _, pinned_version = pin.partition("=")
             info = registry["system_packages"][name]
             version = "Alpine repository version (unpinned)" if image == "bowhead-sandbox-executor" else "Debian repository version (unpinned)"
-            deps.append(Dep("system", name, version, info["license"], image, [rel], note=info.get("note", "")))
+            deps.append(Dep("system", name, pinned_version or version, info["license"], image, [rel], note=info.get("note", "")))
         for pin in parsed["pip"]:
             raw_name, _, version = pin.partition("==")
             name = _norm_py(raw_name)

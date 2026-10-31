@@ -18,19 +18,9 @@ When all five core checks are satisfied, the page shows **Your team is ready**. 
 
 ## Start the work
 
-### Use an uploaded PowerPoint as a template
+### Create a basic presentation
 
-Template requests are available by default unless your administrator disables them. A working document service is still required. Where available, open the **+** (Open…) menu in the Canvas tab bar to find this conversation’s current and earlier drafts. Each opens in the same right-hand Canvas. An accepted request is not a finished file; do not resubmit merely because a draft is still being prepared or its review entry is unavailable.
-
-If your team has template generation enabled, upload or reference an ordinary `.pptx`, identify it as the template in your message, and supply the data and requested changes. For example: “Use the attached PPTX as the template. Update the regional counts from the CSV; keep the layout and all other text.” No template setup form is required. To change the template, upload/reference the replacement and identify it explicitly in a new request.
-
-Removing the card does not delete templates, saved drafts or previously published files. Existing published PPTX and PDF files remain accessible through their ordinary file controls, subject to current permissions. The PDF comes from the corresponding PPTX; downloading does not regenerate either file.
-
-Review the actual pages and changes, then explicitly confirm publication. Closing a draft Tab only closes its view; reopen it from the **+** menu. It neither approves nor cancels the job. If confirmation is uncertain, use the draft’s check/retry action rather than starting over. Published source and PDF files appear through ordinary Results file controls. Switching to another Tab keeps your input and does not redirect an in-flight confirmation.
-
-If a document is waiting for an answer, open it to read the question and follow its instructions in the same conversation. Bowra retains the original request, template and data and rechecks access and file identity. Replacing a file requires a new explicit request. If the document service is unavailable, contact your administrator; changing templates does not repair that service.
-
-Supported changes cover ordinary text and simple unmerged tables, not complex charts, embedded objects or arbitrary template redesign. Rendering uses LibreOffice and does not certify PowerPoint-native compatibility. Confirmation does not run the model again. If a model request has an unresolved outcome, its usage remains pending rather than being shown as free.
+Use the Bowra PPTX Skill to create a new text/table presentation from authorized facts. It does not preserve an uploaded PowerPoint template, its charts, masters or layout. If you supply a template, confirm whether a separate basic presentation is acceptable before generating it. Review the downloaded file before sharing.
 
 1. Choose **New Work** in the left navigation.
 2. Check the team and space at the top. If colleagues will collaborate, make sure they belong to this space.
@@ -41,6 +31,8 @@ Supported changes cover ordinary text and simple unmerged tables, not complex ch
 ## Answer questions during analysis
 
 In a regular conversation, an Agent may show a question card to confirm a period, metric definition, or other condition. Answer each question, add your own answer where needed, and submit to continue. The card means the analysis is waiting for your input; it does not mean the analysis is complete. If no card appears, use the question shown in the conversation to provide more detail.
+
+When an Agent selected with `@` asks after reading its Skill, answer the original card to continue with that Agent and its retained reading results. If that Agent then prepares a document, the same task receives your saved answers. Asking the question does not write its waiting summary into your report.
 
 - With a single single-choice question, selecting an answer submits it. To give a specific number or text, type it in **Type your own answer…** on the card and choose **Send**.
 - With several questions or multiple choices, answer each and choose **Confirm and continue**.
@@ -67,7 +59,19 @@ Use the source label to distinguish resources with the same name. An unavailable
 
 You can select an available team or system Agent without adding a method. A Skill already included in that Agent can be referenced as ordinary instructions without a separate parameter form. If no compatible Agent is available, choose one that includes the Skill or ask its owner to add it. Selecting instructions does not grant permission to run scripts. When a supported task shows a question card, answer on that card to continue with the original Agent and selected methods. You do not need to select them again. Sending a new message, including one edited through **Rephrase**, starts a separate task rather than answering the pending card. If access or task materials have changed, continuation may be unavailable; follow the message shown on the card.
 
-If a task needs a Datarc workspace, choose from the workspace list when prompted. The original task and its attachments remain available while you choose. A withdrawn file, changed permission, or expired task material can prevent continuation.
+If a task needs a Datarc workspace, choose from the workspace list when prompted. Your selected workspace name appears while the task continues. The original task and its attachments remain available while you choose. A withdrawn file, changed permission, or expired task material can prevent continuation.
+
+On a workspace selection card, check **Remember my choice** to make it the default for future tasks. Leave it unchecked to use the selection only in the current Chat.
+
+The analysis agent can also list available Datarc workspaces and use these same switching tools when you request another source. Ordinary data questions keep using your selected workspace.
+
+Say “switch to …” to change the source for
+new work in the current run. Helpers already working keep their original
+source. A temporary choice belongs to this Chat; asking to remember it changes
+your default for future tasks without replacing another Chat's temporary choice.
+Check the result: a switch can work for the current run even if saving fails or
+cannot be confirmed. Upgrades preserve an older workspace choice when its original Team and connection can be confirmed. If that source is ambiguous, choose it once again; a newer saved choice is kept. If the task's original connection or access has changed, start a new task
+with an explicit source instead of continuing the old helper under a new source.
 
 Available built-in Agents also support these selections and question cards. You can select one alone or pair it with an available method.
 

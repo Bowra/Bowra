@@ -106,14 +106,33 @@ async def _fence(db, scope: DocumentScope, job_id: str, owner: str):
 async def _projection_with_version(db, job, execution) -> dict:
     """`_projection` plus the "draft N" number every authorized job read returns."""
     from bowhead_core.documents.planning_instruction import clarification_evidence_sources_in_tx
-    from bowhead_core.documents.revision import draft_version_in_tx
+    from bowhead_core.documents.revision import draft_version_in_tx, superseding_revision_in_tx
 
     value = {**_projection(job, execution), "draft_version": await draft_version_in_tx(db, job["id"])}
+    successor = await superseding_revision_in_tx(db, job=job, execution=execution)
+    if successor is not None:
+        value.update(
+            superseded_by_job_id=successor,
+            can_confirm=False,
+            draft=json.loads(execution["draft_json"]),
+        )
     if "draft" in value:
         sources = await clarification_evidence_sources_in_tx(db, job=job)
         if sources:
             value["clarification_evidence_sources"] = sources
     return value
+
+
+async def _allows_file_read_in_tx(db, *, job, execution, preview: bool) -> bool:
+    if execution is None:
+        return False
+    if execution["state"] == "published" or (preview and execution["state"] == "review"):
+        return True
+    if not preview:
+        return False
+    from bowhead_core.documents.revision import superseding_revision_in_tx
+
+    return await superseding_revision_in_tx(db, job=job, execution=execution) is not None
 
 
 def _projection(job, execution) -> dict:
@@ -262,11 +281,24 @@ class DocumentDeliveryStore:
             await db.commit()
 
     async def save_draft(self, *, scope: DocumentScope, job_id: str, owner: str, result: WorkerResult) -> None:
-        if result.record.get("kind") != "draft" or not {"candidate.pptx", "candidate.pdf"} <= set(result.files):
+        if result.record.get("kind") not in {"draft", "authoring_draft"} or not {"candidate.pptx", "candidate.pdf"} <= set(result.files):
             raise DocumentRequestError("document_draft_invalid")
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             execution = await _fence(db, scope, job_id, owner)
+            async with db.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
+                dispatch_row = await cursor.fetchone()
+            dispatch = dispatch_row[0] if dispatch_row else None
+            if result.record.get("kind") == "authoring_draft" and (
+                dispatch != "pptx-script-worker-v1"
+                or result.record.get("profile") != dispatch
+                or result.record.get("semantic_status") != "unapproved"
+                or result.record.get("requires_full_review") is not True
+                or result.record.get("manifest", {}).get("schema_version") != 2
+            ):
+                raise DocumentRequestError("document_draft_invalid")
+            if result.record.get("kind") == "draft" and dispatch == "pptx-script-worker-v1":
+                raise DocumentRequestError("document_draft_invalid")
             if execution["state"] != "rendering" or execution["image_id"] != result.image_id:
                 raise DocumentRequestError("document_execution_fenced")
             async with db.execute("SELECT 1 FROM document_draft_files WHERE job_id=?", (job_id,)) as cursor:
@@ -363,10 +395,9 @@ class DocumentDeliveryStore:
     async def read_file(self, *, scope: DocumentScope, job_id: str, name: str, preview: bool) -> tuple[bytes, str]:
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN")
-            await _scope(db, scope, job_id, write=False)
+            job = await _scope(db, scope, job_id, write=False)
             execution = await _execution(db, job_id)
-            allowed = ("review", "published") if preview else ("published",)
-            if execution is None or execution["state"] not in allowed or (preview and not name.endswith(".png")):
+            if not await _allows_file_read_in_tx(db, job=job, execution=execution, preview=preview) or (preview and not name.endswith(".png")):
                 raise DocumentRequestError("document_not_found")
             async with db.execute(
                 """SELECT f.*,a.mime FROM document_draft_files f JOIN artifacts a ON a.id=f.artifact_id
@@ -388,9 +419,9 @@ class DocumentDeliveryStore:
             raise DocumentRequestError("document_draft_hash_mismatch")
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN")
-            await _scope(db, scope, job_id, write=False)
+            job = await _scope(db, scope, job_id, write=False)
             current = await _execution(db, job_id)
-            if current["state"] not in allowed:
+            if not await _allows_file_read_in_tx(db, job=job, execution=current, preview=preview):
                 raise DocumentRequestError("document_not_found")
             async with db.execute(
                 """SELECT count(*) FROM document_draft_files f JOIN artifacts a ON a.id=f.artifact_id

@@ -495,6 +495,7 @@ async def test_ch2_tool_context_sentinel_forwards_tool_discriminator(
                     {"value": "7", "label": "华东大区"},
                 ],
                 "remember_option": True,
+                "remember_default": False,
             },
             "rows": [],
         }
@@ -523,6 +524,7 @@ async def test_ch2_tool_context_sentinel_forwards_tool_discriminator(
         payload = clar_events[0].payload
         assert payload["tool"] == "datarc"
         assert payload["kind"] == "tool_context_select"
+        assert payload["remember_default"] is False
         pending = await store.get_pending_for_turn("t_ch2_tool")
         assert len(pending) == 1
         assert pending[0].tool == "datarc"

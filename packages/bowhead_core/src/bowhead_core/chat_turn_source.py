@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from bowhead_core.chat_references import InputDocument
+from bowhead_core.context_action import ContextMaintenanceAction
 from bowhead_core.document_revision_target import DocumentRevisionTarget
 
 
@@ -29,6 +30,7 @@ class ChatTurnUserSource:
     parts: tuple[dict[str, Any], ...] | None
     input_document: InputDocument | None = None
     document_revision_target: DocumentRevisionTarget | None = None
+    context_maintenance: ContextMaintenanceAction | None = None
 
     def __post_init__(self) -> None:
         identities = (
@@ -47,6 +49,20 @@ class ChatTurnUserSource:
             raise TypeError("chat Turn attachment reference is invalid")
         if self.parts is not None and any(not isinstance(value, dict) for value in self.parts):
             raise TypeError("chat Turn source part is invalid")
+        if self.context_maintenance is not None:
+            if not isinstance(self.context_maintenance, ContextMaintenanceAction):
+                raise TypeError("chat Turn context maintenance action is invalid")
+            action = ContextMaintenanceAction.model_validate(self.context_maintenance.model_dump())
+            if (
+                self.user_text
+                or self.attachment_ids
+                or self.attachment_refs
+                or self.parts is not None
+                or self.input_document
+                or self.document_revision_target
+            ):
+                raise ValueError("context maintenance cannot contain business input")
+            object.__setattr__(self, "context_maintenance", action)
         if self.document_revision_target is not None:
             if not isinstance(self.document_revision_target, DocumentRevisionTarget):
                 raise TypeError("chat Turn document revision target is invalid")
@@ -88,6 +104,8 @@ def chat_turn_user_source_projection(source: ChatTurnUserSource) -> dict[str, ob
         projection["input_document"] = source.input_document.model_dump(mode="json", exclude_none=True)
     if source.document_revision_target is not None:
         projection["document_revision_target"] = source.document_revision_target.model_dump(mode="json")
+    if source.context_maintenance is not None:
+        projection["context_maintenance"] = source.context_maintenance.model_dump()
     return projection
 
 
@@ -107,6 +125,7 @@ def snapshot_chat_turn_user_source(source: ChatTurnUserSource) -> ChatTurnUserSo
         parts=(tuple(copy.deepcopy(source.parts)) if source.parts is not None else None),
         input_document=source.input_document,
         document_revision_target=source.document_revision_target,
+        context_maintenance=source.context_maintenance,
     )
 
 

@@ -202,6 +202,21 @@ def project_llm_failure(
 ) -> LLMFailureProjection | None:
     """Project typed Router failures; arbitrary exception prose is rejected."""
 
+    from bowhead_router.output_budget import ContextCapacityError
+
+    if isinstance(exc, ContextCapacityError):
+        return LLMFailureProjection(
+            reason_code="llm_context_overflow",
+            phase="invoke",
+            failure_class="request",
+            provider_family="custom",
+            http_status=None,
+            stream_state="not_started",
+            fallback_state=fallback_state or "not_attempted",
+            attempts=0,
+            retryable=False,
+        )
+
     failure = _terminal_failure(exc)
     if failure is None:
         return None

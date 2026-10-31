@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from bowhead_router.input_admission import LLMInputAdmission
+    from bowhead_router.output_budget import RenderedRequestBudget
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
 FinishReason = Literal["stop", "length", "tool_use", "content_filter", "error"]
@@ -109,6 +110,8 @@ class LLMRequest:
     invocation_execution_id: str | None = field(default=None, repr=False, compare=False)
     invocation_subagent_id: str | None = field(default=None, repr=False, compare=False)
     output_budget: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    context_budget: RenderedRequestBudget | None = field(default=None, repr=False, compare=False)
+    summary_only: bool = field(default=False, repr=False, compare=False)
     output_reservation: int | None = field(default=None, repr=False, compare=False)
     configuration_version: int | None = field(default=None, repr=False, compare=False)
 

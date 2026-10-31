@@ -131,7 +131,6 @@ export function SubagentDraftReview({
   const displayNameId = useId();
   const descriptionId = useId();
   const promptId = useId();
-  const iterationsId = useId();
   const clarificationId = useId();
   const requestTokenRef = useRef(0);
   const dirtyRef = useRef(false);
@@ -1029,7 +1028,6 @@ export function SubagentDraftReview({
           <div style={{ fontSize: "0.78125rem", color: "var(--c-ink-2)", lineHeight: 1.55 }}>
             {t("draft_runtime_summary", {
               model: definition.model || "analyst",
-              iterations: definition.max_iterations,
             })}
             <br />
             {t("draft_private_note")}
@@ -1090,20 +1088,6 @@ export function SubagentDraftReview({
               onChange={(event) => setField("system_prompt", event.target.value)}
             />
             <PromptBudgetHint text={definition.system_prompt} t={t} />
-          </Field>
-          <Field id={iterationsId} label={t("draft_iterations")}>
-            <input
-              id={iterationsId}
-              className="settings-input"
-              type="number"
-              min={1}
-              max={50}
-              value={definition.max_iterations}
-              onChange={(event) => setField(
-                "max_iterations",
-                Number(event.target.value),
-              )}
-            />
           </Field>
         </div>
       ) : null}

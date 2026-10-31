@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from bowhead_core.context_activity import ContextActivity
 from bowhead_core.terminal_approval_contract import (
     build_approval_required_events,
 )
@@ -55,8 +56,12 @@ class RecoveryBuildSnapshot:
     flush: TerminalFlushResult
     effect_disclosure: EffectDisclosureSnapshot | None
     frozen_steer: FrozenSteerSnapshot | None = None
+    context_completions: tuple[ContextActivity, ...] = ()
+    operation_kind: str | None = None
 
     def __post_init__(self) -> None:
+        if self.operation_kind not in (None, "context_maintenance"):
+            raise ValueError("Recovery operation kind is invalid")
         if not isinstance(self.processing, RecoveryProcessingContext) or not isinstance(self.flush, TerminalFlushResult):
             raise TypeError("recovery build snapshot is invalid")
         if self.effect_disclosure is not None and (
@@ -197,6 +202,8 @@ class TerminalReconciler:
                         flush=flush,
                         effect_disclosure=effect_disclosure,
                         frozen_steer=frozen_steer,
+                        context_completions=await self._store.read_recovery_context_completions(processing),
+                        operation_kind=await self._store.read_recovery_operation_kind(processing),
                     )
                 )
             )
@@ -832,7 +839,16 @@ def _build_fixed_interrupt_candidate(
         else SessionVariant.NONE
     )
     variant_key = f"recovery_{session_variant.value}"
-    required: list[StagedTerminalEvent] = []
+    required: list[StagedTerminalEvent] = [
+        StagedTerminalEvent.from_payload(
+            event_id=activity.event_id(),
+            event_type="agent.context",
+            actor_scope=ActorScope.PEER if activity.subagent_id is not None else ActorScope.ROOT,
+            phase_scope=PhaseScope.IN_GENERATION,
+            payload=activity.payload(scope.turn_id),
+        )
+        for activity in snapshot.context_completions
+    ]
     if snapshot.effect_disclosure is not None and snapshot.effect_disclosure.attempt_count > 0:
         event_type = (
             "effect_settlement"
@@ -878,6 +894,7 @@ def _build_fixed_interrupt_candidate(
         phase_scope=PhaseScope.IN_GENERATION,
         payload={
             "candidate_id": candidate_id,
+            **({"operation_kind": snapshot.operation_kind} if snapshot.operation_kind is not None else {}),
             "generation": scope.generation,
             "message_key": message_key,
             "protocol": 1,
@@ -889,6 +906,7 @@ def _build_fixed_interrupt_candidate(
         },
     )
     variant = TerminalCandidateVariant(
+        operation_kind=snapshot.operation_kind,
         variant_key=variant_key,
         outcome_variant=outcome_variant,
         session_variant=session_variant,

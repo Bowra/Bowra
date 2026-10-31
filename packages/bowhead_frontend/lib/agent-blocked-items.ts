@@ -57,6 +57,8 @@ export const BLOCKED_REASON_CODES: ReadonlySet<string> = new Set([
   "skill_not_approved",
   "skill_disabled",
   "skill_bundle_unavailable",
+  "builtin_plugin_skill_revision_mismatch",
+  "builtin_plugin_skill_conflict",
   "skill_risk_report_invalid",
   "skill_risk_report_missing",
   "skill_identity_mismatch",

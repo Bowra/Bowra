@@ -69,6 +69,7 @@ import { AgentEvalPanel } from "./agent-eval-panel";
 import type { TestChangeState } from "./agent-version-validation";
 import { PluginUpdateNotice } from "./plugin-update-notice";
 import { AgentLocalizationPanel } from "./agent-localization-panel";
+import { AgentKnowledgeSourcesPanel } from "./agent-knowledge-sources-panel";
 import { AgentOptionalSkillsPanel } from "./agent-optional-skills-panel";
 import { optionalSkillsNeedPrivateAudience } from "@/lib/agent-runtime-extensions";
 import { agentReleaseBlockedText, agentReleaseErrorKey, agentReleaseReasonKey } from "./agent-release-reason";
@@ -124,7 +125,9 @@ export function agentManagerLocation(search: string): AgentManagerLocation {
 
 function currentManagerLocation(): AgentManagerLocation {
   if (typeof window === "undefined") return { task: "config", section: null, anchor: null, legacy: false };
-  return agentManagerLocation(window.location.search);
+  const location = agentManagerLocation(window.location.search);
+  return location.task === "config" && window.location.hash === `#${AGENT_PENDING_ANCHOR}`
+    ? { ...location, anchor: AGENT_PENDING_ANCHOR } : location;
 }
 
 /** The canonical URL for a task: old parameters removed, the section or anchor kept. */
@@ -158,6 +161,7 @@ interface EditorDraft {
   skillNames: string[];
   skillGrants: AgentExactSkillGrant[];
   extensionFields: { runtime_extensions?: unknown };
+  knowledgeAccess: unknown;
   audienceMode: AudienceMode;
   userIds: string[];
   groupIds: string[];
@@ -354,6 +358,7 @@ function editorDraft(
     toolRefs,
     skillNames: [...new Set(skillNames(definition, grants))].sort(),
     skillGrants: grants.sort((left, right) => left.skill_ref.name.localeCompare(right.skill_ref.name)),
+    knowledgeAccess: structuredClone(definition.knowledge_access),
     extensionFields: Object.hasOwn(definition, "runtime_extensions")
       ? { runtime_extensions: structuredClone(definition.runtime_extensions) }
       : {},
@@ -964,6 +969,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
     return {
       definition: {
         ...draft.extensionFields,
+        ...(draft.knowledgeAccess === undefined ? {} : { knowledge_access: draft.knowledgeAccess }),
         max_iterations: draft.maxIterations,
         // Written only when on, so saving an untouched Agent keeps its definition (and version) unchanged.
         ...(draft.capabilityProtocolBlock ? { capability_protocol_block: true } : {}),
@@ -1476,7 +1482,6 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
                 ) : null}
                 <label className="am-release-field-wide"><span>{t("release_system_prompt")}</span><textarea aria-label={t("release_system_prompt")} name="agent-system-prompt" autoComplete="off" className="am-release-prompt" maxLength={MAX_PROMPT_CHARS_TEAM} rows={14} disabled={archived} value={draft.systemPrompt} onChange={(event) => update({ systemPrompt: event.target.value })} /><PromptBudgetHint text={draft.systemPrompt} t={t} /></label>
                 <div className="am-release-form-grid am-release-compact-fields">
-                  <label><span>{t("release_iterations")}</span><input name="agent-max-iterations" autoComplete="off" type="number" min={1} max={50} disabled={archived} value={draft.maxIterations} onChange={(event) => update({ maxIterations: Math.max(1, Math.min(50, Number(event.target.value) || 1)) })} /></label>
                   <label className="am-release-field-wide am-release-toggle-field"><input name="agent-capability-protocol-block" type="checkbox" disabled={archived} checked={draft.capabilityProtocolBlock} onChange={(event) => update({ capabilityProtocolBlock: event.target.checked })} /><span><strong>{t("release_capability_protocol_block")}</strong><small>{t("release_capability_protocol_block_help")}</small></span></label>
                   {catalog.model_policy.locked || catalog.model_policy.allowed_roles.length <= 1 ? (
                     <div className="am-release-policy-field"><span>{t("release_model_role")}</span><strong>{draft.model === "analyst" ? t("release_model_analyst") : draft.model}</strong><small>{t("release_model_policy_locked")}</small></div>
@@ -1591,6 +1596,7 @@ export function AgentReleaseManager({ agentId, returnHref = "/agents/manage/crea
                 {draft.audienceMode !== "private" ? <PersonalToolAudienceNotice agentId={agentId} /> : null}
                 {draft.audienceMode === "custom" ? <div className="am-release-directory"><label><span>{t("release_find_people")}</span><input name="agent-audience-search" autoComplete="off" type="search" disabled={archived} value={directoryQuery} onChange={(event) => setDirectoryQuery(event.target.value)} placeholder={t("release_find_people_placeholder")} /></label>{customAudienceInvalid ? <p className="am-release-inline-error">{t("release_custom_required")}</p> : null}<div>{groups.map((group) => <label key={`group:${group.id}`}><input name="agent-audience-group" type="checkbox" checked={selectedAudienceGroups.has(group.id)} disabled={archived} onChange={() => toggle("groupIds", group.id)} /><span><strong>{group.name}</strong><small>{t("release_group_members", { count: group.member_count })}</small></span></label>)}{users.map((user) => <label key={`user:${user.id}`}><input name="agent-audience-user" type="checkbox" checked={selectedAudienceUsers.has(user.id)} disabled={archived} onChange={() => toggle("userIds", user.id)} /><span><strong>{user.display_name}</strong><small>{user.email_masked}</small></span></label>)}{[...draft.groupIds.filter((id) => !groups.some((group) => group.id === id)), ...draft.userIds.filter((id) => !users.some((user) => user.id === id))].map((id) => <label key={`unresolved:${id}`}><input name="agent-audience-principal" type="checkbox" checked disabled={archived} onChange={() => draft.groupIds.includes(id) ? toggle("groupIds", id) : toggle("userIds", id)} /><span><strong>{id}</strong><small>{t("release_selected_principal")}</small></span></label>)}</div></div> : null}
               </section>
+              <AgentKnowledgeSourcesPanel key={`knowledge:${agentId}`} agentId={agentId} value={draft.knowledgeAccess} disabled={!detail.actions.edit || busy !== null || archived} onChange={(knowledgeAccess) => update({ knowledgeAccess })} />
               <section className="am-release-section"><AgentOptionalSkillsPanel key={agentId} agentId={agentId} value={draft.extensionFields.runtime_extensions} audience={draft.audienceMode} disabled={!detail.actions.edit || busy !== null} onChange={(runtime_extensions) => {
                 const baseline = detail.working_copy ?? detail.live;
                 update({

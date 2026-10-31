@@ -75,8 +75,7 @@ class TeamOwnerDatarcResolver:
         from bowhead_gateway.datarc_context import (
             DatarcResolutionError,
             _resolve_per_user_datarc_workspace,
-            resolve_team_datarc_client,
-            resolve_team_embed_client,
+            resolve_team_datarc_binding,
         )
         from bowhead_gateway.member_resolver import MemberNotFoundError
 
@@ -94,7 +93,8 @@ class TeamOwnerDatarcResolver:
 
         app = SimpleNamespace(state=self.state)
         try:
-            client = await resolve_team_datarc_client(app, team_id)
+            binding = await resolve_team_datarc_binding(app, team_id)
+            client = binding.client if binding else None
         except DatarcResolutionError:
             raise EvalDatarcUnavailable("connection_unusable") from None
         if client is None:
@@ -109,6 +109,7 @@ class TeamOwnerDatarcResolver:
                 session_id=None,
                 read_only=True,
                 log=logger,
+                connection_binding=binding,
             )
         except Exception as exc:
             errors.append(exc)
@@ -131,7 +132,7 @@ class TeamOwnerDatarcResolver:
             # Never hand a Tool an empty member: that turns the term permission filter off.
             raise EvalDatarcUnavailable("owner_not_member", workspace=workspace_name or str(workspace_id))
 
-        vector_client = await resolve_team_embed_client(app, team_id, project_ids=[str(workspace_id)])
+        vector_client = await binding.vector_resolver([str(workspace_id)]) if binding and binding.vector_resolver else None
         return ResolvedDatarcIdentity(
             client=client,
             vector_client=vector_client,

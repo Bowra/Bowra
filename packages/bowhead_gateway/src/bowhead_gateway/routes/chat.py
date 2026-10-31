@@ -165,6 +165,7 @@ async def _persist_turn_row_for_stream(
         attachment_refs=tuple(attachment_refs or ()),
         parts=tuple(source_parts) if source_parts is not None else None,
         document_revision_target=req.document_revision_target,
+        context_maintenance=req.context_maintenance,
     )
     await session_store.ensure_session(
         session_id=req.session_id,
@@ -194,6 +195,11 @@ _TERMINAL_ADMISSION_PUBLIC_CODES = frozenset(
 
 def _terminal_admission_http_error(exc: Exception) -> HTTPException:
     """Project internal v1 admission failures onto a finite public contract."""
+
+    from bowhead_core.context_action import ContextActionRejected
+
+    if isinstance(exc, ContextActionRejected):
+        return HTTPException(status_code=409, detail={"error": {"code": exc.code}})
 
     from bowhead_core.terminal_protocol import (
         TerminalProtocolFutureVersionError,
@@ -421,6 +427,7 @@ async def _resolve_optional_datarc_member(
         # Clear all query authority; a failed lookup must never reuse a saved member or data scope.
         return replace(
             datarc_context,
+            connection_binding=None,
             active_datarc_project=None,
             datarc_project_for_calls="",
             active_datarc_workspace_name="",
@@ -437,59 +444,22 @@ def _make_datarc_context_switcher(
     user_id: str,
     session_id: str,
     *,
+    workspace_id: str,
+    binding: Any,
     ws_enforce: bool,
     log: Any,
 ):
-    """批2/c6 (PRD §3.4): tool_switch_context 的「switch 提交」闭包（gateway 全权）。
+    """Bind the switch service to the executing Space's authorized Team connection."""
+    from bowhead_gateway.datarc_switch import DatarcContextSwitcher
 
-    handler 在可及集合内唯一命中后调用：①按新工作区重解析 member_uid（fail-closed，
-    抛错则 handler 不改 ctx）②提交偏好走 ``commit_connector_context_choice``（picker resolve
-    共用的唯一提交路径，best-effort 不 raise）——缺省 **session 级**；``remember=True``
-    （用户明确说「记住/以后都用它」，tool-context-framework v1 §5）→ explicit 永久默认 +
-    清本会话覆盖层——设置面板已删，这是唯一的耐久改选入口 ③审计。
-    返回 ``(member_uid, persisted)``——persisted=False 时调用方不得宣称「已设为默认」
-    （review P1-c）。core 零 gateway 依赖。"""
-
-    async def _switch(
-        datarc_workspace_id: str,
-        workspace_name: str = "",
-        *,
-        remember: bool = False,
-    ) -> tuple[str, bool]:
-        user = await request.app.state.user_store.get_user(user_id)
-        datarc_client = await _resolve_team_datarc_client(request, getattr(user, "team_id", None))
-        member_uid = await _resolve_datarc_member_uid(
-            request,
-            resolver=getattr(request.app.state, "member_resolver", None),
-            datarc_client=datarc_client,
-            datarc_ws=datarc_workspace_id,
-            body_member_uid=None,
-            ws_enforce=ws_enforce,
-            log=log,
-        )
-        from bowhead_gateway.connector_context_provider import commit_connector_context_choice
-
-        persisted = await commit_connector_context_choice(
-            getattr(request.app.state, "user_memory_store", None),
-            user_id=user_id,
-            tool="datarc",
-            context_id=datarc_workspace_id,
-            context_name=workspace_name,
-            remember=remember,
-            session_id=session_id,
-            log=log,
-        )
-        log.info(
-            "datarc_context_switch.committed user=%s session=%s to=%s remember=%s persisted=%s",
-            user_id,
-            session_id,
-            datarc_workspace_id,
-            remember,
-            persisted,
-        )
-        return member_uid or "", persisted
-
-    return _switch
+    return DatarcContextSwitcher(
+        request.app,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        binding=binding,
+        log=log,
+    )
 
 
 class UserProfileHint(BaseModel):
@@ -547,6 +517,9 @@ def continue_checkpoint_ids(client_info: dict[str, str]) -> list[str]:
     return list(dict.fromkeys(value))
 
 
+from bowhead_core.context_action import ContextMaintenanceAction
+
+
 class ChatSendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -559,6 +532,7 @@ class ChatSendRequest(BaseModel):
     message: str = ""
     input_document: InputDocument | None = None
     document_revision_target: DocumentRevisionTarget | None = None
+    context_maintenance: ContextMaintenanceAction | None = None
     attachments: list[str] = Field(default_factory=list, max_length=100)
     attachment_refs: list[ChatAttachmentRef] | None = Field(default=None, max_length=32)
     client_info: dict[str, str] = Field(default_factory=dict)
@@ -617,6 +591,27 @@ class ChatSendRequest(BaseModel):
         from bowhead_core.coach_canvas_target import COACH_CANVAS_TARGET_KEY, CoachCanvasSendTarget
 
         resource_target = self.client_info.get(COACH_CANVAS_TARGET_KEY)
+        if self.context_maintenance is not None:
+            if (
+                not self.session_id
+                or self.message
+                or self.attachments
+                or self.attachment_refs
+                or self.input_document
+                or self.document_revision_target
+                or draft_id
+                or settings_target
+                or resource_target
+                or self.plan_execution_id
+                or self.planning_mode not in (None, "off")
+                or self.replay_source_turn_id
+                or CONTINUE_CLIENT_KEY in self.client_info
+                or self.submission_kind in ("steer", "replay")
+                or self.model_control_batch == "references"
+                or (action_identity is None and self.client_submission_id is None)
+                or (action_identity is not None and action_identity.action.kind != "start")
+            ):
+                raise ValueError("context maintenance requires an idle scoped start without business input")
         if resource_target is not None:
             if len(resource_target) > 4096:
                 raise ValueError("resource target exceeds its size limit")
@@ -756,6 +751,7 @@ class ChatSendRequest(BaseModel):
 
 
 class ChatSendResponse(BaseModel):
+    context_maintenance: ContextMaintenanceAction | None = Field(default=None, exclude_if=lambda value: value is None)
     document_revision_target: DocumentRevisionTarget | None = Field(default=None, exclude_if=lambda value: value is None)
     agent_draft_target: AgentDraftSendTarget | None = Field(default=None, exclude_if=lambda value: value is None)
     session_id: str
@@ -774,6 +770,7 @@ class ChatSendResponse(BaseModel):
 
 
 class ChatActionLookupResponse(BaseModel):
+    context_maintenance: ContextMaintenanceAction | None = Field(default=None, exclude_if=lambda value: value is None)
     agent_draft_target: AgentDraftSendTarget | None = Field(default=None, exclude_if=lambda value: value is None)
     action_id: str
     action_kind: Literal["start", "steer"]
@@ -906,6 +903,8 @@ def _submission_fingerprint(
     }
     if body.document_revision_target is not None:
         projection["content"]["document_revision_target"] = body.document_revision_target.model_dump(mode="json")
+    if body.context_maintenance is not None:
+        projection["content"]["context_maintenance"] = body.context_maintenance.model_dump()
     if body.expected_plan_revision is not None:
         projection["content"]["expected_plan_revision"] = body.expected_plan_revision
     domain = b"bowhead/chat-submission-fingerprint/semantic-wire-v1\0"
@@ -1472,10 +1471,12 @@ async def _replay_existing_web_action(
             attachment_ids=tuple(effective_attachment_ids),
             attachment_refs=tuple(effective_attachment_refs),
             parts=None,
+            context_maintenance=body.context_maintenance,
         )
         # team-router-rule: rebuild only to recompute admission digest; never execute
         # (web_start_execution_intent does not read team_router; adding it cannot affect the digest).
         replay_request = TurnRequest(
+            context_maintenance=body.context_maintenance,
             session_id=lookup.scope.session_id,
             workspace_id=body.workspace_id,
             user_id=user_id,
@@ -1527,6 +1528,7 @@ async def _replay_existing_web_action(
 
     return ChatSendResponse(
         agent_draft_target=AgentDraftSendTarget.model_validate(lookup.agent_draft_target) if lookup.agent_draft_target else None,
+        context_maintenance=ContextMaintenanceAction.model_validate(lookup.context_maintenance) if lookup.context_maintenance is not None else None,
         session_id=lookup.scope.session_id,
         turn_id=lookup.scope.turn_id,
         stream_url=f"/api/v1/chat/stream/{lookup.scope.turn_id}",
@@ -2035,7 +2037,7 @@ async def _send_impl(
     assert orchestrator is not None
     # Sprint chat-redesign-2026-05-21 Phase 1.1 (P0-7): empty text is fine IF
     # attachments present (drives L3 picker path). Reject only when BOTH empty.
-    if not text and not body.attachments and body.submission_kind != "replay":
+    if not text and not body.attachments and body.submission_kind != "replay" and body.context_maintenance is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": {"code": "empty_message"}},
@@ -2731,6 +2733,7 @@ async def _send_impl(
     if (
         body.session_id
         and action_identity is None
+        and body.context_maintenance is None
         and not reference_mode
         and not _plan_exec_id
         and (body.client_submission_id is None or body.submission_kind == "steer")
@@ -2953,29 +2956,6 @@ async def _send_impl(
         # run in the plan's own session so the report lands in the user's canvas
         if _plan is not None and _plan.session_id:
             session_id = _plan.session_id
-
-    # Resolve analysis depth before durable admission. create_task copies this
-    # ContextVar; cancellation or settings I/O must never strand an opened v1
-    # generation without a worker.
-    try:
-        _team_store_for_depth = getattr(
-            request.app.state,
-            "team_settings_store",
-            None,
-        )
-        if _team_store_for_depth is not None and resolved_team_id:
-            from bowhead_core.agents.analysis_depth import (
-                KEY_TEAM_ANALYSIS_DEPTH,
-                set_analysis_depth,
-            )
-
-            _depth_raw = await _team_store_for_depth.get(
-                resolved_team_id,
-                KEY_TEAM_ANALYSIS_DEPTH,
-            )
-            set_analysis_depth(_depth_raw)
-    except Exception:  # noqa: S110
-        pass
 
     # workspace/ws-datarc-decouple: resolve the Datarc project + team-scoped clients once at
     # turn-start, then thread the same runtime envelope into member resolution and TurnRequest.
@@ -3310,20 +3290,38 @@ async def _send_impl(
         except Exception as _l3_e:
             _log.warning("l3_picker.candidates_failed err=%s", _l3_e)
 
+    async def _chart_authoring_projection(section: Any) -> dict[str, Any] | None:
+        from bowhead_gateway.chart_authoring_projection import project_chart_for_authoring
+
+        return await project_chart_for_authoring(request, session_id, section)
+
     turn_req = TurnRequest(
+        context_maintenance=body.context_maintenance,
+        chart_authoring_projection=_chart_authoring_projection,
         document_revision_target=body.document_revision_target,
         session_id=session_id,
         workspace_id=body.workspace_id,
         # workspace-datarc-decouple P1 (R8): seeded datarc project (None pre-migration →
         # ctx._ws falls back to workspace_id == today's datarc id).
         active_datarc_project=_datarc_ctx.active_datarc_project,
+        datarc_binding=_datarc_ctx.connection_binding,
         # Batch 2 (PRD §3.3b): carry per-user snapshots in the envelope (legacy always defaults).
         active_datarc_workspace_name=getattr(_datarc_ctx, "active_datarc_workspace_name", "") or "",
         accessible_datarc_workspaces=getattr(_datarc_ctx, "accessible_datarc_workspaces", ()) or (),
         datarc_absence_reason=getattr(_datarc_ctx, "datarc_absence_reason", "") or "",
         # Batch 2/c6 (PRD §3.4): switch commit callback. After tool_switch_context's unique match, this
         # closure re-resolves member_uid + writes session preference (never overwrites explicit default).
-        datarc_context_switcher=(_make_datarc_context_switcher(request, resolved_user_id, session_id, ws_enforce=_ws_enforce, log=_log)),
+        datarc_context_switcher=(
+            _make_datarc_context_switcher(
+                request,
+                resolved_user_id,
+                session_id,
+                workspace_id=body.workspace_id,
+                binding=_datarc_ctx.connection_binding,
+                ws_enforce=_ws_enforce,
+                log=_log,
+            )
+        ),
         # ws-datarc-decouple P2a (③): per-team datarc client resolved above (R7.1 team-scoped).
         datarc_client=_datarc_ctx.datarc_client,
         # [review P1-b] resolution failed → fail closed (turn_runner won't use the global client).
@@ -3376,8 +3374,17 @@ async def _send_impl(
         coach_canvas_target=_coach_canvas_target,
         # 2026-08-11: Web main path is an interactive user session, the sole entry for first-turn AI sidebar titles.
         # Scheduled jobs / dry-run do not declare it (default False), avoiding wasted calls for each new session.
+        knowledge_user_request=True,
         interactive_session=True,
     )
+
+    from bowhead_gateway.datarc_context import recovered_datarc_source
+
+    if resolved_team_id:
+        turn_req.datarc_source_evidence = recovered_datarc_source(_datarc_ctx, resolved_user_id, resolved_team_id or "", member_uid)
+        if _datarc_ctx.datarc_client is None:
+            turn_req.member_uid = ""
+            turn_req.active_datarc_project = None
 
     if reference_start is not None:
         from dataclasses import replace as _reference_replace
@@ -3554,6 +3561,40 @@ async def _send_impl(
 
         turn_req = _draft_replace(turn_req, subagent_draft_editor=draft_editor, agent_draft_target=draft_target)
 
+    if body.context_maintenance is not None:
+        from bowhead_core._db import open_shared_ctx
+        from bowhead_core.chat_turn_source import ChatTurnUserSource
+        from bowhead_core.context_action import ContextActionRejected, validate_context_action_in_tx
+        from bowhead_router.router import UserModelPref
+
+        maintenance_router = turn_req.team_router or orchestrator.router
+        if (
+            maintenance_router.supports_context_maintenance(
+                "lead", "lead", UserModelPref.from_request_fields(turn_req.preferred_provider, turn_req.preferred_model)
+            )
+            is not True
+        ):
+            raise HTTPException(status_code=409, detail={"error": {"code": "context_maintenance_unsupported"}})
+        try:
+            async with open_shared_ctx(orchestrator.session_store.db_path) as db:
+                await db.execute("BEGIN")
+                await validate_context_action_in_tx(
+                    db,
+                    source=ChatTurnUserSource(
+                        turn_id=turn_req.turn_id,
+                        session_id=session_id,
+                        user_id=resolved_user_id,
+                        workspace_id=body.workspace_id,
+                        user_text="",
+                        attachment_ids=(),
+                        attachment_refs=(),
+                        parts=None,
+                        context_maintenance=body.context_maintenance,
+                    ),
+                )
+        except ContextActionRejected as error:
+            raise HTTPException(status_code=409, detail={"error": {"code": error.code}}) from error
+
     # Claim only after all BYO/model setup that may reject the request, but
     # before terminal admission so concurrent approvals cannot both create a
     # Turn. Every later pre-spawn failure must release this claim.
@@ -3692,13 +3733,12 @@ async def _send_impl(
     # recovered run read the same request. Ownership is checked when each run is claimed.
     _resume_ids = continue_checkpoint_ids(body.client_info)
     if _resume_ids and orchestrator.session_store is not None:
-        from bowhead_core.subagent_resume import record_requests, subagent_resume_enabled
+        from bowhead_core.subagent_resume import record_requests
 
-        if subagent_resume_enabled():
-            try:
-                await record_requests(orchestrator.session_store.db_path, turn_id=turn_req.turn_id, checkpoint_ids=_resume_ids)
-            except Exception as exc:  # noqa: BLE001 — the visible "continue" still reaches Lead, which can resume by itself
-                _log.warning("subagent_resume.request_record_failed turn=%s err=%s", turn_req.turn_id, exc)
+        try:
+            await record_requests(orchestrator.session_store.db_path, turn_id=turn_req.turn_id, checkpoint_ids=_resume_ids)
+        except Exception as exc:  # noqa: BLE001 — Lead can still choose the supported resume path.
+            _log.warning("subagent_resume.request_record_failed turn=%s err=%s", turn_req.turn_id, exc)
 
     # Terminal Protocol v1 admission happens after all request gates and before
     # any legacy Turn row/bus write.  Writer ON with missing runtime is a hard
@@ -3727,6 +3767,7 @@ async def _send_impl(
                 request_id=request_id,
                 presentation_locale=str(locale),
                 user_source=ChatTurnUserSource(
+                    context_maintenance=turn_req.context_maintenance,
                     turn_id=turn_req.turn_id,
                     session_id=turn_req.session_id,
                     user_id=turn_req.user_id,
@@ -3864,6 +3905,7 @@ async def _send_impl(
     _send_response = ChatSendResponse(
         document_revision_target=turn_req.document_revision_target,
         agent_draft_target=turn_req.agent_draft_target if action_identity is not None else None,
+        context_maintenance=turn_req.context_maintenance,
         session_id=session_id,
         turn_id=turn_req.turn_id,
         stream_url=f"/api/v1/chat/stream/{turn_req.turn_id}",
@@ -3896,6 +3938,7 @@ async def _send_impl(
                 parts=effective_source_parts,
                 reference_start=reference_start,
                 document_revision_target=body.document_revision_target,
+                context_maintenance=body.context_maintenance,
             )
         else:
             await _persist_turn_row_for_stream(
@@ -3907,7 +3950,10 @@ async def _send_impl(
     except BaseException as _pte:
         persist_error = _pte
         _active_conflict = str(_pte) == "submission_session_active"
+        from bowhead_core.context_action import ContextActionRejected
         from bowhead_core.documents.request import DocumentRequestError
+
+        _maintenance_rejection = _pte.code if isinstance(_pte, ContextActionRejected) else None
 
         _revision_rejection = (
             _pte.code
@@ -3966,7 +4012,7 @@ async def _send_impl(
                     )
 
             if (
-                (_active_conflict or _revision_rejection is not None)
+                (_active_conflict or _revision_rejection is not None or _maintenance_rejection is not None)
                 and _submission_claim is not None
                 and _submission_store is not None
                 and _submission_claim.lease_owner is not None
@@ -3987,7 +4033,7 @@ async def _send_impl(
                         lease_version=_submission_claim.lease_version,
                         response={
                             "http_status": status.HTTP_409_CONFLICT,
-                            "detail": {"error": {"code": _revision_rejection or "turn_became_active"}},
+                            "detail": {"error": {"code": _maintenance_rejection or _revision_rejection or "turn_became_active"}},
                         },
                     )
                 except Exception:
@@ -4036,6 +4082,8 @@ async def _send_impl(
             )
         if not isinstance(_pte, Exception):
             raise
+        if _maintenance_rejection is not None:
+            raise HTTPException(409, detail={"error": {"code": _maintenance_rejection}}) from None
         if _revision_rejection is not None:
             raise HTTPException(409, detail={"error": {"code": _revision_rejection}}) from None
         if reference_start is not None:
@@ -4915,6 +4963,7 @@ async def get_chat_action(
     response.headers["Cache-Control"] = "no-store"
     return ChatActionLookupResponse(
         agent_draft_target=AgentDraftSendTarget.model_validate(lookup.agent_draft_target) if lookup.agent_draft_target else None,
+        context_maintenance=ContextMaintenanceAction.model_validate(lookup.context_maintenance) if lookup.context_maintenance is not None else None,
         action_id=lookup.action_id,
         action_kind=lookup.action_kind,
         outcome=("admitted" if lookup.action_kind == "start" else "accepted"),
@@ -6326,7 +6375,6 @@ async def _run_turn_and_cleanup(
             ):
                 from bowhead_core.agent_run_limits import (
                     TurnCreditGate,
-                    agent_run_limits_enabled,
                     reset_credit_gate,
                     set_credit_gate,
                 )
@@ -6346,9 +6394,7 @@ async def _run_turn_and_cleanup(
                 # Agent run limits, phase 3: subagents stop with partial work once this
                 # turn has used the remaining credit; settlement below is unchanged.
                 _credit_gate_token = set_credit_gate(
-                    TurnCreditGate(_read_credit_balances, _accrued_turn_credits)
-                    if agent_run_limits_enabled() and user_store is not None and team_id
-                    else None
+                    TurnCreditGate(_read_credit_balances, _accrued_turn_credits) if user_store is not None and team_id else None
                 )
                 try:
                     result = await orchestrator.run_turn(req)
@@ -6757,6 +6803,9 @@ async def _run_turn_and_cleanup(
                     reference_scope=_preterminal_reference_scope,
                     reference_runtime=None,
                     reference_clarification_id=None,
+                    document_clarification_id=None,
+                    document_checkpoint=None,
+                    document_revision_target=_follow_up_source.document_revision_target,
                 )
                 if not _follow_up_announced:
                     try:

@@ -30,6 +30,7 @@ tools:
     - skill_invoke
     - skill_list
     - add_chart
+    - read_chart
     # delivery-surface M-C (2026-08-13): grant the pen; this agent writes its own body for report deliverables.
     # The write_report write path includes bake_report_markdown guards (M-B). read_report supports
     # continuation and real figure-ID references. Both tools are unregistered when BOWHEAD_WRITE_REPORT=0, leaving these two lines inert.

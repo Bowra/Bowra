@@ -36,6 +36,9 @@ async def store(tmp_path: Path) -> ArtifactStore:
     backend = LocalBackend(root_dir=tmp_path / "blob")
     s = ArtifactStore(db_path=db_path, backend=backend)
     await s.initialize()
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    await TurnLogStore(db_path).initialize()
     # Bootstrap minimal sessions / turns / canvases / turn_attachments tables
     # (artifact_store creates only artifacts; session_store and others ensure the remaining tables).
     async with aiosqlite.connect(db_path) as db:

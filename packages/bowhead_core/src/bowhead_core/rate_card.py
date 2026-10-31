@@ -17,6 +17,9 @@ RATE_CARD_VERSION = "v2"
 
 #: v1: 1 credit per 1000 tokens (input + output combined), rounded up.
 _TOKENS_PER_CREDIT_BY_VERSION = MappingProxyType({"v1": 1000, "v2": 1000})
+MAX_MODEL_CREDIT_RATE = 1000
+MODEL_CREDIT_RATE_DECIMALS = 6
+
 SUPPORTED_RATE_CARD_VERSIONS = frozenset(_TOKENS_PER_CREDIT_BY_VERSION)
 
 
@@ -41,13 +44,40 @@ class ModelCreditRates:
                 number = Decimal(str(raw))
             except InvalidOperation as exc:
                 raise ValueError(f"model credit rate {key} must be a number") from exc
-            if not number.is_finite() or number < 0 or number > 1000 or number.as_tuple().exponent < -6:
+            if not number.is_finite() or number < 0 or number > MAX_MODEL_CREDIT_RATE or number.as_tuple().exponent < -MODEL_CREDIT_RATE_DECIMALS:
                 raise ValueError(f"model credit rate {key} must be between 0 and 1000 with at most six decimals")
             parsed.append(number)
         return cls(*parsed)
 
     def as_json(self) -> dict[str, str]:
         return {"input": str(self.input), "cached_input": str(self.cached_input), "output": str(self.output)}
+
+
+def model_credit_rates_schema() -> dict:
+    """Agent decimal-string projection; from_config also accepts original numeric inputs."""
+    meanings = {
+        "input": "Credit multiplier for uncached input tokens.",
+        "cached_input": "Credit multiplier for cached input tokens; this does not enable caching.",
+        "output": "Credit multiplier for generated output tokens.",
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(meanings),
+        "properties": {
+            key: {
+                "type": "string",
+                "description": meaning,
+                "x-bowhead-field": {
+                    "unit": "multiplier",
+                    "decimal_minimum": 0,
+                    "decimal_maximum": MAX_MODEL_CREDIT_RATE,
+                    "decimal_places": MODEL_CREDIT_RATE_DECIMALS,
+                },
+            }
+            for key, meaning in meanings.items()
+        },
+    }
 
 
 @dataclass(frozen=True, slots=True)

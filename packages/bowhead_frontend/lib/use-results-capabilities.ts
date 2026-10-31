@@ -14,6 +14,7 @@ export type ResultsCapabilities = {
   workspace: boolean;
   completeList: boolean;
   scaleNav: boolean;
+  interactiveHtml?: boolean;
   resolved: boolean;
   error: "unavailable" | "timeout" | "auth" | null;
 };
@@ -22,6 +23,7 @@ const DISABLED_SNAPSHOT: ResultsCapabilities = {
   workspace: false,
   completeList: false,
   scaleNav: false,
+  interactiveHtml: false,
   resolved: false,
   error: null,
 };
@@ -56,6 +58,7 @@ function publish(next: ResultsCapabilities): void {
     snapshot.workspace === next.workspace
     && snapshot.completeList === next.completeList
     && snapshot.scaleNav === next.scaleNav
+    && snapshot.interactiveHtml === next.interactiveHtml
     && snapshot.resolved === next.resolved
     && snapshot.error === next.error
   ) return;
@@ -77,6 +80,7 @@ function parseCapabilities(value: unknown): ResultsCapabilities | null {
     workspace: dto.workspace,
     completeList: dto.workspace && dto.complete_list,
     scaleNav: dto.workspace && dto.complete_list && dto.scale_nav,
+    interactiveHtml: dto.interactive_html === true,
     resolved: true,
     error: null,
   };

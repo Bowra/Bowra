@@ -141,6 +141,9 @@ def _text_boxes(content: bytes) -> tuple[tuple[float, float], dict[tuple, tuple[
     def visit(shapes, slide, transform=(1.0, 1.0, 0.0, 0.0)):
         sx, sy, tx, ty = transform
         for shape in shapes:
+            # Decoration has no source text to associate with PDF glyphs.
+            if not any(node.tag == f"{{{A}}}t" and (node.text or "").strip() for node in shape._element.iter()):
+                continue
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
                 xfrm = shape._element.grpSpPr.xfrm
                 if xfrm is None or not xfrm.chExt.cx or not xfrm.chExt.cy or shape.rotation or xfrm.flipH or xfrm.flipV:
@@ -160,15 +163,18 @@ def _text_boxes(content: bytes) -> tuple[tuple[float, float], dict[tuple, tuple[
                 raise OfficePackageError("document_layout_unsupported")
             left, top = tx + sx * shape.left, ty + sy * shape.top
             if shape.has_table:
+                row_heights = [row.height for row in shape.table.rows]
+                column_widths = [column.width for column in shape.table.columns]
                 y = top
                 for r, row in enumerate(shape.table.rows):
                     x = left
                     for c, column in enumerate(shape.table.columns):
+                        cell = shape.table.cell(r, c)
                         boxes[(slide, str(shape.shape_id), (r, c))] = (
                             x / 12700,
                             y / 12700,
-                            (x + sx * column.width) / 12700,
-                            (y + sy * row.height) / 12700,
+                            (x + sx * sum(column_widths[c : c + cell.span_width])) / 12700,
+                            (y + sy * sum(row_heights[r : r + cell.span_height])) / 12700,
                             False,
                             False,
                         )
@@ -235,10 +241,12 @@ def validate_pdf(source: bytes, pdf: bytes) -> dict[str, object]:
                         index not in used
                         and selected[0]["x0"] <= right + 2
                         and selected[0]["top"] <= bottom + 2
+                        and max(char["x1"] for char in selected) >= left - 2
+                        and max(char["bottom"] for char in selected) >= top - 2
                         and all(
-                            char["x0"] >= max(0, left) - 2
+                            char["x0"] >= (0 if overflow_x else max(0, left)) - 2
                             and char["x1"] <= (page.width if overflow_x else min(page.width, right)) + 2
-                            and char["top"] >= max(0, top) - 2
+                            and char["top"] >= (0 if overflow_y else max(0, top)) - 2
                             and char["bottom"] <= (page.height if overflow_y else min(page.height, bottom)) + 2
                             for char in selected
                         )

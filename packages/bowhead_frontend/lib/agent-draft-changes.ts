@@ -12,7 +12,7 @@ const USES_FIELDS = new Set([
   "/definition/builtin_plugin_ids",
   "/definition/team_tool_connections",
 ]);
-const WHO_FIELDS = new Set(["/definition/runtime_extensions", "/definition/output_schema"]);
+const WHO_FIELDS = new Set(["/definition/knowledge_access", "/definition/runtime_extensions", "/definition/output_schema"]);
 
 export function draftChangeSection(path: string): AgentConfigSectionKey {
   if (USES_FIELDS.has(path)) return "uses";
@@ -22,6 +22,7 @@ export function draftChangeSection(path: string): AgentConfigSectionKey {
 
 /** Translation key (agents_marketplace) naming a draft field; unknown fields share one generic label. */
 export function draftFieldLabelKey(path: string): string {
+  if (path === "/definition/knowledge_access") return "knowledge_sources_title";
   if (path === "/definition/system_prompt") return "version_proposal_field_system_prompt";
   if (path === "/definition/tool_refs" || path === "/definition/tool_refs_json" || path === "/definition/team_tool_connections") return "version_proposal_field_tools";
   if (path === "/definition/skill_grants" || path === "/definition/skills_json") return "version_proposal_field_skills";

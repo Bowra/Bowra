@@ -360,8 +360,9 @@ async def test_collaboration_barrier_never_trips_the_cross_tool_failure_cap(coll
     assert len(refusals) == 3 and rounds == 5
 
 
+@pytest.mark.parametrize("runtime_limit", [None, 3, 4])
 @pytest.mark.parametrize("invalid_first_reply", [False, True])
-async def test_lead_answers_child_before_original_spawn_completes(collab, invalid_first_reply):
+async def test_lead_answers_child_before_original_spawn_completes(collab, invalid_first_reply, runtime_limit):
     child_returned = asyncio.Event()
     base_round = 0
     child_round = 0
@@ -434,7 +435,19 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
         }
 
     harness.register("subagent_spawn", spawn)
-    result = await asyncio.wait_for(harness.run(collab.lead), 10)
+    context_changes = {}
+    if runtime_limit is not None:
+        from bowhead_core.agent_run_limits import AgentRunLimits, AgentRuntimeControls
+
+        context_changes = {
+            "agent_runtime_budget": AgentRuntimeControls(system_step_limit=runtime_limit + int(invalid_first_reply)).budget(AgentRunLimits()),
+        }
+    result = await asyncio.wait_for(harness.run(collab.lead, context_changes=context_changes), 10)
+    if runtime_limit == 3:
+        assert result.completion == "partial" and result.stop_reason == "step_limit"
+        assert result.step_usage == {"used": 3 + int(invalid_first_reply), "limit": 3 + int(invalid_first_reply)}
+        assert base_round == 1 and child_returned.is_set() and len(coordinated) == 2
+        return
     assert result.ok, result.error
     assert len(coordinated) == 2
     assert result.tokens_input == (36 if invalid_first_reply else 33), "Root usage includes coordination corrections and the original child"

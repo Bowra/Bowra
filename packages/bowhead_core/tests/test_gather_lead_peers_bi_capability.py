@@ -7,8 +7,10 @@ False. Custom peers with data tools must be eligible to replace a disabled built
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import anyio
+import pytest
 from bowhead_core.agents.bi_capability import profile_can_fetch_bi
 from bowhead_core.agents.lead_orchestrator import _gather_lead_peers
 
@@ -160,3 +162,42 @@ def test_team_image_role_tracks_current_connection_readiness() -> None:
         )
     )
     assert build_prompt_roster(unconfigured).holders["image_gen"] is None
+
+
+@pytest.mark.parametrize("source", ["system", "team", "user"])
+@pytest.mark.parametrize("query_tool", ["bi_query", "teammcp.ibt_test.pbi_execute_dax"])
+def test_unavailable_query_tools_cannot_restore_the_data_role(source, query_tool) -> None:
+    from bowhead_core.agents.prompts.peer_block import build_prompt_roster
+
+    name = "source-reader"
+
+    class Registry:
+        def get(self, profile, workspace_id):
+            if profile == "lead":
+                return SimpleNamespace(callable_peers=[name])
+            return SimpleNamespace(
+                description="Read the configured source", tools=SimpleNamespace(allow=(query_tool,)), primary_capability="cap_data_query"
+            )
+
+    class CustomStore:
+        async def list_for_user(self, user_id, *, status):
+            return [SimpleNamespace(name=name, description="Read the configured source", allowed_tools=(query_tool,))]
+
+    async def gather(unavailable):
+        return await _gather_lead_peers(
+            registry=Registry() if source == "system" else None,
+            workspace_id="ws_1",
+            custom_store=CustomStore() if source == "user" else None,
+            user_id="usr_1",
+            team_id="team_fixture",
+            team_subagent_store=_Store([_Row(name, "Read the configured source", (query_tool,))]) if source == "team" else None,
+            unconfigured_capability_tools=unavailable,
+        )
+
+    ready = anyio.run(gather, frozenset())
+    assert build_prompt_roster(ready).holder("data") == name
+    unavailable = anyio.run(gather, frozenset({query_tool}))
+    assert len(unavailable) == 1
+    assert unavailable[0].tool_names == frozenset()
+    assert unavailable[0].can_fetch_bi is False
+    assert build_prompt_roster(unavailable).holder("data") is None

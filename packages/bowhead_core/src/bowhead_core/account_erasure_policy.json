@@ -1381,7 +1381,8 @@
         "retention_hint",
         "origin_query",
         "row_count",
-        "workspace_id"
+        "workspace_id",
+        "knowledge_intent_json"
       ],
       "owner_columns": [
         "created_by"
@@ -2025,7 +2026,8 @@
         "parts_json",
         "created_at",
         "input_document_json",
-        "document_revision_target_json"
+        "document_revision_target_json",
+        "context_maintenance_json"
       ],
       "owner_columns": [
         "user_id"
@@ -2465,7 +2467,8 @@
         "profile",
         "image_id",
         "model_config_version",
-        "capability_execution_id"
+        "capability_execution_id",
+        "model_selection_json"
       ],
       "owner_columns": []
     },
@@ -6047,6 +6050,7 @@
     },
     "turn_terminal_candidate_variants": {
       "columns": [
+        "operation_kind",
         "candidate_id",
         "variant_key",
         "outcome_variant",
@@ -6123,6 +6127,7 @@
     },
     "turn_terminal_receipts": {
       "columns": [
+        "operation_kind",
         "receipt_id",
         "turn_id",
         "generation",
@@ -6221,7 +6226,9 @@
         "generation_base_tokens_input",
         "generation_base_tokens_output",
         "generation_base_cost_usd",
-        "billing_rate_card_version"
+        "billing_rate_card_version",
+        "knowledge_user_request",
+        "operation_kind"
       ],
       "owner_columns": []
     },
@@ -6447,6 +6454,89 @@
         "created_at"
       ],
       "owner_columns": []
+    },
+    "document_canvas_inputs": {
+      "columns": [
+        "job_id",
+        "artifact_id",
+        "path",
+        "sha256",
+        "size_bytes",
+        "manifest_json",
+        "source_job_id",
+        "verified_at",
+        "cleanup_claimed_at",
+        "cleanup_after"
+      ],
+      "owner_columns": []
+    },
+    "model_context_conversation_heads": {
+      "columns": [
+        "session_id",
+        "generation_id",
+        "published_turn_id",
+        "published_turn_seq"
+      ],
+      "owner_columns": []
+    },
+    "model_context_generations": {
+      "columns": [
+        "id",
+        "session_id",
+        "execution_id",
+        "turn_id",
+        "lane",
+        "worker_generation",
+        "kind",
+        "parent_id",
+        "source_refs_json",
+        "snapshot_json",
+        "policy_json",
+        "origin_json",
+        "operation_id",
+        "completion_json",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "model_context_heads": {
+      "columns": [
+        "session_id",
+        "execution_id",
+        "lane",
+        "generation_id"
+      ],
+      "owner_columns": []
+    },
+    "continuation_payload_segments": {
+      "columns": ["kind", "owner_id", "ordinal", "session_id", "turn_id", "clarification_id", "checkpoint_id", "digest", "byte_count", "ciphertext"],
+      "owner_columns": []
+    },
+    "model_context_segments": {
+      "columns": [
+        "id",
+        "session_id",
+        "execution_id",
+        "lane",
+        "digest",
+        "byte_count",
+        "ciphertext",
+        "created_at"
+      ],
+      "owner_columns": []
+    },
+    "bowra_connect_pending": {
+      "columns": [
+        "token_hash",
+        "team_id",
+        "user_id",
+        "kind",
+        "payload_cipher",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
     }
   },
   "secondary": {
@@ -6483,7 +6573,9 @@
         "active_generation_id",
         "source_binding_json",
         "source_absent",
-        "source_observation_json"
+        "source_observation_json",
+        "membership_revision",
+        "ingestion_action_id"
       ],
       "kb_file_generations": [
         "generation_id",
@@ -6515,6 +6607,24 @@
       "account_retention_holds": [
         "user_id",
         "purge_after"
+      ],
+      "kb_membership_operations": [
+        "id",
+        "action_key",
+        "intent_hash",
+        "action",
+        "actor_user_id",
+        "team_id",
+        "workspace_id",
+        "artifact_id",
+        "file_id",
+        "destination_json",
+        "source_fingerprint",
+        "action_ref",
+        "origin",
+        "membership_revision",
+        "state",
+        "created_at"
       ]
     },
     "kb_doc_types.db": {

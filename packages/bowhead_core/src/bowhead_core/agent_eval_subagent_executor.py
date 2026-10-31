@@ -71,7 +71,7 @@ class ExactSubagentEvalExecutor:
     subagent_runner: object
     context_factory: EvalToolContextFactory
     ordered_turn_log_sink: object
-    # Team settings for agent run limits (FEATURE_AGENT_RUN_LIMITS). Evaluation runs a
+    # Team settings for agent run limits. Evaluation runs a
     # subagent outside a Lead turn, so it opens its own limits scope per case run.
     team_settings_store: object | None = None
 
@@ -94,7 +94,6 @@ class ExactSubagentEvalExecutor:
         await self.binding_store.mark_running(binding.execution_id)
         from bowhead_core.agent_run_limits import (
             TurnToolCallBudget,
-            agent_run_limits_enabled,
             load_team_limits,
             reset_run_limits,
             reset_tool_call_budget,
@@ -102,9 +101,9 @@ class ExactSubagentEvalExecutor:
             set_tool_call_budget,
         )
 
-        limits = await load_team_limits(self.team_settings_store, getattr(ctx, "team_id", None)) if agent_run_limits_enabled() else None
+        limits = await load_team_limits(self.team_settings_store, getattr(ctx, "team_id", None))
         limits_token = set_run_limits(limits)
-        budget_token = set_tool_call_budget(TurnToolCallBudget(limits.tool_call_limit) if limits is not None else None)
+        budget_token = set_tool_call_budget(TurnToolCallBudget(limits.tool_call_limit))
         started = time.perf_counter()
         try:
             try:

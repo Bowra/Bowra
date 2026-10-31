@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -40,9 +40,9 @@ class _Bus(TurnEventBus):
         super().__init__()
         self.seen: list[Any] = []
 
-    async def emit(self, event: Any) -> None:
+    async def emit(self, event: Any) -> bool:
         self.seen.append(event)
-        await super().emit(event)
+        return await super().emit(event)
 
     def spawned(self) -> list[dict[str, Any]]:
         return [event.payload for event in self.seen if event.event_type == "agent_spawned"]
@@ -105,16 +105,25 @@ def _ctx(db_path: str, turn_id: str, **extra: Any) -> ToolExecutionContext:
     )
 
 
-async def _run(monkeypatch: pytest.MonkeyPatch, router: _Router, ctx: ToolExecutionContext, *, step_limit: int | None, **kwargs: Any):
-    monkeypatch.setitem(PROFILES, PROFILE.name, PROFILE)
+async def _run(
+    monkeypatch: pytest.MonkeyPatch,
+    router: _Router,
+    ctx: ToolExecutionContext,
+    *,
+    step_limit: int | None,
+    profile: SubagentProfile = PROFILE,
+    registry: ToolRegistry | None = None,
+    **kwargs: Any,
+):
+    monkeypatch.setitem(PROFILES, profile.name, profile)
     limits = rl.AgentRunLimits(step_limit=step_limit, tool_call_limit=1000)
     limits_token = rl.set_run_limits(limits)
     budget_token = rl.set_tool_call_budget(rl.TurnToolCallBudget(1000))
     deadline_token = set_turn_deadline(time.monotonic() + 1800)
     bus = _Bus()
     try:
-        result = await SubagentRunner(router=router, tool_registry=_registry()).run(
-            profile_name=PROFILE.name, task="Read all keys", parent_turn_id=ctx.turn_id, parent_bus=bus, parent_ctx=ctx, **kwargs
+        result = await SubagentRunner(router=router, tool_registry=registry or _registry()).run(
+            profile_name=profile.name, task="Read all keys", parent_turn_id=ctx.turn_id, parent_bus=bus, parent_ctx=ctx, **kwargs
         )
     finally:
         reset_turn_deadline(deadline_token)
@@ -139,7 +148,7 @@ async def test_a_run_stopped_at_its_step_limit_continues_from_its_own_transcript
     assert first.resume_checkpoint_id is not None
 
     checkpoint = await sr.claim(db_path, checkpoint_id=first.resume_checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
-    grant = sr.ResumeGrant(checkpoint=checkpoint, material=sr.open_material(checkpoint), instruction="Finish keys 3-4.")
+    grant = sr.ResumeGrant(checkpoint=checkpoint, material=sr.open_material(checkpoint, db_path=db_path), instruction="Finish keys 3-4.")
     router = _Router(reads=0)
     second, bus = await _run(monkeypatch, router, _ctx(db_path, "t_2"), step_limit=3, pre_minted_subagent_id="sub_a", resume_grant=grant)
 
@@ -149,7 +158,9 @@ async def test_a_run_stopped_at_its_step_limit_continues_from_its_own_transcript
     assert any(m.role == "tool" and m.tool_call_id == "c1" for m in sent)
     # The saved transcript ends where the run stopped; the instruction follows it.
     [at] = [i for i, m in enumerate(sent) if m.role == "user" and m.content.endswith("Finish keys 3-4.")]
-    assert sent[at - 1].role == "assistant" and "Remaining: keys 3-4." in sent[at - 1].content
+    assert sent[at - 1].role == "assistant"
+    assert first.partial_done and first.partial_done in sent[at - 1].content
+    assert first.partial_remaining and first.partial_remaining in sent[at - 1].content
     assert bus.spawned()[0]["resumed_from"] == first.resume_checkpoint_id
     # The resumed run's own checkpoint supersedes the one it continued.
     assert second.resume_checkpoint_id not in (None, first.resume_checkpoint_id)
@@ -161,7 +172,7 @@ async def test_changed_tools_start_fresh_from_the_saved_task_and_say_why(tmp_pat
     db_path = await _db(tmp_path)
     checkpoint_id = await _capture(db_path, profile=PROFILE.name, agent_revision_id=None, tool_names=["read", "write", "subagent_return"])
     checkpoint = await sr.claim(db_path, checkpoint_id=checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
-    grant = sr.ResumeGrant(checkpoint=checkpoint, material=sr.open_material(checkpoint), instruction="Go on.")
+    grant = sr.ResumeGrant(checkpoint=checkpoint, material=sr.open_material(checkpoint, db_path=db_path), instruction="Go on.")
     router = _Router(reads=0)
     _result, bus = await _run(monkeypatch, router, _ctx(db_path, "t_2"), step_limit=None, pre_minted_subagent_id="sub_a", resume_grant=grant)
 
@@ -174,20 +185,54 @@ async def test_changed_tools_start_fresh_from_the_saved_task_and_say_why(tmp_pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("optional_tool", ["bi_query", "python_exec", "teammcp.calendar.read"])
+@pytest.mark.parametrize("before_available,after_available", [(True, False), (False, True), (False, False), (True, True)])
+async def test_resume_tracks_actual_advertised_tools(tmp_path, monkeypatch, optional_tool, before_available, after_available) -> None:
+    monkeypatch.setenv("FEATURE_BI_VISIBILITY_GATE", "0")
+    db_path = await _db(tmp_path)
+    profile = replace(PROFILE, tool_whitelist=(*PROFILE.tool_whitelist, optional_tool))
+    registry = _registry()
+
+    async def optional_handler(_args, _ctx):
+        raise AssertionError("This task must not execute the optional tool")
+
+    registry.register(
+        ToolSpec(schema=ToolSchema(name=optional_tool, description="Optional service", input_schema={"type": "object"}), handler=optional_handler)
+    )
+    first_router = _Router(reads=1)
+    first_ctx = _ctx(db_path, "t_1", unconfigured_capability_tools=frozenset() if before_available else frozenset({optional_tool}))
+    first, _ = await _run(monkeypatch, first_router, first_ctx, step_limit=None, profile=profile, registry=registry)
+    assert first.ok and first.resume_checkpoint_id is not None
+    advertised_before = {schema.name for schema in first_router.requests[0].tools}
+    assert (optional_tool in advertised_before) is before_available
+    checkpoint = await sr.claim(db_path, checkpoint_id=first.resume_checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
+    assert checkpoint.tool_names_hash == sr.tool_names_hash(advertised_before)
+
+    grant = sr.ResumeGrant(
+        checkpoint=checkpoint, material=sr.open_material(checkpoint, db_path=db_path), instruction="Continue using available evidence."
+    )
+    second_router = _Router(reads=0)
+    second_ctx = _ctx(db_path, "t_2", unconfigured_capability_tools=frozenset() if after_available else frozenset({optional_tool}))
+    second, bus = await _run(monkeypatch, second_router, second_ctx, step_limit=None, profile=profile, registry=registry, resume_grant=grant)
+    assert second.ok
+    assert (optional_tool in {schema.name for schema in second_router.requests[0].tools}) is after_available
+    if before_available == after_available:
+        assert grant.refused is None
+        assert bus.spawned()[0]["resumed_from"] == checkpoint.id
+        assert any(message.role == "tool" for message in second_router.requests[0].messages)
+    else:
+        assert grant.refused == "tools_changed"
+        assert bus.spawned()[0]["resume_refused"] == "tools_changed"
+        assert not any(message.role in {"tool", "assistant"} for message in second_router.requests[0].messages)
+
+
+@pytest.mark.asyncio
 async def test_a_completed_run_is_saved_for_follow_ups(tmp_path, monkeypatch) -> None:
     db_path = await _db(tmp_path)
     result, _ = await _run(monkeypatch, _Router(reads=1), _ctx(db_path, "t_1"), step_limit=None)
     assert result.ok and result.resume_checkpoint_id
     [listed] = await sr.list_resumable(db_path, session_id="s_1", user_id="u_1", exclude_turn_id="t_2")
     assert (listed.completion, listed.task) == ("complete", "Read all keys")
-
-
-@pytest.mark.asyncio
-async def test_nothing_is_saved_when_the_feature_is_off(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
-    db_path = await _db(tmp_path)
-    result, _ = await _run(monkeypatch, _Router(reads=1), _ctx(db_path, "t_1"), step_limit=None)
-    assert result.ok and result.resume_checkpoint_id is None
 
 
 @pytest.mark.asyncio

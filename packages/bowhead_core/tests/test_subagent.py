@@ -770,8 +770,11 @@ async def test_short_chat_payload_suppresses_peer_auto_chart(
     assert chart_calls == []
 
 
-async def test_peer_auto_chart_runs_through_the_guarded_tool_path(dc, monkeypatch) -> None:
-    """Backend-initiated charts pass the per-call guards and emit a normal step."""
+@pytest.mark.parametrize("chart_access", ["allowed", "profile_omitted", "run_denied", "unconfigured"])
+async def test_peer_auto_chart_runs_through_the_guarded_tool_path(dc, monkeypatch, chart_access) -> None:
+    """Backend charts require current tool access, then pass per-call guards."""
+    from dataclasses import replace
+
     from bowhead_core.canvas_composers import auto_chart
 
     chart_calls: list[dict[str, object]] = []
@@ -812,6 +815,13 @@ async def test_peer_auto_chart_runs_through_the_guarded_tool_path(dc, monkeypatc
     )
     ctx = ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t_auto_chart", datarc=dc)
     ctx.approval_gate = SimpleNamespace(maybe_gate=_maybe_gate)
+    if chart_access == "profile_omitted":
+        profile = subagent_mod.PROFILES["compute"]
+        monkeypatch.setitem(
+            subagent_mod.PROFILES, "compute", replace(profile, tool_whitelist=tuple(name for name in profile.tool_whitelist if name != "add_chart"))
+        )
+    if chart_access == "unconfigured":
+        ctx.unconfigured_capability_tools = frozenset({"add_chart"})
 
     result = await SubagentRunner(router=router, tool_registry=registry, backend="legacy").run(
         profile_name="compute",
@@ -819,9 +829,15 @@ async def test_peer_auto_chart_runs_through_the_guarded_tool_path(dc, monkeypatc
         parent_turn_id="t_auto_chart",
         parent_bus=bus,
         parent_ctx=ctx,
+        tool_deny=frozenset({"add_chart"}) if chart_access == "run_denied" else frozenset(),
     )
 
     assert result.ok
+    if chart_access != "allowed":
+        assert chart_calls == []
+        assert not any(inv.tool_name == "add_chart" for inv in result.tool_invocations)
+        assert not any(e.event_type == "step_started" and e.payload.get("tool_name") == "add_chart" for e in events)
+        return
     assert chart_calls == [{"data_artifact_id": "art_auto"}]
     chart_inv = next(inv for inv in result.tool_invocations if inv.tool_name == "add_chart")
     assert chart_inv.call_id is not None and chart_inv.call_id.startswith("auto_chart_")

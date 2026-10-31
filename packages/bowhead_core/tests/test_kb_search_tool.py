@@ -37,7 +37,7 @@ def test_kb_search_schema_input_query_required() -> None:
     assert "query" in schema["properties"]
     assert "query" in schema["required"]
     assert schema["properties"]["top_k"]["minimum"] == 1
-    assert schema["properties"]["top_k"]["maximum"] == 10
+    assert schema["properties"]["top_k"]["maximum"] == 50
 
 
 def _make_ctx(kb_retriever=None, **overrides) -> ToolExecutionContext:
@@ -79,7 +79,7 @@ async def test_kb_search_handler_invokes_retriever_with_scope_ctx() -> None:
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
 
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[
@@ -141,7 +141,7 @@ async def test_kb_search_handler_filters_denied_file_chunks(tmp_path, monkeypatc
 
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[
@@ -188,12 +188,13 @@ async def test_kb_search_handler_filters_denied_file_chunks(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_kb_search_handler_default_top_k_5() -> None:
-    """top_k 缺省 → 5 (跟 schema default 一致)."""
+@pytest.mark.parametrize("top_k", [5, 15, 50])
+async def test_kb_search_handler_uses_configured_default(top_k: int) -> None:
+    """An omitted request limit uses the retriever's configured default."""
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
 
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=top_k)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -205,7 +206,7 @@ async def test_kb_search_handler_default_top_k_5() -> None:
     ctx = _make_ctx(kb_retriever=mock_retriever)
 
     await handler({"query": "test"}, ctx)
-    assert mock_retriever.invoke.call_args.kwargs["top_k"] == 5
+    assert mock_retriever.invoke.call_args.kwargs["top_k"] == top_k
 
 
 @pytest.mark.asyncio
@@ -215,7 +216,7 @@ async def test_kb_search_handler_team_id_fail_closed_no_workspace_fallback() -> 
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
 
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -241,7 +242,7 @@ async def test_kb_search_empty_result_has_hint() -> None:
     """
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -264,7 +265,7 @@ async def test_kb_search_strong_result_has_no_hint() -> None:
     """Strong score (>=0.3) → no hint (agent has good signal already)."""
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     from bowhead_core.kb.schemas import KbSearchResultChunk
 
     mock_retriever.invoke = AsyncMock(
@@ -303,7 +304,7 @@ async def test_kb_search_passes_extra_personal_workspaces() -> None:
     """
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -332,7 +333,7 @@ async def test_kb_search_falls_back_when_files_store_raises() -> None:
     """
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -359,7 +360,7 @@ async def test_kb_search_no_files_store_legacy_path() -> None:
     """ctx.kb_files_store=None (pre-0.40.4 wiring) → no crash, extras=[]."""
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -382,7 +383,7 @@ async def test_kb_search_many_workspaces_no_crash() -> None:
     """
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    mock_retriever = MagicMock()
+    mock_retriever = MagicMock(default_top_k=15)
     mock_retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[],
@@ -436,7 +437,7 @@ async def test_kb_search_drops_chunks_of_soft_deleted_files() -> None:
 
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    retriever = MagicMock()
+    retriever = MagicMock(default_top_k=15)
     retriever.invoke = AsyncMock(
         return_value=KbSearchResult(
             chunks=[_result_chunk("c_del", "f_del"), _result_chunk("c_live", "f_live")],
@@ -466,7 +467,7 @@ async def test_kb_search_partial_result_carries_chinese_note() -> None:
 
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    retriever = MagicMock()
+    retriever = MagicMock(default_top_k=15)
     retriever.invoke = AsyncMock(return_value=KbSearchResult(chunks=[], total_candidates=0, rerank_used=False, latency_ms=3000, partial=True))
 
     result = await handler({"query": "季度预算"}, _make_ctx(kb_retriever=retriever))
@@ -480,7 +481,7 @@ async def test_kb_search_partial_result_carries_chinese_note() -> None:
 async def test_kb_search_complete_result_has_no_partial_note() -> None:
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
-    retriever = MagicMock()
+    retriever = MagicMock(default_top_k=15)
     retriever.invoke = AsyncMock(return_value=KbSearchResult(chunks=[], total_candidates=0, rerank_used=False, latency_ms=5))
 
     result = await handler({"query": "季度预算"}, _make_ctx(kb_retriever=retriever))

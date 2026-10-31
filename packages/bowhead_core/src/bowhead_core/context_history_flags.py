@@ -1,13 +1,10 @@
-"""批 3 的开关 —— Lead 带 turn 级历史（`BOWHEAD_CTX_TURN_HISTORY`）。
+"""Legacy history controls for callers without owned context management.
 
-**默认 ON**（tech-design r3，用户拍板：成本是算术题不是未知数）。
-回滚绳：`BOWHEAD_CTX_TURN_HISTORY=0` ⇒ 逐字节回到 digest 形态，无迁移、无状态。
-
-历史有上限（`BOWHEAD_CTX_TURN_HISTORY_TOKENS`，默认约 40k token）：超了掉最老的**整轮**、
-绝不切轮内文本；掉到 0.75 × 上限为止（滞回——每隔几轮才作废一次前缀缓存，不是每轮都作废）。
-上限不是为常态设的（dev 库口径历史通常 1–3k），是为 fleet 128k 那档留的余量。
-
-⚠ 每个 turn 只读一次（lead_orchestrator 构造 H 的那一刻）；循环中途翻转不影响本 turn。
+Qualified executions use cursor-based history and the model's context policy.
+These environment settings apply only to the compatibility assembly path.
+Its 40,000-token default drops complete old Turns with 0.75 hysteresis; the
+Lead caller additionally bounds it by a quarter of the declared model window.
+Settings are read during Turn assembly, never midway through the model loop.
 """
 
 from __future__ import annotations
@@ -21,12 +18,12 @@ HISTORY_HYSTERESIS = 0.75
 
 
 def turn_history_enabled() -> bool:
-    """Lead 是否带 turn 级历史。默认 ON；显式 set=0 为 kill-switch。"""
+    """Enable legacy Turn history by default; an explicit zero selects digest mode."""
     return os.environ.get(_ENV, "1").strip() == "1"
 
 
 def turn_history_token_budget() -> int:
-    """历史软预算（token）。垃圾 / ≤0 回退默认值。"""
+    """Return the legacy token budget, using the default for invalid values."""
     raw = os.environ.get(_ENV_TOKENS, "").strip()
     try:
         v = int(raw) if raw else DEFAULT_HISTORY_TOKENS

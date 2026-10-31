@@ -79,20 +79,16 @@ class KbPermission:
         ctx: ScopeContext,
         role: Role,
     ) -> bool:
-        """[P0-R1 round 6] 写 scope 必验 scope_id 跟 caller context 匹配.
+        """Require the caller's own user, current Space or administered Team.
 
-        防跨 ws/team/user 写 leak (安全 P0).
-
-        - personal: scope_id 必须是 caller 自己 user_id (不能上传到别 user 名下)
-        - workspace: scope_id 必须是 caller 当前 ws (不能跨 ws 上传)
-        - team: scope_id 必须是 caller 当前 team + admin role
+        Space administration alone does not grant Team-wide write authority.
         """
         if scope == "personal":
             return scope_id == ctx.user_id
         if scope in ("space", "workspace"):  # Batch3/c1 dual read.
             return scope_id == ctx.workspace_id
         if scope == "team":
-            return scope_id == ctx.team_id and role in ("ws_admin", "team_admin")
+            return scope_id == ctx.team_id and role == "team_admin"
         return False
 
     @staticmethod

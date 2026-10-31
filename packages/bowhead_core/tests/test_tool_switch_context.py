@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from bowhead_core.agents.clarification_tool import is_clarification_sentinel
+from bowhead_core.datarc_selection import DatarcPersistenceReceipt
 from bowhead_core.tool_registry import (
     ToolExecutionContext,
     _bi_cache_key,
@@ -29,12 +32,15 @@ class _Switcher:
         self.fail = fail
         self.persisted = persisted  # framework v1: (member_uid, persisted) return contract.
 
-    async def __call__(self, ws_id: str, ws_name: str = "", *, remember: bool = False) -> tuple[str, bool]:
+    async def prepare_selection(self, ws_id, ws_name, *, current):
         self.calls.append((ws_id, ws_name))
-        self.remembers.append(remember)
         if self.fail:
-            raise RuntimeError("resolver down")
-        return f"member_of_{ws_id}", self.persisted
+            raise RuntimeError("Controlled member resolution failure")
+        return replace(current, datarc_workspace_id=ws_id, name=ws_name, member_uid=f"member_of_{ws_id}")
+
+    async def save_preference(self, selection, *, remember):
+        self.remembers.append(remember)
+        return DatarcPersistenceReceipt("saved" if self.persisted else "failed", "default" if remember else "session")
 
 
 def _ctx(accessible=WS3, switcher=None, active="1", member="m_old") -> ToolExecutionContext:
@@ -86,6 +92,24 @@ async def test_prefix_ambiguous_yields_clarification_not_autocommit(reg):
     assert {o["value"] for o in clar["options"]} == {"234", "235"}
     assert sw.calls == []  # Not submitted.
     assert ctx.active_datarc_project == "1"  # ctx unchanged.
+
+
+@pytest.mark.parametrize("remember", [False, "false"])
+async def test_ambiguous_temporary_switch_defaults_picker_to_session(reg, remember):
+    inv = await reg.execute("tool_switch_context", {"name": "北极九章", "remember": remember}, _ctx(switcher=_Switcher()))
+    clar = inv.result["clarification"]
+    assert clar["remember_option"] is True
+    assert clar["remember_default"] is False
+
+
+async def test_ambiguous_switch_without_remember_defaults_to_session(reg):
+    inv = await reg.execute("tool_switch_context", {"name": "北极九章"}, _ctx(switcher=_Switcher()))
+    assert inv.result["clarification"]["remember_default"] is False
+
+
+async def test_ambiguous_switch_with_remember_defaults_to_saved_choice(reg):
+    inv = await reg.execute("tool_switch_context", {"name": "北极九章", "remember": True}, _ctx(switcher=_Switcher()))
+    assert inv.result["clarification"]["remember_default"] is True
 
 
 async def test_substring_hit_yields_clarification(reg):
@@ -157,7 +181,7 @@ async def test_remember_default_false_passes_session_semantics(reg):
     inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO"}, ctx)
     assert inv.result["ok"] is True
     assert sw.remembers == [False]
-    assert "本会话" in inv.result["note"]  # Note no longer points to the removed settings panel.
+    assert inv.result["effective"] == "session"
 
 
 async def test_remember_true_passes_through_and_note_says_default(reg):
@@ -167,7 +191,7 @@ async def test_remember_true_passes_through_and_note_says_default(reg):
     inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO", "remember": True}, ctx)
     assert inv.result["ok"] is True
     assert sw.remembers == [True]
-    assert "默认北极九章工作区" in inv.result["note"]  # Terminology P0: full name and truthful claim.
+    assert inv.result["effective"] == "default"
     # Immediate ctx effect this turn is independent of remember.
     assert ctx.active_datarc_project == "234"
 
@@ -180,7 +204,7 @@ async def test_remember_string_false_not_coerced_truthy(reg):
     inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO", "remember": "false"}, ctx)
     assert inv.result["ok"] is True
     assert sw.remembers == [False]
-    assert "本会话" in inv.result["note"]
+    assert inv.result["persistence"]["scope"] == "session"
 
 
 async def test_remember_string_true_accepted(reg):
@@ -199,8 +223,8 @@ async def test_remember_persist_failed_note_honest(reg):
     inv = await reg.execute("tool_switch_context", {"name": "北极九章DEMO", "remember": True}, ctx)
     assert inv.result["ok"] is True  # The switch itself succeeded this turn.
     assert ctx.active_datarc_project == "234"
-    assert "保存失败" in inv.result["note"]
-    assert "默认北极九章工作区（跨会话生效）" not in inv.result["note"]
+    assert inv.result["effective"] == "run"
+    assert inv.result["persistence"]["status"] == "failed"
 
 
 def test_bi_cache_key_has_workspace_dimension():
@@ -224,7 +248,6 @@ async def test_switch_streak_pauses_on_third_consecutive(reg):
     assert r3.result["ok"] is False
     assert r3.result["error_kind"] == "switch_streak_paused"
     assert r3.result["switch_streak"] == 3
-    assert "切一个读一个" in r3.result["hint"] and "切回" in r3.result["hint"]
     # Not submitted: switcher called only twice; ctx stays at the second target.
     assert len(sw.calls) == 2 and ctx.active_datarc_project == "235"
     # Expected outcome: the actual exemption boundary does not count it as failure.
@@ -256,9 +279,8 @@ async def test_switch_streak_counts_commits_not_attempts(reg):
     assert r.result["ok"] is True and r.result["switched"]["id"] == "234"
 
 
-async def test_switch_streak_parallel_burst_deterministic(reg):
-    """review r3#2：并行盲切 burst（motivating incident 的形状）下 check+预留
-    同步原子——确定性地前 2 个落地、其余全部暂停。"""
+async def test_parallel_direct_switches_preserve_the_winning_revision(reg):
+    """Concurrent direct writers cannot overwrite the accepted source revision."""
     import asyncio
 
     sw = _Switcher()
@@ -270,9 +292,9 @@ async def test_switch_streak_parallel_burst_deterministic(reg):
         reg.execute("tool_switch_context", {"name": "北极九章DEMO"}, ctx),
     )
     oks = [i for i in invs if i.result.get("ok") is True]
-    paused = [i for i in invs if i.result.get("error_kind") == "switch_streak_paused"]
-    assert len(oks) == 2 and len(paused) == 2, [i.result for i in invs]
-    assert len(sw.calls) == 2  # Neither paused invocation ever touched switcher.
+    conflicts = [i for i in invs if i.result.get("error_kind") == "datarc_selection_conflict"]
+    assert len(oks) == 1 and len(conflicts) == 3, [i.result for i in invs]
+    assert len(sw.calls) == 1
 
 
 async def test_switch_streak_box_survives_shallow_copy(reg):

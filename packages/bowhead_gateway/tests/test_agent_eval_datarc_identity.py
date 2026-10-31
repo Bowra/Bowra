@@ -161,7 +161,10 @@ async def test_the_owner_who_started_the_run_reads_as_their_own_member(tmp_path:
     assert identity.client is env.client
     assert env.state.datarc_client_factory.keys == [("https://demo.datarc.example", "team-key")]
     # The ladder ran read-only for the Owner, with no session: no auto-select, no preference writes.
-    assert env.workspace_calls == [{"user_id": env.owner.id, "session_id": None, "read_only": True, "log": env.workspace_calls[0]["log"]}]
+    [call] = env.workspace_calls
+    binding = call.pop("connection_binding")
+    assert binding.team_id == env.team.id and binding.client is env.client
+    assert call == {"user_id": env.owner.id, "session_id": None, "read_only": True, "log": call["log"]}
 
 
 async def test_an_administrator_start_is_refused_before_any_datarc_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

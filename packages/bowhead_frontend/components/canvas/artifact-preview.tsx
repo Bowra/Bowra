@@ -11,6 +11,7 @@ import {
   type ArtifactViewerProfile,
 } from "@/lib/artifact-viewer-profile";
 import { appPath } from "@/lib/base-path";
+import { formatByteSize } from "@/lib/format";
 import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors";
 import type { ResultsViewerMode } from "@/lib/results-workspace-route";
 import type {
@@ -45,6 +46,9 @@ import {
   VideoArtifactPreview,
   type VideoPlaybackState,
 } from "./video-artifact-preview";
+import { HtmlPreviewModeControl, useHtmlPreviewMode, type HtmlPreviewMode } from "./html-preview-mode";
+import { InPlaceFullView } from "./in-place-full-view";
+import type { HtmlPreviewIssue, InteractiveHtmlDocument } from "@/lib/html-preview-contract";
 import { ResultObjectActions } from "./result-object-actions";
 
 export function ArtifactPreview({
@@ -122,7 +126,9 @@ export function ArtifactPreview({
   const safeHtmlActive = mode === "preview" && isSafeHtmlMime(mime) && !loading && !error;
   const videoActive = mode === "preview" && isVideoPreviewMime(mime) && !loading && !error;
   const inlineHref = withInlineDisposition(href);
+  const htmlMode = useHtmlPreviewMode();
   const safeHtml = useSafeHtmlDocument({
+    presentation: htmlMode.mode,
     enabled: safeHtmlActive,
     href: rendererHref,
     declaredSize: sizeBytes,
@@ -155,17 +161,11 @@ export function ArtifactPreview({
     setExpanded(false);
   }, [fileId]);
 
-  useEffect(() => {
-    if (!expanded) return;
-    // Return to the Fullscreen View trigger: Safari does not focus clicked buttons, so DialogShell's recorded pre-open focus may be elsewhere.
-    return () => returnFocusRef.current?.focus();
-  }, [expanded]);
-
   const meta = [
     mime,
     sizeLabel,
     safeHtmlActive
-      ? t("capability_safe_html")
+      ? t(htmlMode.mode === "interactive" ? "html_interactive" : "capability_safe_html")
       : videoActive
         ? t("capability_video")
         : t(`capability_${profile}`),
@@ -173,6 +173,9 @@ export function ArtifactPreview({
   const safeHtmlBody = safeHtmlActive
     ? {
         ...safeHtml,
+        htmlMode: htmlMode.available ? htmlMode.mode : undefined,
+        onModeChange: htmlMode.select,
+        onEscape: () => setExpanded(false),
         trust,
         onReload: () => setReloadToken((value) => value + 1),
       }
@@ -214,7 +217,8 @@ export function ArtifactPreview({
 
   return (
     <>
-      <div className="artifact-viewer">
+      <InPlaceFullView active={safeHtmlActive && expanded} label={filename}
+        onClose={() => setExpanded(false)} returnFocusRef={returnFocusRef}>
         <ArtifactPreviewHeader
           artifactId={fileId}
           filename={filename}
@@ -222,9 +226,10 @@ export function ArtifactPreview({
           href={href}
           onExpand={(trigger) => {
             returnFocusRef.current = trigger;
-            setExpanded(true);
+            setExpanded((value) => !value);
           }}
-          onReference={onReference}
+          fullViewActive={safeHtmlActive && expanded}
+          onReference={onReference && safeHtmlActive && expanded ? () => { setExpanded(false); onReference(); } : onReference}
           onDownload={onDownload}
           capabilities={capabilities}
           resultRole={resultRole}
@@ -234,17 +239,18 @@ export function ArtifactPreview({
           onViewerModeChange={onViewerModeChange}
           onOpenHistory={onOpenHistory}
           onFeedbackUnsupported={onFeedbackUnsupported}
-          onClose={onClose}
+          onClose={safeHtmlActive && expanded ? undefined : onClose}
           showTitle={showHeaderTitle}
         />
-        {!expanded ? <ArtifactPreviewBody {...bodyProps} /> : null}
-      </div>
-      {expanded ? (
+        {!expanded || safeHtmlActive ? <ArtifactPreviewBody {...bodyProps} expanded={safeHtmlActive && expanded} /> : null}
+      </InPlaceFullView>
+      {expanded && !safeHtmlActive ? (
         <DialogShell
           presentation="center"
           onClose={() => setExpanded(false)}
           label={filename}
           closeOnBackdrop={false}
+          returnFocusRef={returnFocusRef}
           backdropStyle={{ zIndex: 240 }}
           panelClassName="artifact-viewer-modal"
         >
@@ -308,6 +314,7 @@ function ArtifactPreviewHeader({
   onClose,
   showTitle = true,
   modalClose = false,
+  fullViewActive = false,
 }: {
   artifactId: string;
   filename: string;
@@ -327,6 +334,7 @@ function ArtifactPreviewHeader({
   onClose?: () => void;
   showTitle?: boolean;
   modalClose?: boolean;
+  fullViewActive?: boolean;
 }) {
   const t = useTranslations("artifact_viewer");
   return (
@@ -371,8 +379,8 @@ function ArtifactPreviewHeader({
           <div className="artifact-viewer-tools">
             {onExpand ? (
               <button type="button" onClick={(event) => onExpand(event.currentTarget)}>
-                <Maximize size={13} aria-hidden="true" />
-                {t("open_full")}
+                {fullViewActive ? <X size={13} aria-hidden="true" /> : <Maximize size={13} aria-hidden="true" />}
+                {t(fullViewActive ? "close" : "open_full")}
               </button>
             ) : null}
             {onClose ? (
@@ -426,8 +434,13 @@ function ArtifactPreviewBody({
     document: string | null;
     error: SafeHtmlErrorCode | null;
     loading: boolean;
+    maxBytes: number | null;
     trust?: string | null;
     onReload: () => void;
+    interactive?: InteractiveHtmlDocument;
+    htmlMode?: HtmlPreviewMode;
+    onModeChange: (mode: HtmlPreviewMode) => void;
+    onEscape: () => void;
   } | null;
   video: {
     src: string;
@@ -553,19 +566,27 @@ function SafeHtmlPreviewBody({
     document: string | null;
     error: SafeHtmlErrorCode | null;
     loading: boolean;
+    maxBytes: number | null;
     trust?: string | null;
     onReload: () => void;
+    interactive?: InteractiveHtmlDocument;
+    htmlMode?: HtmlPreviewMode;
+    onModeChange: (mode: HtmlPreviewMode) => void;
+    onEscape: () => void;
   };
   alt: string;
   expanded: boolean;
 }) {
   const t = useTranslations("artifact_viewer");
-  const message = state.error ? t(`safe_html_${state.error}`) : null;
+  const [issue, setIssue] = useState<HtmlPreviewIssue | null>(null);
+  useEffect(() => setIssue(null), [state.document]);
+  const message = state.error ? t(`safe_html_${state.error}`, { limit: formatByteSize(state.maxBytes ?? 0) }) : null;
   return (
     <div className={expanded ? "safe-html-preview expanded" : "safe-html-preview"}>
       <div className="safe-html-preview-status">
-        <span className="safe-html-preview-badge">{t("safe_html_badge")}</span>
-        <span>{t("safe_html_network_off")}</span>
+        {state.htmlMode ? <HtmlPreviewModeControl value={state.htmlMode} onChange={state.onModeChange} />
+          : <span className="safe-html-preview-badge">{t("safe_html_badge")}</span>}
+        <span>{t(state.htmlMode === "interactive" ? "html_offline" : "safe_html_network_off")}</span>
         {state.trust === "unverified" ? (
           <span className="safe-html-preview-unverified">{t("safe_html_unverified")}</span>
         ) : null}
@@ -579,9 +600,11 @@ function SafeHtmlPreviewBody({
       ) : state.loading || state.document === null ? (
         <div className="artifact-viewer-note loading">{t("safe_html_loading")}</div>
       ) : (
-        <SafeHtmlFrame document={state.document} title={alt} className="safe-html-preview-frame" />
+        <SafeHtmlFrame document={state.document} interactive={state.interactive} onEscape={state.onEscape} onIssue={setIssue} title={alt} className="safe-html-preview-frame" />
       )}
-      <div className="safe-html-preview-hint">{t("safe_html_hint")}</div>
+      <div className="safe-html-preview-hint">{t(state.htmlMode === "interactive" ? "html_interactive_hint" : "safe_html_hint")}
+        {state.interactive?.externalResources ? ` ${t("html_external_blocked")}` : null}</div>
+      {issue ? <div role="status" className="safe-html-preview-hint">{t(`html_issue_${issue}`)}</div> : null}
     </div>
   );
 }

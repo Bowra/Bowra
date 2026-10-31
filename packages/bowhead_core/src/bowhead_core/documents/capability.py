@@ -1,4 +1,4 @@
-"""Atomic exact Lead Capability admission, not background file completion."""
+"""Atomic admission on the original interactive Agent execution."""
 
 import hashlib
 
@@ -8,9 +8,9 @@ from bowhead_core.agent_capability_execution import CapabilityExecutionSelection
 from bowhead_core.documents.request import DocumentRequestError
 
 
-async def admit_capability(db, *, runtime, scope, turn_id, inputs, now):
+async def admit_capability(db, *, path, runtime, scope, turn_id, inputs, now):
     binding = runtime.binding
-    if binding is None or binding.team_id != scope.team_id or binding.turn_id != turn_id or binding.runtime_profile_name != "lead":
+    if binding is None or binding.team_id != scope.team_id or binding.turn_id != turn_id:
         raise DocumentRequestError("document_capability_unavailable")
     catalog = default_catalog()
     if catalog is None:
@@ -20,8 +20,15 @@ async def admit_capability(db, *, runtime, scope, turn_id, inputs, now):
     implementation = catalog.get_implementation("capi_template_document_native", 1)
     if definition.lifecycle != "active" or implementation.lifecycle != "active" or implementation.review_state != "reviewed":
         raise DocumentRequestError("document_capability_unavailable")
-    if "template_document_submit" not in binding.definition.get("tool_whitelist", []):
+    tools = binding.definition.get("tool_refs" if binding.agent_source_kind == "team" else "tool_whitelist", [])
+    if "template_document_submit" not in tools:
         raise DocumentRequestError("document_capability_unavailable")
+    if binding.runtime_profile_name != "lead":
+        from bowhead_core.documents.agent_caller import read_document_caller_in_tx
+
+        current = await read_document_caller_in_tx(db, path=path, scope=scope, turn_id=turn_id, execution_id=binding.execution_id)
+        if current.capability_fingerprint != binding.capability_fingerprint or runtime.owns_binding:
+            raise DocumentRequestError("document_capability_unavailable")
     if runtime.owns_binding:
         await db.execute(
             "UPDATE turn_agent_execution SET status='running',started_at=? WHERE id=? AND status='admitted'", (now, binding.execution_id)

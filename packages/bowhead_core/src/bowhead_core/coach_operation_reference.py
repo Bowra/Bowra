@@ -65,32 +65,34 @@ CoachOperationReference = Annotated[
 OPERATION_REFERENCE = TypeAdapter(CoachOperationReference)
 
 
+COACH_OPERATION_EFFECTS = {
+    "agent_draft_start": "draft_record",
+    "agent_authoring_propose": "draft_suggestion",
+    "agent_change_propose": "agent_change",
+    "agent_eval_case_propose": "eval_cases",
+    "agent_skill_save": "skill_save",
+    "agent_plugin_save": "plugin_save",
+    "agent_tool_requirement_create": "tool_requirement",
+    "agent_tool_requirement_reconcile": "tool_requirement",
+    "agent_ci_request": "ci_delegation",
+    "agent_ci_prepare": "ci_delegation",
+    "agent_ci_start": "ci_delegation",
+    "agent_ci_cancel": "ci_delegation",
+}
+
+
 def operation_receipts(invocations: list[ToolInvocation]) -> list[dict[str, Any]]:
     """Project original domain pointers, including uncertain effects, without content."""
-    effects = {
-        "agent_draft_start": "draft_record",
-        "agent_authoring_propose": "draft_suggestion",
-        "agent_change_propose": "agent_change",
-        "agent_eval_case_propose": "eval_cases",
-        "agent_skill_save": "skill_save",
-        "agent_plugin_save": "plugin_save",
-        "agent_tool_requirement_create": "tool_requirement",
-        "agent_tool_requirement_reconcile": "tool_requirement",
-        "agent_ci_request": "ci_delegation",
-        "agent_ci_prepare": "ci_delegation",
-        "agent_ci_start": "ci_delegation",
-        "agent_ci_cancel": "ci_delegation",
-    }
     receipts: list[dict[str, Any]] = []
     for invocation in invocations:
         result = invocation.result
-        if invocation.tool_name not in effects or not isinstance(result, dict):
+        if invocation.tool_name not in COACH_OPERATION_EFFECTS or not isinstance(result, dict):
             continue
         try:
             reference = OPERATION_REFERENCE.validate_python(result.get("operation_ref"))
         except ValidationError:
             continue
-        if reference.kind != effects[invocation.tool_name]:
+        if reference.kind != COACH_OPERATION_EFFECTS[invocation.tool_name]:
             continue
         receipts.append(
             {
@@ -143,4 +145,9 @@ def with_operation_reference(tool_name: str, result: dict[str, Any]) -> dict[str
     except ValidationError:
         # A partial/unknown effect must not acquire an invented receipt pointer.
         return result
-    return {**result, "operation_ref": canonical}
+    return {**result, "operation_ref": canonical, "view_action": operation_view_action(canonical)}
+
+
+def operation_view_action(reference: dict[str, Any]) -> dict[str, Any]:
+    """Describe an available read-only view request, never a delivered view."""
+    return {"tool": "agent_operation_open", "arguments": {"reference": reference}}

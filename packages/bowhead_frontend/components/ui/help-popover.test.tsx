@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { HelpPopover } from "./help-popover";
 
@@ -43,4 +43,31 @@ describe("HelpPopover (decision 21)", () => {
     fireEvent.click(screen.getByRole("button", { name: "First" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+});
+
+it("keeps a focused preview pinned after pressing and does not reopen on Escape focus return", () => {
+  const { unmount } = render(<HelpPopover preview label="Field">Meaning</HelpPopover>);
+  const trigger = screen.getByRole("button", { name: "Field" });
+  act(() => trigger.focus());
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(trigger);
+  fireEvent.pointerLeave(trigger);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  unmount();
+});
+
+
+it("keeps a keyboard preview open when only the pointer leaves", () => {
+  vi.useFakeTimers();
+  const view = render(<HelpPopover preview label="Keyboard field">Meaning</HelpPopover>);
+  const trigger = screen.getByRole("button", { name: "Keyboard field" });
+  act(() => trigger.focus());
+  fireEvent.pointerLeave(trigger);
+  act(() => vi.advanceTimersByTime(200));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  view.unmount();
+  vi.useRealTimers();
 });

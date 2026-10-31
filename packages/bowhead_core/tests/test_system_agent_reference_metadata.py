@@ -267,6 +267,7 @@ async def test_configuration_agent_mention_uses_the_same_pinned_system_profile(s
 
 async def test_ordinary_system_agent_can_be_selected_without_an_exact_skill_adapter(system_catalog_case):
     from bowhead_core.skill_read_resolution import build_reference_skill_sources
+    from bowhead_core.system_skill_snapshot import has_ordinary_system_skill_scope
 
     case = system_catalog_case
     index = await build_system_agent_reference_metadata(case.db_path, case.runner)
@@ -286,4 +287,5 @@ async def test_ordinary_system_agent_can_be_selected_without_an_exact_skill_adap
         case.db_path, input_document=document, scope=case.scope, runner=case.runner, sources=sources
     )
     assert prepared.skill_sources is None and prepared.skill_reads is None
-    assert prepared.system_revision.definition["schema_version"] == 1
+    assert has_ordinary_system_skill_scope(prepared.system_revision.definition)
+    assert prepared.system_revision.definition == subagent._system_profile_snapshot(PROFILES["compute"])

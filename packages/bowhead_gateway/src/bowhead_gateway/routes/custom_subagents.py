@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 from bowhead_core.custom_subagent_store import (
-    MAX_ITERATIONS_CAP,
     MAX_PROMPT_LEN,
     CustomSubagentStore,
 )
@@ -46,7 +45,6 @@ class CreateDTO(BaseModel):
     system_prompt: str = Field(max_length=MAX_PROMPT_LEN)
     allowed_tools: list[str] = Field(default_factory=list)
     auto_read_skills: list[str] = Field(default_factory=list)
-    max_iterations: int = Field(default=10, ge=1, le=MAX_ITERATIONS_CAP)
 
 
 class PatchDTO(BaseModel):
@@ -55,7 +53,6 @@ class PatchDTO(BaseModel):
     system_prompt: str | None = None
     allowed_tools: list[str] | None = None
     auto_read_skills: list[str] | None = None
-    max_iterations: int | None = None
     status: str | None = None  # active | archived
 
 
@@ -114,7 +111,6 @@ async def create(
             system_prompt=body.system_prompt,
             allowed_tools=body.allowed_tools,
             auto_read_skills=body.auto_read_skills,
-            max_iterations=body.max_iterations,
         )
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e

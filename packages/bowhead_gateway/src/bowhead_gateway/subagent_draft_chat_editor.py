@@ -29,7 +29,6 @@ _EDITABLE_FIELDS = frozenset(
         "description",
         "system_prompt",
         "model",
-        "max_iterations",
         "output_schema",
         "selected_tool_refs",
         "skill_grants",

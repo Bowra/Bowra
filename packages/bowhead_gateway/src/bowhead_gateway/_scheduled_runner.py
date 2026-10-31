@@ -906,6 +906,7 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
             turn_id=f"t_sched_{uuid4().hex[:10]}",
             session_id=session_id,
             workspace_id=job.workspace_id,
+            datarc_binding=datarc_ctx.connection_binding,
             active_datarc_project=_active_project,  # Batch 2/c9: per-user + snapshot = pin value.
             datarc_client=datarc_ctx.datarc_client,
             datarc_unavailable=datarc_ctx.datarc_unavailable,

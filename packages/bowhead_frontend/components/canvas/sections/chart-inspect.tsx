@@ -13,13 +13,15 @@
  * columns to null instead of summing; reference lines use visible series only, with scoped labels for truncated views.
  */
 
+import { ChartTableUnits } from "./chart-table-units";
+import { qualifyTableUnitText, tableColumnDisplays } from "@/lib/chart/table-display";
 import { analyticalValue } from "@/lib/chart/analytical";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { Tab, TabList, Tabs } from "@/components/ui/tabs";
 import { useChartTheme } from "@/lib/chart-theme";
-import { formatObservedValue, tableHeaderWithUnit, measureDisplayName, resolvePercentColumn, resolvePercentScale, formatObservedPercentCell, axisUnitOf } from "@/lib/chart/format";
+import { formatObservedValue, measureDisplayName, resolvePercentColumn, resolvePercentScale, formatObservedPercentCell, axisUnitOf } from "@/lib/chart/format";
 import { chartDatasetAvailable, evidencePlanForViewer } from "@/lib/chart/presentation-plan";
 import { observationRows, type ObservationAnnotation, type ObservationTarget } from "@/lib/chart/annotations";
 import type { FocusBinding } from "@/lib/chart/linked-focus";
@@ -70,6 +72,8 @@ export function ChartInspect({ spec, captionText, onClose, returnFocusRef }: Cha
   const focus = useContext(ChartFocusContext);
   const scope = useContext(ChartTimeWindowContext);
   const t = useTranslations("chart_inspect");
+  const unitText = useTranslations("chart_table");
+  const locale = useLocale();
   const tBlock = useTranslations("chart_block");
   const theme = useChartTheme();
   const [tab, setTab] = useState<"chart" | "data">("chart");
@@ -205,17 +209,21 @@ export function ChartInspect({ spec, captionText, onClose, returnFocusRef }: Cha
     onClose();
   };
 
+  const title = tab === "data" || chartSpec.kind === "table"
+    ? qualifyTableUnitText(spec.title, tableColumnDisplays(derived.columns, derived.rows ?? [], locale).values(), (unit) => unitText("source_unit_label", { unit }))
+    : spec.title;
+
   return (
     <DialogShell
       presentation="center"
       onClose={onClose}
-      label={spec.title}
+      label={title}
       returnFocusRef={returnFocusRef}
       backdropClassName="rc-inspect-backdrop"
       panelClassName="rc-inspect-panel"
     >
       <header className="rc-inspect-head">
-        <div className="rc-inspect-title" style={{ color: theme.ink }}>{spec.title}</div>
+        <div className="rc-inspect-title" style={{ color: theme.ink }}>{title}</div>
         <Tabs
           value={tab}
           onValueChange={(next) => { setTab(next); track("bowhead_chart_inspect_total", { action: `tab_${next}` }); }}
@@ -424,22 +432,18 @@ export function ChartInspect({ spec, captionText, onClose, returnFocusRef }: Cha
 /** Data-tab table: same conventions as report tables (column-level percentage mode + precision mode). */
 function InspectDataTable({ spec }: { spec: ChartSpec }) {
   const theme = useChartTheme();
-  const scales = useMemo(() => {
-    const out = new Map<string, ReturnType<typeof resolvePercentScale>>();
-    for (const c of spec.columns ?? []) {
-      if (c.type !== "numeric" || !resolvePercentColumn(c)) continue;
-      out.set(c.key, resolvePercentScale((spec.rows ?? []).map((r) => r[c.key]), c));
-    }
-    return out;
-  }, [spec.columns, spec.rows]);
+  const locale = useLocale();
+  const columnDisplays = useMemo(() => tableColumnDisplays(spec.columns ?? [], spec.rows ?? [], locale), [spec.columns, spec.rows, locale]);
 
   return (
+    <>
+    <ChartTableUnits columns={[...columnDisplays.values()]} />
     <table className="v2-chart-table-el">
       <thead>
         <tr>
           {(spec.columns ?? []).map((c) => (
             <th key={c.key} className={c.type === "numeric" ? "is-num" : undefined} style={{ color: theme.inkSoft }}>
-              {c.type === "numeric" && !scales.has(c.key) ? tableHeaderWithUnit(c.header, axisUnitOf(c)) : c.header}
+              {columnDisplays.get(c.key)?.header ?? c.header}
             </th>
           ))}
         </tr>
@@ -449,12 +453,9 @@ function InspectDataTable({ spec }: { spec: ChartSpec }) {
           <tr key={i}>
             {(spec.columns ?? []).map((c) => {
               const v = r[c.key];
-              const num = typeof v === "number" ? v : null;
               const numeric = c.type === "numeric";
               const display = numeric
-                ? (scales.has(c.key)
-                  ? formatObservedPercentCell(typeof v === "string" ? v : num, scales.get(c.key)!, c.display)
-                  : formatObservedValue(typeof v === "string" ? v : num, axisUnitOf(c), c.format, false, c.display, c.currency_code))
+                ? columnDisplays.get(c.key)!.formatValue(v)
                 : String(v ?? "—");
               return (
                 <td key={c.key} className={numeric ? "is-num" : undefined} style={{ color: theme.ink }}>
@@ -466,6 +467,7 @@ function InspectDataTable({ spec }: { spec: ChartSpec }) {
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 

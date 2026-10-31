@@ -14,6 +14,9 @@
 
 /** Canonical error reason codes emitted by backend; each has copy in `error_messages.reasons`. */
 export const REASON_CODE_LIST = [
+  "agent_step_limit",
+  "agent_tool_call_limit",
+  "agent_stalled",
   "wallclock_exceeded",
   "hop_cap_exceeded",
   "peer_depth_exceeded",
@@ -36,6 +39,8 @@ export const REASON_CODE_LIST = [
   "lead_output_exhausted",
   "document_information_incomplete",
   "document_planning_failed",
+  "document_authoring_script_failed",
+  "document_candidate_invalid",
   "document_history_unavailable",
   "document_request_rejected",
   "document_routing_invalid",

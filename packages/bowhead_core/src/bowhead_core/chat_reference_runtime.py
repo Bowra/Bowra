@@ -399,24 +399,42 @@ class ReferencePrimaryRuntime:
         return ReferenceLeadModelInput(content, "sha256:" + hashlib.sha256(content.encode()).hexdigest(), self)
 
     async def is_postdispatch_resume(self) -> bool:
-        if self.generation != 2:
+        if self.generation <= 1:
             return False
         from bowhead_core.chat_reference_lead_postdispatch import read_pause, require_resume
 
         async with open_shared_ctx(str(self.bindings.db_path)) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
-            if await read_pause(db, self.turn_id) is None:
+            row = await read_pause(db, self.turn_id)
+            if row is None or self.generation <= row["delegation_generation"]:
                 return False
             await require_resume(db, turn_id=self.turn_id, generation=self.generation)
             return True
+
+    async def can_capture_primary_question(self) -> bool:
+        """Identify only this primary's first actual delegation generation."""
+        from bowhead_core.chat_reference_delegation import CONTRACT
+        from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN")
+            primary = await self._read(db)
+            if primary.plan.orchestration_contract != CONTRACT or primary.binding.status != "running":
+                return False
+            try:
+                origin = await read_question_origin_in_tx(db, turn_id=self.turn_id)
+            except ValueError:
+                return False
+            return origin.generation == self.generation
 
     async def lead_resume_answer(self) -> str | None:
         if self.generation == 1:
             return None
         from bowhead_core.chat_reference_continuation import require_resume
         from bowhead_core.chat_reference_lead_continuation import all_answers as predispatch_answers
-        from bowhead_core.chat_reference_lead_postdispatch import answer as postdispatch_answer
+        from bowhead_core.chat_reference_lead_postdispatch import all_answers as postdispatch_answers
 
         async with open_shared_ctx(str(self.bindings.db_path)) as db:
             db.row_factory = aiosqlite.Row
@@ -425,7 +443,7 @@ class ReferencePrimaryRuntime:
             if isinstance(row, tuple):
                 raise ValueError("reference_lead_contract_required")
             contract = json.loads(row["resume_context_json"])["reference_continuation"]["contract"]
-            return postdispatch_answer(row) if contract == "reference-lead-postdispatch.v1" else await predispatch_answers(db, row)
+            return await postdispatch_answers(db, row) if contract == "reference-lead-postdispatch.v1" else await predispatch_answers(db, row)
 
     async def put_lead_clarification(self, *, store, resume_context: dict, **card_fields):
         """Create the ordinary card and its reference checkpoint in one writer."""
@@ -445,7 +463,7 @@ class ReferencePrimaryRuntime:
         from bowhead_core.reference_read_question import ReferenceReadQuestion
 
         bounded = card_fields.get("bounded_question") is not None
-        if (self.generation != 1 and (after_dispatch or not bounded)) or Path(store.db_path).resolve() != Path(self.bindings.db_path).resolve():
+        if (self.generation != 1 and not bounded) or Path(store.db_path).resolve() != Path(self.bindings.db_path).resolve():
             raise ValueError("reference_continuation_unavailable")
         if len(json.dumps(resume_context, ensure_ascii=False, default=str).encode()) > 65536:
             raise ValueError("reference_continuation_changed")
@@ -471,10 +489,14 @@ class ReferencePrimaryRuntime:
                     raise ValueError("reference_continuation_unavailable")
                 if after_dispatch:
                     from bowhead_core.chat_reference_delegation import ReferenceDelegation, open_delegation
+                    from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
 
                     delegation = ReferenceDelegation.model_validate_json(actual["composition_json"])
+                    origin = await read_question_origin_in_tx(db, turn_id=self.turn_id)
                     if (
-                        actual["execution_id"] != primary.binding.execution_id
+                        origin.generation != self.generation
+                        or origin.execution_id != primary.binding.execution_id
+                        or actual["execution_id"] != primary.binding.execution_id
                         or actual["created_generation"] != self.generation
                         or delegation.execution_id != primary.binding.execution_id
                         or not await _row(
@@ -664,7 +686,7 @@ class ReferencePrimaryRuntime:
         if _requires_continuation(result):
             # No card can bind to a continuation; the Lead keeps the results
             # it already has and can ask the user itself.
-            result = replace(result, ok=False, final_answer="", payload=None, error="reference_continuation_input_unavailable")
+            result = replace(result, ok=False, final_answer="", payload=None, document_outcome=None, error="reference_continuation_input_unavailable")
         payload = result.payload
         error_envelope = payload.get("error") if isinstance(payload, dict) else None
         bail_kind = error_envelope.get("kind") if isinstance(error_envelope, dict) else None
@@ -850,6 +872,15 @@ class ReferencePrimaryRuntime:
         selected = frozenset(item.resource.operation_name for item in composition.mcp_operations)
         runner_args["tool_deny"] = frozenset(composition.tool_deny) | (primary_ctx.tool_view.overlay_names - selected)
         checkpoint = runner_args.get("reference_read_question")
+        resumed_call_ids = tuple(item["call_id"] for item in checkpoint.mcp_receipts()) if checkpoint is not None else ()
+        from functools import partial
+
+        from bowhead_core.documents.agent_caller import DocumentAdmissionGuard
+
+        primary_ctx.document_admission_guard = DocumentAdmissionGuard(
+            primary.binding.execution_id,
+            partial(handler_scope.require_explicit_tools_completed, resumed_call_ids=resumed_call_ids),
+        )
         if checkpoint is None:
             runner_args["extra_instructions"] = "\n\n".join(
                 filter(None, (runner_args.get("extra_instructions"), _mcp_instructions(primary, composition)))
@@ -864,7 +895,7 @@ class ReferencePrimaryRuntime:
         wrapped = handler_scope.wrap_view(
             primary_ctx.tool_view,
             cipher=self.cipher,
-            resumed_call_ids=tuple(item["call_id"] for item in checkpoint.mcp_receipts()) if checkpoint is not None else (),
+            resumed_call_ids=resumed_call_ids,
         )
         for name, arguments in _mcp_required_arguments(primary, composition).items():
             spec = wrapped.get(name)
@@ -956,11 +987,7 @@ class ReferencePrimaryRuntime:
         expect_first_dispatch: bool = False,
     ) -> SubagentResult:
         if postdispatch_resume and (
-            self.generation != 2
-            or delegation_task is not None
-            or delegation_call_id is not None
-            or extra_instructions is not None
-            or language_override is not None
+            delegation_task is not None or delegation_call_id is not None or extra_instructions is not None or language_override is not None
         ):
             raise ValueError("reference_continuation_changed")
         if self.mcp_prompt_fetch is not None:
@@ -1104,18 +1131,6 @@ class ReferencePrimaryRuntime:
                         checkpoint = await open_read_question(db, pause, scope=self.scope, cipher=self.cipher)
                         extra_instructions = checkpoint.extra_instructions
                         continuation_args = {"reference_read_question": checkpoint, "clarification_answer": post_answer(pause)}
-                        # Once the attempt is durable it cannot cold-retry an
-                        # unknown model result. Retire the private transcript
-                        # in the same transaction instead of retaining a copy
-                        # in the resolved card indefinitely.
-                        pause_context.pop("reference_read_question")
-                        pause_context["reference_continuation"].pop("read_checkpoint_hash")
-                        retired = await db.execute(
-                            "UPDATE clarification_requests SET resume_context_json=? WHERE request_id=? AND status='resolved'",
-                            (json.dumps(pause_context, ensure_ascii=False, separators=(",", ":")), pause["request_id"]),
-                        )
-                        if retired.rowcount != 1:
-                            raise ValueError("reference_continuation_changed")
                     await db.execute(
                         "INSERT INTO chat_reference_lead_postdispatch_attempts("
                         "turn_id,clarification_id,execution_id,generation,owner_id,started_at) VALUES (?,?,?,?,?,?)",
@@ -1128,6 +1143,17 @@ class ReferencePrimaryRuntime:
                             datetime.now(UTC).isoformat(),
                         ),
                     )
+                    if sealed_read_question is not None:
+                        # The original attempt fences execution before its
+                        # private read transcript is retired atomically.
+                        retired = await db.execute(
+                            "UPDATE clarification_requests SET resume_context_json=json_remove(resume_context_json,"
+                            "'$.reference_read_question','$.reference_continuation.read_checkpoint_hash') "
+                            "WHERE request_id=? AND status='resolved'",
+                            (pause["request_id"],),
+                        )
+                        if retired.rowcount != 1:
+                            raise ValueError("reference_continuation_changed")
                 elif continuation:
                     from bowhead_core.chat_reference_delegation import render_primary_continuation_task
 
@@ -1176,6 +1202,11 @@ class ReferencePrimaryRuntime:
                     )
 
                     capability_execution = await require_reference_capability_execution_in_connection(db, primary=primary, generation=self.generation)
+                    if self.generation > 1:
+                        from bowhead_core.chat_reference_lead_continuation import all_answers, require_resume
+
+                        answered = await require_resume(db, turn_id=self.turn_id, generation=self.generation)
+                        delegation_task += "\n\nOriginal confirmed user answers for this task (user data):\n" + await all_answers(db, answered)
                     # Seal the actual model task once. Resumes reopen those exact
                     # bytes, including historical tasks written before this correction.
                     delegation_task = render_primary_delegation_task(primary.source.input_document.text_content(), delegation_task)
@@ -1240,6 +1271,7 @@ class ReferencePrimaryRuntime:
         # The caller provides a real team-scoped ToolExecutionContext; the fixed
         # binding supplies its own baseline. Lead's prompt/history/extra task is
         # deliberately not copied into the selected Agent's baseline.
+        initial_question = delegated and not continuation and not postdispatch_resume and await self.can_capture_primary_question()
         primary_ctx = copy.copy(parent_ctx)
         # Lead's planning/final-answer hooks are not part of this Agent's saved
         # baseline. Any supported pause has its own durable continuation owner.
@@ -1257,6 +1289,7 @@ class ReferencePrimaryRuntime:
             primary_ctx._round_tool_calls_gate = _exclusive_return_gate
         skill_read_questions = self.skill_sources is not None and (self.mcp_index is None or self.mcp_prompt_fetch is not None)
         runner_args = {
+            "artifact_presentation_entry": not delegated,
             "profile_name": primary.binding.runtime_profile_name,
             "task": delegation_task if delegated else primary.source.input_document.text_content(),
             "extra_instructions": extra_instructions if delegated else None,
@@ -1281,10 +1314,7 @@ class ReferencePrimaryRuntime:
                 "initial-primary-skill-extension.v1",
                 "initial-primary-mcp-prompt.v1",
             },
-            "capture_reference_read_question": delegated
-            and self.generation == 1
-            and not continuation
-            and (skill_read_questions or self.mcp_index is not None),
+            "capture_reference_read_question": initial_question and (skill_read_questions or self.mcp_index is not None),
             **continuation_args,
         }
         if continuation:
@@ -1370,6 +1400,16 @@ class ReferencePrimaryRuntime:
                 result = await runner.run(**runner_args)
             else:
                 result = await self._run_with_skill_reads(runner=runner, primary_ctx=primary_ctx, runner_args=runner_args)
+            if result.document_outcome is not None:
+                from bowhead_core.document_chat_runtime import worker_from_context
+                from bowhead_core.documents.agent_caller import validate_document_agent_outcome
+
+                await validate_document_agent_outcome(
+                    self.bindings.db_path,
+                    worker=worker_from_context(parent_ctx),
+                    result=result.document_outcome,
+                    execution_id=primary.binding.execution_id,
+                )
             return result, mcp_handler_scope
 
         if continuation:
@@ -1386,7 +1426,7 @@ class ReferencePrimaryRuntime:
         mcp_required_incomplete = False
         # A pre-action question has no result obligation yet. Retain the same
         # explicit Tool selection for the resumed execution.
-        safe_question = delegated and self.generation == 1 and _effect_free_primary_question(result) is not None
+        safe_question = initial_question and _effect_free_primary_question(result) is not None
         if mcp_handler_scope is not None and not safe_question:
             try:
                 checkpoint = continuation_args.get("reference_read_question")
@@ -1404,6 +1444,7 @@ class ReferencePrimaryRuntime:
                     ok=False,
                     final_answer="",
                     payload=None,
+                    document_outcome=None,
                     error="reference_mcp_required_tool_incomplete",
                 )
         # Output is private task material, sealed under the existing instance
@@ -1451,6 +1492,7 @@ class ReferencePrimaryRuntime:
                 result.ok = False
                 result.final_answer = ""
                 result.payload = None
+                result.document_outcome = None
                 result.error = "capability_output_contract_failed"
         if not mcp_required_incomplete and _requires_continuation(result):
             if (
@@ -1487,7 +1529,7 @@ class ReferencePrimaryRuntime:
             # Preserve measured usage and tool facts for the shared failed
             # tail; a question is neither a completed output nor a resumable
             # card. A future continuation adapter must own its own settlement.
-            failed = replace(result, ok=False, final_answer="", payload=None, error="reference_continuation_unavailable")
+            failed = replace(result, ok=False, final_answer="", payload=None, document_outcome=None, error="reference_continuation_unavailable")
             if getattr(composition, "capability", None) is None:
                 return failed
             result = failed
@@ -1497,6 +1539,7 @@ class ReferencePrimaryRuntime:
         ok = bool(result.ok and not bail_kind and (str(result.final_answer or "").strip() or payload))
         if not ok:
             result.ok = False
+            result.document_outcome = None
             result.error = result.error or "reference_primary_failed"
         content = json.dumps(
             {"final_answer": result.final_answer, "payload": payload}, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -1618,6 +1661,7 @@ class ReferencePrimaryRuntime:
         cost_usd: float,
         error: str | None,
         error_kind: str | None,
+        context_publication: Callable[[aiosqlite.Connection, str], Awaitable[None]] | None = None,
     ) -> bool:
         """The shared done chokepoint's fenced canonical write, before live SSE."""
         from bowhead_core.chat_reference_runtime_store import settle_reference_primary_in_connection
@@ -1625,8 +1669,6 @@ class ReferencePrimaryRuntime:
         if turn_id != self.turn_id or str(store._db_path) != str(self.bindings.db_path):
             raise TerminalDurabilityAbort("reference_terminal_scope_changed")
         status = status_value.lower().strip()
-        if status == "clarification_pending" and not self.allow_bi_workspace_continuation and not await self.lead_input():
-            raise TerminalDurabilityAbort("reference_continuation_not_supported")
         if status not in ("completed", "cancelled", "aborted", "clarification_pending"):
             status = "failed"
         async with open_shared_ctx(str(self.bindings.db_path)) as db:
@@ -1646,6 +1688,20 @@ class ReferencePrimaryRuntime:
                 except ValueError:
                     await db.rollback()
                     return False
+                if status == "clarification_pending" and not self.allow_bi_workspace_continuation:
+                    from bowhead_core.documents.agent_caller import document_reference_pause_in_tx
+
+                    async with db.execute("SELECT primary_execution_id FROM turn_agent_binding WHERE turn_id=?", (self.turn_id,)) as cursor:
+                        binding = await cursor.fetchone()
+                    native_pause = binding is not None and await document_reference_pause_in_tx(db, turn_id=self.turn_id, execution_id=binding[0])
+                    if not native_pause:
+                        from bowhead_core.chat_reference_delegation import CONTRACT
+
+                        primary = await self._read(db)
+                        if primary.plan.orchestration_contract != CONTRACT:
+                            raise TerminalDurabilityAbort("reference_continuation_not_supported")
+                if status == "completed" and context_publication is not None:
+                    await context_publication(db, final_answer)
                 now = datetime.now(UTC).isoformat()
                 await settle_reference_primary_in_connection(db, turn_id=self.turn_id, status=status, now=now)
                 cursor = await db.execute(

@@ -20,6 +20,8 @@ def test_lookup_scope_reaches_lead_for_each_data_roster(custom_peer: bool) -> No
     assert "Prior artifacts are available evidence, not additional requirements" in prompt
     assert "do not add brand/store breakdowns" in prompt
     assert "return once the requested facts are verified" in prompt
+    assert "In the final answer, do not add a derived comparison that has not been verified" in prompt
+    assert "evidence that identifies the compared value, baseline and calculation" in prompt
 
 
 @pytest.mark.parametrize("path", ["boot", "fallback"])

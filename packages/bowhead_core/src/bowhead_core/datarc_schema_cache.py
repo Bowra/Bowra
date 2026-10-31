@@ -105,6 +105,36 @@ class DatarcSchemaCache:
             "misses": self.misses,
         }
 
+    def scoped(self, source_key: str) -> DatarcSchemaCache:
+        """Share the bounded cache while isolating an accepted source and member."""
+        return _ScopedDatarcSchemaCache(self, source_key)
+
+
+class _ScopedDatarcSchemaCache(DatarcSchemaCache):
+    def __init__(self, cache: DatarcSchemaCache, source_key: str) -> None:
+        self._base = cache._base if isinstance(cache, _ScopedDatarcSchemaCache) else cache
+        self._prefix = source_key + ":"
+
+    def get(self, datarc_workspace_id: str, *, count_stats: bool = True) -> _CachedSchema | None:
+        return self._base.get(self._prefix + datarc_workspace_id, count_stats=count_stats)
+
+    def put(self, datarc_workspace_id: str, entry: _CachedSchema) -> None:
+        self._base.put(self._prefix + datarc_workspace_id, entry)
+
+    def lock_for(self, datarc_workspace_id: str) -> asyncio.Lock:
+        return self._base.lock_for(self._prefix + datarc_workspace_id)
+
+    def invalidate(self, datarc_workspace_id: str | None = None) -> None:
+        if datarc_workspace_id is not None:
+            self._base.invalidate(self._prefix + datarc_workspace_id)
+            return
+        for key in set(self._base._store) | set(self._base._locks):
+            if key.startswith(self._prefix):
+                self._base.invalidate(key)
+
+    def stats(self) -> dict[str, int]:
+        return self._base.stats()
+
 
 async def _fetch_schema_uncached(
     *,

@@ -247,6 +247,14 @@ describe("AgentReleaseReview", () => {
     })));
   });
 
+  it("shows source broadening in the original release review", async () => {
+    vi.mocked(getAgentReleaseCandidate).mockResolvedValue({ ...CANDIDATE,
+      diff: { ...CANDIDATE.diff, knowledge_access_changed: true, knowledge_access_expanded: true } });
+    renderIntl(<AgentReleaseReview agentId="osa_1" candidateId="arc_1" />);
+    expect(await screen.findByText("知识来源已变更")).toBeTruthy();
+    expect(screen.getByText("知识来源范围已扩大；每位使用者仍须拥有文件访问权限")).toBeTruthy();
+  });
+
   it("shows an already-decided candidate without offering a second decision", async () => {
     vi.mocked(getAgentReleaseCandidate).mockResolvedValue({
       ...CANDIDATE,

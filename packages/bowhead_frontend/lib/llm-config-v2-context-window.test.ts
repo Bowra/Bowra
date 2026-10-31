@@ -10,7 +10,16 @@ describe("suggestedContextWindow", () => {
     expect(suggestedContextWindow(CATALOG, " MiniMax-M3 ")).toEqual({ value: 1_000_000, source: "catalog" });
   });
 
+  it("uses the connection declaration before the catalog without changing the saved model", () => {
+    expect(suggestedContextWindow(CATALOG, "deepseek-flash", 128000)).toEqual({ value: 128000, source: "provider" });
+  });
+
   it("uses the 131,072 default for an unknown model", () => {
     expect(suggestedContextWindow(CATALOG, "my-private-llm")).toEqual({ value: 131_072, source: "default" });
   });
+});
+
+ it("keeps declared provider capacity available when the catalog is unavailable", () => {
+  expect(suggestedContextWindow(null, "custom", 32000)).toEqual({ value: 32000, source: "provider" });
+  expect(suggestedContextWindow(null, "custom")).toBeNull();
 });

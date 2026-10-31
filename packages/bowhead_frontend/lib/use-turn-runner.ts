@@ -9,6 +9,7 @@
  */
 
 "use client";
+import { requireMaintenanceReceipt, type ContextMaintenanceReceipt } from "./context-maintenance";
 import { canonicalizeComposerAttachmentRef } from "./composer-attachment-refs";
 import { projectDisplayUsage } from "@/lib/document-usage-display";
 
@@ -33,7 +34,7 @@ import {
   resolveChatSendErrorReason,
   resolveModelUnconfiguredPresentation,
 } from "./chat-send-errors";
-import { isClarificationAnswered, markClarificationAnswered } from "./clarification-tombstone";
+import { clarificationDisplayAnswer, getAnsweredClarification, isClarificationAnswered, markClarificationAnswered } from "./clarification-tombstone";
 import { clearPyCells, clearSectionsForChatTurn, getCanvasSnapshot, hasBufferedCanvasContentForTurn, pruneStreamingSections, reconcileCanvasWithServer, resetCanvas, revealBufferedSectionsForTurn } from "./canvas-store";
 import { SCENARIOS } from "./scenarios";
 import { toast } from "./use-toast";
@@ -242,6 +243,7 @@ export function snapshotArchivedTurn(s: TurnRunnerState): import("./types").Arch
     && !s.answer
     && s.userAttachments.length === 0
     && (s.traceSteps?.length ?? 0) === 0
+    && s.operationKind !== "context_maintenance"
   ) return null;
   // chat-redesign Phase 1.7-A — snapshot turn-store beats[] at archive time
   // so ArchivedTurnView (1.7-B) can iterate the same composition as live.
@@ -251,6 +253,7 @@ export function snapshotArchivedTurn(s: TurnRunnerState): import("./types").Arch
   const beats = turnStoreSnap?.beats ?? [];
   return {
     turnId: s.turnId,
+    operationKind: s.operationKind,
     terminalStatus: s.terminalStatus ?? null,
     executionGeneration: s.executionGeneration ?? null,
     effectDisclosure: s.effectDisclosure ?? null,
@@ -877,6 +880,7 @@ function useMockRunner(
     answerRef.current = "";
     const hasRoutedLastTurn = Boolean(
       hydrate.lastTurnRouted
+      || hydrate.lastOperationKind === "context_maintenance"
       || hydrate.lastFinalPayload !== undefined
       || hydrate.lastErrorReason,
     );
@@ -891,6 +895,7 @@ function useMockRunner(
       archivedTurns: hydrate.archivedTurns ?? [],
       intent: hydrate.lastIntent ?? null,
       turnId: hydrate.lastTurnId ?? null,
+      operationKind: hydrate.lastOperationKind ?? null,
       startedAt: finiteMsOrNull(hydrate.lastStartedAt),
       user: hasRoutedLastTurn ? (hydrate.lastUserText ?? "") : "",
       userAttachments: hasRoutedLastTurn ? (hydrate.lastUserAttachments ?? []) : [],
@@ -992,7 +997,7 @@ export function captureComposerSubmissionWireSnapshot(
   };
 }
 
-async function postSendMessage(
+export async function postSendMessage(
   workspaceId: string,
   memberUid: string,
   message: string,
@@ -1025,7 +1030,7 @@ async function postSendMessage(
       throw new Error("composer start action target mismatch");
     }
   }
-  const profile = (referenceDocument || revisionTarget) && frozenWireSnapshot
+  const profile = (referenceDocument || revisionTarget || frozenWireSnapshot?.contextMaintenance) && frozenWireSnapshot
     ? frozenWireSnapshot.userProfile
     : frozenWireSnapshot?.userProfile ?? _loadUserProfile();
   const preferred = frozenWireSnapshot
@@ -1048,6 +1053,7 @@ async function postSendMessage(
   )));
   const requestBody = {
     workspace_id: workspaceId,
+    ...(frozenWireSnapshot?.contextMaintenance ? { context_maintenance: frozenWireSnapshot.contextMaintenance } : {}),
     ...(revisionTarget ? { document_revision_target: parseDocumentRevisionTarget(revisionTarget) } : {}),
     // Empty memberUid → Gateway resolves dynamically by identity × Space;
     // send only explicit frontend values (nonempty/nondefault), avoiding a permanently incorrect memberUid
@@ -1110,7 +1116,7 @@ async function postSendMessage(
     // An @ send keeps the single-attempt rule but, like an ordinary send, has no client deadline: the server prepares
     // it (exact versions, materials, possibly a model call to pick the receiver) before accepting, and 116 measured
     // 16s against the 15s bound it used to inherit.
-    const fetchMutation = referenceDocument || revisionTarget
+    const fetchMutation = referenceDocument || revisionTarget || frozenWireSnapshot?.contextMaintenance
       ? (input: RequestInfo | URL, init?: RequestInit) => singleAttemptChatActionFetch(input, init, null)
       : chatAction
         ? singleAttemptChatActionFetch
@@ -1135,6 +1141,12 @@ async function postSendMessage(
     terminal_protocol_version?: number;
   };
   const checkReferenceStarted = (value: StartedResponse): StartedResponse => {
+    if (frozenWireSnapshot?.contextMaintenance) {
+      if ((value as { status?: unknown } | null)?.status !== "started")
+        throw new Error("Context maintenance response is not admitted");
+      requireMaintenanceReceipt(value, frozenWireSnapshot.contextMaintenance, sessionId!);
+      return value;
+    }
     if (!referenceDocument && !revisionTarget) return value;
     if (revisionTarget && !sameDocumentRevisionTarget(revisionTarget, (value as { document_revision_target?: unknown })?.document_revision_target))
       throw new Error("Document revision receipt target mismatch");
@@ -1266,7 +1278,7 @@ function useSSERunner(
     scopeKey: string,
     clientSubmissionId: string,
   ) => void) | undefined,
-  onSendInitSettled: ((attemptKey: string, accepted: boolean) => void) | undefined,
+  onSendInitSettled: UseTurnRunnerArgs["onSendInitSettled"],
   onWorkspaceSettingsTurnAccepted: UseTurnRunnerArgs["onWorkspaceSettingsTurnAccepted"],
   onWorkspaceSettingsAccessDenied: UseTurnRunnerArgs["onWorkspaceSettingsAccessDenied"],
 ): TurnRunnerState {
@@ -1402,6 +1414,28 @@ function useSSERunner(
       true,   // attachStreamCallback = HITL resume / external stream reattachment ⇒ mid-turn attachment
       terminalProtocolVersion,
     );
+  }, [clearWatchdog]);
+
+  const maintenanceStateRef = useRef(state);
+  maintenanceStateRef.current = state;
+  const attachContextMaintenance = useCallback((receipt: ContextMaintenanceReceipt, existingOnly = false): boolean => {
+    const current = maintenanceStateRef.current;
+    if (current.sessionId === receipt.session_id && current.turnId === receipt.turn_id
+      && current.operationKind === "context_maintenance" && current.executionGeneration === receipt.execution_generation)
+      return true;
+    if (existingOnly) return false;
+    if ((current.sessionId && current.sessionId !== receipt.session_id) || current.clarificationPending
+      || (current.running && current.turnId !== receipt.turn_id)) return false;
+    esRef.current?.close();
+    esRef.current = null;
+    clearWatchdog();
+    setState((previous) => ({
+      ...(previous.turnId === receipt.turn_id ? previous : archiveAndFreshTurn(previous, { user: null, turnId: receipt.turn_id, userAttachments: [] })),
+      sessionId: receipt.session_id, operationKind: "context_maintenance", running: true,
+      executionGeneration: receipt.execution_generation, terminalProtocolVersion: receipt.terminal_protocol_version ?? null,
+    }));
+    attachStream(receipt.stream_url, esRef, watchdogRef, setState, transportRef, true, receipt.terminal_protocol_version ?? undefined);
+    return true;
   }, [clearWatchdog]);
 
   // dogfood-0708 F3: dismissing「换个问法」clears clarificationPending, collapsing the card.
@@ -1550,6 +1584,7 @@ function useSSERunner(
         user: resume.userText,
         userAttachments: resume.userAttachments ?? [],
         turnId: resume.turnId,
+        operationKind: hydrate.lastOperationKind ?? null,
         executionGeneration: resume.executionGeneration ?? 1,
         terminalProtocolVersion:
           hydrate.lastTerminalProtocolVersion ?? null,
@@ -1578,6 +1613,7 @@ function useSSERunner(
       // hydrate.lastUserText so the user bubble still renders.
       const hasRoutedLastTurn = Boolean(
         hydrate.lastTurnRouted
+        || hydrate.lastOperationKind === "context_maintenance"
         || hydrate.lastFinalPayload !== undefined
         || hydrate.lastErrorReason,
       );
@@ -1602,6 +1638,7 @@ function useSSERunner(
         traceSteps: [],
         summary: hydrate.lastSummary ?? null,
         turnId: hydrate.lastTurnId ?? null,
+        operationKind: hydrate.lastOperationKind ?? null,
         startedAt: finiteMsOrNull(hydrate.lastStartedAt),
         user: hasRoutedLastTurn ? (hydrate.lastUserText ?? "") : "",
         userAttachments: hasRoutedLastTurn ? (hydrate.lastUserAttachments ?? []) : [],
@@ -1878,7 +1915,11 @@ function useSSERunner(
             return;
           }
         }
-        onSendInitSettled?.(currentAttemptKey, true);
+        if (ownsPresentation()) {
+          onSendInitSettled?.(currentAttemptKey, true, { turnId: turn_id, sessionId: session_id ?? actionSessionId ?? null });
+        } else {
+          onSendInitSettled?.(currentAttemptKey, true);
+        }
         if (!ownsPresentation()) return;
         // Only move the runner into a new Turn after a definitive accepted
         // receipt. Keeping the prior surface mounted during POST preserves the
@@ -1891,6 +1932,7 @@ function useSSERunner(
             userAttachments: attachmentRefs,
           }),
           sessionId: session_id ?? s.sessionId,
+          operationKind: null,
           executionGeneration: execution_generation ?? 1,
           terminalProtocolVersion: terminal_protocol_version ?? null,
         }));
@@ -2002,6 +2044,7 @@ function useSSERunner(
   return {
     ...state,
     attachStream: attachStreamCallback,
+    attachContextMaintenance,
     clearClarificationPending,
     updateEffectDisclosure,
     // stream-liveness ①: expose the measurement sample unchanged; **draw no conclusions here**.
@@ -2876,6 +2919,19 @@ function attachStream(
             // redelivers old clarification_required (per-attach seenSeq cannot block it);
             // answered cards must never return unanswered (TurnContainer renders an answered summary row).
             if (isClarificationAnswered(String(payload.clarification_id))) {
+              const requestId = String(payload.clarification_id);
+              const answered = getAnsweredClarification(requestId);
+              if (answered && !answered.skipped && !answered.dismissed && payload.kind === "tool_context_select" && Array.isArray(payload.options)) {
+                const options = payload.options.flatMap((option: unknown) => {
+                  if (!option || typeof option !== "object") return [];
+                  const pair = option as { value?: unknown; label?: unknown };
+                  return pair.value != null && pair.label != null ? [{ value: String(pair.value), label: String(pair.label) }] : [];
+                });
+                markClarificationAnswered(requestId, clarificationDisplayAnswer(
+                  requestId, answered.canonicalValues ?? answered.values,
+                  { clarificationId: requestId, kind: "tool_context_select", options }, false,
+                ));
+              }
               break;
             }
             const candidates = Array.isArray(payload.candidates)
@@ -2899,6 +2955,7 @@ function attachStream(
               kind: payload.kind != null ? String(payload.kind) : undefined,
               options: pairOptions && pairOptions.length ? pairOptions : undefined,
               rememberOption: Boolean(payload.remember_option),
+              rememberDefault: typeof payload.remember_default === "boolean" ? payload.remember_default : undefined,
               tool: payload.tool != null ? String(payload.tool) : undefined,
               ...(payload.purpose === "document_draft" ? { purpose: "document_draft" as const } : {}),
             };
@@ -3205,12 +3262,12 @@ function attachStream(
           // review FE-P2-3: module-level mark side effect inside setState updater matches existing patterns
           // here (track/canvas-store operations also live in updaters). mark is idempotent for the same key/value,
           // harmless under StrictMode double invocation / bail-out recomputation.
-          markClarificationAnswered(reqId, {
-            values: Array.isArray(payload.chosen_values)
+          markClarificationAnswered(reqId, clarificationDisplayAnswer(reqId,
+            Array.isArray(payload.chosen_values)
               ? (payload.chosen_values as unknown[]).map((v) => String(v))
               : payload.chosen_value != null ? [String(payload.chosen_value)] : [],
-            skipped: Boolean(payload.skipped),
-          });
+            s.clarificationPending, Boolean(payload.skipped),
+          ));
           break;
         }
         case "clarification.dismissed": {
@@ -3243,12 +3300,12 @@ function attachStream(
           const reqId = String(payload.request_id ?? "");
           if (!reqId) return s;
           if (ns.errorReason?.source === "clarification_resume") ns.errorReason = null;
-          markClarificationAnswered(reqId, {
-            values: Array.isArray(payload.chosen_values)
+          markClarificationAnswered(reqId, clarificationDisplayAnswer(reqId,
+            Array.isArray(payload.chosen_values)
               ? (payload.chosen_values as unknown[]).map((v) => String(v))
               : [],
-            skipped: Boolean(payload.skipped),
-          });
+            s.clarificationPending, Boolean(payload.skipped),
+          ));
           ns.clarifications = s.clarifications.filter((c) => c.request_id !== reqId);
           if (s.clarificationPending?.clarificationId === reqId) {
             ns.clarificationPending = null;
@@ -3346,6 +3403,7 @@ function attachStream(
       // both now classified as backend internal telemetry (chat-pipeline.md), named in guard tests' ignore list.
       "agent_spawned",
       "agent.collaboration",
+      "agent.context",
       "turn_failed", "canvas_op_failed", "peer_dispatch_failed", "turn_aborted",
       "cca.tool_create_open",  // cca P2 (C3): opens the inline create-tool card
       "document.draft_open",
@@ -3774,6 +3832,7 @@ export interface UseTurnRunnerArgs {
     /** Explicit ownership of the terminal last Turn. Unlike finalPayload, this
      * is available before its event log has been replayed. */
     lastTurnRouted?: boolean;
+    lastOperationKind?: "context_maintenance" | null;
     /** Event-derived fields that are empty during the persisted baseline and
      * filled by the guarded current-turn patch. */
     lastHeadline?: string;
@@ -3833,7 +3892,7 @@ export interface UseTurnRunnerArgs {
     clientSubmissionId: string,
   ) => void;
   /** Resolves the Composer's preparing state only after POST receipt/rejection. */
-  onSendInitSettled?: (attemptKey: string, accepted: boolean) => void;
+  onSendInitSettled?: (attemptKey: string, accepted: boolean, turn?: { turnId: string; sessionId: string | null }) => void;
   /** Terminal v1 identity already persisted (or retained in-memory if storage failed). */
   chatAction?: ComposerChatAction | null;
   /** Workspace captured with the marker; never borrow a later selection. */
@@ -3922,6 +3981,7 @@ export function resolveHydratedClarificationPending(
     kind: last.kind != null ? String(last.kind) : undefined,
     options: pairOptions?.length ? pairOptions : undefined,
     rememberOption: Boolean(last.remember_option),
+    rememberDefault: typeof last.remember_default === "boolean" ? last.remember_default : undefined,
     tool: last.tool != null ? String(last.tool) : undefined,
     ...(last.purpose === "document_draft" ? { purpose: "document_draft" as const } : {}),
   };

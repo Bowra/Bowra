@@ -39,6 +39,7 @@ def test_results_capability_route_is_authenticated() -> None:
 
 @pytest.mark.unit
 def test_results_capability_route_returns_standard_results_capabilities(monkeypatch) -> None:
+    monkeypatch.delenv("FEATURE_INTERACTIVE_HTML_PREVIEW", raising=False)
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode("ascii"))
     user = SimpleNamespace(id="user_a", team_id="team_a")
 
@@ -50,6 +51,7 @@ def test_results_capability_route_returns_standard_results_capabilities(monkeypa
         "workspace": True,
         "complete_list": True,
         "scale_nav": True,
+        "interactive_html": True,
         "max_page_size": 50,
     }
     assert response.headers["cache-control"] == "private, no-store"
@@ -73,7 +75,7 @@ def test_results_capability_route_fails_subfeatures_closed_without_cursor_key(
 
 @pytest.mark.unit
 def test_results_capability_route_is_mounted_in_main_app() -> None:
-    paths = {route.path for route in create_app().routes}
+    paths = create_app().openapi()["paths"]
 
     assert "/api/v1/results/capabilities" in paths
     assert "/api/v1/sessions/{session_id}/results/query" in paths
@@ -219,3 +221,16 @@ def test_owner_results_route_maps_invalid_body_to_finite_400(monkeypatch) -> Non
         "detail": {"error": {"code": "results_query_invalid"}},
     }
     assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value,expected", [(None, True), ("0", False), ("", False), ("true", False), ("1", True)])
+def test_interactive_html_default_and_explicit_override(monkeypatch, value, expected) -> None:
+    if value is None:
+        monkeypatch.delenv("FEATURE_INTERACTIVE_HTML_PREVIEW", raising=False)
+    else:
+        monkeypatch.setenv("FEATURE_INTERACTIVE_HTML_PREVIEW", value)
+    user = SimpleNamespace(id="user_a", team_id="team_a")
+    response = TestClient(_app(user)).get("/api/v1/results/capabilities")
+    assert response.status_code == 200
+    assert response.json()["interactive_html"] is expected

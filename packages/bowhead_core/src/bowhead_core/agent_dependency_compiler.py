@@ -28,7 +28,7 @@ from bowhead_core.agent_runtime_extensions import (
     extension_policy_summary,
     read_agent_runtime_extensions,
 )
-from bowhead_core.skill_upload import bundle_sha256
+from bowhead_core.skill_upload import builtin_bundle_sha256, bundle_sha256
 from bowhead_core.subagent_authoring_catalog import (
     CATALOG_SCHEMA_VERSION,
     COMPILER_DERIVED_SKILL_TOOLS,
@@ -502,7 +502,7 @@ class AgentDependencyCompiler:
         for name in names:
             builtin = self._builtin_skills.get(name)
             if builtin is not None:
-                revision = _bundle_revision(str(builtin.source_dir))
+                revision = builtin_skill_bundle_revision(str(builtin.source_dir))
                 if revision is None:
                     raise ValueError("selected Skill bundle is unavailable")
                 if name == "python_sandbox":
@@ -608,6 +608,13 @@ class AgentDependencyCompiler:
 
         parsed = _parse_definition(definition)
         reasons = set(parsed.reason_codes)
+        from bowhead_core.system_plugins import resolved_plugin_skill_grants
+
+        try:
+            plugin_pins = {grant.identity: grant.revision for grant in resolved_plugin_skill_grants(definition)}
+        except ValueError:
+            plugin_pins = {}
+            reasons.add("dependency_definition_malformed")
         review_required = False
         unknown_dependencies: set[str] = set()
         extension_policy = read_agent_runtime_extensions(definition)
@@ -639,9 +646,13 @@ class AgentDependencyCompiler:
         skill_dependencies: list[ResolvedSkillDependency] = []
         skill_names: dict[str, str] = {}
         for grant in parsed.skill_grants:
-            # The dependency carries the grant rebased to the Skill's current
-            # approved revision; scope and runtime names come from it.
+            # Independent Skills follow their approved package; Plugin methods
+            # retain the exact package declared by the selected Plugin version.
             dependency = await self._resolve_skill(grant, context=context)
+            if grant.identity in plugin_pins and (
+                grant.revision != plugin_pins[grant.identity] or dependency.grant.revision != plugin_pins[grant.identity]
+            ):
+                dependency = _missing_skill(grant, "builtin_plugin_skill_revision_mismatch")
             skill_dependencies.append(dependency)
             reasons.update(dependency.reason_codes)
             items[("skill", grant.identity)] = (grant.name, set(dependency.reason_codes))
@@ -718,6 +729,7 @@ class AgentDependencyCompiler:
             "precise_skill_scope_required",
             "skill_approval_hash_missing",
             "skill_bundle_unavailable",
+            "builtin_plugin_skill_revision_mismatch",
             "skill_disabled",
             "skill_import_pending",
             "skill_grant_duplicate",
@@ -828,7 +840,8 @@ class AgentDependencyCompiler:
                 if str(getattr(record, "source_type", "")) not in {"user_upload", "user_generated"}:
                     return None
                 name, path = str(getattr(record, "name", "") or ""), str(getattr(record, "source_path", "") or "")
-            revision = await anyio.to_thread.run_sync(_bundle_revision, path)
+            revision_reader = builtin_skill_bundle_revision if selector.source_kind == "builtin" else _bundle_revision
+            revision = await anyio.to_thread.run_sync(revision_reader, path)
             if revision is None or selector.version not in {None, revision}:
                 return None
             key = ExactSkillGrant(
@@ -880,7 +893,7 @@ class AgentDependencyCompiler:
         return _resolved_skill_from_spec(
             grant,
             spec=spec,
-            expected_revision=_bundle_revision(str(spec.source_dir)),
+            expected_revision=builtin_skill_bundle_revision(str(spec.source_dir)),
             risk_report=None,
             trusted_builtin=True,
         )
@@ -1572,14 +1585,14 @@ def _load_skill(source_path: str) -> SkillSpec | None:
         return None
 
 
-def _bundle_revision(source_path: str) -> str | None:
+def _bundle_revision(source_path: str, *, builtin: bool = False) -> str | None:
     if not source_path:
         return None
     root = Path(source_path)
     if not _bundle_is_safe(source_path):
         return None
     try:
-        digest = bundle_sha256(root)
+        digest = builtin_bundle_sha256(root) if builtin else bundle_sha256(root)
     except OSError:
         return None
     return f"sha256:{digest}"
@@ -1615,7 +1628,7 @@ def with_python_sandbox_skill_grant(definition: Mapping[str, Any], *, builtin_sk
         if len(grants) >= _MAX_SKILL_GRANTS:
             return expanded
         builtin = (builtin_skills or _builtin_skill_catalog()).get(_PYTHON_SANDBOX)
-        revision = _bundle_revision(str(builtin.source_dir)) if builtin is not None else None
+        revision = builtin_skill_bundle_revision(str(builtin.source_dir)) if builtin is not None else None
         if revision is None:
             return expanded
         grants.append(
@@ -1641,6 +1654,11 @@ def _builtin_skill_catalog() -> SkillCatalog:
 def skill_bundle_revision(source_path: str) -> str | None:
     """``sha256:<digest>`` of a safe Skill bundle, the revision an exact grant records."""
     return _bundle_revision(source_path)
+
+
+def builtin_skill_bundle_revision(source_path: str) -> str | None:
+    """Resolve builtin source revision without generated Python cache bytes."""
+    return _bundle_revision(source_path, builtin=True)
 
 
 def approved_revision_token(value: Any) -> str | None:
@@ -1718,6 +1736,7 @@ __all__ = [
     "approved_revision_token",
     "compare_agent_dependencies",
     "skill_bundle_revision",
+    "builtin_skill_bundle_revision",
     "skill_has_runnable_scripts",
     "skill_is_runnable",
     "skill_script_runtime",

@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from bowhead_core.datarc_selection import DatarcConnectionBinding, DatarcPreferenceScope
 from bowhead_core.scrub import scrub
 
 from bowhead_gateway.connector_context_provider import (
@@ -49,6 +50,7 @@ class DatarcTurnContext:
     # bi-absent-turn R3.1: BI absence reason ("" | "no_connection" | "no_identity" |
     # "zero_workspaces" | "transient") for wording selection (PRD R3.3). "" = unknown/not applicable.
     datarc_absence_reason: str = ""
+    connection_binding: DatarcConnectionBinding | None = None
 
 
 def _state(request_or_app: Any) -> Any | None:
@@ -56,7 +58,7 @@ def _state(request_or_app: Any) -> Any | None:
     return getattr(app, "state", None)
 
 
-async def resolve_team_datarc_client(request_or_app: Any, team_id: str | None) -> Any:
+async def resolve_team_datarc_binding(request_or_app: Any, team_id: str | None) -> DatarcConnectionBinding | None:
     """Resolve the caller team's per-connection DatarcClient.
 
     Returns ``None`` for benign misses (no team, store/factory not wired, no active
@@ -72,14 +74,24 @@ async def resolve_team_datarc_client(request_or_app: Any, team_id: str | None) -
     if store is None or factory is None:
         return None
     try:
-        conns = await store.list_connections(team_id)
-        if not conns:
+        resolved = await store.resolve_active_binding(team_id)
+        if resolved is None:
             return None
-        conn = conns[0]
-        auth_key = await store.get_connection_auth(conn.id, team_id)
+        conn, auth_key, revision = resolved
         if not auth_key:
             raise DatarcResolutionError(f"datarc connection {conn.id} has no usable auth")
-        return factory.get_client(conn.base_url, auth_key)
+
+        async def resolve_vector(project_ids: Sequence[str]) -> Any:
+            embed_factory = getattr(state, "embed_client_factory", None)
+            if embed_factory is None:
+                return None
+            try:
+                return await embed_factory.get_verified_client(conn.base_url, auth_key, project_ids=project_ids)
+            except Exception:
+                logger.warning("datarc_connection.vector_unavailable team_id=%s", team_id)
+                return None
+
+        return DatarcConnectionBinding(team_id, conn.id, revision, factory.get_client(conn.base_url, auth_key), resolve_vector)
     except DatarcResolutionError:
         raise
     except Exception as exc:
@@ -89,6 +101,111 @@ async def resolve_team_datarc_client(request_or_app: Any, team_id: str | None) -
             scrub(str(exc)),
         )
         raise DatarcResolutionError("datarc connection resolution failed") from exc
+
+
+async def resolve_team_datarc_client(request_or_app: Any, team_id: str | None) -> Any:
+    """Return the authorized Team registry client without a process-global fallback."""
+    binding = await resolve_team_datarc_binding(request_or_app, team_id)
+    return binding.client if binding else None
+
+
+def clarification_runtime_context(card: Any, *, db_path=None) -> dict:
+    """Read the original native identity context, including a sealed ordinary request."""
+    context = card.resume_context if isinstance(card.resume_context, dict) else {}
+    if context.get("__schema_version") == 4:
+        from bowhead_core.ordinary_lead_continuation import ordinary_resume_request_material
+
+        return ordinary_resume_request_material(card, db_path=db_path)[1]
+    return context
+
+
+def recovered_datarc_source(context: DatarcTurnContext, user_id: str, team_id: str, member_uid: str) -> dict:
+    from bowhead_core.datarc_selection import DatarcSelection
+
+    return (
+        DatarcSelection(
+            context.connection_binding,
+            user_id,
+            context.active_datarc_project,
+            context.active_datarc_workspace_name,
+            member_uid,
+            context.datarc_client,
+        )
+        .snapshot(team_id=team_id)
+        .model_dump(mode="json")
+    )
+
+
+async def resolve_datarc_recovery_context(
+    request_or_app: Any,
+    *,
+    team_id: str,
+    user_id: str,
+    workspace_id: str,
+    session_id: str,
+    evidence: dict,
+    selected_project: str | None = None,
+) -> tuple[DatarcTurnContext, str]:
+    """Reauthorize an accepted source, without consulting a newer personal choice."""
+    from dataclasses import replace
+
+    from bowhead_core.datarc_selection import DatarcSelectionSnapshot, validate_datarc_source_evidence
+
+    source = DatarcSelectionSnapshot.model_validate(evidence)
+    if source.state == "unavailable":
+        context = DatarcTurnContext(datarc_unavailable=True)
+    else:
+        context = await resolve_datarc_turn_context(
+            request_or_app,
+            team_id=team_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            pinned_project=selected_project or source.datarc_workspace_id,
+            read_only=True,
+        )
+        binding = context.connection_binding
+        if binding is None or (binding.team_id, binding.connection_id, binding.revision) != (
+            source.team_id,
+            source.connection_id,
+            source.connection_revision,
+        ):
+            raise ValueError("datarc_resume_scope_changed")
+        if source.state == "unselected" and selected_project is None:
+            context = replace(context, active_datarc_project=None, datarc_project_for_calls="", active_datarc_workspace_name="")
+        elif source.name and context.active_datarc_project == source.datarc_workspace_id:
+            context = replace(context, active_datarc_workspace_name=source.name)
+    member = ""
+    if context.datarc_project_for_calls:
+        state = _state(request_or_app)
+        user = await state.user_store.get_user(user_id)
+        if user is None or not user.email or not user.email_verified:
+            raise ValueError("datarc_identity_required")
+        refs, reason = await state.tool_context_service.accessible_workspaces_ex(context.datarc_client, user_id, refresh=True)
+        selected = next((item for item in refs if item.id == context.datarc_project_for_calls), None)
+        if reason or selected is None:
+            raise ValueError("datarc_resume_scope_changed")
+        context = replace(context, accessible_datarc_workspaces=tuple({"id": item.id, "name": item.name} for item in refs))
+        if selected_project is not None or not context.active_datarc_workspace_name:
+            context = replace(context, active_datarc_workspace_name=selected.name)
+        member = await state.member_resolver.resolve(user.email, context.datarc_project_for_calls, datarc=context.datarc_client, refresh=True)
+    validate_datarc_source_evidence(
+        evidence,
+        binding=context.connection_binding,
+        team_id=team_id,
+        user_id=user_id,
+        datarc_workspace_id=context.active_datarc_project,
+        member_uid=member,
+        allow_workspace_change=selected_project is not None,
+    )
+    if context.connection_binding is not None and context.connection_binding.vector_resolver is not None:
+        context = replace(
+            context,
+            vector_client=await context.connection_binding.vector_resolver(
+                [context.datarc_project_for_calls] if context.datarc_project_for_calls else []
+            ),
+        )
+    return context, member
 
 
 async def resolve_team_embed_client(
@@ -139,6 +256,7 @@ async def _resolve_per_user_datarc_workspace(
     session_id: str | None = None,
     read_only: bool = False,
     log: logging.Logger | None = None,
+    connection_binding: DatarcConnectionBinding | None = None,
 ) -> tuple[str | None, str, tuple[dict, ...], str]:
     """批2 (PRD §2.1 阶梯)：per-user 模式的「当前北极九章工作区」解析——薄壳.
 
@@ -161,6 +279,7 @@ async def _resolve_per_user_datarc_workspace(
         umem=umem,
         datarc_client=datarc_client,
         log=log or logger,
+        preference_scope=DatarcPreferenceScope(connection_binding.team_id, connection_binding.connection_id) if connection_binding else None,
     )
     resolved = await provider.resolve(
         user_id,
@@ -188,10 +307,12 @@ async def resolve_datarc_turn_context(
     auto-select / 撤权清偏好等用户偏好副作用（架构 review 2026-07-13，framework 文档 §6）。
     """
     # User-context validation needs the accessible set from the team client.
+    connection_binding = None
     datarc_client = None
     datarc_unavailable = False
     try:
-        datarc_client = await resolve_team_datarc_client(request_or_app, team_id)
+        connection_binding = await resolve_team_datarc_binding(request_or_app, team_id)
+        datarc_client = connection_binding.client if connection_binding else None
     except DatarcResolutionError:
         if read_only:
             raise
@@ -211,6 +332,7 @@ async def resolve_datarc_turn_context(
             session_id=session_id,
             read_only=read_only,
             log=log,
+            connection_binding=connection_binding,
         )
 
     if not read_only:
@@ -231,11 +353,8 @@ async def resolve_datarc_turn_context(
         _tenant_probe_projects = [str(w.get("id")) for w in accessible_workspaces if isinstance(w, dict) and w.get("id")]
         if active_project and str(active_project) not in _tenant_probe_projects:
             _tenant_probe_projects.append(str(active_project))
-        vector_client = await resolve_team_embed_client(
-            request_or_app,
-            team_id,
-            project_ids=_tenant_probe_projects,
-        )
+        if connection_binding is not None and connection_binding.vector_resolver is not None:
+            vector_client = await connection_binding.vector_resolver(_tenant_probe_projects)
 
     if workspace_id and not workspace_id.startswith("ws_") and not active_project:
         (log or logger).warning(
@@ -244,6 +363,7 @@ async def resolve_datarc_turn_context(
         )
 
     return DatarcTurnContext(
+        connection_binding=connection_binding,
         active_datarc_project=active_project,
         datarc_client=datarc_client,
         datarc_unavailable=datarc_unavailable,

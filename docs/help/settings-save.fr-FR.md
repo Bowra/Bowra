@@ -2,6 +2,8 @@
 
 Les paramètres personnels, d’équipe et d’espace sont regroupés par thème : une carte par groupe, une ligne par réglage. Le nom et la description sont à gauche, le contrôle à droite ; sur téléphone, ils se superposent.
 
+Lorsqu’un point d’interrogation apparaît près d’un réglage, survolez-le ou placez-y le focus pour un aperçu ; cliquez ou touchez-le pour garder l’explication ouverte. Elle précise l’usage, le type, la plage ou les options. Échap ferme l’explication sans fermer l’éditeur. La lecture ne modifie ni n’enregistre la saisie ; les indications et étapes de validation habituelles restent applicables.
+
 ## Deux modes d’enregistrement
 
 - **Les interrupteurs et les choix simples s’appliquent immédiatement** : activer ou désactiver un interrupteur ou choisir une option enregistre le réglage. Aucune autre action n’est nécessaire.

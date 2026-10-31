@@ -18,7 +18,6 @@ from bowhead_core.clarification_store import (
     ClarificationStore,
 )
 from bowhead_core.events import get_event_registry
-from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.routes.clarifications import (
     QUESTION_SKIP_TEXT,
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch):
+async def app_ctx(tmp_path: Path, monkeypatch, completed_community_user_store):
     from cryptography.fernet import Fernet
 
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "dev")
@@ -69,7 +68,11 @@ async def app_ctx(tmp_path: Path, monkeypatch):
     app.state.clarification_store = clarify
     app.state.user_memory_store = user_mem
     app.state.project_memory_store = proj_mem
-    app.state.user_store = _LegacyTeamResolver()
+    app.state.user_store = _LegacyTeamResolver(completed_community_user_store.db_path)
+    if app.state.edition == "community":
+        from bowhead_core.entitlements import CommunityResolver
+
+        app.state.entitlements = CommunityResolver(mode="saas", user_store=app.state.user_store)
     app.state.terminal_protocol_store = _LegacyProtocolStore(clarify)
     from bowhead_gateway import turn_service
 
@@ -118,12 +121,13 @@ async def _drain_preference_writers() -> None:
 
 
 class _LegacyTeamResolver:
-    def __init__(self) -> None:
+    def __init__(self, db_path: str) -> None:
+        self.db_path = db_path
         self.credit_balance = 1_000
         self.credit_events: list[dict] = []
 
     async def get_user(self, user_id: str):
-        assert user_id == "u_dev_alice"
+        assert user_id in {"u_dev_alice", "alice"}
         return SimpleNamespace(
             id=user_id,
             team_id="team_legacy",
@@ -134,18 +138,25 @@ class _LegacyTeamResolver:
 
     async def get_team(self, team_id: str):
         assert team_id
-        return SimpleNamespace(id=team_id, team_credit_balance=100_000, team_credit_quota=100_000)
+        return SimpleNamespace(
+            id=team_id,
+            status="active",
+            default_user_tier="free",
+            tier_credits={},
+            team_credit_balance=100_000,
+            team_credit_quota=100_000,
+        )
 
     async def record_credit_exhaustion_event(self, **kwargs):
         self.credit_events.append(kwargs)
         return {"id": "cex_test", **kwargs}
 
     async def get_user_team_id(self, user_id: str) -> str:
-        assert user_id == "u_dev_alice"
+        assert user_id in {"u_dev_alice", "alice"}
         return "team_legacy"
 
     async def get_team_role(self, user_id: str, team_id: str) -> str:
-        assert user_id == "u_dev_alice"
+        assert user_id in {"u_dev_alice", "alice"}
         assert team_id
         return "member"
 
@@ -155,7 +166,7 @@ class _LegacyTeamResolver:
 
     async def get_member_role(self, workspace_id: str, user_id: str) -> str:
         assert workspace_id
-        assert user_id == "u_dev_alice"
+        assert user_id in {"u_dev_alice", "alice"}
         return "member"
 
     async def get_workspace(self, workspace_id: str) -> dict[str, str]:
@@ -807,6 +818,9 @@ class _StubResumeSessionStore:
 # not ws-keyed project_memory defaults. Doubles below complete the actual chain: saved team connection
 # → client → accessible set → ladder (sole accessible automatically selected) → member_uid re-resolved for selected workspace.
 class _ResumeConnStore:
+    async def resolve_active_binding(self, team_id: str):
+        return SimpleNamespace(id="conn_resume", base_url="https://datarc.example"), "auth_resume", "revision_resume"
+
     async def list_connections(self, team_id: str) -> list:
         return [SimpleNamespace(id="conn_resume", base_url="https://datarc.example")]
 
@@ -1821,10 +1835,11 @@ async def test_resume_turn_revalidates_current_workspace_membership(
     http,
     app_with_orch,
     tmp_path: Path,
+    completed_community_user_store,
 ) -> None:
-    users = UserStore(tmp_path / "authz.db")
+    users = completed_community_user_store
     await users.initialize()
-    access = AccessControlStore(tmp_path / "authz.db")
+    access = AccessControlStore(users.db_path)
     await access.initialize()
     team = await users.create_team(name="Acme", max_seats=10)
     user = await users.create_user(
@@ -1838,6 +1853,10 @@ async def test_resume_turn_revalidates_current_workspace_membership(
         creator_user_id=user.id,
     )
     app_with_orch.state.user_store = users
+    if app_with_orch.state.edition == "community":
+        from bowhead_core.entitlements import CommunityResolver
+
+        app_with_orch.state.entitlements = CommunityResolver(mode="saas", user_store=users)
     app_with_orch.state.access_control_store = access
 
     store: ClarificationStore = app_with_orch.state.clarification_store

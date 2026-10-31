@@ -20,7 +20,7 @@ const json = (body: unknown, status = 200) => ({
   body: JSON.stringify(body),
 });
 
-async function mockReport(page: Page, html = "<!doctype html><html><body><p id=\"fs-content\">Embedded result</p></body></html>"): Promise<void> {
+async function mockReport(page: Page, html = "<!doctype html><html><body><p id=\"fs-content\">Embedded result</p></body></html>", maxBytes?: number): Promise<void> {
   await page.route("**/health", (route: Route) =>
     route.fulfill(json({ ok: true, feature_flags: { results_workspace: true } })),
   );
@@ -60,6 +60,7 @@ async function mockReport(page: Page, html = "<!doctype html><html><body><p id=\
       await route.fulfill({
         status: 200,
         contentType: "text/html",
+        headers: maxBytes == null ? {} : { "X-Bowhead-HTML-Max-Bytes": String(maxBytes) },
         body: html,
       });
       return;
@@ -191,14 +192,46 @@ async function bodyLayersAboveFullscreen(page: Page): Promise<{ menu: boolean; t
 
 const SHOT_DIR = process.env.HTML_FULLSCREEN_SHOT_DIR;
 
-test("previews a complete static HTML report at the 5 MiB default", async ({ page }) => {
-  const prefix = "<!doctype html><html><body><p id=\"fs-content\">Large report</p><!--";
-  const suffix = "--></body></html>";
-  const html = prefix + "x".repeat(5 * 1024 * 1024 - prefix.length - suffix.length) + suffix;
-  await mockReport(page, html);
+for (const sample of [
+  { mib: 6, table: false, maxBytes: undefined },
+  { mib: 25, table: false, maxBytes: undefined },
+  { mib: 25, table: true, maxBytes: undefined },
+  { mib: 50, table: false, maxBytes: 50 * 1024 * 1024 },
+]) {
+  test(`previews complete ${sample.mib} MiB HTML with ${sample.table ? "table rows" : "embedded data"}`, async ({ page }, testInfo) => {
+    const prefix = '<!doctype html><html><head><style>table{table-layout:fixed;width:100%}td{overflow:hidden;white-space:nowrap}</style></head><body><p id="fs-content">Large report</p>';
+    const suffix = '<p id="report-end">Complete report</p></body></html>';
+    const size = sample.mib * 1024 * 1024;
+    let content: string;
+    if (sample.table) {
+      const rows = 2048;
+      const cellBytes = Math.floor((size - prefix.length - suffix.length - 64 - rows * 45) / (rows * 4));
+      const row = `<tr>${`<td>${"x".repeat(cellBytes)}</td>`.repeat(4)}</tr>`;
+      content = `<table><tbody>${row.repeat(rows)}</tbody></table>`;
+    } else {
+      content = "";
+    }
+    const padding = size - prefix.length - content.length - suffix.length - "<pre hidden></pre>".length;
+    const html = prefix + content + `<pre hidden>${"x".repeat(padding)}</pre>` + suffix;
+    expect(Buffer.byteLength(html)).toBe(size);
+    await mockReport(page, html, sample.maxBytes);
+    const started = Date.now();
+    await page.goto(`/?session=${SESSION_ID}&report=1`);
+    const frame = page.frameLocator(`iframe[title="${TITLE}"]`);
+    await expect(frame.locator("#report-end")).toHaveText("Complete report", { timeout: 30_000 });
+    await expect(page.locator(`iframe[title="${TITLE}"]`)).toHaveAttribute("sandbox", "");
+    if (sample.table) await expect(frame.locator("tbody tr")).toHaveCount(2048);
+    console.log(`HTML preview ${testInfo.project.name} ${sample.mib} MiB ${sample.table ? "table" : "data"}: ${Date.now() - started} ms`);
+  });
+}
+
+test("explains the active Team HTML limit and retains original download access", async ({ page }) => {
+  await mockReport(page, "<p>Over the configured limit</p>", 16);
   await page.goto(`/?session=${SESSION_ID}&report=1`);
-  await expect(page.frameLocator(`iframe[title="${TITLE}"]`).locator("#fs-content")).toHaveText("Large report");
-  await expect(page.locator(`iframe[title="${TITLE}"]`)).toHaveAttribute("sandbox", "");
+  await expect(page.locator(".rc-embed-error")).toContainText("16 B");
+  await expect(page.locator(".rc-embed-error")).toContainText("HTML");
+  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(`a[href*="/artifacts/${ARTIFACT_ID}"]`)).toBeVisible();
 });
 
 test("桌面：全屏盖住侧栏、顶栏与工作台，iframe 不重载，Esc 回焦到展开按钮", async ({ page, browserName }) => {
@@ -283,3 +316,24 @@ test("手机：全屏盖住顶栏与报告区", async ({ page, browserName }) =>
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
 });
+
+for (const width of [1280, 390]) {
+  test(`offline report HTML retains controls across Full view at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockReport(page, '<!doctype html><button id="count" onclick="this.textContent=Number(this.textContent)+1">0</button>');
+    await page.route("**/api/v1/results/capabilities", (route) => route.fulfill(json({
+      dto_version: 1, workspace: true, complete_list: false, scale_nav: false, max_page_size: 50, interactive_html: true,
+    })));
+    await page.goto(`/?session=${SESSION_ID}&report=1`);
+    const inner = page.frameLocator(`iframe[title="${TITLE}"]`).frameLocator('iframe[title="HTML content"]');
+    await expect(inner.locator("#count")).toHaveText("0");
+    await inner.locator("#count").click();
+    const toggle = page.locator(".rc-embed-head").getByRole("button", { name: "展开", exact: true });
+    await toggle.click();
+    await expect(inner.locator("#count")).toHaveText("1");
+    await inner.locator("#count").press("Escape");
+    await expect(page.getByRole("dialog", { name: TITLE })).toHaveCount(0);
+    await expect(inner.locator("#count")).toHaveText("1");
+    await expect(toggle).toBeFocused();
+  });
+}

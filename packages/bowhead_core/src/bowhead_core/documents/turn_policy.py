@@ -160,6 +160,17 @@ def abandoned_generation_rejection(invocations: list[ToolInvocation], state: Doc
     )
 
 
+def pending_source_action_message(ctx: Any) -> str:
+    language = str(getattr(getattr(ctx, "language_context", None), "output_language", "") or "en-US")
+    messages = {
+        "en-US": "No draft was created because a tool explicitly selected for this task has not completed. Run that selected tool first, then request the document draft.",
+        "zh-CN": "本次未创建草稿，因为这项任务明确选中的工具尚未完成。请先完成所选工具的操作，再请求生成文档草稿。",
+        "de-DE": "Es wurde kein Entwurf erstellt, weil ein ausdrücklich für diese Aufgabe ausgewähltes Werkzeug noch nicht abgeschlossen wurde. Führen Sie zuerst dieses Werkzeug aus und fordern Sie dann den Dokumententwurf an.",
+        "fr-FR": "Aucun brouillon n’a été créé, car un outil explicitement sélectionné pour cette tâche n’a pas terminé son opération. Exécutez d’abord cet outil, puis demandez le brouillon du document.",
+    }
+    return messages.get(language, messages["en-US"])
+
+
 def terminal_message(ctx: Any, *, accepted: bool | None, conflict: bool = False) -> str:
     language = str(getattr(getattr(ctx, "language_context", None), "output_language", "") or "en-US")
     messages = {

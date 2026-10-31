@@ -1185,7 +1185,7 @@ class SubagentDraftService:
             "system_prompt": _render_system_prompt(blueprint, locale=locale),
             "tool_refs": selected_refs,
             **({"builtin_plugin_ids": plugin_ids} if plugin_ids else {}),
-            "max_iterations": blueprint.max_iterations_hint,
+            "max_iterations": 12,
             "skills": [],
             "model": "analyst",
             "output_schema": None,

@@ -29,7 +29,7 @@ from bowhead_skill.runtime_scope import (
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.access_control import AccessControlStore
-from bowhead_core.agent_dependency_compiler import ExactSkillGrant, _revision_token, parse_exact_skill_grants
+from bowhead_core.agent_dependency_compiler import ExactSkillGrant, _revision_token, parse_exact_skill_grants, skill_bundle_revision
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, read_reference_access_context_in_connection
 from bowhead_core.chat_references import SkillResourceRef, _bounded_json
 from bowhead_core.skill_instance_store import SkillInstanceStore
@@ -78,7 +78,7 @@ async def _current_revision(grant: ExactSkillGrant, db_path: Path, scope: Refere
     if record is None or not record.source_path:
         return None
     try:
-        return await anyio.to_thread.run_sync(_package_revision, Path(record.source_path))
+        return await anyio.to_thread.run_sync(skill_bundle_revision, record.source_path)
     except (OSError, ValueError):
         return None
 

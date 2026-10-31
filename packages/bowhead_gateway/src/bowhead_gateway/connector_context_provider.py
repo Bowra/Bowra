@@ -1,28 +1,11 @@
-"""Connector Context Framework v2 — Provider 契约 + 默认阶梯策略（SSOT: docs/tool-context-framework.md）.
+"""Native connector selection policy and the shared preference commit adapter.
 
-**概念模型（v2，connector-context 修正 sprint 2026-07-15）**：本框架管理的是
-**connector（连接器）** 的 per-user 上下文选择——connector = 一个外部系统的接入
-实例（datarc / pbi / teammcp 源）；tool ↔ connector 多对一（14 个 ``bi_*`` →
-datarc）。身份粒度 = connector **实例 id**（MCP 的 ``ots_*`` 是范例）；datarc 用
-类型名 ``"datarc"`` 当 key 是「每 team 单 active 连接」不变量下实例↔类型 1:1 的
-**特例**。v1 把中心概念叫「tool」——该拼写在存储 key 字面量（``datarc/workspace``、
-kind=``'tool_context'``）与 LLM-facing wire（``tool_switch_context`` 的 ``tool``
-参数、sentinel payload 的 ``"tool"`` 键）上**冻结**，语义上它们装的都是
-connector 实例 id。
-
-「connector 上下文」的四个协议零件（user_memory 存储 / tool_context_select 弹卡 /
-tool_switch_context 切换原语 / dispatch 闸 sentinel）在批2 已落地；本模块是第五块：
-**解析策略的可替换契约**。
-
-- :class:`ConnectorContextProvider` — 每个 connector 一个实例的契约。datarc 是实例 #1
-  （:class:`DatarcContextProvider`）；新 connector 接上下文必须实现本契约、复用四零件，
-  **禁止在 turn 组装 / dispatch 闸之外另起「决定 connector 上下文」的第二处代码**（review P0）。
-- :class:`DefaultContextLadder` — 默认策略 = 批2 PRD §2.1 阶梯（会话覆盖 > 永久默认 >
-  集合=1 自动选 > None→弹卡），connector key / 可及集合 / 存储三点参数化。语义不同的
-  connector 写自己的 ``resolve``，插同一个底座。
-
-决策记录（2026-07-10 用户拍板）：上下文维度 = 用户全局 ``(user, connector)``；``resolve``
-签名**故意不含 workspace_id**（「空间绑定进阶梯」方案被否，冻结列不读）。
+Datarc uses Team/registry-connection scoped workspace addresses, with an exact
+Session overlay ahead of the default. The same ladder serves fresh turns and
+Plan recovery. Runtime publication belongs to datarc_selection; this module
+reports durable facts and does not broadcast preferences to admitted work.
+Generic connectors and the independent account slot retain their legacy keys.
+See docs/tool-context-framework.en-US.md for the current contract.
 """
 
 from __future__ import annotations
@@ -30,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any, NamedTuple, Protocol
 
+from bowhead_core.datarc_selection import DatarcCommitUnknown, DatarcPersistenceReceipt, DatarcPreferenceScope
 from bowhead_core.scrub import scrub
 
 logger = logging.getLogger(__name__)
@@ -74,6 +58,32 @@ class ConnectorContextProvider(Protocol):
         ...
 
 
+class ScopedDatarcMemory:
+    """Adapt the original ladder to exact workspace preference addresses."""
+
+    def __init__(self, store: Any, scope: DatarcPreferenceScope, session_id: str | None):
+        self.store, self.scope, self.session_id = store, scope, session_id
+
+    async def get_tool_context(self, user_id: str, tool: str, *, session_scoped: bool = False):
+        if self.store is None or (session_scoped and not self.session_id):
+            return None
+        return await self.store.get_datarc_workspace(user_id, self.scope, session_id=self.session_id if session_scoped else None)
+
+    async def set_tool_context(self, user_id: str, tool: str, **kwargs):
+        return await self.store.commit_datarc_workspace(
+            user_id,
+            self.scope,
+            context_id=kwargs["context_id"],
+            context_name=kwargs.get("context_name", ""),
+            source=kwargs.get("source"),
+            remember=True,
+            session_id=None,
+        )
+
+    async def clear_tool_context(self, user_id: str, tool: str):
+        await self.store.clear_datarc_workspace(user_id, self.scope)
+
+
 class DefaultContextLadder:
     """默认策略：批2 PRD §2.1 阶梯，语义与原 datarc 实现逐条保真（零行为变化）.
 
@@ -92,7 +102,9 @@ class DefaultContextLadder:
         tool: str,
         umem: Any,
         log: logging.Logger | None = None,
+        preference_scope: DatarcPreferenceScope | None = None,
     ) -> None:
+        self.preference_scope = preference_scope
         self.tool = tool
         self._umem = umem
         self._log = log or logger
@@ -105,7 +117,7 @@ class DefaultContextLadder:
         accessible: tuple[Any, ...],
         read_only: bool = False,
     ) -> ResolvedConnectorContext:
-        umem = self._umem
+        umem = ScopedDatarcMemory(self._umem, self.preference_scope, session_id) if self.preference_scope else self._umem
         tool = self.tool
         _log = self._log
         refs = accessible
@@ -193,45 +205,45 @@ async def commit_connector_context_choice(
     context_name: str = "",
     remember: bool,
     session_id: str | None,
+    preference_scope: DatarcPreferenceScope | None = None,
     log: logging.Logger | None = None,
-) -> bool:
-    """用户选定 connector 上下文的**唯一提交路径**（picker resolve 与 tool_switch_context 共用）.
-
-    ``tool`` 参数 = connector 实例 id（冻结拼写，见模块 docstring）。
-
-    remember=True → 写 explicit 永久默认 + 清本会话覆盖层（BUG1 决策1：否则本会话
-    早先的「换XX」overlay 会盖住刚记住的默认）；False → session 级软偏好。
-
-    **best-effort，绝不 raise**：提交失败不打断 switch/resolve 本体（review P1-b：
-    此前 switch 路两笔写未受保护——第一笔 explicit 已落、第二笔清 overlay 抛错时，
-    用户被告知「切换失败」但永久默认已被改）。返回是否真持久化了——调用方据此
-    如实措辞（review P1-c：不许在没写成时宣称「已设为默认」）。
-    """
-    _log = log or logger
-    if umem is None:
-        _log.info("tool_context.commit_skipped_no_store user=%s tool=%s", user_id, tool)
-        return False
+) -> DatarcPersistenceReceipt:
+    """The switch and picker share one scoped, atomic preference transaction."""
+    destination = "default" if remember else "session"
+    if tool != "datarc":
+        if umem is None:
+            return DatarcPersistenceReceipt("skipped", destination, "missing_store")
+        try:
+            await umem.set_tool_context(
+                user_id,
+                tool,
+                context_id=context_id,
+                context_name=context_name,
+                source="explicit" if remember else "session",
+                session_id=None if remember else str(session_id or ""),
+            )
+            if remember:
+                await umem.clear_tool_context(user_id, tool, session_scoped=True)
+        except Exception as error:
+            (log or logger).warning("tool_context.commit_failed user=%s tool=%s error=%s", user_id, tool, type(error).__name__)
+            return DatarcPersistenceReceipt("failed", destination, "storage_failed")
+        return DatarcPersistenceReceipt("saved", destination)
+    if umem is None or preference_scope is None:
+        return DatarcPersistenceReceipt("skipped", destination, "missing_store" if umem is None else "missing_scope")
     try:
-        await umem.set_tool_context(
+        return await umem.commit_datarc_workspace(
             user_id,
-            tool,
+            preference_scope,
             context_id=context_id,
             context_name=context_name,
-            source="explicit" if remember else "session",
-            session_id=None if remember else str(session_id or ""),
+            remember=remember,
+            session_id=session_id,
         )
-        if remember:
-            await umem.clear_tool_context(user_id, tool, session_scoped=True)
-    except Exception as exc:
-        _log.warning(
-            "tool_context.commit_failed user=%s tool=%s remember=%s err=%s",
-            user_id,
-            tool,
-            remember,
-            scrub(str(exc)),
-        )
-        return False
-    return True
+    except DatarcCommitUnknown:
+        return DatarcPersistenceReceipt("unknown", destination, "commit_unconfirmed")
+    except Exception as error:
+        (log or logger).warning("tool_context.commit_failed user=%s tool=%s error=%s", user_id, tool, type(error).__name__)
+        return DatarcPersistenceReceipt("failed", destination, "storage_failed")
 
 
 class DatarcContextProvider:
@@ -253,10 +265,11 @@ class DatarcContextProvider:
         umem: Any,
         datarc_client: Any,
         log: logging.Logger | None = None,
+        preference_scope: DatarcPreferenceScope | None = None,
     ) -> None:
         self._service = service
         self._datarc_client = datarc_client
-        self._ladder = DefaultContextLadder(tool=self.tool, umem=umem, log=log)
+        self._ladder = DefaultContextLadder(tool=self.tool, umem=umem, log=log, preference_scope=preference_scope)
 
     async def accessible(self, user_id: str) -> tuple[Any, ...]:
         return await self._service.accessible_workspaces(self._datarc_client, user_id)  # type: ignore[no-any-return]

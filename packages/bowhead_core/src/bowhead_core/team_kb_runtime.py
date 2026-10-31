@@ -197,6 +197,7 @@ class TeamKbRuntimeRegistry:
         row_extractor: Any,
         active_per_row_tasks_ref: Any,
         ingestion_gate: Any = None,
+        ingestion_authorizer: Any = None,
     ) -> None:
         self._persist_dir = persist_dir
         self._files_store = files_store
@@ -210,6 +211,7 @@ class TeamKbRuntimeRegistry:
         self._row_extractor = row_extractor
         self._active_per_row_tasks_ref = active_per_row_tasks_ref
         self._ingestion_gate = ingestion_gate
+        self._ingestion_authorizer = ingestion_authorizer
         self._cache: dict[str, TeamKbRuntime] = {}
         self._lock = asyncio.Lock()
         self._reaper_task: asyncio.Task[None] | None = None
@@ -353,6 +355,7 @@ class TeamKbRuntimeRegistry:
                 kb_model_registry=registry,
                 active_per_row_tasks_ref=self._active_per_row_tasks_ref,
                 ingestion_gate=self._ingestion_gate,
+                ingestion_authorizer=self._ingestion_authorizer,
             )
             return TeamKbRuntime(
                 version=version,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 
@@ -27,7 +26,10 @@ DOMAINS = {
         "settings-language-preferences", "user", "/settings/profile/", "Persistent AI-answer language; not interface language."
     ),
     "team_run_limits": ConfigurationDomain(
-        "settings-team-administration", "team", "/team/settings/subagents/", "Team execution limits and restore defaults."
+        "settings-team-administration",
+        "team",
+        "/team/settings/subagents/",
+        "Team Agent loop limits: turn duration, model steps, tool calls and model-call time; restore Team defaults. Deployment ceilings remain effective.",
     ),
     "team_execution_limits": ConfigurationDomain(
         "settings-team-administration",
@@ -45,11 +47,3 @@ DOMAINS = {
 }
 
 TEAM_FORMS = frozenset(name for name, domain in DOMAINS.items() if domain.scope == "team")
-
-
-def team_configuration_enabled() -> bool:
-    return os.getenv("FEATURE_CONFIGURATION_TEAM_SETTINGS", "0").lower() in {"1", "true", "yes", "on"}
-
-
-def domain_enabled(form_id: str) -> bool:
-    return form_id in DOMAINS and (form_id not in TEAM_FORMS or team_configuration_enabled())

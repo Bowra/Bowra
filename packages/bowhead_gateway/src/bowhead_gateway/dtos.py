@@ -91,6 +91,7 @@ class TurnSummaryDTO(BaseModel):
 
 
 class TurnDTO(BaseModel):
+    operation_kind: Literal["context_maintenance"] | None = None
     id: str
     seq: int
     user_text: str
@@ -131,6 +132,7 @@ class ChatExecutionBootstrapDTO(BaseModel):
 
 
 class SessionDetailDTO(BaseModel):
+    context_generation: str | None = None
     session: SessionDTO
     turns: list[TurnDTO]
     chat_execution: ChatExecutionBootstrapDTO

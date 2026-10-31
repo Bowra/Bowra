@@ -290,11 +290,31 @@ async def team_plugin_provenance(db_path: str, authored: dict[str, Any], resolve
 
         for item in resolved.get("resolved_builtin_plugins") or []:
             plugin = builtin_plugin(f"builtin:{item['name']}@{int(item['version'])}")
-            contributions.append(PluginContribution("builtin", plugin.name, tools=plugin.tools))
+            contributions.append(
+                PluginContribution("builtin", plugin.name, tools=plugin.tools, skills=tuple(grant.id for grant in plugin.exact_skill_grants))
+            )
     except Exception as exc:  # noqa: BLE001 — provenance must never fail the run.
         logger.warning("resource_disable.team_provenance_failed err=%s", exc)
         return None
     return ResourceProvenance(direct_tools=direct_tools, direct_skills=_grant_ids(authored), plugins=tuple(contributions))
+
+
+def system_plugin_provenance(refs: list[str], tools: list[str], grants: list[dict[str, Any]] | None) -> ResourceProvenance | None:
+    """Retain exact explicit Skill contributions without attributing direct Skills by Tool membership."""
+    from bowhead_core.system_plugins import builtin_plugin
+
+    selected = [plugin for ref in refs if (plugin := builtin_plugin(ref)).family == "general"]
+    if not any(plugin.exact_skill_grants for plugin in selected):
+        return None
+    attributed = attribute_system_tools(tools)
+    plugins = {plugin.id: plugin for plugin in attributed.plugins}
+    for plugin in selected:
+        plugins[plugin.name] = PluginContribution(
+            "builtin", plugin.name, tools=plugin.tools, skills=tuple(grant.id for grant in plugin.exact_skill_grants)
+        )
+    return ResourceProvenance(
+        direct_tools=attributed.direct_tools, direct_skills=_grant_ids({"skill_grants": grants}), plugins=tuple(plugins.values())
+    )
 
 
 # Built-in Tools that used to be Lead-only or fenced from team Agents are open to them.

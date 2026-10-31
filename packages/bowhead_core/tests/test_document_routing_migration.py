@@ -58,7 +58,8 @@ async def test_original_encrypted_card_roundtrip_preserves_version_and_bytes(ctx
     if routing is None:
         assert "document_routing" not in json.loads(encoded)
         assert "collaboration" not in json.loads(encoded)
-        assert encoded == canonical_json(checkpoint.model_dump(exclude={"document_routing", "collaboration"})).encode()
+        assert "knowledge_read" not in json.loads(encoded)
+        assert encoded == canonical_json(checkpoint.model_dump(exclude={"document_routing", "collaboration", "knowledge_read"})).encode()
     path = tmp_path / "old-routing.db"
     _historical_fixture(ctx.path, path, MIGRATION.down_revision)
     before = snapshot(path)

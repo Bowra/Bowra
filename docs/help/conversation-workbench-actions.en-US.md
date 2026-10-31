@@ -2,6 +2,14 @@
 
 This article covers drag and drop, shortcuts, and hints on the conversation page. For the layout of the page itself, see [Conversation page layout](conversation-workbench.en-US.md).
 
+## Compact a long conversation
+
+Open the conversation title’s **⋯** menu and choose **Compact context** when the conversation is idle. Bowhead summarizes eligible older material for the next message and keeps the original conversation visible. A quiet activity line shows progress and the result; the existing Stop control cancels this operation. Your unsent draft stays in the composer.
+
+Manual compaction works even when the model’s **Auto-compact** setting is off and does not change that setting. It may use model credits. If there is nothing useful to reduce, no summary call is made. Wait for active work or pending decisions to finish; dedicated recovery flows may be unavailable.
+
+If the connection is interrupted, Bowhead checks the original request when you reopen the conversation. Select **Compact context** again to check it or explicitly retry the same saved request. A missing or unreadable saved request cannot be resent automatically. Review the operation’s activity before starting another task.
+
 ## Choose an Agent, method or result
 
 - When quick references are available, type `@` to choose an Agent for this message, or `/` to choose a Skill, Outcome or tool. Select an available item from the menu to add its tag.
@@ -93,6 +101,14 @@ For an available PowerPoint template workflow, attach the template once and iden
 To create a new presentation instead, say that the attachment is only a style or content reference; this does not preserve its existing slides. If template updating is unavailable, the assistant should explain that limitation, not silently deliver a rebuilt deck. A template draft's PDF comes from its corresponding reviewed presentation, not a separate report.
 
 If you want inspection or a question before editing an uploaded template, say so in your message. Answer any clarification using its original question card, then review the draft in Canvas and confirm it before publishing the editable PPT and corresponding PDF. Check that the assistant followed your requested steps and preserved the template; a generic file or a completed chat reply is not the same as a reviewed template draft. If you only want a summary or a new reference-based presentation, state that instead.
+
+Selecting fewer pages does not remove all undisplayed template content from the editable file. Use a template suitable for sharing.
+
+If the preview reports font substitutions, opening the PPTX on another computer or in another presentation app can change fonts and line breaks. Check the editable file in the app where you intend to use it. The published PDF preserves the layout used in the reviewed preview.
+
+The assistant may automatically correct a failed template edit once. If it still fails, the task stops without publishing. Narrow the requested changes or specify the pages and values in a new request.
+
+If a draft says its changes could not be compared reliably, review every preview page. This does not mean the document has no changes. You can still request a revision in chat before confirming publication.
 
 ## Report rewrite drafts and retry
 

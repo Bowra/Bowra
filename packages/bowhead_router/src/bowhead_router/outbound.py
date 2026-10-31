@@ -31,6 +31,50 @@ OUTBOUND_PARAMS: tuple[str, ...] = (
 _CAP_CAPABLE: frozenset[str] = frozenset({"max_tokens"})
 
 
+def outbound_value_schema(param: str, family: ProtocolFamily = "openai") -> dict[str, Any]:
+    """Value constraints shared by strict validation and field guidance."""
+    if param == "parallel_tool_calls":
+        return {"type": "boolean"}
+    if param == "max_tokens":
+        return {"type": "integer", "minimum": 1, "x-bowhead-field": {"unit": "tokens"}}
+    if param == "temperature":
+        return {"type": "number", "minimum": 0, "maximum": 1 if family == "anthropic" else 2}
+    return {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+
+
+def outbound_parameters_schema(*, strict_values: bool = True) -> dict[str, Any]:
+    """Describe rules without tightening the legacy policy's accepted values."""
+    meanings = {
+        "temperature": "Sampling randomness; the selected provider and profile may further restrict this parameter.",
+        "top_p": "Nucleus sampling probability; provider and profile support still apply.",
+        "max_tokens": "Output-token request policy, bounded by the model output capacity.",
+        "parallel_tool_calls": "Whether the provider may return parallel tool calls; applicable only to supported tool models.",
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            name: {
+                "type": "object",
+                "description": meanings[name],
+                "additionalProperties": False,
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["follow", "fixed", "omit", *(["cap"] if name in _CAP_CAPABLE else [])],
+                        "description": "Follow the caller, fix a value, or omit the parameter. Cap is available only for output tokens; protocol requirements still apply.",
+                    },
+                    "value": {
+                        **(outbound_value_schema(name) if strict_values else {"type": ["number", "boolean", "null"]}),
+                        "description": "Supply a value for fixed or cap mode; omit it for follow or omit mode. The original provider validation remains authoritative.",
+                    },
+                },
+            }
+            for name in OUTBOUND_PARAMS
+        },
+    }
+
+
 class OutboundParamsError(ValueError):
     """配置形状非法 —— 由配置校验层转成可操作的保存期错误。"""
 
@@ -101,9 +145,12 @@ def parse_outbound_params(raw: Any, *, family: ProtocolFamily, where: str, stric
                 raise OutboundParamsError(f"{where}.{param}.value must be a finite number")
             elif param == "max_tokens" and (not isinstance(value, int) or value <= 0):
                 raise OutboundParamsError(f"{where}.{param}.value must be a positive integer")
-            elif param == "temperature" and not 0 <= value <= (1 if family == "anthropic" else 2):
+            elif param == "temperature" and not 0 <= value <= outbound_value_schema(param, family)["maximum"]:
                 raise OutboundParamsError(f"{where}.{param}.value is outside the protocol range")
-            elif param == "top_p" and not 0 < value <= 1:
+            elif (
+                param == "top_p"
+                and not outbound_value_schema(param, family)["exclusiveMinimum"] < value <= outbound_value_schema(param, family)["maximum"]
+            ):
                 raise OutboundParamsError(f"{where}.{param}.value must be greater than zero and at most one")
         # Reject protocol differences at **validation time**, not runtime: Anthropic requires max_tokens.
         if family == "anthropic" and param == "max_tokens" and rule.mode == "omit":

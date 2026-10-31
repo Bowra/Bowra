@@ -15,7 +15,6 @@ URL = "/api/v1/team-settings/agent-run-limits"
 
 @pytest.fixture
 def client(app_ctx, monkeypatch):
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "1")
     app_ctx.app.include_router(team_settings.router)
     return TestClient(app_ctx.app)
 
@@ -46,6 +45,28 @@ async def test_unlimited_steps_are_stored_explicitly(client, app_ctx):
     assert client.put(URL, cookies=_as(app_ctx.owner), json=_body(version, step_limit=None)).status_code == 200
     stored = await app_ctx.app.state.team_settings_store.get(app_ctx.team.id, "agent_run_limits")
     assert '"step_limit":null' in stored
+
+
+async def test_system_policy_is_read_only_and_reset_keeps_the_ceiling(client, app_ctx, monkeypatch):
+    from bowhead_core.agent_run_limits import get_runtime_controls
+
+    monkeypatch.setenv("BOWHEAD_AGENT_MAX_STEPS", "100")
+    get_runtime_controls.cache_clear()
+    try:
+        first = client.get(URL, cookies=_as(app_ctx.owner)).json()
+        assert first["step_limit"] is None
+        assert first["runtime_controls"]["effective_step_limit"] == 100
+        saved = client.put(URL, cookies=_as(app_ctx.owner), json=_body(first["version"], step_limit=200)).json()
+        assert saved["step_limit"] == 200
+        assert saved["runtime_controls"]["effective_step_limit"] == 100
+        denied = client.put(URL, cookies=_as(app_ctx.owner), json=_body(saved["version"], runtime_controls={"system_step_limit": None}))
+        assert denied.status_code == 422
+        reset = client.delete(URL, cookies=_as(app_ctx.owner)).json()
+        assert reset["step_limit"] is None
+        assert reset["runtime_controls"]["effective_step_limit"] == 100
+        assert await app_ctx.app.state.team_settings_store.get(app_ctx.team.id, "agent_run_limits") is None
+    finally:
+        get_runtime_controls.cache_clear()
 
 
 @pytest.mark.parametrize(
@@ -99,9 +120,3 @@ async def test_model_call_deadline_persists_and_resets_to_follow_turn(client, ap
     automatic = client.put(URL, cookies=_as(app_ctx.owner), json=_body(legacy.json()["version"], model_call_time_limit_s=None))
     assert automatic.status_code == 200 and automatic.json()["model_call_time_limit_s"] is None
     assert client.delete(URL, cookies=_as(app_ctx.owner)).json()["model_call_time_limit_s"] is None
-
-
-async def test_routes_are_absent_while_the_feature_is_off(client, app_ctx, monkeypatch):
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
-    assert client.get(URL, cookies=_as(app_ctx.owner)).status_code == 404
-    assert client.put(URL, cookies=_as(app_ctx.owner), json=_body("default")).status_code == 404

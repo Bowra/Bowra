@@ -79,6 +79,7 @@ def test_extract_payload_preserves_pairs_kind_remember():
             "prompt": "选一个",
             "options": [{"value": "42", "label": "零售集团"}],
             "remember_option": True,
+            "remember_default": False,
         },
         "rows": [],
     }
@@ -87,6 +88,7 @@ def test_extract_payload_preserves_pairs_kind_remember():
     assert p["option_pairs"] == [{"value": "42", "label": "零售集团"}]
     assert p["clar_kind"] == "tool_context_select"
     assert p["remember_option"] is True
+    assert p["remember_default"] is False
     assert p["fallback_text"] == "选一个"
 
 

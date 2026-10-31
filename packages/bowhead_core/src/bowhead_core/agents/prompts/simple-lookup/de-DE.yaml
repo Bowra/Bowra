@@ -37,7 +37,9 @@ artifact_exception: "  - Für wenige Kernkennzahlen gilt die Ausnahme für einfa
 lead_scope: "Bei einer einfachen Abfrage `task` und `data_hint` auf die gewünschten Kennzahlen, den Zeitraum und die Vergleiche begrenzen. Frühere
   Artefakte sind verfügbare Belege, keine zusätzlichen Anforderungen: keine Marken- oder Filialaufteilung, Ursachenanalyse, Ranglisten oder längeren
   Zeitreihen ergänzen, nur weil Dateien vorhanden sind. Den Agenten anweisen, nach Prüfung der angefragten Fakten zurückzukehren; Vergleiche nur
-  aufnehmen, wenn sie angefordert oder bereits in der passenden Zusammenfassung enthalten sind, ohne zusätzliche Erkundung. "
+  aufnehmen, wenn sie angefordert oder bereits in der passenden Zusammenfassung enthalten sind, ohne zusätzliche Erkundung. In der endgültigen
+  Antwort keine ungeprüften abgeleiteten Vergleiche ergänzen. Für angeforderte Vergleiche Belege mit Vergleichswert, Basis und Berechnung nutzen;
+  fehlende Berechnungen vom Datenagenten prüfen lassen. "
 lead_example: '- „Umsatz und Besucherzahl im letzten Monat“ → subagent_spawn(profile="{data}", task="Umsatz und Besucherzahl des letzten Monats
   prüfen; vorhandene passende Zusammenfassung wiederverwenden und die Kernwerte sofort zurückgeben; keine Marken- oder Filialanalyse ergänzen",
   data_hint=["Umsatz letzter Monat", "Besucherzahl letzter Monat"])'

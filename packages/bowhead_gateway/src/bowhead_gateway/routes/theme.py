@@ -64,6 +64,7 @@ from bowhead_gateway.chart_style_resolution import (
     resolve_chart_style_for_user,
     resolve_chart_style_for_user_v2,
 )
+from bowhead_gateway.configuration_field_guidance import with_field_contract
 from bowhead_gateway.routes.auth import _current_user
 
 if TYPE_CHECKING:
@@ -247,11 +248,9 @@ async def get_personal_theme(
     base, _ = await _resolve_personal_base(request, team_store=team_store, user=user)
     resource = await service.get(user_id=user.id, team_id=user.team_id, base=base)
     headers = _personal_headers(resource.etag)
-    if request.headers.get("If-None-Match") == resource.etag:
-        return Response(status_code=304, headers=headers)
     for key, value in headers.items():
         response.headers[key] = value
-    return resource.payload
+    return with_field_contract("personal_appearance", resource.payload)
 
 
 @router.patch(
@@ -279,7 +278,7 @@ async def patch_personal_theme(
     except Exception as exc:
         _raise_personal_http(exc)
     _apply_headers(response, _personal_headers(resource.etag))
-    return resource.payload
+    return with_field_contract("personal_appearance", resource.payload)
 
 
 @router.post("/personal/compile", response_model=None)
@@ -373,7 +372,7 @@ async def undo_personal_theme(
     except Exception as exc:
         _raise_personal_http(exc)
     _apply_headers(response, _personal_headers(resource.etag))
-    return resource.payload
+    return with_field_contract("personal_appearance", resource.payload)
 
 
 @router.put(

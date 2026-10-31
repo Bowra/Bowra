@@ -337,3 +337,16 @@ async def test_scalar_reset_removes_override_and_undo_restores_it(settings_ctx, 
     assert client.get("/api/v1/theme/personal", cookies=_as(ctx.member)).json()["overrides"] == {"density": "compact"}
     assert client.post(path + "/undo", cookies=_as(ctx.member)).status_code == 200
     assert client.get("/api/v1/theme/personal", cookies=_as(ctx.member)).json()["overrides"] == {"mode": "dark", "density": "compact"}
+
+
+@pytest.mark.asyncio
+async def test_personal_help_preserves_cas_and_refreshes_metadata_despite_matching_etag(settings_ctx, client):
+    cookies = _as(settings_ctx.member)
+    before = client.get("/api/v1/theme/personal", cookies=cookies)
+    assert before.status_code == 200
+    after = client.get("/api/v1/theme/personal", cookies=cookies, headers={"If-None-Match": before.headers["etag"]})
+    assert after.status_code == 200
+    assert after.headers["etag"] == before.headers["etag"]
+    body = after.json()
+    assert body["field_contract"]["domain"] == "personal_appearance"
+    assert body == before.json()

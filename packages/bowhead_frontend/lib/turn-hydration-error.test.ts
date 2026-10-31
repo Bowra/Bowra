@@ -29,7 +29,7 @@ describe("reconcileHydratedErrorAfterDone", () => {
 });
 
 describe("resolveHydratedTurnError", () => {
-  it.each(["document_information_incomplete", "document_planning_failed", "document_history_unavailable", "document_request_rejected", "document_routing_invalid", "document_routing_uncertain", "document_routing_source_unavailable"])("retains a document failure from durable state (%s)", (reasonCode) => {
+  it.each(["document_information_incomplete", "document_planning_failed", "document_authoring_script_failed", "document_candidate_invalid", "document_history_unavailable", "document_request_rejected", "document_routing_invalid", "document_routing_uncertain", "document_routing_source_unavailable"])("retains a document failure from durable state (%s)", (reasonCode) => {
     expect(resolveHydratedTurnError(null, "failed", reasonCode)).toEqual({ source: "turn_failed", reasonCode });
   });
   it("synthesizes a stable failure projection from DB-only terminal state", () => {

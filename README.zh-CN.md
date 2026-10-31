@@ -31,9 +31,11 @@ Bowra 将专业 Agent、业务知识、文档审查、计算与报告放进共�
 
 部分生产依赖的已知安全公告仍待复核。源码预览不代表部署安全验收完成；部署前请阅读[安全说明](SECURITY.zh-CN.md)并复核依赖锁。
 
-## 源码快照 1.6.7
+## 源码快照 1.6.43
 
-本次快照更新团队执行与知识搜索限制、Configuration Agent 的受支持配置审阅、Coach 用例建议，以及报告阅读和 AI 改写可靠性，同时更新前端安全依赖，并将应用构建升级到 Node.js 24.22.1。团队配置辅助和 Agent 评估仍遵循各自的启用条件及审阅要求。已有实例请先阅读[升级注意事项](deploy/README.zh-CN.md#升级已有实例)；沙箱镜像仍需独立管理。
+本次加入显式知识入库、按权限发现资料来源、统一 Agent 运行控制、字段级配置说明、更多图表编辑方式、自动／手动上下文整理及隔离的 HTML 离线交互；改善 Coach 与澄清续接、个人 Skill 版本、来源单位读数及导出恢复。保留 Tiptap 3.32.0 安全修复。详见[Community 发布说明](docs/help/release-notes/releases/v1.6.43.zh-CN.md)及[升级注意事项](deploy/README.zh-CN.md)。
+
+数据库升级须使用完整迁移链。沙箱源码与版本保留另行审核的 Community 基线，本次不发布运行镜像。Bowra 基础文档 Skill 保留现有能力限制，不提供私有 PowerPoint 模板创作。
 
 ## Verified Intelligence
 

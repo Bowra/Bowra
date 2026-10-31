@@ -31,6 +31,8 @@ const DIFF_KEYS = [
   "tool_set_changed",
   "skill_set_changed",
   "runtime_extensions_changed",
+  "knowledge_access_changed",
+  "knowledge_access_expanded",
   "primary_capability_changed",
   "capability_protocol_block_changed",
   "behavior_changed",
@@ -199,7 +201,6 @@ export function AgentReleaseReview({ agentId, candidateId }: { agentId: string; 
               <div><dt>{t("release_review_outputs")}</dt><dd>{candidate.behavior.output_contract_refs.length}</dd></div>
               <div><dt>{t("release_review_tools")}</dt><dd>{candidate.behavior.tool_count}</dd></div>
               <div><dt>{t("release_review_skills")}</dt><dd>{candidate.behavior.skill_count}</dd></div>
-              <div><dt>{t("release_iterations")}</dt><dd>{candidate.behavior.max_iterations}</dd></div>
               <div><dt>{t("release_output_contract_title")}</dt><dd>{candidate.behavior.has_output_contract ? t("yes") : t("no")}</dd></div>
             </dl>
           </details>

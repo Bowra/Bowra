@@ -989,6 +989,67 @@ def test_directly_selected_python_tool_with_a_plugin_creates_with_its_skill_gran
     assert "precise_skill_scope_required" not in row[1]
 
 
+@pytest.mark.integration
+def test_plugin_method_survives_original_draft_creation_and_exact_run_admission(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from bowhead_core.agent_execution_binding import _resolved_team_definition_json
+    from bowhead_core.skill_upload import bundle_sha256
+
+    from bowhead_core import system_plugins
+
+    method = {
+        "skill_ref": {"kind": "builtin", "id": "builtin:canvas-pptx", "name": "canvas-pptx"},
+        "permissions": ["read"],
+        "revision": "sha256:" + bundle_sha256(Path(__file__).parents[2] / "bowhead_skill/catalog/canvas-pptx"),
+        "distribution": "reference",
+    }
+    registry = dict(system_plugins._registry())
+    raw = registry["builtin:code-computation@1"].model_dump()
+    raw.update(version=2, skill_grants=[method])
+    plugin = system_plugins.BuiltinPlugin.model_validate(raw)
+    registry[plugin.ref] = plugin
+    monkeypatch.setattr(system_plugins, "_registry", lambda: registry)
+    user_store, draft_store, schema_store, owner, _ = _setup(tmp_path, monkeypatch)
+    with sqlite3.connect(user_store.db_path) as db:
+        db.execute("UPDATE team_subagent_schema_meta SET release_semantics_activated_at=? WHERE singleton=1", ("2026-09-07T00:00:00+00:00",))
+    draft = _create_ready_draft(user_store, draft_store, owner, tool_refs=[], builtin_plugin_ids=["builtin:code-computation"])
+    now = _now()
+    with sqlite3.connect(user_store.db_path) as db:
+        db.execute(
+            "INSERT INTO workspaces(id,team_id,name,created_at,updated_at) VALUES (?,?,?,?,?)", ("ws_method", owner.team_id, "Method", now, now)
+        )
+        db.execute("INSERT INTO workspace_members(workspace_id,user_id,role,joined_at) VALUES (?,?,?,?)", ("ws_method", owner.id, "member", now))
+        db.execute("UPDATE team_subagent_draft SET workspace_id='ws_method' WHERE id=?", (draft.id,))
+    client = _client(user_store, draft_store, schema_store, owner)
+
+    def create():
+        return client.post(
+            f"{_BASE}/{draft.id}/create",
+            headers={"If-Match": f'W/"{draft.id}:1"'},
+            json={"schema_version": 1, "mutation_id": draft.mutation_id, "acknowledged_warning_codes": []},
+        )
+
+    stale = create()
+    assert stale.status_code == 409 and stale.json()["detail"]["error"]["code"] == "subagent_catalog_changed", stale.text
+    with sqlite3.connect(user_store.db_path) as db:
+        db.execute(
+            "UPDATE team_subagent_draft SET catalog_fingerprint=? WHERE id=?",
+            (stale.json()["detail"]["error"]["details"]["current_catalog_fingerprint"], draft.id),
+        )
+    response = create()
+    assert response.status_code == 201, response.text
+    with sqlite3.connect(user_store.db_path) as db:
+        original = db.execute(
+            "SELECT definition_json FROM team_subagent_revision WHERE subagent_id=?", (response.json()["definition_id"],)
+        ).fetchone()[0]
+    assert json.loads(original)["builtin_plugin_ids"] == ["builtin:code-computation"]
+    assert all(grant["skill_ref"]["name"] != "canvas-pptx" for grant in json.loads(original).get("skill_grants", []))
+    admitted = _run(_resolved_team_definition_json(None, team_id=owner.team_id, snapshot={"definition_json": original}))
+    [retained] = [grant for grant in json.loads(admitted)["skill_grants"] if grant["skill_ref"]["name"] == "canvas-pptx"]
+    assert retained == method
+
+
 def test_validate_body_does_not_persist_or_bump_version(
     tmp_path,
     monkeypatch,
@@ -1400,7 +1461,7 @@ def test_chat_request_drafts_a_private_subagent_with_default_configuration(tmp_p
         suggestions = client.get(f"{_BASE}/{draft_id}/suggestions", headers=scope_headers).json()["items"]
         assert len(suggestions) == 1
         suggestion = suggestions[0]
-        fields = ["name", "display_name", "description", "system_prompt", "tool_refs", "model", "max_iterations", "output_schema_text"]
+        fields = ["name", "display_name", "description", "system_prompt", "tool_refs", "model", "output_schema_text"]
         applied = client.post(
             f"{_BASE}/{draft_id}/suggestions/{suggestion['suggestion_id']}/apply",
             headers={**scope_headers, "If-Match": detail.headers["ETag"]},

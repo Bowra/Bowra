@@ -45,6 +45,8 @@ import type { ModelRetryStatus, PeerTerminal } from "@/lib/turn-store";
 import type { AgentProgress } from "@/lib/types";
 
 import { AgentBadge } from "./AgentBadge";
+import { agentDisplayName } from "./agent-meta";
+import { useContextActivities } from "./ContextActivity";
 import { collaborationTopicState, useCollaborationTrace } from "./collaboration-trace-state";
 import { buildBandModel, type PeerIdentity } from "./running-band-model";
 import type { StepView } from "./types";
@@ -354,6 +356,9 @@ export function RunningBand({
   const noSignal = running && silentMs !== null && silentMs >= NO_SIGNAL_MS;
 
   const collaboration = useCollaborationTrace();
+  const contextActivities = useContextActivities();
+  const compacting = running ? contextActivities.filter((activity) => activity.phase === "running") : [];
+  const compactingAgent = compacting.length === 1 ? compacting[0] : null;
   const waitingCount = collaboration?.data?.participants.filter((participant) => participant.waiting && participant.status === "running").length ?? 0;
   const latestTopic = [...(collaboration?.data?.topics ?? [])].sort((left, right) =>
     (right.revision ?? 0) - (left.revision ?? 0),
@@ -369,6 +374,8 @@ export function RunningBand({
     ? t("band_no_signal", { sec: Math.floor((silentMs ?? 0) / 1000) })
     : modelRetry
     ? formatModelRetry(modelRetry, t)
+    : compacting.length > 0
+    ? t("context_activity.running")
     : progressQuiet
     ? progressAgents.length === 1
       ? t("still_running_progress", {
@@ -402,7 +409,9 @@ export function RunningBand({
   const footMeta = [
     waitingCount > 0 ? t("collaboration.waiting_count", { count: waitingCount }) : "",
     collaborationSummary,
-    model.current?.agentName ?? "",
+    compactingAgent
+      ? agentDisplayName(compactingAgent.profile, compactingAgent.subagent_id ? peerDisplayNames?.[compactingAgent.subagent_id] : undefined)
+      : model.current?.agentName ?? "",
     ...(prose ? [] : (model.current?.detail ?? [])),
     model.current?.handoffFrom ? t("band_handoff", { from: model.current.handoffFrom }) : "",
   ].filter(Boolean).join(" · ");
@@ -529,7 +538,7 @@ export function RunningBand({
         <div className="bh-band__now">
           {/* ⚠AgentBadge requires backend `agent_name`, not AgentKey;
               passing a key collapses all custom agents into one generic badge. */}
-          <AgentBadge agent={model.current?.agentBadgeName ?? "lead"} size={20} />
+          <AgentBadge agent={compactingAgent?.profile ?? model.current?.agentBadgeName ?? "lead"} size={20} />
           <div className="bh-band__now-main">
             <div className="bh-band__act">{action}</div>
             {footMeta || prose ? (

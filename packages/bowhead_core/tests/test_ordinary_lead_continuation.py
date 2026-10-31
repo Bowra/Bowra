@@ -12,6 +12,7 @@ from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadCapture, OrdinaryLeadCheckpoint, capture_message_prefix
 from bowhead_core.ordinary_lead_continuation import (
     OrdinaryContinuationUnavailable,
+    OrdinaryQuestionUnavailable,
     canonical_json,
     consume_ordinary_resume_in_tx,
     read_ordinary_card_in_tx,
@@ -30,6 +31,104 @@ from test_document_store import migrated_db as migrated_db
 pytestmark = pytest.mark.integration
 QUESTION = {"question": "Which title?", "type": "free_text", "options": []}
 ANSWER = {"question": QUESTION["question"], "source": "custom", "answer": "Quarterly review", "skipped": False, "option_index": None}
+
+
+async def test_rejected_revision_scope_can_fall_back_to_a_text_question():
+    from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadRunState
+    from bowhead_core.ordinary_lead_runtime import capture_ordinary_lead_loop
+
+    state = OrdinaryLeadRunState()
+    context = SimpleNamespace(ordinary_lead_state=state, collaboration_execution=None)
+    rejected = ToolInvocation(
+        tool_name="subagent_spawn", arguments={}, result={"error_kind": "invalid_args", "reason_code": "revise_scope_unresolved"}
+    )
+    question = ToolInvocation(tool_name="clarification_ask", arguments={}, result={})
+    kwargs = {
+        "ctx": context,
+        "bus": None,
+        "messages": [Message("user", "Edit a chart")],
+        "invocations": [rejected, question],
+        "subagent_id": "lead",
+        "system": "",
+        "turn_tail": "",
+        "language_tail": "",
+        "attachment_context": None,
+        "schemas": [],
+        "next_iteration": 2,
+        "max_iterations": 5,
+        "consumed_tokens": 0,
+        "history_sizes": [],
+        "source_bounce_used": False,
+        "overflow_retried": False,
+        "deadline_retried": False,
+    }
+    with pytest.raises(OrdinaryQuestionUnavailable):
+        await capture_ordinary_lead_loop(**kwargs)
+    completed = ToolInvocation(tool_name="subagent_spawn", arguments={}, result={"ok": True, "subagent_id": "peer"})
+    state.helper_bindings.append({"subagent_id": "peer"})
+    kwargs["invocations"] = [completed, rejected, question]
+    with pytest.raises(OrdinaryQuestionUnavailable) as exc:
+        await capture_ordinary_lead_loop(**kwargs)
+    assert "Preserve confirmed earlier results" in exc.value.note
+    state.helper_bindings.clear()
+    kwargs["invocations"] = [rejected, question]
+    rejected.result = {"error_kind": "invalid_args"}
+    with pytest.raises(OrdinaryContinuationUnavailable) as exc:
+        await capture_ordinary_lead_loop(**kwargs)
+    assert type(exc.value) is OrdinaryContinuationUnavailable
+
+
+async def test_budget_extension_widens_counters_without_changing_legacy_bytes_or_material(ctx, monkeypatch):
+    from bowhead_core.agent_run_limits import UNBOUNDED_STEPS, AgentRunLimits, AgentRuntimeControls
+
+    _, _, _, original = await prepare(ctx, monkeypatch)
+    encoded = original.encode()
+    assert b"loop_budget" not in encoded
+    assert OrdinaryLeadCheckpoint.decode(encoded).encode() == encoded
+    raw = original.model_dump()
+    with pytest.raises(ValueError):
+        OrdinaryLeadCheckpoint.model_validate({**raw, "max_iterations": UNBOUNDED_STEPS + 1, "next_iteration": 101})
+    budget = AgentRuntimeControls().budget(AgentRunLimits()).model_copy(update={"model_steps_used": 146})
+    current = OrdinaryLeadCheckpoint.model_validate(
+        {
+            **raw,
+            "max_iterations": UNBOUNDED_STEPS + 1,
+            "next_iteration": 101,
+            "loop_budget": budget,
+        }
+    )
+    restored = OrdinaryLeadCheckpoint.decode(current.encode())
+    assert restored.loop_budget == budget
+    assert restored.contract == original.contract
+    assert restored.remaining_wallclock_s == original.remaining_wallclock_s
+    assert restored.material_json == original.material_json
+    # A counter extension does not authorize v12 knowledge material on a v1 snapshot.
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        current.model_copy(update={"contract": "ordinary-lead-loop.v12"}).encode()
+
+
+async def test_segmented_storage_keeps_large_history_without_relaxing_native_pairs(ctx, monkeypatch):
+    from dataclasses import asdict
+
+    _, _, _, original = await prepare(ctx, monkeypatch)
+    history = [asdict(Message(role=role, content=f"Retained {index}: " + "source " * 400)) for index in range(140) for role in ("user", "assistant")]
+    extended = original.model_copy(
+        update={
+            "storage_format": "segmented.v1",
+            "messages_json": canonical_json([*history, *json.loads(original.messages_json)]),
+            "history_sizes": [2] * 140,
+        }
+    )
+    encoded = extended.encode()
+    assert len(encoded) > 256 * 1024
+    restored = OrdinaryLeadCheckpoint.decode(encoded)
+    assert restored.encode() == encoded
+    assert restored.messages()[0].content == history[0]["content"]
+    assert restored.invocations() == original.invocations()
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        extended.model_copy(update={"storage_format": None}).encode()
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        extended.model_copy(update={"history_sizes": [len(history) + 2]}).encode()
 
 
 def multi_checkpoint(checkpoint, helper_count=2):

@@ -3,8 +3,7 @@
 Design: docs/design/agent-run-limits.md and agent-run-limits-phase-1-tech-design.md.
 The Team settings page is the only source of these values; one snapshot is resolved
 per turn and shared by Lead and every subagent of that turn through a ContextVar.
-``FEATURE_AGENT_RUN_LIMITS`` is on by default (user decision, 2026-10-21); an explicit
-``0`` restores the earlier limits.
+Run limits apply to every admitted turn and Agent evaluation.
 """
 
 from __future__ import annotations
@@ -16,7 +15,10 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any
+from functools import lru_cache
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +44,6 @@ NO_PROGRESS_STOP_STEPS = 12
 WRAP_UP_RESERVE_S = 300
 
 
-def agent_run_limits_enabled() -> bool:
-    """On unless the deployment sets FEATURE_AGENT_RUN_LIMITS to an explicit off value."""
-    return os.environ.get("FEATURE_AGENT_RUN_LIMITS", "1").strip().lower() not in {"0", "false", "no", "off"}
-
-
 @dataclass(frozen=True)
 class AgentRunLimits:
     """One Team's limits as applied to a turn. ``step_limit=None`` means unlimited."""
@@ -56,6 +53,7 @@ class AgentRunLimits:
         metadata={
             "minimum": MIN_TURN_TIME_LIMIT_S,
             "maximum": MAX_TURN_TIME_LIMIT_S,
+            "unit": "seconds",
             "description": "Maximum duration of one turn in seconds, including all agents.",
         },
     )
@@ -65,12 +63,18 @@ class AgentRunLimits:
             "minimum": 1,
             "maximum": MAX_STEP_LIMIT,
             "nullable": True,
-            "description": "Maximum steps per subagent; null means unlimited steps within the other turn limits.",
+            "unit": "count",
+            "description": "Team model-step ceiling. Runtime controls apply it to Lead and helpers; null removes the Team ceiling, but a deployment ceiling and other turn limits can still apply.",
         },
     )
     tool_call_limit: int = field(
         default=DEFAULT_TOOL_CALL_LIMIT,
-        metadata={"minimum": 1, "maximum": MAX_TOOL_CALL_LIMIT, "description": "Maximum tool calls shared by the agents in one turn."},
+        metadata={
+            "unit": "count",
+            "minimum": 1,
+            "maximum": MAX_TOOL_CALL_LIMIT,
+            "description": "Maximum tool calls shared by the agents in one turn.",
+        },
     )
     model_call_time_limit_s: int | None = field(
         default=None,
@@ -78,6 +82,7 @@ class AgentRunLimits:
             "minimum": MIN_MODEL_CALL_TIME_LIMIT_S,
             "maximum": MAX_MODEL_CALL_TIME_LIMIT_S,
             "nullable": True,
+            "unit": "seconds",
             "description": "Maximum duration of a model call in seconds; null selects the automatic budget.",
         },
     )
@@ -91,6 +96,60 @@ class AgentRunLimits:
 
 
 DEFAULT_LIMITS = AgentRunLimits()
+
+
+class AgentLoopBudget(BaseModel):
+    """Saved decision budget; independent of continuation material permissions."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    contract: Literal["agent-runtime-budget.v1"]
+    step_limit: int | None = Field(ge=1, le=MAX_STEP_LIMIT)
+    model_steps_used: int = Field(default=0, ge=0, le=UNBOUNDED_STEPS)
+    stall_timeout_s: int = Field(default=300, ge=30, le=MAX_TURN_TIME_LIMIT_S)
+
+    @model_validator(mode="after")
+    def validate_used(self) -> AgentLoopBudget:
+        if self.step_limit is not None and self.model_steps_used > self.step_limit:
+            raise ValueError("Saved model decisions exceed the step limit")
+        return self
+
+
+@dataclass(frozen=True)
+class AgentRuntimeControls:
+    """Operator-owned controls resolved once at startup, never saved as Team values."""
+
+    system_step_limit: int | None = None
+    stall_timeout_s: int = 300
+
+    def budget(self, limits: AgentRunLimits) -> AgentLoopBudget:
+        finite = [value for value in (self.system_step_limit, limits.step_limit) if value is not None]
+        return AgentLoopBudget(contract="agent-runtime-budget.v1", step_limit=min(finite) if finite else None, stall_timeout_s=self.stall_timeout_s)
+
+    def view(self, limits: AgentRunLimits) -> dict[str, Any]:
+        return {
+            "contract": "agent-runtime-controls.v1",
+            "system_step_limit": self.system_step_limit,
+            "effective_step_limit": self.budget(limits).step_limit,
+            "stall_timeout_s": self.stall_timeout_s,
+        }
+
+
+@lru_cache(maxsize=1)
+def get_runtime_controls() -> AgentRuntimeControls:
+    """Resolve released runtime controls for unified run limits at startup."""
+
+    def integer(name: str, default: int | None, minimum: int, maximum: int) -> int | None:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        value = raw.strip()
+        if not value.isascii() or not value.isdecimal() or not minimum <= int(value) <= maximum:
+            raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+        return int(value)
+
+    stall_timeout = integer("BOWHEAD_AGENT_STALL_TIMEOUT_SEC", 300, 30, MAX_TURN_TIME_LIMIT_S)
+    assert stall_timeout is not None
+    return AgentRuntimeControls(system_step_limit=integer("BOWHEAD_AGENT_MAX_STEPS", None, 1, MAX_STEP_LIMIT), stall_timeout_s=stall_timeout)
 
 
 class AgentRunLimitsInvalid(ValueError):
@@ -261,10 +320,6 @@ def reset_credit_gate(token: contextvars.Token) -> None:
     _CREDIT_GATE_CONTEXTVAR.reset(token)
 
 
-def loop_step_limit(limits: AgentRunLimits) -> int:
-    return limits.step_limit if limits.step_limit is not None else UNBOUNDED_STEPS
-
-
 def persisted_step_limit(value: int | None) -> int | None:
     """The step limit as stored in continuation records: None for unlimited."""
     return None if value is None or value >= UNBOUNDED_STEPS else value
@@ -278,7 +333,7 @@ def set_run_limits(limits: AgentRunLimits | None) -> contextvars.Token:
 
 
 def get_run_limits() -> AgentRunLimits | None:
-    """The current turn's limits, or None when the feature is off or no turn is active."""
+    """The current turn's limits, or None outside an active turn."""
     return _RUN_LIMITS_CONTEXTVAR.get()
 
 
@@ -304,12 +359,10 @@ __all__ = [
     "AgentRunLimits",
     "AgentRunLimitsInvalid",
     "TurnToolCallBudget",
-    "agent_run_limits_enabled",
     "get_credit_gate",
     "get_run_limits",
     "get_tool_call_budget",
     "load_team_limits",
-    "loop_step_limit",
     "model_call_budget_s",
     "parse_stored",
     "persisted_step_limit",

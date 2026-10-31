@@ -56,6 +56,7 @@ from bowhead_core.skill_upload import (
     NAME_PATTERN,
     SkillUploadError,
     _check_user_quota,
+    builtin_bundle_sha256,
     bundle_sha256,
     copy_validated_bundle,
     peek_skill_name,
@@ -185,12 +186,16 @@ def _skill_instance_state(inst: Any | None) -> dict[str, Any] | None:
     }
 
 
+def _source_bundle_sha256(source_dir: Path, *, source_type: str) -> str:
+    return builtin_bundle_sha256(source_dir) if source_type == "builtin" else bundle_sha256(source_dir)
+
+
 def _personal_skill_state(spec: Any, inst: Any | None, source_type: str) -> dict[str, Any]:
     source_dir = Path(str(spec.source_dir))
     content_digest: str | None = None
     if source_dir.is_dir():
         with contextlib.suppress(OSError):
-            content_digest = bundle_sha256(source_dir)
+            content_digest = _source_bundle_sha256(source_dir, source_type=source_type)
     return {
         "name": spec.name,
         "source_type": source_type,
@@ -767,7 +772,7 @@ def _impact_selector(target: Any, *, name: str) -> ResourceUsageSelector:
         source_dir = Path(str(target.spec.source_dir))
         if source_dir.is_dir():
             with contextlib.suppress(OSError):
-                revision = bundle_sha256(source_dir)
+                revision = _source_bundle_sha256(source_dir, source_type=target.source_type)
     return ResourceUsageSelector(
         key=target.resource_id,
         kind="skill",
@@ -1330,7 +1335,9 @@ async def get_skill_usage(
                 resource_id=(inst.id if inst else name),
                 display_name=str(getattr(spec, "title", "") or spec.name),
                 resource_ref=resource_ref,
-                revision=(bundle_sha256(Path(str(spec.source_dir))) if Path(str(spec.source_dir)).exists() else None),
+                revision=(
+                    _source_bundle_sha256(Path(str(spec.source_dir)), source_type=source_type) if Path(str(spec.source_dir)).exists() else None
+                ),
                 available=(inst.enabled if inst else True),
             ),
         )
@@ -1402,7 +1409,7 @@ async def get_skill(
         import_status=(getattr(inst, "import_status", None) if inst is not None else None),
         import_report=_import_report_dict(inst),
         script_execution=script_execution_mode(
-            has_scripts=bool(spec.scripts), builtin=source_type == "builtin", knowledge=getattr(spec, "kind", "tool") == "knowledge"
+            name=spec.name, has_scripts=bool(spec.scripts), builtin=source_type == "builtin", knowledge=getattr(spec, "kind", "tool") == "knowledge"
         ),
         allowed_tools=list(spec.allowed_tools or []),
         source_turn_id=(inst.source_turn_id if inst else None),

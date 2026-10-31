@@ -18,6 +18,7 @@ import {
   formatObservedPercentCell,
   formatExact,
   formatObservedValue,
+  formatSourceValue,
   formatDisplayValue,
   resolveDisplayMagnitude,
   resolveAxisMagnitude,
@@ -78,6 +79,12 @@ describe("readable value magnitudes and ordinary localized observations", () => 
     expect(axisUnitOf({ key: "v", header: "营业额_亿元", type: "numeric" })).toBe("亿元");
     expect(formatObservedValue(null, "元")).toBe("—");
     expect(formatObservedValue(-0, "元")).toBe("0元");
+  });
+
+  it("honors explicit table precision without converting source units", () => {
+    setLocale("zh-CN");
+    expect(formatSourceValue(0.0009, "亿元", false, { decimal_places: 5, decimal_mode: "fixed" })).toBe("0.00090");
+    expect(formatSourceValue(0.0009, "亿元")).toBe("0.0009亿元");
   });
 
   it("uses range differences for ticks and never turns a small finite value into zero", () => {

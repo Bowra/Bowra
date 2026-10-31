@@ -5,14 +5,14 @@
  *
  * It carries the same items, labels and order as the sidebar session row menu — Rename…, Pin / Unpin,
  * Archive Session, a separator and Delete Session — with the same feedback: a past-tense toast with an
- * eight-second Undo, and the running-session reason when the action is unavailable. The title bar adds only
+ * eight-second Undo, and the running-session reason when the action is unavailable. The title bar also offers context maintenance and
  * "Copy Diagnostic Information" after the shared non-destructive items: identifying the session and turn is
  * needed only when reporting a problem. The copied text keeps the session and latest turn ids on the first line,
  * then the transport measurement line. After a successful copy the menu has closed, so a toast confirms it; when
  * the clipboard is unavailable the existing prompt fallback shows the text for manual copying.
  */
 
-import { Archive, Copy, Pencil, Pin, Trash2 } from "lucide-react";
+import { Archive, Copy, Pencil, Pin, Trash2, FoldVertical } from "lucide-react";
 import { useRef } from "react";
 import { useTranslations } from "next-intl";
 
@@ -30,6 +30,8 @@ import { toast } from "@/lib/use-toast";
 export type SessionTopbarMutationResult = "success" | "cancelled";
 
 export interface SessionTopbarMenuProps {
+  onCompactContext?: () => void | Promise<unknown>;
+  compactDisabledReason?: string | null;
   sessionId: string;
   turnId?: string | null;
   /** This turn's SSE transport measurement, appended to the copied text. */
@@ -74,6 +76,8 @@ export function SessionTopbarMenu({
   onUndelete,
   deleteDisabledReason,
   onRename,
+  onCompactContext,
+  compactDisabledReason,
 }: SessionTopbarMenuProps) {
   const t = useTranslations("chat");
   const tCard = useTranslations("chat_card");
@@ -170,6 +174,11 @@ export function SessionTopbarMenu({
           onSelect: () => void archive(),
         }]
       : []),
+    ...(onCompactContext ? [{ id: "compact-context", label: t("compact_context"),
+      icon: <LucideGlyph icon={FoldVertical} size={16} aria-hidden="true" />,
+      disabled: Boolean(compactDisabledReason), title: compactDisabledReason ?? undefined,
+      onSelect: () => void onCompactContext(),
+    }] : []),
     {
       id: "copy-diagnostics",
       label: tCard("copy_diagnostics_menu"),

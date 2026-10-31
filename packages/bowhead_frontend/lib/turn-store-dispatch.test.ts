@@ -1062,6 +1062,7 @@ describe("peer_dispatched → peerProseKey (dogfood s_3e854 ④)", () => {
       profile: "compute",
       status: "partial",
       stop_reason: "time_limit",
+      step_usage: { used: 5, limit: 10 },
       duration_ms: 3000,
     });
     dispatchToTurnStore("lead.subagent_summary", {
@@ -1076,6 +1077,7 @@ describe("peer_dispatched → peerProseKey (dogfood s_3e854 ④)", () => {
     expect(getTurnSnapshot(T)?.peerTerminalById.s1).toMatchObject({
       status: "partial",
       stopReason: "time_limit",
+      stepUsage: { used: 5, limit: 10 },
       durationMs: 3100,
     });
     expect(getTurnSnapshot(T)?.peerTerminalById.s1?.failureReason).toBeUndefined();

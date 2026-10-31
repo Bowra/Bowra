@@ -26,7 +26,8 @@ from bowhead_router.types import ToolSchema
 from bowhead_core.agents._lead_context import run_ref_allowlist
 from bowhead_core.canvas_store import CanvasRevConflictError
 from bowhead_core.chart import ChartColumn, infer_chart_spec, spec_to_dict
-from bowhead_core.chart.expression import composition, derive_columns, schema_properties
+from bowhead_core.chart.date_display import apply_date_patterns
+from bowhead_core.chart.expression import composition, derive_columns, schema_properties, structured
 from bowhead_core.chart.infer import _take_top_n, indistinguishable_rows_reason
 from bowhead_core.chart.numeric_display import apply_column_display, currency_identity
 from bowhead_core.chart.presentation_plan import ChartPlanError, compile_notes_plan, evidence_notes_schema, parse_plan_input, verify_plan_notes
@@ -149,7 +150,25 @@ def _design_size_metric_label(value: Any) -> str:
 
 def register_canvas_tools(registry: ToolRegistry) -> None:
     """canvas.add_* tool 家族: chart / insight / iframe / html_artifact / external_iframe / image."""
-    registry.register(ToolSpec(schema=_add_chart_schema(), handler=_add_chart))
+    from bowhead_core.chart.edit_guard import coordinate_chart_handler
+
+    registry.register(ToolSpec(schema=_add_chart_schema(), handler=coordinate_chart_handler(_add_chart)))
+    from bowhead_core.chart.authoring_tools import edit_chart_effect, edit_schema, read_chart, read_schema
+    from bowhead_core.terminal_effect_contract import TOOL_EFFECT_READ_ONLY, ToolEffectIdempotency, ToolEffectSpec
+    from bowhead_core.terminal_protocol import EffectClass
+
+    registry.register(
+        ToolSpec(schema=read_schema(), handler=coordinate_chart_handler(read_chart, inspection=True), effect_spec=TOOL_EFFECT_READ_ONLY)
+    )
+    registry.register(
+        ToolSpec(
+            schema=edit_schema(),
+            handler=coordinate_chart_handler(edit_chart_effect, inspection=True),
+            effect_spec=ToolEffectSpec(
+                effect_class=EffectClass.SIDE_EFFECT_POSSIBLE, idempotency=ToolEffectIdempotency.NON_RETRIABLE, effect_contract_key="tool_external/v1"
+            ),
+        )
+    )
     registry.register(ToolSpec(schema=_add_insight_schema(), handler=_add_insight))  # M157
     registry.register(
         ToolSpec(
@@ -183,7 +202,7 @@ def register_canvas_tools(registry: ToolRegistry) -> None:
     from bowhead_core.canvas_revise import section_revise_enabled
 
     if section_revise_enabled():
-        registry.register(ToolSpec(schema=_remove_chart_schema(), handler=_remove_chart))
+        registry.register(ToolSpec(schema=_remove_chart_schema(), handler=coordinate_chart_handler(_remove_chart)))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -198,7 +217,8 @@ def _add_chart_schema() -> ToolSchema:
             "①`bi_query` 返的 `_ref_artifact_id`; "
             "②**`python_sandbox` 算出的数据**（code 里 `df.to_csv('out.csv', index=False)`，"
             "取 `output_artifacts[0].artifact_id` 传进来 — 不要 `savefig` 出 PNG）. "
-            "**不要**把 rows 逐字填进来；数据走 artifact_id 引用."
+            "**不要**把 rows 逐字填进来；数据走 artifact_id 引用. "
+            "The display receipt reports saved dimension types, date patterns and known axis scale; a category axis is not proportional elapsed time."
         ),
         input_schema={
             "type": "object",
@@ -251,11 +271,19 @@ def _add_chart_schema() -> ToolSchema:
                 },
                 "title": {
                     "type": "string",
-                    "description": "图表标题（≤ 30 字）",
+                    "description": "Chart subject (up to 30 characters). Put source units in column_units, not in a global title unit; the renderer discloses actual display units.",
                 },
                 "subtitle": {
                     "type": "string",
-                    "description": "（可选）副标题",
+                    "description": "Optional analytical context. Identify any stated source unit explicitly as a source unit. Do not claim a displayed unit or no display conversion before rendering.",
+                },
+                "show_legend": {
+                    "type": "boolean",
+                    "description": "Optional legend visibility. False hides it; true permits the existing layout policy to show it. Omit to use existing defaults.",
+                },
+                "show_data_labels": {
+                    "type": "boolean",
+                    "description": "Optional data-label visibility. Omit to retain the existing responsive and export defaults.",
                 },
                 "force_kind": {
                     "type": "string",
@@ -303,6 +331,11 @@ def _add_chart_schema() -> ToolSchema:
                         "required": ["decimal_places", "decimal_mode"],
                         "additionalProperties": False,
                     },
+                },
+                "column_date_formats": {
+                    "type": "object",
+                    "description": "Optional date display by exact date column key. Prefer presets compact_date, iso_date, year_month, month_day, year, date_time, time, or auto; alternatively use a pattern such as yyyyMMdd. Pattern tokens: yyyy, yy, MM, dd, HH, mm, ss, XXX. Source values and sorting are unchanged. Invalid, ambiguous, or source-incompatible entries retain the automatic default and return a fallback receipt.",
+                    "additionalProperties": {"type": "string", "maxLength": 80},
                 },
                 "column_types": {
                     "type": "object",
@@ -680,8 +713,20 @@ async def _add_chart(
     _group_title: str | None = None,
     _dataset_cache: list[_PreparedChartDataset] | None = None,
 ) -> Any:
+    from bowhead_core.chart.edit_guard import blocked, denial
+
+    protected = await blocked(ctx)
+    if protected:
+        return denial(history_unavailable="chart_guard_history_unavailable" in protected)
     if args.get("_args_parse_error"):
         return {"error": f"args parse failed: {args['_args_parse_error']}"}
+    for field in ("show_legend", "show_data_labels"):
+        if field in args and type(args[field]) is not bool:
+            return {
+                "error": f"{field} must be true or false; omit it to use the existing default",
+                "error_kind": "invalid_chart_expression",
+                "path": f"/{field}",
+            }
     misplaced = sorted(
         set(args)
         & {
@@ -953,9 +998,15 @@ async def _add_chart(
         derived_row_count = cached.derived_row_count
     elif "derived_columns" in args:
         try:
+            definitions = structured(args["derived_columns"], "derived_columns")
+            if isinstance(definitions, list) and any(
+                isinstance(definition, dict) and "convert_from" in definition and definition["convert_from"] not in units
+                for definition in definitions
+            ):
+                raise ValueError("Unit conversion requires the actual source unit to be explicitly declared in column_units.")
             _apply_column_units(cols, units)
             _enrich_units(cols, ctx, rows, artifact=art)
-            rows, cols, calculation_metadata, calculation_missing = derive_columns(args["derived_columns"], rows, cols)
+            rows, cols, calculation_metadata, calculation_missing = derive_columns(definitions, rows, cols)
             csv_output = _io.StringIO()
             writer = _csv.DictWriter(csv_output, fieldnames=[column.key for column in cols])
             writer.writeheader()
@@ -964,6 +1015,7 @@ async def _add_chart(
         except (ValueError, TypeError, OverflowError, RecursionError) as exc:
             return {"error": str(exc), "error_kind": "invalid_chart_expression"}
     display_fallbacks = apply_column_display(cols, args.get("column_display"))
+    display_fallbacks += apply_date_patterns(cols, args.get("column_date_formats"), rows)
     if _dataset_cache is not None and not _dataset_cache:
         _dataset_cache.append(
             _PreparedChartDataset(
@@ -1142,6 +1194,10 @@ async def _add_chart(
             **({"inline_rows_limit": MAX_FRAME_ROWS} if _prepared_frame else {}),
         )
 
+    for field in ("show_legend", "show_data_labels"):
+        if field in args:
+            setattr(spec, field, args[field])
+
     # 2.3 Disclose wide-table pivot series pruning too, under the same rules as long-table _cap_time_series.
     #
     # 116 dogfood 2026-09-24 t_b06a7810265a: a 38-category wide table was pruned to 12 columns/lines,
@@ -1209,6 +1265,7 @@ async def _add_chart(
             plan_columns = plan_data_columns or []
             _apply_column_units(plan_columns, units)
             apply_column_display(plan_columns, args.get("column_display"))
+            apply_date_patterns(plan_columns, args.get("column_date_formats"), plan_data_rows)
             if not calculation_metadata:
                 _enrich_units(plan_columns, ctx, plan_data_rows, artifact=art)
             notes = await verify_plan_notes(plan_input, plan_columns, ctx)
@@ -1302,6 +1359,8 @@ async def _add_chart(
         candidate = spec_to_dict(spec)
         if prior.get("subtitle") != spec.subtitle:
             return False
+        if any(prior.get(key) != candidate.get(key) for key in ("show_legend", "show_data_labels")):
+            return False
         # Same-source scratch-to-series correction remains valid for a compatible
         # metric. A shared title alone cannot stand in for a different chart request.
         if not any(
@@ -1357,6 +1416,8 @@ async def _add_chart(
         None,
     )
     if _dup is not None:
+        from bowhead_core.chart.display_receipt import chart_display_receipt
+
         # ⚠ Compare **rows actually plotted**, not row_count: after limit, row_count is the original total
         # for total-M captions. Using it to judge completeness lets a chart plotting only ten of 1000 source rows
         # replace a complete 40-row chart (re-review observed reversed decisions in both directions).
@@ -1383,6 +1444,7 @@ async def _add_chart(
                 "row_count": spec.row_count,
                 "title": spec.title,
                 "deduped": "upgraded",
+                "display_receipt": chart_display_receipt(spec_to_dict(spec)),
             }
         return {
             "section_id": _dup.id,
@@ -1391,11 +1453,13 @@ async def _add_chart(
             "row_count": _dup_rows,
             "title": spec.title,
             "deduped": "skipped_degenerate",
+            "display_receipt": chart_display_receipt(_prior_spec(_dup)),
         }
 
     await materialize_calculation()
 
-    # Different titles, **byte-identical data**: the D6 title criterion above blocks none of these.
+    # Equal plotted rows can come from different artifacts; identical observations
+    # alone do not prove that their provenance or analytical meaning is equivalent.
     #
     # 116 observations: of 612 turns with ≥2 charts, **77** had identical data + kind but different titles,
     # and **zero** shared titles. Two cases coexist and machines cannot distinguish them (judging title wording is forbidden):
@@ -1410,9 +1474,9 @@ async def _add_chart(
     _same_data = _prior_chart_with_same_data(_prior_charts, spec, _prior_spec)
     if _same_data is not None:
         result_same_data_note = (
-            f"⚠ 本轮已经用**同一份数据**画过《{_same_data}》（逐行一致，不只是同一个 artifact_id）。"
-            "如果这张图想表达的是**另一种切法**（同比/环比/衰退榜/占比…），那份数据还没算出来——"
-            "先去算，再画；否则就是同一张图画了两次，删掉一张。"
+            f"This turn already plotted the same rows in ‘{_same_data}’. "
+            "Check whether the new chart is a retry or has a distinct analytical meaning. "
+            "Equal rows do not prove the same provenance; retain genuinely distinct sources."
         )
     else:
         result_same_data_note = ""
@@ -1503,6 +1567,9 @@ async def _add_chart(
         "title": spec.title,
         "_infer_reason": spec._infer_reason,
     }
+    from bowhead_core.chart.display_receipt import chart_display_receipt
+
+    result["display_receipt"] = chart_display_receipt(spec_to_dict(spec))
     if note_fallbacks:
         result["presentation_fallbacks"] = note_fallbacks
     if spec.views:
@@ -1511,6 +1578,7 @@ async def _add_chart(
                 "id": view["id"],
                 "title": view["spec"]["title"],
                 "kind": view["spec"]["kind"],
+                "display_receipt": chart_display_receipt(view["spec"], has_root_plan=bool(spec.presentation_plan)),
                 "row_count": view["spec"]["row_count"],
                 "drawn_rows": len(view["spec"].get("rows", [])),
                 "coverage": {
@@ -1651,6 +1719,11 @@ async def _remove_chart(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         ids = [ids]
     if not isinstance(ids, list) or not ids:
         return {"error": "section_ids 必填（上一轮图表的真实 id 列表）"}
+    from bowhead_core.chart.edit_guard import blocked, denial
+
+    protected = await blocked(ctx)
+    if "chart_guard_history_unavailable" in protected or any(section_id in protected for section_id in ids if isinstance(section_id, str)):
+        return denial(history_unavailable="chart_guard_history_unavailable" in protected)
     reason = str(args.get("reason") or "").strip().lower()
     if reason not in REMOVE_REASONS:
         return {"error": "reason 只能是 replaced（被新图取代）或 removed（用户要求去掉）"}
@@ -2371,24 +2444,13 @@ _SERIES_RANK_NAMED = 5
 
 
 def _prior_chart_with_same_data(prior: list[Any], spec: Any, spec_of: Any) -> str | None:
-    """本轮是否已有一张**数据逐行相同、标题不同**的图；有就返回它的标题。
-
-    比的是**画出来的行**，不是 `data_artifact_id`：同一个 artifact 配不同的
-    `series` / `limit` 会画出真的不同的图（那是合法的），而不同 artifact 也可能
-    装着同一份数据（沙箱算两遍）。判据必须落在最终进图的那批行上。
-    """
+    """Report identical plotted rows without treating them as proof of identical provenance."""
     try:
         mine = json.dumps(spec.rows or [], sort_keys=True, ensure_ascii=False)
     except Exception:  # noqa: S110
         return None
     for sec in prior:
         ps = spec_of(sec)
-        if str(ps.get("title") or "") == str(spec.title or ""):
-            # D6 handles same titles (upgrade or skip). ★ This line is **currently unreachable**: D6 hits return
-            # directly before this point (observed to survive mutation testing). Retain it because it assumes
-            # the earlier code returns, something this function cannot guarantee. Removing it and later changing D6
-            # not to return would send same-title charts a confusing already-drawn-same-title warning.
-            continue
         try:
             if json.dumps(ps.get("rows") or [], sort_keys=True, ensure_ascii=False) == mine:
                 return str(ps.get("title") or "")
@@ -2846,13 +2908,16 @@ def _add_html_artifact_schema() -> ToolSchema:
     return ToolSchema(
         name="canvas_add_html_artifact",
         description=(
-            "把 AI 生成、已物化的单文件静态 HTML artifact 嵌入画布作安全阅读视图. "
-            "HTML 的正文、数字、表格和图形必须已经写入文件，不能依赖 JavaScript、React mount、"
-            "运行时 fetch、表单或外部资源. 前端会净化主动内容、关闭外网，并用不授予任何 token 的 "
-            "sandbox iframe 渲染；被净化后没有静态正文或内嵌 raster 图片的页面会降级为不可预览. "
-            "artifact 必须以 text/html 或 application/xhtml+xml MIME 持久化；扩展名不能替代 MIME. "
-            "`data` 只记录生成输入快照与可信来源，不会在浏览器运行时注入页面. "
-            "**禁止** 用作 external URL 嵌入（那走 canvas_add_external_iframe）."
+            "Embed a persisted, self-contained HTML artifact in a report. Materialize essential "
+            "prose, numbers, tables and figures in the file so Reading remains useful. "
+            "Admitted viewers also support offline JavaScript controls, charts and games; "
+            "prefer function event listeners and embed required assets. External connections, "
+            "dependencies and submissions are blocked; never rely on app cookies, parent DOM "
+            "or runtime data injection. Interactive availability depends on the viewer capability. "
+            "The original bytes remain downloadable. Persist text/html or application/xhtml+xml; "
+            "a filename extension does not substitute for MIME. data records generation inputs "
+            "and provenance only, never browser runtime inputs. External URLs must use "
+            "canvas_add_external_iframe instead."
         ),
         input_schema={
             "type": "object",
@@ -2860,21 +2925,19 @@ def _add_html_artifact_schema() -> ToolSchema:
             "properties": {
                 "artifact_id": {
                     "type": "string",
-                    "description": "web-artifacts-builder 生成的 HTML artifact_id (art_xxx)",
+                    "description": "Persisted self-contained HTML artifact ID (art_xxx).",
                 },
                 "title": {
                     "type": "string",
-                    "description": "section 标题（≤ 40 字）",
+                    "description": "Section title (up to 40 characters).",
                 },
                 "height": {
                     "type": "integer",
-                    "description": "静态阅读框高度像素（默认 480，范围 200–1200）",
+                    "description": "Preview height in pixels (default 480, range 200-1200).",
                 },
                 "data": {
                     "type": "object",
-                    "description": (
-                        "生成这份静态 HTML 时使用的 verified 数据快照（JSON object）. 只用于来源说明，不会注入 iframe；HTML 必须已包含可读结果."
-                    ),
+                    "description": ("Generation-input data snapshot (JSON object), retained only for provenance; never injected into the iframe."),
                 },
                 "sources": {
                     "type": "array",

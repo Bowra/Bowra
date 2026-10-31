@@ -380,6 +380,29 @@ describe("clarificationPending replay idempotency", () => {
     expect(getTurnSnapshot("t_1")?.beats.filter((beat) => beat.kind === "picker")).toHaveLength(2);
   });
 
+  it("replays connector choices using the saved option label while retaining the identifier", async () => {
+    const { hook, es } = await setupRunningTurn();
+    act(() => es.emit("clarification_required", {
+      ...CLAR_REQUIRED,
+      kind: "tool_context_select",
+      options: [{ value: "1", label: "Retail workspace" }, { value: "6", label: "Other workspace" }],
+    }));
+    act(() => es.emit("clarification.resolved", { request_id: "c1", chosen_value: "1", chosen_values: ["1"] }));
+    expect(hook.result.current.clarificationPending).toBeNull();
+    expect(getAnsweredClarification("c1")).toMatchObject({ values: ["Retail workspace"], canonicalValues: ["1"] });
+    act(() => es.emit("turn.resumed", { turn_id: "t_1", request_id: "c1", chosen_values: ["1"] }));
+    expect(getAnsweredClarification("c1")).toMatchObject({ values: ["Retail workspace"], canonicalValues: ["1"] });
+  });
+
+  it("restores a connector label when the question arrives after its replayed answer", async () => {
+    const { es } = await setupRunningTurn();
+    act(() => es.emit("turn.resumed", { turn_id: "t_1", request_id: "c1", chosen_values: ["1"] }));
+    act(() => es.emit("clarification_required", {
+      ...CLAR_REQUIRED, kind: "tool_context_select", options: [{ value: "1", label: "Retail workspace" }],
+    }));
+    expect(getAnsweredClarification("c1")).toMatchObject({ values: ["Retail workspace"], canonicalValues: ["1"] });
+  });
+
   it("clarification.dismissed 收掉 exact card 并留下 dismissed tombstone", async () => {
     const { hook, es } = await setupRunningTurn();
     act(() => es.emit("clarification_required", CLAR_REQUIRED));
@@ -636,6 +659,17 @@ describe("clarificationPending replay idempotency", () => {
         type: "single_select",
       },
     ]);
+  });
+
+  it("retains the temporary workspace checkbox default in the live event", async () => {
+    const { hook, es } = await setupRunningTurn();
+    act(() => es.emit("clarification_required", {
+      ...CLAR_REQUIRED,
+      kind: "tool_context_select",
+      remember_option: true,
+      remember_default: false,
+    }));
+    expect(hook.result.current.clarificationPending?.rememberDefault).toBe(false);
   });
 });
 

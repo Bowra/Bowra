@@ -97,8 +97,12 @@ def web_start_execution_intent(
         "text": request.text,
         "workspace_id": request.workspace_id,
     }
+    if request.datarc_source_evidence is not None:
+        intent["datarc_selection"] = request.datarc_source_evidence
     if request.agent_draft_target is not None:
         intent["agent_draft_target"] = request.agent_draft_target.model_dump()
+    if request.context_maintenance is not None:
+        intent["context_maintenance"] = request.context_maintenance.model_dump()
     if request.plan_execution_id is not None:
         intent["plan_execution_id"] = request.plan_execution_id
     if request.expected_plan_revision is not None:
@@ -111,6 +115,8 @@ def web_start_execution_intent(
 
 def _add_followup_time_zone(intent: dict[str, object], request: TurnRequest) -> dict[str, object]:
     """Carry the parent Turn's viewer zone into a queued follow-up (omitted when none)."""
+    if request.datarc_source_evidence is not None:
+        intent["datarc_selection"] = request.datarc_source_evidence
     if zone := request_time_zone_name(request):
         intent["time_zone"] = zone
     return intent
@@ -685,6 +691,7 @@ class TerminalRuntimeFactory:
         request.text = admitted.effective_user_text
         request.attachments = list(attachments)
         if typed_start:
+            request.datarc_source_evidence = effective.get("datarc_selection")
             request.active_datarc_project = active_datarc_project
             assert isinstance(member_uid, str)
             request.member_uid = member_uid
@@ -714,6 +721,8 @@ class TerminalRuntimeFactory:
             "user_id": request.user_id,
             "workspace_id": request.workspace_id,
         }
+        if request.datarc_source_evidence is not None:
+            followup_execution_intent["datarc_selection"] = request.datarc_source_evidence
         _add_followup_time_zone(followup_execution_intent, request)
         if has_paradigm_v2:
             followup_execution_intent["paradigm_v2"] = request.paradigm_v2

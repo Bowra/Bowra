@@ -63,10 +63,8 @@ CAPABILITY_LABELS_ZH = {
     QUERIES_BI: "查本空间BI",
 }
 
-# Labels → tools proving each label. Prefix matching (`kb_`) covers kb_search / kb_query_records /
-# kb_list_tables / kb_get_record as a family; future kb_* tools need no change here. Other tool evidence
-# must reuse capability_roles migration inference, not maintain a second planner tool list.
-_KB_PREFIX = "kb_"
+# Only declared retrieval Tools prove document-reading capability. Knowledge
+# management Tools mutate membership and do not grant retrieval access.
 
 
 def derive_capabilities(tool_names: Iterable[str] | None) -> frozenset[str]:
@@ -82,7 +80,9 @@ def derive_capabilities(tool_names: Iterable[str] | None) -> frozenset[str]:
 
     capability_ids = agent_capabilities(names)
     caps: set[str] = set()
-    if "cap_knowledge_search" in capability_ids or any(n.startswith(_KB_PREFIX) for n in names):
+    from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS
+
+    if "cap_knowledge_search" in capability_ids or KNOWLEDGE_READ_TOOLS.intersection(names):
         caps.add(READS_UPLOADS)
     if "cap_web_research" in capability_ids:
         caps.add(SEARCHES_WEB)

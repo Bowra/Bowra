@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     category        TEXT,                     -- 业务分类（LLM / 用户赋 / rule）
     category_source TEXT,                     -- 'llm' | 'user' | 'rule'
     row_count       INTEGER,                  -- 表格类产物的行数；非表格为 NULL
+    knowledge_intent_json TEXT,
     workspace_id    TEXT                      -- 产物所属空间；NULL=未归属（**不是**跨空间）
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_canvas  ON artifacts(canvas_id, created_at DESC);
@@ -204,16 +205,26 @@ def _defaults_for_kind(kind: str) -> tuple[str, str]:
 
 
 @contextlib.asynccontextmanager
-async def _open_db(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
+async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None) -> AsyncIterator[aiosqlite.Connection]:
     """Sprint ι (P1 #1): unified aiosqlite connect helper that:
     - sets PRAGMA foreign_keys=ON per-connection (required for FK CASCADE on
       artifact_stdout, see §1.3) — SQLite default is OFF and is per-connection.
     - reserves single hook for future per-conn settings (busy_timeout, etc.).
 
+    A supplied connection remains caller-owned; its row factory is restored
+    without committing, rolling back, changing PRAGMAs or opening another connection.
+
     All call sites in artifact_store.py route through this. Direct
     `aiosqlite.connect(self.db_path)` in this file is now a lint violation
     (contract test in test_iota_aiosqlite_contract.py enforces).
     """
+    if connection is not None:
+        previous_factory = connection.row_factory
+        try:
+            yield connection
+        finally:
+            connection.row_factory = previous_factory
+        return
     async with aiosqlite.connect(db_path) as db:
         await db.execute("PRAGMA foreign_keys = ON")
         yield db
@@ -434,6 +445,7 @@ class ResultsArtifactSnapshot:
     high_water_created_at: str | None
     high_water_artifact_id: str | None
     membership_cutoff_at: str | None = None
+    presentation_high_water: int | None = None
 
     def __post_init__(self) -> None:
         if (self.high_water_created_at is None) != (self.high_water_artifact_id is None):
@@ -656,7 +668,13 @@ _ARTIFACT_FETCH_JWT_AUD = "artifact-fetch"
 _ARTIFACT_FETCH_DEFAULT_TTL = 600
 
 
-def mint_artifact_fetch_token(secret: str, user_id: str, *, ttl_sec: int = _ARTIFACT_FETCH_DEFAULT_TTL) -> str:
+def mint_artifact_fetch_token(
+    secret: str,
+    user_id: str,
+    *,
+    ttl_sec: int = _ARTIFACT_FETCH_DEFAULT_TTL,
+    producer_output: dict[str, str] | None = None,
+) -> str:
     """cca P3 F-B: mint a short-lived artifact-fetch-scoped HS256 token (aud + sub + exp).
     `secret` is the dedicated artifact-fetch secret (NOT the main JWT secret)."""
     import time
@@ -665,8 +683,33 @@ def mint_artifact_fetch_token(secret: str, user_id: str, *, ttl_sec: int = _ARTI
 
     now = int(time.time())
     payload = {"aud": _ARTIFACT_FETCH_JWT_AUD, "sub": user_id, "iat": now, "exp": now + int(ttl_sec)}
+    if producer_output is not None:
+        if (
+            set(producer_output) != {"session_id", "turn_id", "workspace_id"}
+            or any(not isinstance(value, str) for value in producer_output.values())
+            or not producer_output["session_id"]
+            or not producer_output["turn_id"]
+        ):
+            raise ValueError("invalid_producer_output_scope")
+        payload["producer_output"] = dict(producer_output)
     token = jwt.encode(payload, secret, algorithm="HS256")
     return token.decode("utf-8") if isinstance(token, bytes) else token
+
+
+def artifact_fetch_producer_output(secret: str, token: str) -> dict[str, str] | None:
+    """Read the signed run binding for narrowly admitted sandbox output types."""
+    import jwt
+
+    try:
+        payload = jwt.decode(token, secret, algorithms=["HS256"], audience=_ARTIFACT_FETCH_JWT_AUD)
+    except jwt.InvalidTokenError:
+        return None
+    scope = payload.get("producer_output")
+    if not isinstance(scope, dict) or set(scope) != {"session_id", "turn_id", "workspace_id"}:
+        return None
+    if any(not isinstance(value, str) for value in scope.values()) or not scope["session_id"] or not scope["turn_id"]:
+        return None
+    return scope
 
 
 def verify_artifact_fetch_token(secret: str, token: str) -> str | None:
@@ -1413,6 +1456,14 @@ class ArtifactStore:
             ):
                 if col not in cols:
                     await db.execute(f"ALTER TABLE artifacts ADD COLUMN {col} {decl}")
+            if "knowledge_intent_json" in cols or "knowledge_intent_json" in {
+                row[1] for row in await (await db.execute("PRAGMA table_info(artifacts)")).fetchall()
+            }:
+                from importlib import import_module
+
+                intent_contract = import_module("bowhead_core.migrations.versions.0202_knowledge_ingestion")
+                await db.execute(intent_contract.UPLOAD_DEFAULT.replace("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1))
+                await db.execute(intent_contract.UPLOAD_IMMUTABLE.replace("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1))
             # Create indexes referencing new columns only once all columns exist
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_artifacts_user ON artifacts(created_by, deleted_at, created_at DESC)",
@@ -2370,6 +2421,7 @@ class ArtifactStore:
         include_deleted: bool = False,
         check_created_by: str | None = None,
         reject_null_owner: bool = False,
+        connection: aiosqlite.Connection | None = None,
     ) -> Artifact | None:
         """按 id 拿 artifact. 默认过滤已删除.
 
@@ -2386,7 +2438,7 @@ class ArtifactStore:
         cross-user/owner-less exfil vector). Regular per-user downloads keep NULL artifacts
         readable (legit shared/system artifacts), so this stays opt-in.
         """
-        async with _open_db(self.db_path) as db:
+        async with _open_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             q = "SELECT * FROM artifacts WHERE id=? AND COALESCE(producer_kind,'')<>'template_document_internal_v1'"
             q += " AND " + await self._retired_owner_filter(db)
@@ -2439,6 +2491,7 @@ class ArtifactStore:
         *,
         user_id: str,
         workspace_id: str,
+        connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Artifact]:
         """Resolve completed, caller-owned uploads inside one Space.
 
@@ -2459,7 +2512,7 @@ class ArtifactStore:
             "AND COALESCE(a.producer_kind,'')<>'template_document_internal_v1' "
             "AND b.user_id=? AND b.workspace_id=?"
         )
-        async with _open_db(self.db_path) as db:
+        async with _open_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 query,
@@ -2621,7 +2674,9 @@ class ArtifactStore:
     # ─── Results complete read model ───────────────────────────
     @staticmethod
     def _results_membership_cte() -> str:
-        return """
+        from bowhead_core.artifact_presentation import PRESENTATION_EVENT_SQL
+
+        return f"""
         WITH session_artifact_ids AS (
             SELECT DISTINCT ta.artifact_id
             FROM turn_attachments ta
@@ -2641,6 +2696,23 @@ class ArtifactStore:
             FROM artifacts a
             JOIN turns t ON t.id = a.created_by_turn
             WHERE t.session_id = ?
+            UNION
+            SELECT json_extract(CASE WHEN item.type='object' THEN item.value ELSE '{{}}' END, '$.artifact_id')
+            FROM turns t JOIN sessions owner ON owner.id=t.session_id
+            JOIN turn_events e ON e.turn_id=t.id
+            JOIN json_each(CASE WHEN json_type(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,
+                '$.result_meta.artifact_presentation.items')='array' THEN
+                json_extract(e.payload_json,'$.result_meta.artifact_presentation.items') ELSE '[]' END) item
+            JOIN artifacts presented ON presented.id=json_extract(CASE WHEN item.type='object' THEN item.value ELSE '{{}}' END,'$.artifact_id')
+              AND presented.workspace_id=owner.workspace_id AND presented.created_by=owner.user_id
+            WHERE t.session_id=? AND e.rowid <= ? AND {PRESENTATION_EVENT_SQL}
+              AND json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,
+                '$.result_meta.artifact_presentation.contract')='artifact-presentation.v1'
+              AND json_type(CASE WHEN item.type='object' THEN item.value ELSE '{{}}' END,'$.artifact_id')='text'
+              AND json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,'$.result_meta.artifact_presentation_receipt.turn_id')=t.id
+              AND json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,'$.result_meta.artifact_presentation_receipt.session_id')=owner.id
+              AND json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,'$.result_meta.artifact_presentation_receipt.user_id')=owner.user_id
+              AND json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{{}}' END,'$.result_meta.artifact_presentation_receipt.workspace_id')=owner.workspace_id
         )
         """
 
@@ -2651,6 +2723,7 @@ class ArtifactStore:
         session_id: str,
         user_id: str,
         authorized_artifact_ids: Sequence[str] | None,
+        presentation_high_water: int | None = None,
     ) -> tuple[str, list[object], str, list[object]]:
         """Build one authorized artifact-ID relation for owner or reportOnly.
 
@@ -2663,7 +2736,14 @@ class ArtifactStore:
         if authorized_artifact_ids is None:
             return (
                 cls._results_membership_cte(),
-                [session_id, session_id, session_id, session_id],
+                [
+                    session_id,
+                    session_id,
+                    session_id,
+                    session_id,
+                    session_id,
+                    presentation_high_water if presentation_high_water is not None else 9223372036854775807,
+                ],
                 "AND a.created_by = ?",
                 [user_id],
             )
@@ -2759,6 +2839,25 @@ class ArtifactStore:
                 deterministic=True,
             )
 
+    async def results_presentation_high_water(self, *, session_id: str) -> int:
+        """Observe native receipt membership, independent of original file age."""
+        from bowhead_core.artifact_presentation import PRESENTATION_EVENT_SQL, PresentationContractUnsupported
+
+        async with (
+            _open_db(self.db_path) as db,
+            db.execute(
+                "SELECT COALESCE(MAX(e.rowid),0), MAX(CASE WHEN json_valid(payload_json) THEN "
+                "json_extract(payload_json,'$.result_meta.artifact_presentation.contract') != 'artifact-presentation.v1' ELSE 0 END) "
+                "FROM turn_events e JOIN turns t ON t.id=e.turn_id "
+                f"WHERE t.session_id=? AND {PRESENTATION_EVENT_SQL}",
+                (session_id,),
+            ) as cursor,
+        ):
+            row = await cursor.fetchone()
+        if row[1]:
+            raise PresentationContractUnsupported("artifact_presentation_contract_unsupported")
+        return int(row[0])
+
     async def results_high_water(
         self,
         *,
@@ -2771,10 +2870,12 @@ class ArtifactStore:
         from bowhead_core.results_artifact_policy import results_internal_artifact_sql
 
         internal_sql, internal_params = results_internal_artifact_sql("a")
+        presentation_high_water = await self.results_presentation_high_water(session_id=session_id)
         scope_sql, scope_params, owner_sql, owner_params = self._results_scope_sql(
             session_id=session_id,
             user_id=user_id,
             authorized_artifact_ids=authorized_artifact_ids,
+            presentation_high_water=presentation_high_water,
         )
         sql = (
             scope_sql
@@ -2798,6 +2899,7 @@ class ArtifactStore:
         return ResultsArtifactSnapshot(
             high_water_created_at=(str(row["created_at"]) if row else None),
             high_water_artifact_id=(str(row["id"]) if row else None),
+            presentation_high_water=presentation_high_water,
         )
 
     async def results_snapshot_membership_digest(
@@ -2843,6 +2945,7 @@ class ArtifactStore:
             session_id=session_id,
             user_id=user_id,
             authorized_artifact_ids=authorized_artifact_ids,
+            presentation_high_water=snapshot.presentation_high_water,
         )
         sql = (
             scope_sql
@@ -2968,6 +3071,7 @@ class ArtifactStore:
             session_id=session_id,
             user_id=user_id,
             authorized_artifact_ids=authorized_artifact_ids,
+            presentation_high_water=snapshot.presentation_high_water,
         )
         direct_ids_json = json.dumps(
             list(dict.fromkeys(item for item in direct_report_artifact_ids if item)),
@@ -3322,6 +3426,7 @@ class ArtifactStore:
         limit: int = 100,
         offset: int = 0,
         results_visible_only: bool = False,
+        connection: aiosqlite.Connection | None = None,
     ) -> list[Artifact]:
         """列本 session 触碰过的 artifact（去重 + owner 校验）.
 
@@ -3339,42 +3444,23 @@ class ArtifactStore:
         """
         like = f"%{q}%" if q else None
         # One UNION collects all sources; final JOIN artifacts gets details.
-        sql = """
-        WITH session_artifact_ids AS (
-            -- 1. turn_attachments
-            SELECT DISTINCT ta.artifact_id
-            FROM turn_attachments ta
-            JOIN turns t ON t.id = ta.turn_id
-            WHERE t.session_id = ?
-            UNION
-            -- 2. session_attachments
-            SELECT sa.artifact_id
-            FROM session_attachments sa
-            WHERE sa.session_id = ? AND sa.detached_at IS NULL
-            UNION
-            -- 3. canvas_id -> session
-            SELECT a.id
-            FROM artifacts a
-            JOIN canvases c ON c.id = a.canvas_id
-            WHERE c.session_id = ?
-            UNION
-            -- 4. producer turn -> session (precise legacy/runtime fallback)
-            SELECT a.id
-            FROM artifacts a
-            JOIN turns t ON t.id = a.created_by_turn
-            WHERE t.session_id = ?
-        )
+        sql = (
+            self._results_membership_cte()
+            + """
         SELECT a.*
         FROM artifacts a
         JOIN session_artifact_ids s ON s.artifact_id = a.id
         WHERE a.deleted_at IS NULL AND a.status <> 'missing'
           AND a.created_by = ? AND COALESCE(a.producer_kind,'')<>'template_document_internal_v1'
         """
+        )
         params: list = [
             session_id,  # turn_attachments
             session_id,  # session_attachments
             session_id,  # canvases
             session_id,  # created_by_turn
+            session_id,  # native presentation receipts
+            9223372036854775807,
             user_id,  # final created_by guard
         ]
         if like:
@@ -3393,7 +3479,7 @@ class ArtifactStore:
             params.extend(internal_params)
         sql += " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?"
         params += [limit, offset]
-        async with _open_db(self.db_path) as db:
+        async with _open_db(self.db_path, connection) as db:
             db.row_factory = aiosqlite.Row
             try:
                 async with db.execute(sql, params) as cur:

@@ -14,7 +14,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,8 +27,11 @@ from bowhead_core._db import open_shared_ctx
 
 if TYPE_CHECKING:
     from bowhead_core.chat_reference_admission import ReferenceStartAdmission
+    from bowhead_core.chat_reference_scope import ReferenceRequestScope
     from bowhead_core.chat_reference_storage import ChatReferenceStore, QueuedReferenceInput, ReferenceScope
-    from bowhead_core.document_chat_continuation import DocumentTurnOwner
+    from bowhead_core.coach_operation_history import CoachOperationHistory
+    from bowhead_core.context_action import ContextMaintenanceAction
+    from bowhead_core.document_chat_continuation import DocumentResumeReservation, DocumentTurnOwner
 from bowhead_core.chat_turn_source import (
     ChatTurnUserSource,
     ReferenceExecutionUnavailableError,
@@ -270,6 +273,7 @@ def _chat_turn_user_source_json(
 
 def _chat_turn_user_source_from_row(row: aiosqlite.Row) -> ChatTurnUserSource:
     from bowhead_core.chat_references import decode_input_document
+    from bowhead_core.context_action import ContextMaintenanceAction
     from bowhead_core.document_revision_target import DocumentRevisionTarget
 
     attachment_ids = json.loads(str(row["attachment_ids_json"]))
@@ -294,6 +298,11 @@ def _chat_turn_user_source_from_row(row: aiosqlite.Row) -> ChatTurnUserSource:
         document_revision_target=(
             DocumentRevisionTarget.model_validate_json(row["document_revision_target_json"])
             if row["document_revision_target_json"] is not None
+            else None
+        ),
+        context_maintenance=(
+            ContextMaintenanceAction.model_validate_json(row["context_maintenance_json"])
+            if "context_maintenance_json" in tuple(row.keys()) and row["context_maintenance_json"] is not None
             else None
         ),
     )
@@ -420,11 +429,14 @@ async def _insert_chat_turn_user_source_in_tx(
         if not document_reuse_enabled():
             raise DocumentRequestError("document_revision_unavailable")
         await validate_revision_target_in_tx(connection, source=source_snapshot)
+    from bowhead_core.context_action import validate_context_action_in_tx
+
+    await validate_context_action_in_tx(connection, source=source_snapshot)
     cursor = await connection.execute(
         "INSERT OR IGNORE INTO chat_turn_user_sources("
         "turn_id,session_id,user_id,workspace_id,user_text,attachment_ids_json,"
-        "attachment_refs_json,parts_json,created_at,input_document_json,document_revision_target_json"
-        ") VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "attachment_refs_json,parts_json,created_at,input_document_json,document_revision_target_json,context_maintenance_json"
+        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             source_snapshot.turn_id,
             source_snapshot.session_id,
@@ -437,9 +449,12 @@ async def _insert_chat_turn_user_source_in_tx(
             created_at,
             source_snapshot.input_document.model_dump_json(exclude_none=True) if source_snapshot.input_document is not None else None,
             source_snapshot.document_revision_target.model_dump_json() if source_snapshot.document_revision_target is not None else None,
+            source_snapshot.context_maintenance.model_dump_json() if source_snapshot.context_maintenance is not None else None,
         ),
     )
     if cursor.rowcount == 1:
+        if source_snapshot.context_maintenance is not None:
+            await connection.execute("UPDATE turns SET operation_kind='context_maintenance' WHERE id=?", (source_snapshot.turn_id,))
         # Commit current live-file associations before dispatch. Queued/recovered
         # sources can outlive their files; retain their source without reviving
         # deleted inputs. Readers still enforce readiness, ownership and scope.
@@ -1234,6 +1249,7 @@ class Turn:
     ended_at: str | None
     final_answer: str | None
     cost_usd: float
+    operation_kind: str | None = None
     execution_generation: int = 1
     terminal_protocol_version: int | None = None
     tokens_input: int = 0
@@ -1866,7 +1882,7 @@ class SessionStore:
             "SELECT 1 FROM workspaces w "
             "JOIN sessions s ON s.workspace_id = w.id "
             "JOIN turns t ON t.session_id = s.id "
-            "WHERE w.team_id = ? AND w.status = 'active' "
+            "WHERE w.team_id = ? AND w.status = 'active' AND t.operation_kind IS NULL "
             "AND s.origin = 'normal' LIMIT 1"
         )
         completed_query = any_query.replace(
@@ -2462,13 +2478,13 @@ class SessionStore:
                 if schema_mode == "migrated":
                     active_query = (
                         "SELECT s.active_turn_id,s.steer_buffer_json,"
-                        "t.error_kind,d.state AS dispatch_state FROM sessions s "
+                        "t.error_kind,d.state AS dispatch_state,t.operation_kind FROM sessions s "
                         "LEFT JOIN turns t ON t.id=s.active_turn_id "
                         "LEFT JOIN chat_turn_spawn_dispatch d ON d.turn_id=t.id "
                         "WHERE s.id=?"
                     )
                 else:
-                    active_query = "SELECT active_turn_id,steer_buffer_json,NULL,NULL FROM sessions WHERE id=?"
+                    active_query = "SELECT active_turn_id,steer_buffer_json,NULL,NULL,NULL FROM sessions WHERE id=?"
                 async with db.execute(active_query, (session_id,)) as cur:
                     row = await cur.fetchone()
                 if row is None:
@@ -2482,7 +2498,7 @@ class SessionStore:
                 if expected_turn_id and active_turn_id != expected_turn_id:
                     await db.execute("ROLLBACK")
                     return False
-                if row[2] == "legacy_protocol_isolated" or row[3] == "failed":
+                if row[2] == "legacy_protocol_isolated" or row[3] == "failed" or row[4] == "context_maintenance":
                     # Isolation preserves the active pointer and previously
                     # accepted raw buffer as a fail-closed fence. It must never
                     # acknowledge additional steer work that no recovery owner
@@ -3256,6 +3272,19 @@ class SessionStore:
             await db.commit()
         return max(cursor.rowcount, 0)
 
+    async def retain_knowledge_user_request(self, *, turn_id: str, session_id: str, user_id: str, workspace_id: str) -> bool:
+        """Retain trusted human ingress before a question can pause the execution."""
+        async with open_shared_ctx(self._db_path) as db:
+            cursor = await db.execute(
+                "UPDATE turns SET knowledge_user_request=1 WHERE id=? AND session_id=? AND EXISTS("
+                "SELECT 1 FROM chat_turn_user_sources source JOIN sessions session ON session.id=source.session_id "
+                "WHERE source.turn_id=turns.id AND source.session_id=turns.session_id AND source.user_id=? AND source.workspace_id=? "
+                "AND session.user_id=source.user_id AND session.workspace_id=source.workspace_id)",
+                (turn_id, session_id, user_id, workspace_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def get_chat_turn_user_source(
         self,
         *,
@@ -3397,11 +3426,25 @@ class SessionStore:
             return "settled"
         return "active"
 
-    async def require_legacy_chat_execution(self, *, turn_id: str) -> None:
+    async def require_legacy_chat_execution(
+        self,
+        *,
+        turn_id: str,
+        document_worker: DocumentTurnOwner | None = None,
+        document_resume: DocumentResumeReservation | None = None,
+    ) -> None:
         """Execution gate only; does not restrict history/source/receipt reads."""
         async with open_shared_ctx(self._db_path) as db:
+            await db.execute("BEGIN")
             if await _requires_reference_execution_in_tx(db, turn_id):
-                raise ReferenceExecutionUnavailableError()
+                if document_worker is None or document_resume is None or document_worker.turn_id != turn_id:
+                    raise ReferenceExecutionUnavailableError()
+                from bowhead_core.documents.agent_caller import require_document_reference_resume_entry_in_tx
+
+                try:
+                    await require_document_reference_resume_entry_in_tx(db, worker=document_worker, reservation=document_resume)
+                except ValueError as exc:
+                    raise ReferenceExecutionUnavailableError() from exc
 
     async def claim_chat_spawn_dispatch_for_worker(
         self,
@@ -3442,8 +3485,19 @@ class SessionStore:
                     return "rejected" if turn_exists else "untracked"
                 _parent_session, _parent_turn = parent
                 if await _requires_reference_execution_in_tx(db, turn_id):
-                    await db.rollback()
-                    return "rejected"
+                    from bowhead_core.documents.agent_caller import document_reference_resume_reserved_in_tx
+
+                    async with db.execute(
+                        "SELECT 1 FROM chat_turn_spawn_dispatch WHERE turn_id=? AND session_id=? AND lease_kind='resume' "
+                        "AND state='claimed' AND owner_id IS NULL AND cancel_requested_at IS NULL AND lease_execution_generation=?",
+                        (turn_id, _parent_turn["session_id"], _parent_turn["execution_generation"]),
+                    ) as cursor:
+                        reserved_dispatch = await cursor.fetchone()
+                    if reserved_dispatch is None or not await document_reference_resume_reserved_in_tx(
+                        db, turn_id=turn_id, generation=_parent_turn["execution_generation"]
+                    ):
+                        await db.rollback()
+                        return "rejected"
                 async with db.execute(
                     "SELECT d.state,d.owner_id,d.session_id AS dispatch_session_id,"
                     "d.lease_kind,d.lease_execution_generation,t.status,"
@@ -3590,11 +3644,22 @@ class SessionStore:
                     from bowhead_core.chat_reference_retention import reference_material_available_in_connection
                     from bowhead_core.chat_reference_runtime_store import is_reference_runtime_in_connection
                     from bowhead_core.chat_reference_storage import _time
+                    from bowhead_core.documents.agent_caller import document_reference_resume_heartbeat_in_tx
 
-                    if not await is_reference_runtime_in_connection(db, turn_id=turn_id) or _time(row["lease_expires_at"]) <= datetime.now(UTC):
+                    native_resume = await document_reference_resume_heartbeat_in_tx(
+                        db, turn_id=turn_id, generation=turn_generation, owner_id=owner_id, settling=settling
+                    )
+                    if (
+                        native_resume is False
+                        or native_resume is not None
+                        and lease_kind != "resume"
+                        or native_resume is None
+                        and not await is_reference_runtime_in_connection(db, turn_id=turn_id)
+                        or _time(row["lease_expires_at"]) <= datetime.now(UTC)
+                    ):
                         await db.rollback()
                         return "lost"
-                    if not settling and not await reference_material_available_in_connection(db, turn_id=turn_id):
+                    if not settling and native_resume is None and not await reference_material_available_in_connection(db, turn_id=turn_id):
                         await db.rollback()
                         return "lost"
                 # Compute deadlines under the writer lock, after validation.
@@ -3697,15 +3762,15 @@ class SessionStore:
                     db,
                     turn_id=turn_id,
                 )
+                from bowhead_core.document_clarification_lifecycle import document_pause_retained_in_tx
+
+                document_pause = canonical_status == "clarification_pending" and await document_pause_retained_in_tx(db, turn_id=turn_id)
                 deferred_reference_work = False
                 recover_reference_work = False
                 if reference_execution and canonical_status == "clarification_pending" and has_work:
                     from bowhead_core.chat_reference_continuation import pause_ready
 
-                    deferred_reference_work = proof["deleted_at"] is None and await pause_ready(
-                        db,
-                        turn_id=turn_id,
-                    )
+                    deferred_reference_work = proof["deleted_at"] is None and (document_pause or await pause_ready(db, turn_id=turn_id))
                     recover_reference_work = not deferred_reference_work
                 if reference_execution:
                     from bowhead_core.chat_reference_runtime_store import settle_reference_primary_in_connection
@@ -3725,9 +3790,6 @@ class SessionStore:
                         return False
                     if not recover_reference_work:
                         await settle_reference_primary_in_connection(db, turn_id=turn_id, status=canonical_status, now=_now())
-                from bowhead_core.document_clarification_lifecycle import document_pause_retained_in_tx
-
-                document_pause = canonical_status == "clarification_pending" and await document_pause_retained_in_tx(db, turn_id=turn_id)
                 drain_work = recover_reference_work or (has_work and not reference_execution and not document_pause)
                 cursor = await db.execute(
                     "UPDATE chat_turn_spawn_dispatch SET state=?,"
@@ -4132,10 +4194,13 @@ class SessionStore:
                     ) as deferred_cursor:
                         deferred_candidates = await deferred_cursor.fetchall()
                     from bowhead_core.chat_reference_continuation import pause_recoverable
+                    from bowhead_core.document_clarification_lifecycle import document_pause_retained_in_tx
 
                     for deferred_candidate in deferred_candidates:
                         deferred_turn_id = str(deferred_candidate[0])
-                        pause_is_recoverable = await pause_recoverable(db, turn_id=deferred_turn_id, reference_store=reference_store)
+                        pause_is_recoverable = await document_pause_retained_in_tx(db, turn_id=deferred_turn_id) or await pause_recoverable(
+                            db, turn_id=deferred_turn_id, reference_store=reference_store
+                        )
                         if pause_is_recoverable:
                             # Rotate healthy rows behind the bounded batch so
                             # a stable prefix cannot starve later candidates.
@@ -4150,6 +4215,17 @@ class SessionStore:
                             "WHERE turn_id=? AND state='terminal'",
                             (now, now, deferred_turn_id),
                         )
+                from bowhead_core.document_clarification_lifecycle import installed as document_cards_installed
+
+                if await document_cards_installed(db):
+                    # This only selects candidates; the row savepoint below
+                    # validates the original native proof before any mutation.
+                    reference_runtime_filter = (
+                        f"({reference_runtime_filter} OR EXISTS (SELECT 1 FROM clarification_document_continuations native "
+                        "WHERE native.turn_id=t.id AND native.reserved_generation=t.execution_generation "
+                        "AND native.creation_generation<native.reserved_generation AND d.lease_kind='resume' "
+                        "AND d.lease_execution_generation=t.execution_generation))"
+                    )
                 async with db.execute(
                     "SELECT d.turn_id,d.session_id,d.state,d.lease_kind,"
                     "d.lease_execution_generation,s.workspace_id,s.user_id,"
@@ -4180,6 +4256,7 @@ class SessionStore:
                     buffer_is_malformed = False
                     reference_runtime = False
                     reference_continuation = False
+                    native_lifecycle = None
                     await db.execute("SAVEPOINT recover_chat_dispatch_row")
                     try:
                         parent = await _read_legacy_continuation_parent_in_tx(
@@ -4236,8 +4313,12 @@ class SessionStore:
                             from bowhead_core.chat_reference_runtime_store import is_reference_recoverable_in_connection
 
                             if not await is_reference_recoverable_in_connection(db, turn_id=turn_id):
-                                await db.execute("RELEASE SAVEPOINT recover_chat_dispatch_row")
-                                continue
+                                from bowhead_core.documents.agent_caller import _document_reference_lifecycle_in_tx
+
+                                native_lifecycle = await _document_reference_lifecycle_in_tx(db, turn_id=turn_id)
+                                if native_lifecycle is None:
+                                    await db.execute("RELEASE SAVEPOINT recover_chat_dispatch_row")
+                                    continue
                         parent_is_validated_legacy = True
                         parent_session, _parent_turn = parent
                         owns_session_continuation = str(parent_session["active_turn_id"] or "") == turn_id
@@ -4256,7 +4337,7 @@ class SessionStore:
                         preworker_resume = (
                             is_resume_lease
                             and owns_session_continuation
-                            and str(row["state"]) == "claimed"
+                            and (str(row["state"]) == "claimed" or str(row["state"]) == "spawned" and native_lifecycle == "reserved")
                             and str(row["turn_status"]) == "running"
                             and lease_execution_generation == turn_execution_generation
                         )
@@ -4278,7 +4359,7 @@ class SessionStore:
                                     preworker_resume = ordinary.consumed_generation is None
                                 except ValueError:
                                     preworker_resume = False
-                        if preworker_resume and reference_runtime:
+                        if preworker_resume and reference_runtime and not document_card_id:
                             from bowhead_core.chat_reference_continuation import release_resume
 
                             try:
@@ -4304,7 +4385,7 @@ class SessionStore:
                             await db.execute(
                                 "UPDATE chat_turn_spawn_dispatch SET state='terminal',"
                                 "owner_id=NULL,lease_expires_at=?,updated_at=? "
-                                "WHERE turn_id=? AND state='claimed' "
+                                "WHERE turn_id=? AND state IN ('claimed','spawned') "
                                 "AND lease_kind='resume' "
                                 "AND lease_execution_generation=?",
                                 (
@@ -4513,8 +4594,10 @@ class SessionStore:
                         turn_status = str(row["turn_status"])
                         error_kind = str(row["error_kind"] or "")
                         from bowhead_core.agent_collaboration import recover_collaboration_publications_in_connection
+                        from bowhead_core.context_activity import recover_context_publications_in_connection
 
-                        recovered_collaboration = await recover_collaboration_publications_in_connection(db, turn_id=turn_id)
+                        recovered_activity = await recover_collaboration_publications_in_connection(db, turn_id=turn_id)
+                        recovered_activity += await recover_context_publications_in_connection(db, turn_id=turn_id)
                         generation_floor = await _legacy_generation_floor_in_tx(
                             db,
                             turn_id=turn_id,
@@ -4573,7 +4656,7 @@ class SessionStore:
                             canonical_status=recovered_status,
                             canonical_final_answer=str(row["final_answer"] or ""),
                         )
-                        if recovered_collaboration:
+                        if recovered_activity:
                             wire_terminal_matches = False
                         final_answer_matches = False
                         recovered_final_answer = str(row["final_answer"] or "")
@@ -4930,7 +5013,13 @@ class SessionStore:
                         db,
                         turn_id=current_turn_id,
                     ):
-                        raise ReferenceExecutionUnavailableError()
+                        from bowhead_core.documents.agent_caller import _document_reference_lifecycle_in_tx
+
+                        if (
+                            normalize_legacy_turn_status(str(parent_turn["status"])) not in {"completed", "failed", "cancelled", "aborted"}
+                            or await _document_reference_lifecycle_in_tx(db, turn_id=current_turn_id) != "consumed"
+                        ):
+                            raise ReferenceExecutionUnavailableError()
                 try:
                     steer_segment = _segment_steer_buffer(session["steer_buffer_json"])
                 except _LegacyContinuationRowError:
@@ -5361,6 +5450,7 @@ class SessionStore:
         parts: list[dict[str, Any]] | None = None,
         reference_start: ReferenceStartAdmission | None = None,
         document_revision_target: DocumentRevisionTarget | None = None,
+        context_maintenance: ContextMaintenanceAction | None = None,
     ) -> ChatSubmissionReceipt:
         """Atomically persist a Turn/receipt and optional prepared Agent/Skill references.
 
@@ -5495,6 +5585,7 @@ class SessionStore:
                     attachment_refs=tuple(attachment_refs or ()),
                     parts=tuple(parts) if parts is not None else None,
                     document_revision_target=document_revision_target,
+                    context_maintenance=context_maintenance,
                 )
 
                 if reference_start is not None and (expected_source.attachment_ids or expected_source.attachment_refs):
@@ -6412,7 +6503,7 @@ class SessionStore:
                 )
                 # #133: set a temporary title immediately on the first turn (the real AI title overwrites it later).
                 # Only replace an empty title or a session_id-shaped title; preserve existing AI titles.
-                if seq == 1:
+                if seq == 1 and (source is None or source.context_maintenance is None):
                     lines = (user_text or "").strip().splitlines()
                     snippet = (lines[0][:40] if lines else "") or "新对话"
                     await db.execute(
@@ -6458,10 +6549,19 @@ class SessionStore:
         tokens_output: int,
         cost_usd: float,
         error_kind: str | None = None,
+        context_publication: Callable[[aiosqlite.Connection, str], Awaitable[None]] | None = None,
     ) -> bool:
+        from bowhead_core.context_publication import ContextPublication
+
+        if isinstance(context_publication, ContextPublication):
+            context_publication = await context_publication.prepare_for_answer(final_answer)
         async with open_shared_ctx(self._db_path) as db:
             if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
                 return False
+            if context_publication is not None:
+                if worker is None:
+                    raise ValueError("Context publication requires the original worker")
+                await context_publication(db, final_answer)
             now = _now()
             cursor = await db.execute(
                 """
@@ -7058,24 +7158,60 @@ class SessionStore:
             cost_usd=cost_usd,
         )
 
-    async def list_turns(self, *, session_id: str, limit: int | None = None) -> list[Turn]:
-        """会话的 turn，按 seq 升序。``limit`` 给了就只取**最近** ``limit`` 轮（仍升序返回）——
-        批 3 的 turn 级历史用它，IM 会话永不结束，不能每轮把整个会话拖进内存（review 修）。"""
+    async def list_turns(self, *, session_id: str, limit: int | None = None, include_maintenance: bool = False) -> list[Turn]:
+        """Read business exchanges in sequence; UI/audit may include maintenance."""
+        where = "session_id=?" + ("" if include_maintenance else " AND operation_kind IS NULL")
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             if limit is not None and limit > 0:
                 async with db.execute(
-                    "SELECT * FROM (SELECT * FROM turns WHERE session_id=? ORDER BY seq DESC LIMIT ?) ORDER BY seq",
+                    f"SELECT * FROM (SELECT * FROM turns WHERE {where} ORDER BY seq DESC LIMIT ?) ORDER BY seq",  # noqa: S608
                     (session_id, int(limit)),
                 ) as cur:
                     rows = await cur.fetchall()
             else:
                 async with db.execute(
-                    "SELECT * FROM turns WHERE session_id=? ORDER BY seq",
+                    f"SELECT * FROM turns WHERE {where} ORDER BY seq",  # noqa: S608
                     (session_id,),
                 ) as cur:
                     rows = await cur.fetchall()
         return [_row_to_turn(r) for r in rows]
+
+    async def context_conversation_generation(self, *, session_id: str) -> str | None:
+        """Read advisory context identity after the caller's session access check."""
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute("SELECT generation_id FROM model_context_conversation_heads WHERE session_id=?", (session_id,)) as cursor,
+        ):
+            row = await cursor.fetchone()
+        return row[0] if row is not None else None
+
+    async def list_context_history_page(self, *, session_id: str, after_seq: int, before_seq: int, limit: int = 100) -> list[Turn]:
+        """Read the next ordered history page without dropping older exchanges."""
+        if not 0 <= after_seq < before_seq or not 1 <= limit <= 100:
+            raise ValueError("Invalid context history cursor")
+        async with open_shared_ctx(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM turns WHERE session_id=? AND operation_kind IS NULL AND seq>? AND seq<? ORDER BY seq LIMIT ?",
+                (session_id, after_seq, before_seq, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [_row_to_turn(row) for row in rows]
+
+    async def load_coach_operation_history(self, scope: ReferenceRequestScope, before_turn_id: str) -> CoachOperationHistory:
+        """Read bounded original references under current owned-Chat admission."""
+        from bowhead_core.coach_operation_history import load_history
+
+        return await load_history(str(self._db_path), scope, before_turn_id)
+
+    async def load_clarification_history(
+        self, scope: ReferenceRequestScope, before_turn_id: str, *, turn_ids: tuple[str, ...] | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read historical question/answer facts under current Chat access."""
+        from bowhead_core.clarification_history import load_history
+
+        return await load_history(str(self._db_path), scope, before_turn_id, turn_ids=turn_ids)
 
     async def list_turn_spawns(
         self,
@@ -7227,7 +7363,7 @@ class SessionStore:
             cur_seq_row = await (await db.execute("SELECT seq FROM turns WHERE id=?", (before_turn_id,))).fetchone()
             cur_seq = int(cur_seq_row["seq"]) if cur_seq_row else None
             async with db.execute(
-                "SELECT id, seq, status, user_text FROM turns WHERE session_id=? AND status IN ('completed','failed','cancelled') AND id != ? "
+                "SELECT id, seq, status, user_text FROM turns WHERE session_id=? AND operation_kind IS NULL AND status IN ('completed','failed','cancelled') AND id != ? "
                 + ("AND seq < ? " if cur_seq is not None else "")
                 + "ORDER BY seq DESC LIMIT ?",
                 ((session_id, before_turn_id, cur_seq, int(scan_turns)) if cur_seq is not None else (session_id, before_turn_id, int(scan_turns))),
@@ -7526,7 +7662,7 @@ class SessionStore:
                         await require_ordinary_pause_in_tx(db, card_id=ordinary_card_id)
                     except ValueError:
                         return False
-            if await _requires_reference_execution_in_tx(db, turn_id):
+            if not document_card_id and await _requires_reference_execution_in_tx(db, turn_id):
                 from bowhead_core.chat_reference_continuation import pause_ready
 
                 if not await pause_ready(db, turn_id=turn_id):
@@ -7614,7 +7750,7 @@ class SessionStore:
                 ):
                     await db.rollback()
                     return None
-                reference_resume = await _requires_reference_execution_in_tx(db, turn_id)
+                reference_resume = document_card_id is None and await _requires_reference_execution_in_tx(db, turn_id)
                 if reference_resume:
                     from bowhead_core.chat_reference_continuation import pause_ready
 
@@ -7748,7 +7884,7 @@ class SessionStore:
                         except ValueError:
                             await db.rollback()
                             return False
-                if await _requires_reference_execution_in_tx(db, turn_id):
+                if document_card_id is None and await _requires_reference_execution_in_tx(db, turn_id):
                     from bowhead_core.chat_reference_continuation import release_resume
 
                     try:
@@ -8474,6 +8610,7 @@ def _row_to_turn(row: aiosqlite.Row) -> Turn:
         ended_at=row["ended_at"],
         final_answer=row["final_answer"],
         cost_usd=float(row["cost_usd"] or 0.0),
+        operation_kind=row["operation_kind"] if "operation_kind" in row.keys() else None,  # noqa: SIM118 -- sqlite Row membership checks values
         execution_generation=execution_generation,
         terminal_protocol_version=terminal_protocol_version,
         tokens_input=tokens_input,

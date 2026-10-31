@@ -14,7 +14,6 @@ import {
   UPLOAD_ACCEPT,
   UPLOAD_MAX_BYTES,
   UPLOAD_MAX_PER_MESSAGE,
-  isOfficeUpload,
   uploadFile,
   validateUpload,
 } from "@/lib/api";
@@ -22,7 +21,6 @@ import { ApiError } from "@/lib/api-client";
 import { fileError } from "@/lib/file-error";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import { googlePickerErrorKey, pickDriveFiles, pickedFilesAsText, prepareGooglePicker } from "@/lib/google-picker";
-import type { KbBundleUploadResponse, KbFileDTO } from "@/lib/kb-api";
 import {
   ConfirmExpiredError,
   PresignExpiredError,
@@ -143,6 +141,8 @@ export interface ComposerDraftControl {
 }
 
 interface Props {
+  /** Native input supersedes a pending result-view selection, even for identical text. */
+  onInputInteraction?: () => void;
   /** Server-projected authoring capability; selection and submission remain independently checked. */
   referenceInputEnabled?: boolean;
   /** Attachments include uploaded-file metadata (fileId + filename + size + mime).
@@ -315,26 +315,6 @@ function ordinaryDraftFingerprint(
   documentRevision?: ComposerDocumentRevision,
 ): string {
   return JSON.stringify({ message, attachments, ...(input_document?.nodes.some((node) => node.type === "reference") ? { input_document } : {}), ...(documentRevision ? { documentRevision } : {}) });
-}
-
-/** Map KbFileDTO.parse_status → the chip popover dot quad-state.
- * Phase 3-followup review P1-1: "failed" is its own visual signal (red dot)
- * not "queued" (gray). */
-function parseStatusToDot(s: string): "done" | "busy" | "queued" | "failed" {
-  if (s === "done") return "done";
-  if (s === "failed") return "failed";
-  if (s === "parsing" || s === "chunking" || s === "embedding") return "busy";
-  return "queued";
-}
-
-function isZipFile(file: File): boolean {
-  if (isOfficeUpload(file)) return false;
-  const ext = file.name.toLowerCase();
-  return (
-    ext.endsWith(".zip") ||
-    file.type === "application/zip" ||
-    file.type === "application/x-zip-compressed"
-  );
 }
 
 /** Three planning states; order matches the menu (design §3). */
@@ -737,6 +717,7 @@ export function V2Composer(props: Props) {
 
 function V2ComposerScope({
   referenceInputEnabled = false,
+  onInputInteraction,
   onSend, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, disabled, placeholder, sessionTexts, running, onCancel, prefillText, prefillInputDocument, onPrefillConsumed, onPrefillInputDocumentConsumed, statusMessage, prefillAttachments, onPrefillAttachmentsConsumed, onSteer,
   lastUserText, lastUserAttachments = [], onReplay, readOnly, recoveryLocked = false, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", autoFocus, hidden, surface = "workbench", stopRequested = false, draftControlRef,
   fileDropTargetRef, sendBlockedReason = null, draftTransferLocked, transferNotice = null, submitRequest,
@@ -2133,7 +2114,7 @@ function V2ComposerScope({
       duplicateFlashTimerRef.current = window.setTimeout(() => setDuplicateFlashId(null), DUPLICATE_FLASH_MS);
       return;
     }
-    const kind: "file" | "bundle" = isZipFile(file) ? "bundle" : "file";
+    const kind: "file" | "bundle" = "file";
     const isLargeFile = file.size >= PRESIGN_THRESHOLD;
     if (attachmentCount >= UPLOAD_MAX_PER_MESSAGE) {
       trackAttachmentAction("select", "rejected", kind, file.size);
@@ -2164,10 +2145,7 @@ function V2ComposerScope({
       ]);
       return;
     }
-    // Size-dispatch + zip auto-detect (tech-design §7.2 P0-C-4):
-    //   - .zip → uploadKbBundle (KB ingest pipeline)
-    //   - else ≥10 MB → presign path via uploadFile
-    //   - else → existing /files/upload path
+    // All task inputs, including archives, use file-only upload transports.
     trackAttachmentAction("select", "accepted", kind, file.size);
     setItems((p) => [
       ...p,
@@ -2182,11 +2160,7 @@ function V2ComposerScope({
     // Freeze the draft identity before any asynchronous auth, hashing or transfer.
     const uploadContext = { ...draftPersistenceScope! };
     abortControllers.current.set(localId, ctrl);
-    if (isZipFile(file)) {
-      void runBundleUpload(file, localId, uploadContext, ctrl.signal);
-    } else {
-      void runUpload(file, localId, isLargeFile, uploadContext, ctrl.signal);
-    }
+    void runUpload(file, localId, isLargeFile, uploadContext, ctrl.signal);
   };
 
   function runUpload(file: File, localId: string, isLargeFile: boolean, context: ComposerDraftScope, signal?: AbortSignal) {
@@ -2261,187 +2235,6 @@ function V2ComposerScope({
     })();
   }
 
-  /** Sprint file-upload-presign Phase 3 — zip bundle upload flow.
-   * 1. uploadKbBundle does presign → POST → confirm (chip stays uploading w/ progress)
-   * 2. On confirm response: indexed children land; chip transitions to "indexing"
-   *    with initial counts from response.uploaded[]
-   * 3. Poll /kb/files for child parse_status until all done; update indexedCount live
-   * 4. On all-done: status = "done" + populate bundleArtifactIds for submit()
-   */
-  function runBundleUpload(file: File, localId: string, context: ComposerDraftScope, signal?: AbortSignal) {
-    return (async () => {
-      try {
-        if (!uploadResponseAllowed(signal)) {
-          abortControllers.current.delete(localId);
-          return;
-        }
-        // Dynamic import keeps kb-api off the v2-composer eager-load graph
-        // (otherwise spy mocks in upload-presign.test.ts get polluted by
-        // module pre-loading via v2-composer rendering in unrelated tests).
-        const { uploadKbBundle } = await import("@/lib/kb-api");
-        const resp: KbBundleUploadResponse = await uploadKbBundle(file, {
-          scope: "personal",
-          scope_id: context.userId,
-          spaceHeaders: spaceHeader(context),
-          use_llm: false,
-          signal,
-          onProgress: (pct) => {
-            setItems((p) =>
-              uploadResponseAllowed(signal) ? p.map((it) =>
-                it.localId === localId && it.status === "uploading"
-                  ? { ...it, progressPct: pct }
-                  : it,
-              ) : p,
-            );
-          },
-        });
-        if (!uploadResponseAllowed(signal)) {
-          abortControllers.current.delete(localId);
-          return;
-        }
-        // Transition: uploading → confirming (already in chip CSS) is implicit
-        // during the confirm call. After resp returns, flip to indexing with
-        // initial counts from KbBundleUploadResponse.
-        const childArtifactIds = resp.uploaded.map((c) => c.artifact_id);
-        if (childArtifactIds.length > MAX_COMPOSER_RUNTIME_ATTACHMENTS) {
-          throw new ApiError(422, t("too_many_attachments", { max: MAX_COMPOSER_RUNTIME_ATTACHMENTS }), { code: "too_many_attachments" });
-        }
-        const childFileIds = resp.uploaded.map((c) => c.file_id);
-        const initialDone = resp.uploaded.filter((c) => c.parse_status === "done").length;
-        const initialSettled = resp.uploaded.filter((c) => c.parse_status === "done" || c.parse_status === "failed").length;
-        // Phase 3-followup review P0-3: totalCount = total_entries from
-        // response (matches design spec "N / M indexed"). uploaded.length is
-        // a SUBSET (some entries skipped for mime/oversize); the user expects
-        // the denominator to reflect the whole zip.
-        const totalEntries = resp.total_entries;
-        // Surface skipped entries in the popover too so the user understands
-        // why N < M.
-        // 0.40.4 Bug 10 side branch: skipped entries (unsupported mime / oversize)
-        // get their own "skipped" status, NOT "failed". Keeps user from
-        // confusing "we couldn't index this file type" with a parse error.
-        const skippedChildren = resp.skipped.map((s) => ({
-          filename: s.filename,
-          size: 0,
-          status: "skipped" as const,
-          reasonCode: s.reason_code,
-        }));
-        setItems((p) =>
-          uploadResponseAllowed(signal) ? p.map((it) =>
-            it.localId === localId
-              ? {
-                  ...it,
-                  status: initialSettled === resp.uploaded.length ? "done" : "indexing",
-                  progressPct: 100,
-                  indexedCount: initialDone,
-                  totalCount: totalEntries,
-                  kbFileIds: childFileIds,
-                  fileId: resp.bundle_artifact_id,
-                  filename: resp.bundle_filename,
-                  mime: resp.bundle_mime ?? it.mime,
-                  size: resp.bundle_size ?? it.size,
-                  bundleArtifactIds: childArtifactIds,
-                  bundleChildren: [
-                    ...resp.uploaded.map((c) => ({
-                      filename: c.filename,
-                      size: c.size_bytes,
-                      status: parseStatusToDot(c.parse_status),
-                    })),
-                    ...skippedChildren,
-                  ],
-                  // fileId is the stable server-owned bundle root; runtime
-                  // still expands bundleArtifactIds[] into child inputs.
-                }
-              : it,
-          ) : p,
-        );
-        // If not yet all done, poll
-        if (initialSettled < resp.uploaded.length) {
-          void pollBundleProgress(localId, childFileIds, context, skippedChildren, signal)
-            .finally(() => abortControllers.current.delete(localId));
-        } else {
-          abortControllers.current.delete(localId);
-        }
-        if (uploadResponseAllowed(signal)) {
-          trackAttachmentAction("upload", "success", "bundle", file.size);
-        }
-      } catch (e) {
-        abortControllers.current.delete(localId);
-        if (!uploadResponseAllowed(signal)) return;
-        trackAttachmentAction("upload", "failed", "bundle", file.size);
-        const cls = classifyError(e);
-        setItems((p) =>
-          uploadResponseAllowed(signal) ? p.map((it) =>
-            it.localId === localId
-              ? { ...it, status: "error" as const, errorKind: cls.kind, error: cls.message, errorCause: cls.cause }
-              : it,
-          ) : p,
-        );
-      }
-    })();
-  }
-
-  /** Poll only this bundle's admitted children, independent of browser time or list pagination. */
-  function pollBundleProgress(
-    localId: string,
-    childFileIds: string[],
-    context: ComposerDraftScope,
-    skippedChildren: NonNullable<AttachmentItem["bundleChildren"]>,
-    signal?: AbortSignal,
-  ) {
-    return (async () => {
-      const POLL_INTERVAL_MS = 3000;
-      const MAX_POLLS = 200; // ~10 min upper bound; bail safe
-      const idSet = new Set(childFileIds);
-      const query = new URLSearchParams({ scope: "personal", limit: String(childFileIds.length) });
-      childFileIds.forEach((id) => query.append("file_ids", id));
-      for (let i = 0; i < MAX_POLLS; i++) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        // Cancel detection (user clicked × → AbortController.abort()).
-        if (!uploadResponseAllowed(signal)) return;
-        try {
-          const r = await fetch(
-            `/api/v1/kb/files?${query}`,
-            { headers: spaceHeader(context), signal },
-          );
-          if (!r.ok) continue;
-          const body = (await r.json()) as { files: KbFileDTO[] };
-          if (!uploadResponseAllowed(signal)) return;
-          const ours = body.files.filter((f) => idSet.has(f.file_id));
-          const done = ours.filter((f) => f.parse_status === "done").length;
-          const failed = ours.filter((f) => f.parse_status === "failed").length;
-          const total = childFileIds.length;
-          setItems((p) =>
-            uploadResponseAllowed(signal) ? p.map((it) => {
-              if (it.localId !== localId) return it;
-              const allDone = done + failed >= total;
-              return {
-                ...it,
-                status: allDone ? ("done" as const) : ("indexing" as const),
-                indexedCount: done,
-                bundleChildren: [...ours.map((c) => ({
-                  filename: c.filename,
-                  size: c.size_bytes,
-                  status: parseStatusToDot(c.parse_status),
-                })), ...skippedChildren],
-              };
-            }) : p,
-          );
-          if (done + failed >= total) return;
-        } catch (e) {
-          // AbortError → caller cancelled, stop polling immediately.
-          if ((e as Error)?.name === "AbortError") return;
-          // network blip; keep polling
-        }
-      }
-      if (!uploadResponseAllowed(signal)) return;
-      const failure = classifyError(new UploadNetworkError("Bundle progress polling timed out"));
-      setItems((previous) => uploadResponseAllowed(signal) ? previous.map((item) =>
-        item.localId === localId && item.status === "indexing"
-          ? { ...item, status: "error" as const, errorKind: failure.kind, error: failure.message, errorCause: failure.cause }
-          : item,
-      ) : previous);
-    })();
-  }
 
   /** Re-trigger upload for a chip in recoverable error state (auth/network).
    * Phase 3 review P1-1: branch on errorKind. "auth" = presign-expired or
@@ -3391,7 +3184,7 @@ function V2ComposerScope({
     : t("send_title");
 
   return (
-    <div ref={composerWrapRef} className="v2-composer-wrap" hidden={effectiveHidden} style={effectiveHidden ? { display: "none" } : undefined}>
+    <div ref={composerWrapRef} onInputCapture={onInputInteraction} className="v2-composer-wrap" hidden={effectiveHidden} style={effectiveHidden ? { display: "none" } : undefined}>
       {dropOverlay}
       <span
         className="composer-v2__sr-only"
@@ -3482,6 +3275,10 @@ function V2ComposerScope({
               />
             ))}
           </div>
+        ) : null}
+
+        {items.some((item) => item.status === "done" && item.kind !== "bundle" && item.filename.toLowerCase().endsWith(".zip")) ? (
+          <p role="status" className="px-3 text-xs text-muted-foreground">{t("archive_file_only")}</p>
         ) : null}
 
         {documentRevision ? (

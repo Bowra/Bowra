@@ -148,6 +148,7 @@ class ResultsCapabilitiesResponseV1(_ContractModel):
     workspace: bool
     complete_list: bool
     scale_nav: bool
+    interactive_html: bool = False
     max_page_size: Literal[50] = 50
 
 

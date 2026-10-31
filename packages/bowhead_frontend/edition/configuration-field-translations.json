@@ -1,0 +1,1398 @@
+{
+  "reviewed": {
+    "zh-CN": {
+      "personal_appearance.density": "fb786b2502f26f4eb94f",
+      "personal_appearance.mode": "bcb0473c37231ca1e9e6",
+      "personal_appearance.motion": "3a2249917f60b748a687",
+      "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
+      "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
+      "personal_appearance.typographyProfile": "029ba279130883f32ec1",
+      "space_instructions.content": "549977c9bacde339fdb0",
+      "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
+      "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
+      "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
+      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb.active": "8d87acecb64b960561f2",
+      "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.row_extractor": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.vision": "537aa3cd90b58650fae1",
+      "team_model_config.kb.models": "85bea16b441869f2275f",
+      "team_model_config.kb.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.kb.models.*.dim": "6eaba9966a1104d602dd",
+      "team_model_config.kb.models.*.model": "81cc335162116d594f52",
+      "team_model_config.kb.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.kb.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.kb.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.kb.retrieval_top_k": "e225b7afa587b16ae51f",
+      "team_model_config.media": "172c365f0322af8fd279",
+      "team_model_config.media.active": "8d87acecb64b960561f2",
+      "team_model_config.media.active.image_gen": "537aa3cd90b58650fae1",
+      "team_model_config.media.models": "85bea16b441869f2275f",
+      "team_model_config.media.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.media.models.*.model": "81cc335162116d594f52",
+      "team_model_config.media.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.media.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.media.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.providers": "068c7d1cd0d1f53aca92",
+      "team_model_config.providers.*.anthropic_version": "a6e7fe4440e78d72f6a1",
+      "team_model_config.providers.*.api_version": "feaf2cb44e58b1a9f23d",
+      "team_model_config.providers.*.base_url": "e7fb59049b21d21a2a1c",
+      "team_model_config.providers.*.context_window": "d2aa6f3cdf43a4a2ce90",
+      "team_model_config.providers.*.display_name": "a36be57e68169f247429",
+      "team_model_config.providers.*.endpoint": "31ca69011fb780677568",
+      "team_model_config.providers.*.max_output_tokens": "2b978a565121a4e3981e",
+      "team_model_config.providers.*.messages_path": "bbf98e8e28a1268b3e36",
+      "team_model_config.providers.*.models": "27a7fb4848c615ec2e28",
+      "team_model_config.providers.*.models.*.api_surface": "9c5d2322735e0cc9fa52",
+      "team_model_config.providers.*.models.*.capabilities": "b11453fb4ef92d237938",
+      "team_model_config.providers.*.models.*.capability_transports": "1195e84c2b03bee61ecd",
+      "team_model_config.providers.*.models.*.context_window": "458d91f9ea75dc056055",
+      "team_model_config.providers.*.models.*.credit_rates": "02440c7820256a55d27d",
+      "team_model_config.providers.*.models.*.credit_rates.cached_input": "6aafb8aa67a90178a0e9",
+      "team_model_config.providers.*.models.*.credit_rates.input": "d65911732b3d56bf27c2",
+      "team_model_config.providers.*.models.*.credit_rates.output": "7f98409e4c09efd76ec9",
+      "team_model_config.providers.*.models.*.deployment": "4e2a1e4a6342ab8d884b",
+      "team_model_config.providers.*.models.*.id": "7bd0f28ce384b95f9838",
+      "team_model_config.providers.*.models.*.max_output_tokens": "46703df260d3a2979e54",
+      "team_model_config.providers.*.models.*.outbound_params": "d1fd676eaa9f2230f3c6",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.protocol": "7e5ba8239d9e5346c988",
+      "team_model_config.providers.*.models.*.public_name": "46b83d299df0eca698d5",
+      "team_model_config.providers.*.models.*.request_body_overrides": "00d57486b378ec13c923",
+      "team_model_config.providers.*.models.*.runtime_parameters": "bc3a36b8577932a60fcb",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides": "5bc1f152100728a54f92",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults": "d042868146fa8879cacf",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.profile": "249d119557fb38f1d2b5",
+      "team_model_config.providers.*.outbound_params": "76ec09f1f28a98c612b6",
+      "team_model_config.providers.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.timeout_sec": "f7688bd6eac113799f95",
+      "team_model_config.providers.*.type": "57aa87e3b0fe78a4e54b",
+      "team_model_config.search": "783938226508bead16b1",
+      "team_model_config.search.active": "8d87acecb64b960561f2",
+      "team_model_config.search.active.web_search": "537aa3cd90b58650fae1",
+      "team_model_config.search.models": "85bea16b441869f2275f",
+      "team_model_config.search.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.search.models.*.model": "81cc335162116d594f52",
+      "team_model_config.search.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.search.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.search.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.tiers": "f852170fb33121817d92",
+      "team_model_config.tiers.fast": "ea8ad428daa01a394e47",
+      "team_model_config.tiers.fast.follow": "4cec92caceaef587a35a",
+      "team_model_config.tiers.fast.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.fast.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.judge": "3b1a68df382efce3f7e9",
+      "team_model_config.tiers.judge.auto": "228aa5ff0ba0057bf397",
+      "team_model_config.tiers.judge.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.judge.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary": "c8dafd7666facb2ff971",
+      "team_model_config.tiers.primary.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary_fallback": "6c37ffe46a2b60ce576a",
+      "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
+      "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
+      "team_run_limits.step_limit": "69d088074266b94b4d99",
+      "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
+      "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
+      "user_language.output_language": "82b25c439000165cf775",
+      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
+      "workspace_metadata.description": "2b0555a9fc599fabf0f7",
+      "workspace_metadata.name": "2e84325382b23bcfd36d",
+      "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
+      "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
+      "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+    },
+    "de-DE": {
+      "personal_appearance.density": "fb786b2502f26f4eb94f",
+      "personal_appearance.mode": "bcb0473c37231ca1e9e6",
+      "personal_appearance.motion": "3a2249917f60b748a687",
+      "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
+      "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
+      "personal_appearance.typographyProfile": "029ba279130883f32ec1",
+      "space_instructions.content": "549977c9bacde339fdb0",
+      "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
+      "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
+      "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
+      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb.active": "8d87acecb64b960561f2",
+      "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.row_extractor": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.vision": "537aa3cd90b58650fae1",
+      "team_model_config.kb.models": "85bea16b441869f2275f",
+      "team_model_config.kb.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.kb.models.*.dim": "6eaba9966a1104d602dd",
+      "team_model_config.kb.models.*.model": "81cc335162116d594f52",
+      "team_model_config.kb.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.kb.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.kb.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.kb.retrieval_top_k": "e225b7afa587b16ae51f",
+      "team_model_config.media": "172c365f0322af8fd279",
+      "team_model_config.media.active": "8d87acecb64b960561f2",
+      "team_model_config.media.active.image_gen": "537aa3cd90b58650fae1",
+      "team_model_config.media.models": "85bea16b441869f2275f",
+      "team_model_config.media.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.media.models.*.model": "81cc335162116d594f52",
+      "team_model_config.media.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.media.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.media.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.providers": "068c7d1cd0d1f53aca92",
+      "team_model_config.providers.*.anthropic_version": "a6e7fe4440e78d72f6a1",
+      "team_model_config.providers.*.api_version": "feaf2cb44e58b1a9f23d",
+      "team_model_config.providers.*.base_url": "e7fb59049b21d21a2a1c",
+      "team_model_config.providers.*.context_window": "d2aa6f3cdf43a4a2ce90",
+      "team_model_config.providers.*.display_name": "a36be57e68169f247429",
+      "team_model_config.providers.*.endpoint": "31ca69011fb780677568",
+      "team_model_config.providers.*.max_output_tokens": "2b978a565121a4e3981e",
+      "team_model_config.providers.*.messages_path": "bbf98e8e28a1268b3e36",
+      "team_model_config.providers.*.models": "27a7fb4848c615ec2e28",
+      "team_model_config.providers.*.models.*.api_surface": "9c5d2322735e0cc9fa52",
+      "team_model_config.providers.*.models.*.capabilities": "b11453fb4ef92d237938",
+      "team_model_config.providers.*.models.*.capability_transports": "1195e84c2b03bee61ecd",
+      "team_model_config.providers.*.models.*.context_window": "458d91f9ea75dc056055",
+      "team_model_config.providers.*.models.*.credit_rates": "02440c7820256a55d27d",
+      "team_model_config.providers.*.models.*.credit_rates.cached_input": "6aafb8aa67a90178a0e9",
+      "team_model_config.providers.*.models.*.credit_rates.input": "d65911732b3d56bf27c2",
+      "team_model_config.providers.*.models.*.credit_rates.output": "7f98409e4c09efd76ec9",
+      "team_model_config.providers.*.models.*.deployment": "4e2a1e4a6342ab8d884b",
+      "team_model_config.providers.*.models.*.id": "7bd0f28ce384b95f9838",
+      "team_model_config.providers.*.models.*.max_output_tokens": "46703df260d3a2979e54",
+      "team_model_config.providers.*.models.*.outbound_params": "d1fd676eaa9f2230f3c6",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.protocol": "7e5ba8239d9e5346c988",
+      "team_model_config.providers.*.models.*.public_name": "46b83d299df0eca698d5",
+      "team_model_config.providers.*.models.*.request_body_overrides": "00d57486b378ec13c923",
+      "team_model_config.providers.*.models.*.runtime_parameters": "bc3a36b8577932a60fcb",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides": "5bc1f152100728a54f92",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults": "d042868146fa8879cacf",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.profile": "249d119557fb38f1d2b5",
+      "team_model_config.providers.*.outbound_params": "76ec09f1f28a98c612b6",
+      "team_model_config.providers.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.timeout_sec": "f7688bd6eac113799f95",
+      "team_model_config.providers.*.type": "57aa87e3b0fe78a4e54b",
+      "team_model_config.search": "783938226508bead16b1",
+      "team_model_config.search.active": "8d87acecb64b960561f2",
+      "team_model_config.search.active.web_search": "537aa3cd90b58650fae1",
+      "team_model_config.search.models": "85bea16b441869f2275f",
+      "team_model_config.search.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.search.models.*.model": "81cc335162116d594f52",
+      "team_model_config.search.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.search.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.search.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.tiers": "f852170fb33121817d92",
+      "team_model_config.tiers.fast": "ea8ad428daa01a394e47",
+      "team_model_config.tiers.fast.follow": "4cec92caceaef587a35a",
+      "team_model_config.tiers.fast.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.fast.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.judge": "3b1a68df382efce3f7e9",
+      "team_model_config.tiers.judge.auto": "228aa5ff0ba0057bf397",
+      "team_model_config.tiers.judge.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.judge.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary": "c8dafd7666facb2ff971",
+      "team_model_config.tiers.primary.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary_fallback": "6c37ffe46a2b60ce576a",
+      "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
+      "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
+      "team_run_limits.step_limit": "69d088074266b94b4d99",
+      "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
+      "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
+      "user_language.output_language": "82b25c439000165cf775",
+      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
+      "workspace_metadata.description": "2b0555a9fc599fabf0f7",
+      "workspace_metadata.name": "2e84325382b23bcfd36d",
+      "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
+      "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
+      "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+    },
+    "fr-FR": {
+      "personal_appearance.density": "fb786b2502f26f4eb94f",
+      "personal_appearance.mode": "bcb0473c37231ca1e9e6",
+      "personal_appearance.motion": "3a2249917f60b748a687",
+      "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
+      "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
+      "personal_appearance.typographyProfile": "029ba279130883f32ec1",
+      "space_instructions.content": "549977c9bacde339fdb0",
+      "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
+      "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
+      "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
+      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb.active": "8d87acecb64b960561f2",
+      "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.row_extractor": "537aa3cd90b58650fae1",
+      "team_model_config.kb.active.vision": "537aa3cd90b58650fae1",
+      "team_model_config.kb.models": "85bea16b441869f2275f",
+      "team_model_config.kb.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.kb.models.*.dim": "6eaba9966a1104d602dd",
+      "team_model_config.kb.models.*.model": "81cc335162116d594f52",
+      "team_model_config.kb.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.kb.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.kb.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.kb.retrieval_top_k": "e225b7afa587b16ae51f",
+      "team_model_config.media": "172c365f0322af8fd279",
+      "team_model_config.media.active": "8d87acecb64b960561f2",
+      "team_model_config.media.active.image_gen": "537aa3cd90b58650fae1",
+      "team_model_config.media.models": "85bea16b441869f2275f",
+      "team_model_config.media.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.media.models.*.model": "81cc335162116d594f52",
+      "team_model_config.media.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.media.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.media.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.providers": "068c7d1cd0d1f53aca92",
+      "team_model_config.providers.*.anthropic_version": "a6e7fe4440e78d72f6a1",
+      "team_model_config.providers.*.api_version": "feaf2cb44e58b1a9f23d",
+      "team_model_config.providers.*.base_url": "e7fb59049b21d21a2a1c",
+      "team_model_config.providers.*.context_window": "d2aa6f3cdf43a4a2ce90",
+      "team_model_config.providers.*.display_name": "a36be57e68169f247429",
+      "team_model_config.providers.*.endpoint": "31ca69011fb780677568",
+      "team_model_config.providers.*.max_output_tokens": "2b978a565121a4e3981e",
+      "team_model_config.providers.*.messages_path": "bbf98e8e28a1268b3e36",
+      "team_model_config.providers.*.models": "27a7fb4848c615ec2e28",
+      "team_model_config.providers.*.models.*.api_surface": "9c5d2322735e0cc9fa52",
+      "team_model_config.providers.*.models.*.capabilities": "b11453fb4ef92d237938",
+      "team_model_config.providers.*.models.*.capability_transports": "1195e84c2b03bee61ecd",
+      "team_model_config.providers.*.models.*.context_window": "458d91f9ea75dc056055",
+      "team_model_config.providers.*.models.*.credit_rates": "02440c7820256a55d27d",
+      "team_model_config.providers.*.models.*.credit_rates.cached_input": "6aafb8aa67a90178a0e9",
+      "team_model_config.providers.*.models.*.credit_rates.input": "d65911732b3d56bf27c2",
+      "team_model_config.providers.*.models.*.credit_rates.output": "7f98409e4c09efd76ec9",
+      "team_model_config.providers.*.models.*.deployment": "4e2a1e4a6342ab8d884b",
+      "team_model_config.providers.*.models.*.id": "7bd0f28ce384b95f9838",
+      "team_model_config.providers.*.models.*.max_output_tokens": "46703df260d3a2979e54",
+      "team_model_config.providers.*.models.*.outbound_params": "d1fd676eaa9f2230f3c6",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.protocol": "7e5ba8239d9e5346c988",
+      "team_model_config.providers.*.models.*.public_name": "46b83d299df0eca698d5",
+      "team_model_config.providers.*.models.*.request_body_overrides": "00d57486b378ec13c923",
+      "team_model_config.providers.*.models.*.runtime_parameters": "bc3a36b8577932a60fcb",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides": "5bc1f152100728a54f92",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision": "7fd95b58fa490855b16c",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults": "d042868146fa8879cacf",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.advanced": "8ac3dd30d346271d93f6",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params": "64b65a91b60568d258da",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.value": "2f4bff1c729f9500bab3",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.reasoning_effort": "f0b3777b56d34a420a60",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_budget": "ee384bb2d0f7dae40ba2",
+      "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_mode": "0e9a9a1fdab6f99cd6aa",
+      "team_model_config.providers.*.models.*.runtime_parameters.profile": "249d119557fb38f1d2b5",
+      "team_model_config.providers.*.outbound_params": "76ec09f1f28a98c612b6",
+      "team_model_config.providers.*.outbound_params.max_tokens": "ac71c945131c7500c35e",
+      "team_model_config.providers.*.outbound_params.max_tokens.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.max_tokens.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls": "7345fcea8236494b652f",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.parallel_tool_calls.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.temperature": "8771c726afea312773f4",
+      "team_model_config.providers.*.outbound_params.temperature.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.temperature.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.outbound_params.top_p": "75761a6e49edb68c9122",
+      "team_model_config.providers.*.outbound_params.top_p.mode": "885f4226e481e5d15d59",
+      "team_model_config.providers.*.outbound_params.top_p.value": "f56b786dba80ed86e40d",
+      "team_model_config.providers.*.timeout_sec": "f7688bd6eac113799f95",
+      "team_model_config.providers.*.type": "57aa87e3b0fe78a4e54b",
+      "team_model_config.search": "783938226508bead16b1",
+      "team_model_config.search.active": "8d87acecb64b960561f2",
+      "team_model_config.search.active.web_search": "537aa3cd90b58650fae1",
+      "team_model_config.search.models": "85bea16b441869f2275f",
+      "team_model_config.search.models.*.capability": "bd852bee286364cf8b7d",
+      "team_model_config.search.models.*.model": "81cc335162116d594f52",
+      "team_model_config.search.models.*.protocol": "7118d5b374048fb54d8c",
+      "team_model_config.search.models.*.provider": "8cf6766b09412afec36b",
+      "team_model_config.search.models.*.real_id": "44a99c912150edfbcc1b",
+      "team_model_config.tiers": "f852170fb33121817d92",
+      "team_model_config.tiers.fast": "ea8ad428daa01a394e47",
+      "team_model_config.tiers.fast.follow": "4cec92caceaef587a35a",
+      "team_model_config.tiers.fast.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.fast.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.judge": "3b1a68df382efce3f7e9",
+      "team_model_config.tiers.judge.auto": "228aa5ff0ba0057bf397",
+      "team_model_config.tiers.judge.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.judge.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary": "c8dafd7666facb2ff971",
+      "team_model_config.tiers.primary.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary.provider": "a61551d7a4bd277402e2",
+      "team_model_config.tiers.primary_fallback": "6c37ffe46a2b60ce576a",
+      "team_model_config.tiers.primary_fallback.*.model": "71b0ff8eaae554d65699",
+      "team_model_config.tiers.primary_fallback.*.provider": "a61551d7a4bd277402e2",
+      "team_model_retry.max_retries": "48048c04431e8d4b45a1",
+      "team_run_limits.model_call_time_limit_s": "70a151e610bf610a6757",
+      "team_run_limits.step_limit": "69d088074266b94b4d99",
+      "team_run_limits.tool_call_limit": "30d810a46b6d2a100d70",
+      "team_run_limits.turn_time_limit_s": "585d913806d7db3ce9f8",
+      "user_language.output_language": "82b25c439000165cf775",
+      "workspace_i18n.default_data_language": "073c911180d6a3215aeb",
+      "workspace_i18n.week_start_day": "f8a70709d06bf0719d48",
+      "workspace_metadata.description": "2b0555a9fc599fabf0f7",
+      "workspace_metadata.name": "2e84325382b23bcfd36d",
+      "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
+      "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
+      "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+    }
+  },
+  "fields": {
+    "personal_appearance.density": {
+      "key": "d_c58466e4cab37fbd2bb8",
+      "revision": "fb786b2502f26f4eb94f"
+    },
+    "personal_appearance.mode": {
+      "key": "d_aa48753dffd2b65e1b1a",
+      "revision": "bcb0473c37231ca1e9e6"
+    },
+    "personal_appearance.motion": {
+      "key": "d_ead93d1afefe7c6a1583",
+      "revision": "3a2249917f60b748a687"
+    },
+    "personal_appearance.radius": {
+      "key": "d_6ac5abf7b86f3996037a",
+      "revision": "ef0f5b6ba9b0ab8e0261"
+    },
+    "personal_appearance.typeScale": {
+      "key": "d_8ad08efdcf2109b87bb2",
+      "revision": "2537ddeaf976421f5c2c"
+    },
+    "personal_appearance.typographyProfile": {
+      "key": "d_3f7485c792f40f15802d",
+      "revision": "029ba279130883f32ec1"
+    },
+    "space_instructions.content": {
+      "key": "d_f4aed1aa02abed8580b4",
+      "revision": "549977c9bacde339fdb0"
+    },
+    "team_execution_limits.html_max_bytes": {
+      "key": "d_c8661ad2504825cbbd34",
+      "revision": "534b2e9ca836c2bacf0e"
+    },
+    "team_execution_limits.sandbox_default_timeout_s": {
+      "key": "d_e589410f7e1247057c4b",
+      "revision": "04e9c80aeff658fcc9c5"
+    },
+    "team_execution_limits.sandbox_max_timeout_s": {
+      "key": "d_00fb772596dce1ae9d35",
+      "revision": "a4a413397809d729429d"
+    },
+    "team_model_config.kb": {
+      "key": "d_f1ef59b319a884ab994d",
+      "revision": "745abe5ec82019355e0f"
+    },
+    "team_model_config.kb.active": {
+      "key": "d_bc7b188f3fab108ba12e",
+      "revision": "8d87acecb64b960561f2"
+    },
+    "team_model_config.kb.active.embed": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.kb.active.rerank": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.kb.active.row_extractor": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.kb.active.vision": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.kb.models": {
+      "key": "d_0524af6a4020bfa125de",
+      "revision": "85bea16b441869f2275f"
+    },
+    "team_model_config.kb.models.*.capability": {
+      "key": "d_1c179e33ad8e9759a551",
+      "revision": "bd852bee286364cf8b7d"
+    },
+    "team_model_config.kb.models.*.dim": {
+      "key": "d_9007c940a3395aca49a3",
+      "revision": "6eaba9966a1104d602dd"
+    },
+    "team_model_config.kb.models.*.model": {
+      "key": "d_b4666050675ce70660c4",
+      "revision": "81cc335162116d594f52"
+    },
+    "team_model_config.kb.models.*.protocol": {
+      "key": "d_863d209f2e1583d91f96",
+      "revision": "7118d5b374048fb54d8c"
+    },
+    "team_model_config.kb.models.*.provider": {
+      "key": "d_1ddcc9235f6553ac3913",
+      "revision": "8cf6766b09412afec36b"
+    },
+    "team_model_config.kb.models.*.real_id": {
+      "key": "d_323d611aa6d6e259e132",
+      "revision": "44a99c912150edfbcc1b"
+    },
+    "team_model_config.kb.retrieval_top_k": {
+      "key": "d_00aabebe69bc0c0a4460",
+      "revision": "e225b7afa587b16ae51f"
+    },
+    "team_model_config.media": {
+      "key": "d_1ecb2158e62926cb9ee4",
+      "revision": "172c365f0322af8fd279"
+    },
+    "team_model_config.media.active": {
+      "key": "d_bc7b188f3fab108ba12e",
+      "revision": "8d87acecb64b960561f2"
+    },
+    "team_model_config.media.active.image_gen": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.media.models": {
+      "key": "d_0524af6a4020bfa125de",
+      "revision": "85bea16b441869f2275f"
+    },
+    "team_model_config.media.models.*.capability": {
+      "key": "d_1c179e33ad8e9759a551",
+      "revision": "bd852bee286364cf8b7d"
+    },
+    "team_model_config.media.models.*.model": {
+      "key": "d_b4666050675ce70660c4",
+      "revision": "81cc335162116d594f52"
+    },
+    "team_model_config.media.models.*.protocol": {
+      "key": "d_863d209f2e1583d91f96",
+      "revision": "7118d5b374048fb54d8c"
+    },
+    "team_model_config.media.models.*.provider": {
+      "key": "d_1ddcc9235f6553ac3913",
+      "revision": "8cf6766b09412afec36b"
+    },
+    "team_model_config.media.models.*.real_id": {
+      "key": "d_323d611aa6d6e259e132",
+      "revision": "44a99c912150edfbcc1b"
+    },
+    "team_model_config.providers": {
+      "key": "d_0f7fd1e540488b18471f",
+      "revision": "068c7d1cd0d1f53aca92"
+    },
+    "team_model_config.providers.*.anthropic_version": {
+      "key": "d_4a42cc31b8f4827ccfa6",
+      "revision": "a6e7fe4440e78d72f6a1"
+    },
+    "team_model_config.providers.*.api_version": {
+      "key": "d_5fbff84299334357e81f",
+      "revision": "feaf2cb44e58b1a9f23d"
+    },
+    "team_model_config.providers.*.base_url": {
+      "key": "d_c656ef43cf87918bb65c",
+      "revision": "e7fb59049b21d21a2a1c"
+    },
+    "team_model_config.providers.*.context_window": {
+      "key": "d_9a0079815b4ce108b593",
+      "revision": "d2aa6f3cdf43a4a2ce90"
+    },
+    "team_model_config.providers.*.display_name": {
+      "key": "d_ba952ae1140870c98f4d",
+      "revision": "a36be57e68169f247429"
+    },
+    "team_model_config.providers.*.endpoint": {
+      "key": "d_83a8e0e19e649a83248a",
+      "revision": "31ca69011fb780677568"
+    },
+    "team_model_config.providers.*.max_output_tokens": {
+      "key": "d_f5a6709571dcd2faa191",
+      "revision": "2b978a565121a4e3981e"
+    },
+    "team_model_config.providers.*.messages_path": {
+      "key": "d_2cf8d0308a2b5339e860",
+      "revision": "bbf98e8e28a1268b3e36"
+    },
+    "team_model_config.providers.*.models": {
+      "key": "d_486956de17e4cc2bfabc",
+      "revision": "27a7fb4848c615ec2e28"
+    },
+    "team_model_config.providers.*.models.*.api_surface": {
+      "key": "d_870198d00394389f2d25",
+      "revision": "9c5d2322735e0cc9fa52"
+    },
+    "team_model_config.providers.*.models.*.capabilities": {
+      "key": "d_8f9802e306af81b98f2b",
+      "revision": "b11453fb4ef92d237938"
+    },
+    "team_model_config.providers.*.models.*.capability_transports": {
+      "key": "d_067986c6054002cc060a",
+      "revision": "1195e84c2b03bee61ecd"
+    },
+    "team_model_config.providers.*.models.*.context_policy": {
+      "key": "d_3423322a477c897adfce",
+      "revision": "065e23ef99edb9fe31ef"
+    },
+    "team_model_config.providers.*.models.*.context_policy.enabled": {
+      "key": "d_d0379028b2960c38c363",
+      "revision": "ba0edcb37f0b7cca655a"
+    },
+    "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": {
+      "key": "d_975198d60db80442ccb4",
+      "revision": "2dd48ed330a5549d31aa"
+    },
+    "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": {
+      "key": "d_ac9561191e835d8df133",
+      "revision": "9df89261dc4bba1ed0e1"
+    },
+    "team_model_config.providers.*.models.*.context_window": {
+      "key": "d_3d51902ed4bd98a77f68",
+      "revision": "458d91f9ea75dc056055"
+    },
+    "team_model_config.providers.*.models.*.credit_rates": {
+      "key": "d_1c18b9456c5c71e2af7f",
+      "revision": "02440c7820256a55d27d"
+    },
+    "team_model_config.providers.*.models.*.credit_rates.cached_input": {
+      "key": "d_900395487b2d41dc1eee",
+      "revision": "6aafb8aa67a90178a0e9"
+    },
+    "team_model_config.providers.*.models.*.credit_rates.input": {
+      "key": "d_ccfec4f2fa7929ef7bb4",
+      "revision": "d65911732b3d56bf27c2"
+    },
+    "team_model_config.providers.*.models.*.credit_rates.output": {
+      "key": "d_6eb472785a3fcb6519e1",
+      "revision": "7f98409e4c09efd76ec9"
+    },
+    "team_model_config.providers.*.models.*.deployment": {
+      "key": "d_b137347bc02318d72907",
+      "revision": "4e2a1e4a6342ab8d884b"
+    },
+    "team_model_config.providers.*.models.*.id": {
+      "key": "d_f49fcadf81fbb38e334c",
+      "revision": "7bd0f28ce384b95f9838"
+    },
+    "team_model_config.providers.*.models.*.max_output_tokens": {
+      "key": "d_6cc61870dc6d509d82db",
+      "revision": "46703df260d3a2979e54"
+    },
+    "team_model_config.providers.*.models.*.outbound_params": {
+      "key": "d_251f2325c43911cca941",
+      "revision": "d1fd676eaa9f2230f3c6"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.protocol": {
+      "key": "d_7f871e656a7e2b3acc03",
+      "revision": "7e5ba8239d9e5346c988"
+    },
+    "team_model_config.providers.*.models.*.public_name": {
+      "key": "d_5072239ca415eb53241b",
+      "revision": "46b83d299df0eca698d5"
+    },
+    "team_model_config.providers.*.models.*.request_body_overrides": {
+      "key": "d_fa94a84d4aa8a1ba9def",
+      "revision": "00d57486b378ec13c923"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters": {
+      "key": "d_ddf722343e3a90022568",
+      "revision": "bc3a36b8577932a60fcb"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides": {
+      "key": "d_1f51a64e553f111658a3",
+      "revision": "5bc1f152100728a54f92"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat": {
+      "key": "d_d438dce7ae58d7bd0dd4",
+      "revision": "7fd95b58fa490855b16c"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.advanced": {
+      "key": "d_5c7b7f784c86a367937f",
+      "revision": "8ac3dd30d346271d93f6"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params": {
+      "key": "d_27b8e6893601fe368074",
+      "revision": "64b65a91b60568d258da"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "2f4bff1c729f9500bab3"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.reasoning_effort": {
+      "key": "d_1123637cf8adbf565197",
+      "revision": "f0b3777b56d34a420a60"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_budget": {
+      "key": "d_93a832e96e61d65a6b6f",
+      "revision": "ee384bb2d0f7dae40ba2"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.chat.thinking_mode": {
+      "key": "d_7abc75906bbe7067e39c",
+      "revision": "0e9a9a1fdab6f99cd6aa"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool": {
+      "key": "d_d438dce7ae58d7bd0dd4",
+      "revision": "7fd95b58fa490855b16c"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.advanced": {
+      "key": "d_5c7b7f784c86a367937f",
+      "revision": "8ac3dd30d346271d93f6"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params": {
+      "key": "d_27b8e6893601fe368074",
+      "revision": "64b65a91b60568d258da"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "2f4bff1c729f9500bab3"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.reasoning_effort": {
+      "key": "d_1123637cf8adbf565197",
+      "revision": "f0b3777b56d34a420a60"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_budget": {
+      "key": "d_93a832e96e61d65a6b6f",
+      "revision": "ee384bb2d0f7dae40ba2"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.tool.thinking_mode": {
+      "key": "d_7abc75906bbe7067e39c",
+      "revision": "0e9a9a1fdab6f99cd6aa"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision": {
+      "key": "d_d438dce7ae58d7bd0dd4",
+      "revision": "7fd95b58fa490855b16c"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.advanced": {
+      "key": "d_5c7b7f784c86a367937f",
+      "revision": "8ac3dd30d346271d93f6"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params": {
+      "key": "d_27b8e6893601fe368074",
+      "revision": "64b65a91b60568d258da"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "2f4bff1c729f9500bab3"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.reasoning_effort": {
+      "key": "d_1123637cf8adbf565197",
+      "revision": "f0b3777b56d34a420a60"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_budget": {
+      "key": "d_93a832e96e61d65a6b6f",
+      "revision": "ee384bb2d0f7dae40ba2"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.capability_overrides.vision.thinking_mode": {
+      "key": "d_7abc75906bbe7067e39c",
+      "revision": "0e9a9a1fdab6f99cd6aa"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults": {
+      "key": "d_a3751e36e4335a5757cd",
+      "revision": "d042868146fa8879cacf"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.advanced": {
+      "key": "d_5c7b7f784c86a367937f",
+      "revision": "8ac3dd30d346271d93f6"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params": {
+      "key": "d_27b8e6893601fe368074",
+      "revision": "64b65a91b60568d258da"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "2f4bff1c729f9500bab3"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.reasoning_effort": {
+      "key": "d_1123637cf8adbf565197",
+      "revision": "f0b3777b56d34a420a60"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_budget": {
+      "key": "d_93a832e96e61d65a6b6f",
+      "revision": "ee384bb2d0f7dae40ba2"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.defaults.thinking_mode": {
+      "key": "d_7abc75906bbe7067e39c",
+      "revision": "0e9a9a1fdab6f99cd6aa"
+    },
+    "team_model_config.providers.*.models.*.runtime_parameters.profile": {
+      "key": "d_c9b967680b15a137ccd3",
+      "revision": "249d119557fb38f1d2b5"
+    },
+    "team_model_config.providers.*.outbound_params": {
+      "key": "d_ad360db8ad12caad7849",
+      "revision": "76ec09f1f28a98c612b6"
+    },
+    "team_model_config.providers.*.outbound_params.max_tokens": {
+      "key": "d_da1e4f200458413e2313",
+      "revision": "ac71c945131c7500c35e"
+    },
+    "team_model_config.providers.*.outbound_params.max_tokens.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.outbound_params.max_tokens.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.outbound_params.parallel_tool_calls": {
+      "key": "d_4d6131b7334acec65d98",
+      "revision": "7345fcea8236494b652f"
+    },
+    "team_model_config.providers.*.outbound_params.parallel_tool_calls.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.outbound_params.parallel_tool_calls.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.outbound_params.temperature": {
+      "key": "d_42c2652d178d7e93d379",
+      "revision": "8771c726afea312773f4"
+    },
+    "team_model_config.providers.*.outbound_params.temperature.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.outbound_params.temperature.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.outbound_params.top_p": {
+      "key": "d_b5a98e919a20ffa95a66",
+      "revision": "75761a6e49edb68c9122"
+    },
+    "team_model_config.providers.*.outbound_params.top_p.mode": {
+      "key": "d_6502218937372536b2e3",
+      "revision": "885f4226e481e5d15d59"
+    },
+    "team_model_config.providers.*.outbound_params.top_p.value": {
+      "key": "d_f3064ff8f087b8ba381d",
+      "revision": "f56b786dba80ed86e40d"
+    },
+    "team_model_config.providers.*.timeout_sec": {
+      "key": "d_e2955c3aebc9702581c4",
+      "revision": "f7688bd6eac113799f95"
+    },
+    "team_model_config.providers.*.type": {
+      "key": "d_e66b6ad1e0dcd86c90ba",
+      "revision": "57aa87e3b0fe78a4e54b"
+    },
+    "team_model_config.search": {
+      "key": "d_8771a400ab03f1b97f91",
+      "revision": "783938226508bead16b1"
+    },
+    "team_model_config.search.active": {
+      "key": "d_bc7b188f3fab108ba12e",
+      "revision": "8d87acecb64b960561f2"
+    },
+    "team_model_config.search.active.web_search": {
+      "key": "d_ddb754c5303c2114d8ed",
+      "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.search.models": {
+      "key": "d_0524af6a4020bfa125de",
+      "revision": "85bea16b441869f2275f"
+    },
+    "team_model_config.search.models.*.capability": {
+      "key": "d_1c179e33ad8e9759a551",
+      "revision": "bd852bee286364cf8b7d"
+    },
+    "team_model_config.search.models.*.model": {
+      "key": "d_b4666050675ce70660c4",
+      "revision": "81cc335162116d594f52"
+    },
+    "team_model_config.search.models.*.protocol": {
+      "key": "d_863d209f2e1583d91f96",
+      "revision": "7118d5b374048fb54d8c"
+    },
+    "team_model_config.search.models.*.provider": {
+      "key": "d_1ddcc9235f6553ac3913",
+      "revision": "8cf6766b09412afec36b"
+    },
+    "team_model_config.search.models.*.real_id": {
+      "key": "d_323d611aa6d6e259e132",
+      "revision": "44a99c912150edfbcc1b"
+    },
+    "team_model_config.tiers": {
+      "key": "d_e98eed4c112791a5683d",
+      "revision": "f852170fb33121817d92"
+    },
+    "team_model_config.tiers.fast": {
+      "key": "d_03eed7880bcec0fce65b",
+      "revision": "ea8ad428daa01a394e47"
+    },
+    "team_model_config.tiers.fast.follow": {
+      "key": "d_e69285852c201257cf2a",
+      "revision": "4cec92caceaef587a35a"
+    },
+    "team_model_config.tiers.fast.model": {
+      "key": "d_4cc26e8dbc88f4f8891d",
+      "revision": "71b0ff8eaae554d65699"
+    },
+    "team_model_config.tiers.fast.provider": {
+      "key": "d_d00a5f79f1b2e5552914",
+      "revision": "a61551d7a4bd277402e2"
+    },
+    "team_model_config.tiers.judge": {
+      "key": "d_27dc921e4033ccff1b93",
+      "revision": "3b1a68df382efce3f7e9"
+    },
+    "team_model_config.tiers.judge.auto": {
+      "key": "d_d933dadf7881c4539ea4",
+      "revision": "228aa5ff0ba0057bf397"
+    },
+    "team_model_config.tiers.judge.model": {
+      "key": "d_4cc26e8dbc88f4f8891d",
+      "revision": "71b0ff8eaae554d65699"
+    },
+    "team_model_config.tiers.judge.provider": {
+      "key": "d_d00a5f79f1b2e5552914",
+      "revision": "a61551d7a4bd277402e2"
+    },
+    "team_model_config.tiers.primary": {
+      "key": "d_86bfc099a555b453715b",
+      "revision": "c8dafd7666facb2ff971"
+    },
+    "team_model_config.tiers.primary.model": {
+      "key": "d_4cc26e8dbc88f4f8891d",
+      "revision": "71b0ff8eaae554d65699"
+    },
+    "team_model_config.tiers.primary.provider": {
+      "key": "d_d00a5f79f1b2e5552914",
+      "revision": "a61551d7a4bd277402e2"
+    },
+    "team_model_config.tiers.primary_fallback": {
+      "key": "d_47062c82574fd9a6ae38",
+      "revision": "6c37ffe46a2b60ce576a"
+    },
+    "team_model_config.tiers.primary_fallback.*.model": {
+      "key": "d_4cc26e8dbc88f4f8891d",
+      "revision": "71b0ff8eaae554d65699"
+    },
+    "team_model_config.tiers.primary_fallback.*.provider": {
+      "key": "d_d00a5f79f1b2e5552914",
+      "revision": "a61551d7a4bd277402e2"
+    },
+    "team_model_retry.max_retries": {
+      "key": "d_e48811dee43adbe01b71",
+      "revision": "48048c04431e8d4b45a1"
+    },
+    "team_run_limits.model_call_time_limit_s": {
+      "key": "d_998a83cbf07e4d34a2c7",
+      "revision": "70a151e610bf610a6757"
+    },
+    "team_run_limits.step_limit": {
+      "key": "d_6dc4c1597cd3de516013",
+      "revision": "69d088074266b94b4d99"
+    },
+    "team_run_limits.tool_call_limit": {
+      "key": "d_bd9c84e080980bfbd232",
+      "revision": "30d810a46b6d2a100d70"
+    },
+    "team_run_limits.turn_time_limit_s": {
+      "key": "d_17d395b54e898a8b8f35",
+      "revision": "585d913806d7db3ce9f8"
+    },
+    "user_language.output_language": {
+      "key": "d_f03b252c3776f006df19",
+      "revision": "82b25c439000165cf775"
+    },
+    "workspace_i18n.default_data_language": {
+      "key": "d_6c5e4e24364abbc7af42",
+      "revision": "073c911180d6a3215aeb"
+    },
+    "workspace_i18n.week_start_day": {
+      "key": "d_894eae24172ddccf657b",
+      "revision": "f8a70709d06bf0719d48"
+    },
+    "workspace_metadata.description": {
+      "key": "d_f9181db819f58500ca41",
+      "revision": "2b0555a9fc599fabf0f7"
+    },
+    "workspace_metadata.name": {
+      "key": "d_419d8c182ad84189ac3b",
+      "revision": "2e84325382b23bcfd36d"
+    }
+  }
+}

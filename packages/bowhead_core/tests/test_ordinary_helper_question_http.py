@@ -36,7 +36,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
     pytest.mark.parametrize("start_case", ["team"], indirect=True),
-    pytest.mark.parametrize("receiver_case", ["admission"], indirect=True),
+    pytest.mark.parametrize("receiver_case", ["admission_concept_resolve"], indirect=True),
 ]
 
 QUESTION = {"question": "Which sales metric?", "options": ["Net sales", "Gross sales"], "type": "single_select"}
@@ -86,9 +86,8 @@ async def test_helper_question_reaches_lead_without_failing_the_turn(http_start,
             hint = {"next_action_hint": "call_clarification_ask", "clarification_payload": {"questions": [QUESTION]}}
             return {"results": [{"token": "sales", "verdict": "ambiguous", **hint}]}
 
-        # The published helper may only use bi_query; it stands in for the
-        # resolver, whose result shape is what the promotion keys on.
-        schema = ToolSchema(name="bi_query", description="Resolve terms.", input_schema={"type": "object", "properties": {}})
+        # The admitted helper grants the actual producer of this protocol.
+        schema = ToolSchema(name="bi_concept_resolve", description="Resolve terms.", input_schema={"type": "object", "properties": {}})
         orch.tool_registry.register(ToolSpec(schema=schema, handler=resolve))
         monkeypatch.setattr(tool_registry, "_tool_requires_datarc", lambda name: False)
         monkeypatch.setattr(tool_registry, "connector_for_tool", lambda name: None)
@@ -115,7 +114,7 @@ async def test_helper_question_reaches_lead_without_failing_the_turn(http_start,
             helper_calls.append(body)
             if helper_style == "prose":
                 if len(helper_calls) == 1:
-                    return response(body, call("helper-resolve", "bi_query", {}), "tool_calls")
+                    return response(body, call("helper-resolve", "bi_concept_resolve", {}), "tool_calls")
                 prose = {"delivery_surface": "chat", "exec_summary": "Which sales metric? Net sales or gross sales."}
                 return response(body, call("helper-return", "subagent_return", {"payload": prose}), "tool_calls")
             bail = {"kind": "needs_user_input", "message": "Which sales metric?", "clarification_payload": {"questions": [QUESTION]}}

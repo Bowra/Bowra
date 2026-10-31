@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useLocale, useTranslations } from "next-intl";
 import type { OutputBudgetDefaults } from "@/lib/llm-config-v2-api";
 import type { OutboundParams } from "@/lib/outbound-params";
@@ -58,9 +59,9 @@ export function OutputBudgetField(props: Props) {
   );
   return (
     <div className="medit-proto medit-setting-row mset-output-budget">
-      <label className="mp-lab" htmlFor={id}>
+      <span className="configuration-field-label"><label className="mp-lab" htmlFor={id}>
         {t("capacity_label")}
-      </label>
+      </label><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.max_output_tokens" label={t("capacity_label")} /></span>
       <input
         id={id}
         className="inp mono"

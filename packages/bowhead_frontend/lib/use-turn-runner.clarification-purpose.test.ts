@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 
 import { resolveHydratedClarificationPending } from "./use-turn-runner";
 
+it("retains a temporary workspace checkbox default on refresh", () => {
+  expect(resolveHydratedClarificationPending([{ clarification_id: "temporary", kind: "tool_context_select", remember_option: true, remember_default: false }])?.rememberDefault).toBe(false);
+});
+
 const BASE = { clarification_id: "clr_doc_purpose", questions: [{ question: "用哪个模板？", options: ["A", "B"], type: "single_select" }] };
 
 describe("hydrated clarification purpose", () => {

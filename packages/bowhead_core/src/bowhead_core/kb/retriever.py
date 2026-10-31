@@ -30,7 +30,7 @@ from bowhead_core.kb.eligibility import FileAuthorizer, KbUseEligibility
 from bowhead_core.kb.generations import use_guard_enabled
 from bowhead_core.kb.reranker import FallbackRerankPairs
 from bowhead_core.kb.retrieval_policy import DEFAULT_TOP_K, MAX_TOP_K, retrieval_top_k
-from bowhead_core.kb.schemas import KbSearchResult, KbSearchResultChunk
+from bowhead_core.kb.schemas import KbFileDTO, KbSearchResult, KbSearchResultChunk
 from bowhead_core.kb.splitter.paragraph_aware import count_tokens, truncate_to_tokens
 from bowhead_core.kb.synonyms import expand_synonyms_for_query
 from bowhead_core.kb.telemetry import emit_audit
@@ -318,6 +318,22 @@ class KbRetriever:
         self._artifact_store = artifact_store
         self.default_top_k = retrieval_top_k({"retrieval_top_k": default_top_k})
 
+    async def preview_source(self, file: KbFileDTO, scope_ctx: ScopeContext, authorize_file: FileAuthorizer) -> list[tuple[str, str, dict[str, Any]]]:
+        """Reuse indexed text without an embedding, reranking or generation call."""
+        from bowhead_core.kb.permission import KbPermission
+
+        if file.team_id != scope_ctx.team_id or not KbPermission.can_read(file, scope_ctx) or not await authorize_file(file):
+            return []
+        if use_guard_enabled():
+            if self._files_store is None or self._artifact_store is None:
+                return []
+            check = await KbUseEligibility(self._files_store, self._artifact_store, self._store).check(
+                file.file_id, scope_ctx, authorize_file, expected_generation=file.active_generation_id
+            )
+            if check.state != "eligible":
+                return []
+        return await self._store.preview_current_chunks(file)
+
     async def invoke(
         self,
         query: str,
@@ -325,9 +341,14 @@ class KbRetriever:
         top_k: int | None = None,
         scope_filter: list[str] | None = None,
         authorize_file: FileAuthorizer | None = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
+        enforce_source_access: bool = False,
     ) -> KbSearchResult:
         """4-stage pipeline. Returns KbSearchResult."""
         t0 = time.time()
+        if allowed_file_ids == ():
+            return KbSearchResult(chunks=[], total_candidates=0, rerank_used=False, latency_ms=0)
+        source_filter = {"allowed_file_ids": allowed_file_ids} if allowed_file_ids is not None else {}
 
         # 0.40.3 Bug 5: short-circuit garbage input. Empty/whitespace/<2-char
         # queries produced degenerate embeddings → rerank API 400 rejected
@@ -373,26 +394,32 @@ class KbRetriever:
             query_emb,
             top_k=VECTOR_FETCH_SIZE,
             scope_filter=scope_filter,
+            **source_filter,
         )
 
         # Collections skipped on timeout/error → incomplete results, honestly pass to caller (see KbSearchCandidates)
         partial = bool(getattr(candidates, "partial", False))
-        if self._files_store is not None or use_guard_enabled():
+        if self._files_store is not None or use_guard_enabled() or enforce_source_access:
             # Filter before reranking/top-k; bounded expansion accounts for old
             # generations occupying vector slots. The cap is reported as partial.
             seen_checks: dict[str, tuple[Any, Any]] = {}
             for window in (VECTOR_FETCH_SIZE, VECTOR_FETCH_SIZE * 2, VECTOR_FETCH_SIZE * 4):
                 if window != VECTOR_FETCH_SIZE:
-                    candidates = await self._store.search(scope_ctx, query_emb, top_k=window, scope_filter=scope_filter)
+                    candidates = await self._store.search(scope_ctx, query_emb, top_k=window, scope_filter=scope_filter, **source_filter)
                     partial |= bool(getattr(candidates, "partial", False))
                 fetched = len(candidates)
                 surviving = []
                 for candidate in candidates:
                     metadata = candidate.get("metadata", {})
                     file_id = str(metadata.get("file_id") or "")
+                    if allowed_file_ids is not None and file_id not in allowed_file_ids:
+                        continue
                     if file_id not in seen_checks:
                         file = await self._files_store.get(file_id) if self._files_store else None
                         check = None
+                        if enforce_source_access and (not file or authorize_file is None or not await authorize_file(file)):
+                            seen_checks[file_id] = (None, None)
+                            continue
                         if file and use_guard_enabled() and authorize_file is not None:
                             remaining = 12 - (time.time() - t0)
                             if remaining > 0 and len(seen_checks) < 64:

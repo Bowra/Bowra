@@ -117,7 +117,7 @@ def _plugin_view(
         "listing": {locale: item.model_dump() for locale, item in (plugin.listing or {}).items()},
         "tools": list(plugin.tools),
         "tool_count": len(plugin.tools) + len(plugin.parts),
-        "skill_count": 1 if plugin.skill_revision else 0,
+        "skill_count": len(plugin.exact_skill_grants),
         "prompt_modules": list(plugin.prompt_modules),
         "availability": list(plugin.availability),
         "team_disabled": plugin.name in team_disabled,

@@ -31,6 +31,7 @@ export interface ModelSettingsOverviewProvider {
   endpoint: string;
   modelCount: number;
   fingerprint?: string | null;
+  authType?: "bearer" | "api_key" | "secret_header" | "none";
 }
 
 export function safeOverviewEndpoint(value: string): string {
@@ -270,6 +271,7 @@ export function ModelSettingsOverview({
   reindexState,
   onEdit,
   onAddProvider,
+  onConnectBowra,
   onEditProvider,
   onRetryReadiness,
   onVerify,
@@ -294,6 +296,7 @@ export function ModelSettingsOverview({
   reindexState: "idle" | "running" | "failed";
   onEdit?: () => void;
   onAddProvider: () => void;
+  onConnectBowra?: () => void;
   onEditProvider: (runtimeKey: string) => void;
   onRetryReadiness: () => void;
   onVerify: () => void;
@@ -306,6 +309,7 @@ export function ModelSettingsOverview({
   configurationActionsDisabled: boolean;
 }) {
   const t = useTranslations("settings.models.overview");
+  const tConnect = useTranslations("settings.models.connect");
   const tProviderType = useTranslations("settings.llm.provider_types");
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const items = evidenceItems(readiness);
@@ -370,14 +374,19 @@ export function ModelSettingsOverview({
             {!section ? <span className="overview-section-index">01</span> : null}
             <h2 id="mset-overview-connections">{t("connections_title")}</h2>
           </div>
-          <button
-            type="button"
-            className="btn sec sm"
-            disabled={configurationActionsDisabled}
-            onClick={onAddProvider}
-          >
-            <Plus size={13} /> {t("add_connection")}
-          </button>
+          <div className="overview-connection-actions">
+            {onConnectBowra ? <button type="button" className="btn sec sm" disabled={configurationActionsDisabled} onClick={onConnectBowra}>
+              {t("use_bowra")}
+            </button> : null}
+            <button
+              type="button"
+              className="btn sec sm"
+              disabled={configurationActionsDisabled}
+              onClick={onAddProvider}
+            >
+              <Plus size={13} /> {t("add_connection")}
+            </button>
+          </div>
         </div>
         {providers.length === 0 ? (
           <div className="overview-empty">
@@ -403,8 +412,10 @@ export function ModelSettingsOverview({
                   <code translate="no">{safeOverviewEndpoint(provider.endpoint)}</code>
                 </div>
                 <div className="overview-provider-secret">
-                  <span>{t("secret")}</span>
-                  <code translate="no">{provider.fingerprint || t("secret_saved")}</code>
+                  <span>{provider.authType === "none" ? tConnect("auth_type") : t("secret")}</span>
+                  {provider.authType === "none"
+                    ? <span>{tConnect("no_auth")}</span>
+                    : <code translate="no">{provider.fingerprint || t("secret_saved")}</code>}
                 </div>
                 <button
                   type="button"

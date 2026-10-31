@@ -40,6 +40,7 @@ from bowhead_core.team_llm_verification_store import (
     ProviderIdentityConflict,
     TeamLlmVerificationStore,
 )
+from bowhead_router.context_policy import MAX_SAFE_TOKEN_INTEGER, parse_context_policy
 from bowhead_router.outbound import learned_adaptations
 from bowhead_router.probe import NotTestable
 from bowhead_router.transport import is_sensitive_query_name
@@ -72,26 +73,101 @@ _REQUIRE_TEAM_ADMIN = _require_team_role_dep("owner", "team_admin")
 _CAPABILITIES = {"chat", "tool", "vision", "embed", "rerank"}
 
 
+class V2ContextPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        True,
+        strict=True,
+        description="Automatically summarize older context when this model needs room. Defaults to on. When off, oversized requests omit older completed context without a summary; saved conversation history stays intact. Required input must still fit.",
+    )
+    trigger_input_tokens: int | None = Field(
+        None,
+        gt=0,
+        le=MAX_SAFE_TOKEN_INTEGER,
+        strict=True,
+        description="Optional earlier input-token trigger. Null uses the automatic safe threshold; a saved value cannot raise that threshold. Must exceed the configured recent-token target.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
+    keep_recent_tokens: int | None = Field(
+        None,
+        gt=0,
+        le=MAX_SAFE_TOKEN_INTEGER,
+        strict=True,
+        description="Target tokens of recent original content after compaction. Null selects automatically. Required original evidence and complete tool pairs take precedence; must be below the configured trigger.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> V2ContextPolicy:
+        parse_context_policy(self.model_dump())
+        return self
+
+
 class V2ModelDeclaration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(..., min_length=1, max_length=200)
-    capabilities: list[str] = Field(..., min_length=1, max_length=5)
+    id: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Exact model identifier accepted by the provider. Surrounding whitespace is removed; an empty identifier is invalid.",
+    )
+    capabilities: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description="Capabilities this model supports. Only declare capabilities the provider can actually serve; each capability appears once.",
+    )
     declaration_origin: str = Field("v2_explicit", max_length=40)
-    public_name: str | None = Field(None, max_length=120)
-    deployment: str | None = Field(None, max_length=200)
-    capability_transports: dict[str, str] = Field(default_factory=dict)
+    public_name: str | None = Field(
+        None,
+        max_length=120,
+        description="Optional public model alias. It does not replace the provider model identifier or an Azure deployment name.",
+    )
+    deployment: str | None = Field(
+        None, max_length=200, description="Azure deployment name for this model. It must identify a deployment in the selected connection."
+    )
+    capability_transports: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping from declared model capabilities to existing transport templates. Authentication and template editing stay in the connection editor.",
+    )
     request_body_overrides: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
+        description="Static request-body overrides by capability. Protected request fields and credentials are forbidden; original protocol and collision validation applies.",
     )
-    outbound_params: dict[str, dict[str, Any]] | None = None
-    context_window: int | None = Field(None, gt=0)
-    max_output_tokens: int | None = Field(None, gt=0, strict=True)
-    runtime_parameters: dict[str, Any] | None = None
+    outbound_params: dict[str, dict[str, Any]] | None = Field(
+        None,
+        description="Model-level request parameter policy. Unset parameters inherit the connection policy; runtime parameters may further specialize it.",
+    )
+    context_window: int | None = Field(
+        None,
+        gt=0,
+        description="Declared context capacity in tokens. Catalog suggestions are estimates until explicitly saved; an absent declaration stays unset.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
+    max_output_tokens: int | None = Field(
+        None,
+        gt=0,
+        strict=True,
+        description="Declared maximum output budget in tokens. An absent declaration inherits the connection budget; thinking and request limits also apply.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
+    context_policy: V2ContextPolicy | None = Field(
+        None,
+        description="Model context preferences. Omission or reset enables automatic compaction with automatic token targets; explicit off and saved numeric preferences survive unrelated edits.",
+    )
+    runtime_parameters: dict[str, Any] | None = Field(
+        None,
+        description="Versioned model request policies for declared Chat, Tool and Vision capabilities. Select a matching profile before setting thinking options.",
+    )
     # Model-level API surface: Responses API batch 0. None/omitted = chat_completions.
     # Must travel in v2 drafts; otherwise a switched model's verification evidence stays stale under the new signature
     # (tech-design §8.1; unset is not persisted with model_dump(exclude_none=True)).
-    api_surface: Literal["chat_completions", "responses"] | None = None
+    api_surface: Literal["chat_completions", "responses"] | None = Field(
+        None,
+        description="OpenAI-compatible request API: Chat Completions or Responses. Changing it requires the original model verification and review.",
+    )
 
     @field_validator("id")
     @classmethod
@@ -124,21 +200,49 @@ class V2ProviderDraft(BaseModel):
         max_length=80,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
     )
-    display_name: str | None = Field(None, max_length=120)
+    display_name: str | None = Field(
+        None, max_length=120, description="Name shown for this Team connection. Renaming it does not change the saved connection identity."
+    )
     type: str = Field(
         ...,
         pattern=r"^(openai_compatible|anthropic_compatible|azure_openai|custom_http)$",
+        description="Connection protocol used to send model requests. It determines which address, authentication and model options apply.",
     )
-    base_url: str = Field("", max_length=500)
-    endpoint: str | None = Field(None, max_length=500)
-    api_version: str | None = Field(None, max_length=40)
+    base_url: str = Field(
+        "",
+        max_length=500,
+        description="Base address of the model service. Use the service address without credentials or query parameters; deployment URL rules apply.",
+    )
+    endpoint: str | None = Field(
+        None, max_length=500, description="Azure service endpoint used by this connection. The deployment name is selected separately for each model."
+    )
+    api_version: str | None = Field(
+        None, max_length=40, description="Azure API version sent with requests. Use a version supported by the configured service."
+    )
     api_key: str | None = Field(None, max_length=500)
     auth: dict[str, Any] = Field(default_factory=dict)
     transports: dict[str, Any] = Field(default_factory=dict)
-    models: list[V2ModelDeclaration] = Field(default_factory=list, max_length=1000)
-    outbound_params: dict[str, dict[str, Any]] | None = None
-    context_window: int | None = Field(None, gt=0)
-    max_output_tokens: int | None = Field(None, gt=0, strict=True)
+    models: list[V2ModelDeclaration] = Field(
+        default_factory=list,
+        max_length=1000,
+        description="Models declared on this connection. Preserve models and capabilities that are not part of the requested change.",
+    )
+    outbound_params: dict[str, dict[str, Any]] | None = Field(
+        None, description="Connection-level request parameter defaults inherited by its models. Model policies can override these defaults."
+    )
+    context_window: int | None = Field(
+        None,
+        gt=0,
+        description="Declared connection context capacity in tokens. Leave unset when unknown; model-specific declarations take precedence.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
+    max_output_tokens: int | None = Field(
+        None,
+        gt=0,
+        strict=True,
+        description="Connection-level output token budget inherited by models without their own declaration. This is separate from context capacity.",
+        json_schema_extra={"x-bowhead-field": {"unit": "tokens"}},
+    )
 
     @model_validator(mode="after")
     def _api_surface_requires_openai_compatible(self) -> V2ProviderDraft:
@@ -151,9 +255,21 @@ class V2ProviderDraft(BaseModel):
         return self
 
     default_headers: dict[str, str] = Field(default_factory=dict)
-    timeout_sec: int = Field(60, ge=1, le=300)
-    messages_path: str | None = Field(None, max_length=200)
-    anthropic_version: str | None = Field(None, max_length=40)
+    timeout_sec: int = Field(
+        60,
+        ge=1,
+        le=300,
+        description="Maximum time in seconds for a request through this connection. The remaining turn and model-call budgets may end it earlier.",
+        json_schema_extra={"x-bowhead-field": {"unit": "seconds"}},
+    )
+    messages_path: str | None = Field(
+        None, max_length=200, description="Custom Messages API path for an Anthropic-compatible connection. An absent path uses the adapter default."
+    )
+    anthropic_version: str | None = Field(
+        None,
+        max_length=40,
+        description="Anthropic protocol version header used by the connection. Preserve it unless the service requires a different version.",
+    )
 
     @field_validator("api_key")
     @classmethod

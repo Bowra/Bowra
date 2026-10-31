@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
+from bowhead_core.agent_dependency_compiler import ExactSkillGrant, parse_exact_skill_grants
 from bowhead_core.agents._generated.tool_kinds import TOOL_KINDS
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class PluginListing(BaseModel):
 class BuiltinPlugin(BaseModel):
     """One immutable version of a built-in Plugin.
 
-    `general` Plugins bundle user-visible Tools and may attach prompt modules; `settings` Plugins
+    `general` Plugins bundle user-visible Tools, exact read-only Skills and optional prompt modules; `settings` Plugins
     carry the configuration Agent's parts and one exact settings Skill grant.
     """
 
@@ -57,8 +58,24 @@ class BuiltinPlugin(BaseModel):
     tools: tuple[str, ...] = ()
     parts: tuple[str, ...] = ()
     skill_revision: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    skill_grants: tuple[ExactSkillGrant, ...] = ()
     prompt_modules: tuple[str, ...] = ()
     availability: tuple[Availability, ...] = ()
+
+    @field_validator("skill_grants", mode="before")
+    @classmethod
+    def _exact_read_grants(cls, value: object) -> tuple[ExactSkillGrant, ...]:
+        grants = parse_exact_skill_grants(value)
+        if any(
+            grant.kind != "builtin" or grant.id != f"builtin:{grant.name}" or grant.permissions != ("read",) or grant.distribution != "reference"
+            for grant in grants
+        ):
+            raise ValueError("general Plugin Skills require exact built-in read-only reference grants")
+        return grants
+
+    @field_serializer("skill_grants")
+    def _serialize_skill_grants(self, value: tuple[ExactSkillGrant, ...]) -> list[dict[str, Any]]:
+        return [grant.to_canonical_dict() for grant in value]
 
     @field_validator("tools", "parts", "prompt_modules", "availability")
     @classmethod
@@ -86,14 +103,14 @@ class BuiltinPlugin(BaseModel):
                 raise ValueError(f"{part!r} is not a system part")
         if self.family == "general":
             if not self.tools or self.parts or self.skill_revision is not None:
-                raise ValueError("a general Plugin has Tools and no parts or Skill grant")
+                raise ValueError("a general Plugin has Tools and no parts or settings Skill revision")
             if self.listing is None or set(self.listing) != _LOCALES:
                 raise ValueError(f"a general Plugin needs a listing for {sorted(_LOCALES)}")
             if any(item.use_when is None or item.example is None for item in self.listing.values()):
                 raise ValueError("a general Plugin listing needs use_when and example in every locale")
             if not self.selectable:
                 raise ValueError("a general Plugin is selectable: selecting it is the Owner's grant")
-        elif not self.parts or self.skill_revision is None or self.prompt_modules:
+        elif not self.parts or self.skill_revision is None or self.skill_grants or self.prompt_modules:
             raise ValueError("a settings Plugin has parts and one Skill grant and no prompt modules")
         return self
 
@@ -106,15 +123,12 @@ class BuiltinPlugin(BaseModel):
         """Tools first, then parts, in declaration order."""
         return self.tools + self.parts
 
-    def skill_grant(self) -> dict[str, Any] | None:
+    @property
+    def exact_skill_grants(self) -> tuple[ExactSkillGrant, ...]:
+        """Normalize the retained settings shape and the general Plugin's explicit list."""
         if self.skill_revision is None:
-            return None
-        return {
-            "skill_ref": {"kind": "builtin", "id": "builtin:" + self.name, "name": self.name},
-            "permissions": ["read"],
-            "revision": self.skill_revision,
-            "distribution": "reference",
-        }
+            return self.skill_grants
+        return (ExactSkillGrant("builtin", "builtin:" + self.name, self.name, ("read",), self.skill_revision, "reference"),)
 
 
 class _Registry(BaseModel):
@@ -177,29 +191,60 @@ def resolve_system_plugins(refs: list[str], tools: list[str], grants: list[dict[
     if len(set(refs)) != len(refs):
         raise ValueError("duplicate system Plugin")
     resolved_tools = list(dict.fromkeys(tools))
-    resolved_grants = list(grants or [])
-    for ref in refs:
-        plugin = builtin_plugin(ref)
+    plugins = [builtin_plugin(ref) for ref in refs]
+    for plugin in plugins:
         for tool in plugin.resources:
             if tool not in resolved_tools:
                 resolved_tools.append(tool)
-        grant = plugin.skill_grant()
-        if grant is None:
-            continue
-        existing = [item for item in resolved_grants if item["skill_ref"]["id"] == grant["skill_ref"]["id"]]
-        if existing and existing != [grant]:
-            raise ValueError("conflicting system resource Skill grant")
-        if not existing:
-            resolved_grants.append(grant)
+    if any(plugin.family == "general" and plugin.exact_skill_grants for plugin in plugins) and "skill_read" not in resolved_tools:
+        resolved_tools.append("skill_read")
+    resolved_grants = _merge_plugin_skill_grants(grants, plugins)
     return resolved_tools, [grant.to_canonical_dict() for grant in parse_system_manifest_skill_grants(resolved_grants)]
+
+
+def _merge_plugin_skill_grants(grants: list[dict[str, Any]] | None, plugins: list[BuiltinPlugin]) -> list[dict[str, Any]]:
+    existing = {grant.identity: grant for grant in parse_exact_skill_grants(grants if grants is not None else [])}
+    for plugin in plugins:
+        for grant in plugin.exact_skill_grants:
+            previous = existing.get(grant.identity)
+            if previous is not None and previous != grant:
+                # An independent direct invoke grant survives a read-only Plugin selection,
+                # but neither a Plugin nor another source may replace a different exact package.
+                if plugin.family == "settings" or (previous.kind, previous.id, previous.name, previous.revision, previous.distribution) != (
+                    grant.kind,
+                    grant.id,
+                    grant.name,
+                    grant.revision,
+                    grant.distribution,
+                ):
+                    raise BuiltinPluginSelectionError("builtin_plugin_skill_conflict", skill=grant)
+            else:
+                existing[grant.identity] = grant
+    canonical = [grant.to_canonical_dict() for grant in existing.values()]
+    return [grant.to_canonical_dict() for grant in parse_exact_skill_grants(canonical)]
+
+
+def resolved_plugin_skill_grants(definition: Mapping[str, Any]) -> tuple[ExactSkillGrant, ...]:
+    """Read declared pins from the exact Plugin versions already recorded by expansion."""
+    raw = definition.get("resolved_builtin_plugins", [])
+    if not isinstance(raw, list) or len(raw) > _MAX_SELECTED_BUILTIN_PLUGINS:
+        raise ValueError("invalid resolved built-in Plugins")
+    plugins = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != {"name", "version"} or not isinstance(item["name"], str) or type(item["version"]) is not int:
+            raise ValueError("invalid resolved built-in Plugin")
+        plugins.append(builtin_plugin(f"builtin:{item['name']}@{item['version']}"))
+    return parse_exact_skill_grants(_merge_plugin_skill_grants([], plugins))
 
 
 class BuiltinPluginSelectionError(ValueError):
     """A team Agent's ``builtin_plugin_ids`` cannot be used; ``code`` is the stable reason."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, skill: ExactSkillGrant | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.blocked_items = () if skill is None else ({"kind": "skill", "name": skill.name, "identity": skill.identity, "reason_codes": [code]},)
+        self.details = {"blocked_items": list(self.blocked_items)} if self.blocked_items else {}
 
 
 _MAX_SELECTED_BUILTIN_PLUGINS = 16
@@ -251,6 +296,7 @@ def expand_builtin_plugins(definition: Mapping[str, Any], *, strict: bool = True
     if not ids:
         return expanded
     plugin_tools: list[str] = []
+    plugins: list[BuiltinPlugin] = []
     resolved: list[dict[str, Any]] = []
     guidance = False
     for item in ids:
@@ -258,10 +304,18 @@ def expand_builtin_plugins(definition: Mapping[str, Any], *, strict: bool = True
         if plugin is None:  # validated above; the registry is immutable at run time
             raise BuiltinPluginSelectionError("builtin_plugin_unknown")
         plugin_tools.extend(plugin.tools)
+        plugins.append(plugin)
         guidance = guidance or bool(plugin.prompt_modules)
         resolved.append({"name": plugin.name, "version": plugin.version})
     expanded["tool_refs"] = sorted({*(definition.get("tool_refs") or []), *plugin_tools})
     expanded["resolved_builtin_plugins"] = resolved
+    if any(plugin.exact_skill_grants for plugin in plugins):
+        try:
+            expanded["skill_grants"] = _merge_plugin_skill_grants(definition.get("skill_grants"), plugins)
+        except BuiltinPluginSelectionError:
+            raise
+        except ValueError as exc:
+            raise BuiltinPluginSelectionError("builtin_plugin_skill_conflict") from exc
     if guidance:
         expanded["capability_protocol_block"] = True
     if "python_sandbox" in plugin_tools:

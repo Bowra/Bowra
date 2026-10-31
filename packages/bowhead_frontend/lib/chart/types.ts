@@ -46,6 +46,7 @@ export interface ChartColumn {
   unit?: string;
   currency_code?: string;
   display?: NumericDisplay;
+  date_pattern?: string;
   /** Only declared percentage shape or canonical percent input establishes scaling. */
   percent_scale?: ChartPercentScale;
   percent_shape_unknown?: boolean;

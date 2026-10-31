@@ -81,8 +81,8 @@ def test_current_turn_is_excluded() -> None:
 
 
 @pytest.mark.unit
-def test_pending_running_and_empty_turns_do_not_enter() -> None:
-    """dev 库查实：clarification_pending 轮为空、running 轮还在跑、completed 但空的轮用户没看到回答。都不进。"""
+def test_pending_turns_retain_context_while_running_and_empty_turns_do_not_enter() -> None:
+    """A pending question still establishes the topic of the next request."""
     turns = [
         _turn(2, status="clarification_pending", answer=""),
         _turn(3, status="running", answer=""),
@@ -90,8 +90,9 @@ def test_pending_running_and_empty_turns_do_not_enter() -> None:
         _turn(5, status="completed", answer="我需要知道你在哪个城市，等你确认城市再查。"),  # Prose follow-up: included
     ]
     th = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE)
-    assert th.turns_used == 1
-    assert th.messages[1]["content"].startswith("我需要知道")
+    assert th.turns_used == 2 and th.incomplete_turns == 1
+    assert "clarification_pending" in th.messages[1]["content"]
+    assert th.messages[3]["content"].startswith("我需要知道")
 
 
 @pytest.mark.unit
@@ -482,8 +483,7 @@ def test_special_token_text_does_not_kill_history_or_the_guard() -> None:
 async def test_lead_falls_back_to_digest_block_when_history_is_empty(
     monkeypatch: pytest.MonkeyPatch, fake_subagent_runner, make_subagent_result
 ) -> None:
-    """review 修二：历史为空（这里：唯一的先前轮是 clarification_pending；r7 起 failed 轮会进历史）而 digest 存在
-    ⇒ 走 digest 块，规则块不能指着不存在的对话。"""
+    """Use the digest when only a running Turn exists and native history is empty."""
     from bowhead_core.turn_runner import TurnRunner
 
     helpers = _turn_runner_helpers()
@@ -491,7 +491,7 @@ async def test_lead_falls_back_to_digest_block_when_history_is_empty(
 
     monkeypatch.setenv(_FLAG, "1")
     fake_subagent_runner.results = [make_subagent_result(final_answer="ok")]
-    ss = _session_store_with([_turn(1, status="clarification_pending", answer="")], _DIGESTS)
+    ss = _session_store_with([_turn(1, status="running", answer="")], _DIGESTS)
     orch = _make_orch(subagent_runner=fake_subagent_runner, session_store=ss)
     await TurnRunner(orch).run(_req("那利润呢"))
     inv = fake_subagent_runner.invocations[0]

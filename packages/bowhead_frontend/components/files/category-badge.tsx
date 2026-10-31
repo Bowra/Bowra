@@ -6,8 +6,7 @@
  * Four categories: Upload / Deliverable / Export / Knowledge Base. Subtle differences within the same accent family
  * (fill vs outline + icon), without high-saturation colors.
  *
- * Knowledge Base has two substates: manually added (solid outline) vs automatically added (dashed outline + ✨),
- * distinguishing user-added from system-added content; deliberately subtle, without two separate labels.
+ * Knowledge membership is shown from the persisted file state, never classification.
  */
 import clsx from "clsx";
 import { useTranslations } from "next-intl";
@@ -15,7 +14,6 @@ import { useTranslations } from "next-intl";
 import type { AssetClass } from "@/lib/files-taxonomy";
 import {
   Library as LucideLibrary,
-  Sparkle as LucideSparkle,
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
 
@@ -25,20 +23,12 @@ function BookIcon({ size = 11 }: { size?: number }) {
   );
 }
 
-function SparkleIcon({ size = 10 }: { size?: number }) {
-  return (
-    <LucideGlyph icon={LucideSparkle} size={size} aria-hidden />
-  );
-}
 
 export function CategoryBadge({
   cls,
-  auto = false,
   onRemove,
 }: {
   cls: AssetClass;
-  /** System auto-indexed (D7), not manually added by the user — meaningful only for kb category. */
-  auto?: boolean;
   onRemove?: () => void;
 }) {
   const t = useTranslations("files_page");
@@ -49,13 +39,12 @@ export function CategoryBadge({
 
   return (
     <span className="tip" onClick={(e) => e.stopPropagation()}>
-      <span className={clsx("cbadge kb", { auto })}>
+      <span className="cbadge kb">
         <BookIcon />
         {t("asset_class.kb")}
-        {auto ? <SparkleIcon /> : null}
       </span>
       <span className="tipbody" role="tooltip">
-        {auto ? t("kb.auto_tip") : t("kb.manual_tip")}
+        {t("kb.manual_tip")}
         {onRemove ? (
           <button type="button" className="tipact" onClick={onRemove}>
             {t("kb.remove")}

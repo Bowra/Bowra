@@ -151,7 +151,7 @@ async def test_same_data_different_title_tells_the_model() -> None:
     assert len(store.sections) == 2, "两张图都要留着，不能悄悄丢一张"
     assert out2.get("same_data_as") == "种类营业额环比增长TOP20"
     note = out2.get("note") or ""
-    assert "同一份数据" in note and "另一种切法" in note, note
+    assert "same rows" in note and "distinct analytical meaning" in note, note
 
 
 async def test_different_data_gets_no_such_note() -> None:
@@ -162,7 +162,7 @@ async def test_different_data_gets_no_such_note() -> None:
 
     assert len(store.sections) == 2
     assert "same_data_as" not in out2
-    assert "同一份数据" not in (out2.get("note") or "")
+    assert "same rows" not in (out2.get("note") or "")
 
 
 async def test_same_title_still_goes_through_the_old_dedup() -> None:
@@ -175,6 +175,17 @@ async def test_same_title_still_goes_through_the_old_dedup() -> None:
     assert len(store.sections) == 1
     assert out2.get("deduped") == "upgraded"
     assert "same_data_as" not in out2
+
+
+async def test_same_title_and_rows_from_a_different_artifact_are_reported_without_losing_source() -> None:
+    store = _FakeCanvasStore()
+    ctx = _Ctx(canvas_store=store, artifact_store=_FakeArtStore(_BIG))
+    first = await _add_chart({"data_artifact_id": _AID, "hint": "raw", "title": "Trend"}, ctx)
+    second = await _add_chart({"data_artifact_id": "art_bbbbbbbbbbbb", "hint": "raw", "title": "Trend"}, ctx)
+    assert second["section_id"] != first["section_id"]
+    assert len(store.sections) == 2
+    assert second["same_data_as"] == "Trend"
+    assert "provenance" in second["note"]
 
 
 @pytest.mark.parametrize("change", ["series", "kind", "unit", "subtitle", "sort"])

@@ -30,6 +30,8 @@ Die Liste enthält auch **Coach** und den **Konfigurationsagent**. Bei diesen be
 
 ## Laufzeitlimits festlegen
 
+Beim Erstellen und Konfigurieren von Agents gelten diese Teamlimits; es gibt kein separates Schrittlimit pro Agent.
+
 Team-Inhaber und Team-Admins legen unter **Team-Einstellungen › Agents › Laufzeitlimits** Limits für alle Agents des Teams fest, integrierte und eigene:
 
 - **Zeitlimit pro Runde**: wie lange eine Gesprächsrunde laufen darf. Standard sind 30 Minuten; möglich sind 10 Minuten bis 10 Stunden. Agents halten 5 Minuten früher an, damit die Antwort geschrieben werden kann.
@@ -48,7 +50,7 @@ Wird ein Limit erreicht, hält der Agent an und berichtet, was fertig ist und wa
 Unter **Team-Einstellungen › Agents › Laufzeitlimits** können Team-Eigentümer und Administratoren zusätzlich Folgendes einstellen:
 
 - **Sandbox-Berechnungen**: Standardlaufzeit (anfangs 120 Sekunden) und maximale Laufzeit (anfangs 600 Sekunden). Die Standardlaufzeit darf das Maximum nicht überschreiten. Die angezeigte Bereitstellungsgrenze kann nur die für den Betrieb zuständige Person erhöhen.
-- **HTML-Berichte**: maximale Größe jeder eingebetteten HTML-Datei einschließlich eingebetteter Bilder und Daten. Anfangs 5 MiB, höchstens 50 MiB. Diese Einstellung begrenzt die Datei, nicht die Token-Ausgabe des Modells.
+- **HTML-Berichte**: maximale Größe jeder eingebetteten HTML-Datei einschließlich eingebetteter Bilder und Daten. Anfangs 25 MiB, höchstens 50 MiB. Größere Dateien und komplexe Tabellen benötigen mehr Browserspeicher und Verarbeitungszeit. Gespeicherte Teamwerte und Bereitstellungsstandards gelten weiterhin. Erhöhen und speichern Sie dieses Feld, wenn ein älteres Limit die Vorschau verhindert. Diese Einstellung begrenzt die Datei, nicht die Token-Ausgabe des Modells.
 
 Die Seite zeigt Standardwerte und zulässige Bereiche. Wählen Sie nach der Bearbeitung **Sandbox- und HTML-Grenzen speichern**. Mit **Bereitstellungsstandard verwenden** übernehmen Sie die Standardwerte zunächst in den Entwurf; prüfen und speichern Sie sie anschließend. Aufgabenlaufzeit und Sandbox/HTML werden separat gespeichert. Bei gleichzeitigen Änderungen bleiben Ihre Eingaben erhalten; verwerfen und laden Sie die aktuellen Einstellungen vor der erneuten Bearbeitung.
 

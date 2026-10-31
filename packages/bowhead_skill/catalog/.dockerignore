@@ -29,6 +29,11 @@ python_sandbox/wheelhouse/
 pptx/*
 !pptx/scripts/
 
+# The private document authoring worker imports the reviewed helper directly.
+!pptx-authoring/
+pptx-authoring/*
+!pptx-authoring/scripts/
+
 # Large, runtime-unused OOXML schema tree (~1.0 MB, 39 *.xsd) — used only by the
 # gateway-side validators, never inside the --network=none sandbox. Keep it out
 # of the daemon context even though pptx/scripts/ is otherwise allowed.

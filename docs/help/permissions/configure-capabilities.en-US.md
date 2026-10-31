@@ -36,25 +36,27 @@ If the configuration version has changed in the meantime, the page reads the lat
 
 ## Set run limits
 
+Agent creation and configuration use these Team limits; they do not have a separate step setting.
+
 Team owners and Team admins set limits for every agent in the Team, built-in and custom, under **Team settings › Agents › Run limits**:
 
-- **Turn time limit**: how long one conversation turn may run. The default is 30 minutes; you can set 10 minutes to 10 hours. Agents stop 5 minutes before it so the answer can be written.
+- **Turn time limit**: how long one conversation turn may run. The default is 30 minutes; you can set 10 minutes to 10 hours. Helpers stop 5 minutes before it so Lead can write the answer.
 - **Single model call time**: defaults to **Follow turn time**, using the Agent's remaining time. Choose **At most** for a shorter ceiling of 30–36,000 seconds. It cannot extend the turn, and the model connection's own timeout still applies.
-- **Step limit per task**: how many steps one agent may take on one task. The default is **Unlimited**. An agent that produces no new results for several steps is stopped automatically, so a step limit is usually not needed.
+- **Step limit per task**: how many steps one agent may take on one task. The Team default is **Unlimited**. When an effective deployment policy is displayed, the shorter finite Team/deployment ceiling applies to Lead and each helper separately. A step is one model decision; several tool calls in that decision do not count as several model steps. The displayed local stall interval protects waits with no active operation or progress; model and tool waits have their own timeouts.
 - **Tool calls per turn**: total tool calls by all agents in one turn. The default is 300; every tool counts the same.
 
 1. Open **Team settings › Agents** and choose the **Run limits** tab.
 2. Change the values you need. A value out of range shows the allowed range under the field, and Save stays unavailable.
 3. Choose **Save**. The limits apply from the next turn; turns already running are not affected. To go back to the defaults, choose **Restore defaults**.
 
-When a limit is reached, the agent stops and reports what it finished and what remains; the conversation marks it **Partially completed**. Reply "continue" to let it carry on. Higher limits let a task do more, but you wait longer and use more quota.
+When a limit is reached, the conversation shows the specific reason and retains known results. A finite step stop also shows used/allowed decisions. Review those results before narrowing the remaining request. Use Continue only when the conversation offers a supported continuation; it is not available for every stop. Restoring Team defaults does not remove a displayed deployment ceiling. Higher limits let a task do more, but you wait longer and use more quota.
 
 ## Set sandbox and HTML limits
 
 On **Team settings › Agents › Run limits**, Team owners and admins can also configure:
 
 - **Sandbox computation**: default execution time (120 seconds initially) and maximum execution time (600 seconds initially). The default cannot exceed the maximum. The displayed deployment ceiling is a hard boundary; increasing it requires the deployment maintainer.
-- **HTML reports**: maximum size of each embedded HTML file, including inline images and data. The initial value is 5 MiB; the maximum is 50 MiB. This controls the whole file, not the model’s token output.
+- **HTML reports**: maximum size of each embedded HTML file, including inline images and data. The initial value is 25 MiB; the maximum is 50 MiB. Larger files and complex tables need more browser memory and processing time. Existing saved Team values and deployment defaults still apply: raise this field and save if an older limit blocks a report. This controls the whole file, not the model’s token output.
 
 The page shows the deployment defaults and allowed ranges. Edit the values and choose **Save sandbox and HTML limits**. To inherit the deployment defaults again, choose **Use deployment defaults**, review the values, then save. Task runtime and sandbox/HTML changes are saved separately. If another administrator saved first, your edits stay visible; discard and reload the current settings before editing again.
 
@@ -91,7 +93,7 @@ Under **Documents & export**, the built-in Skills are separated by purpose:
 
 The group does not grant extra access or enable missing functionality. Your own and team Skills keep their existing groups and names.
 
-In the Trace, **Create New Presentation** means a new editable PPTX is being created from supplied content. **Edit Existing Presentation** means a supported uploaded template is used to prepare a private draft. Review that draft in Canvas and confirm it before files are published. Exporting a Canvas report is a separate action; a template draft's matching PDF comes from its actual presentation.
+In the Trace, **Create New Presentation** means a new basic editable PPTX is being created from supplied content. Exporting an existing Canvas report is a separate operation. Community does not provide the private PowerPoint template-draft Plugin.
 
 ## Find the owner for other enablement
 

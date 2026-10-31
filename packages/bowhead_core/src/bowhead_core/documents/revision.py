@@ -138,6 +138,28 @@ async def validate_revision_target_in_tx(connection: aiosqlite.Connection, *, so
 _MAX_LINEAGE_DEPTH = 256
 
 
+async def superseding_revision_in_tx(connection: aiosqlite.Connection, *, job, execution) -> str | None:
+    """Distinguish a retained superseded review from an explicit cancellation."""
+    from bowhead_core.documents.store import _digest
+
+    if (
+        job["status"] != "cancelled"
+        or execution is None
+        or execution["state"] != "cancelled"
+        or not execution["draft_json"]
+        or _digest(execution["draft_json"]) != execution["draft_digest"]
+    ):
+        return None
+    async with connection.execute(
+        """SELECT successor.id FROM document_revisions r JOIN document_jobs successor ON successor.id=r.job_id
+        WHERE r.parent_job_id=? AND r.draft_digest=? AND successor.requested_by=?
+          AND successor.team_id=? AND successor.workspace_id=? AND successor.session_id=?""",
+        (job["id"], execution["draft_digest"], job["requested_by"], job["team_id"], job["workspace_id"], job["session_id"]),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return row[0] if row is not None else None
+
+
 async def draft_version_in_tx(connection: aiosqlite.Connection, job_id: str) -> int:
     """1-based draft number of ``job_id``: the revision edges in its lineage plus one.
 

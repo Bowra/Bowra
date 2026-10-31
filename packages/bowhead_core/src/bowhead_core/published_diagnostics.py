@@ -56,6 +56,9 @@ _LLM_FALLBACK_STATES = frozenset({"not_attempted", "succeeded", "failed"})
 
 CHAT_TURN_FAILURE_CODES = frozenset(
     {
+        "agent_step_limit",
+        "agent_tool_call_limit",
+        "agent_stalled",
         "access_context_missing",
         "canvas_payload_invalid",
         "canvas_section_not_found",
@@ -68,6 +71,8 @@ CHAT_TURN_FAILURE_CODES = frozenset(
         "document_routing_uncertain",
         "document_routing_source_unavailable",
         "document_planning_failed",
+        "document_authoring_script_failed",
+        "document_candidate_invalid",
         "entitlement_denied",
         "hop_cap_exceeded",
         "lead_internal_error",
@@ -366,6 +371,8 @@ _RULE_CLARIFICATION_ACCESS_CODES = frozenset(
 _RULE_CLARIFICATION_INPUT_CODES = frozenset(
     {
         "clarification_answer_required",
+        "clarification_context_selection_invalid",
+        "clarification_context_selection_unavailable",
         "clarification_cancel_directive_invalid",
         "clarification_input_rejected",
     }
@@ -448,6 +455,8 @@ _CHAT_FAILURE_CLASS_BY_PARENT = types.MappingProxyType(
         "clarification_resume_unavailable": "configuration",
         "document_information_incomplete": "content",
         "document_planning_failed": "runtime",
+        "document_authoring_script_failed": "runtime",
+        "document_candidate_invalid": "content",
         "document_history_unavailable": "configuration",
         "document_request_rejected": "content",
         "document_routing_invalid": "runtime",
@@ -473,6 +482,9 @@ _CHAT_FAILURE_CLASS_BY_PARENT = types.MappingProxyType(
         "single_write_leaf_violation": "access",
         "team_pool_exhausted": "credit",
         "token_cap_exhausted": "limit",
+        "agent_step_limit": "limit",
+        "agent_tool_call_limit": "limit",
+        "agent_stalled": "timeout",
         "user_credit_exhausted": "credit",
         "wallclock_exceeded": "timeout",
     }
@@ -487,6 +499,8 @@ _CHAT_RETRYABLE_BY_PARENT = types.MappingProxyType(
         "clarification_resume_unavailable": False,
         "document_information_incomplete": False,
         "document_planning_failed": False,
+        "document_authoring_script_failed": False,
+        "document_candidate_invalid": False,
         "document_history_unavailable": False,
         "document_request_rejected": False,
         "document_routing_invalid": True,
@@ -512,6 +526,9 @@ _CHAT_RETRYABLE_BY_PARENT = types.MappingProxyType(
         "single_write_leaf_violation": False,
         "team_pool_exhausted": False,
         "token_cap_exhausted": False,
+        "agent_step_limit": False,
+        "agent_tool_call_limit": False,
+        "agent_stalled": False,
         "user_credit_exhausted": False,
         "wallclock_exceeded": True,
     }
@@ -531,8 +548,9 @@ RECOVERY_ACTIONS: frozenset[str] = frozenset(get_args(RecoveryAction))
 #: ``wallclock_exceeded`` and ``llm_stream_deadline_exceeded`` are retryable, but the same request
 #: tends to hit the same limit, so the user should narrow it first; ``access_context_missing`` is
 #: retryable, but an identical retry cannot restore missing access context; ``plan_blocked`` needs
-#: the user to change the request or the plan. ``llm_context_overflow`` needs a new session, which a
-#: boolean cannot express. Every code in ``PUBLIC_TURN_FAILURE_CODES`` must have exactly one action.
+#: the user to change the request or the plan. ``llm_context_overflow`` needs compaction, a larger
+#: context window or less input before resending; it does not require a new session.
+#: Every code in ``PUBLIC_TURN_FAILURE_CODES`` must have exactly one action.
 _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingProxyType(
     {
         # retry
@@ -556,9 +574,14 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         "peer_depth_exceeded": "edit_and_resend",
         "cost_cap_exceeded": "edit_and_resend",
         "token_cap_exhausted": "edit_and_resend",
+        "agent_step_limit": "edit_and_resend",
+        "agent_tool_call_limit": "edit_and_resend",
+        "agent_stalled": "edit_and_resend",
         "canvas_payload_invalid": "edit_and_resend",
         "no_safe_fields_changed": "edit_and_resend",
         "document_information_incomplete": "edit_and_resend",
+        "document_authoring_script_failed": "edit_and_resend",
+        "document_candidate_invalid": "edit_and_resend",
         "document_request_rejected": "edit_and_resend",
         "document_routing_uncertain": "edit_and_resend",
         "document_routing_source_unavailable": "edit_and_resend",
@@ -566,6 +589,7 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         "reference_continuation_unavailable": "edit_and_resend",
         "reference_primary_incomplete": "edit_and_resend",
         "clarification_resume_unavailable": "edit_and_resend",
+        "llm_context_overflow": "edit_and_resend",
         "llm_request_rejected": "edit_and_resend",
         "llm_stream_deadline_exceeded": "edit_and_resend",
         "plan_blocked": "edit_and_resend",
@@ -581,7 +605,6 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         # new_session
         "session_deleted": "new_session",
         "document_history_unavailable": "new_session",
-        "llm_context_overflow": "new_session",
     }
 )
 
@@ -1242,7 +1265,15 @@ def publish_chat_llm_failure(
         _drop("chat_llm_failed", "parent_code")
         return None
     status_valid = projection.http_status is None or (type(projection.http_status) is int and 100 <= projection.http_status <= 599)
-    attempts_valid = type(projection.attempts) is int and 1 <= projection.attempts <= 99
+    local_capacity_rejection = (
+        projection.reason_code == "llm_context_overflow"
+        and projection.phase == "invoke"
+        and projection.failure_class == "request"
+        and projection.http_status is None
+        and projection.stream_state == "not_started"
+        and projection.fallback_state == "not_attempted"
+    )
+    attempts_valid = type(projection.attempts) is int and (1 <= projection.attempts <= 99 or (projection.attempts == 0 and local_capacity_rejection))
     if (
         projection.phase not in _LLM_FAILURE_PHASES
         or projection.failure_class not in _LLM_FAILURE_CLASSES
@@ -1330,6 +1361,8 @@ def normalize_chat_peer_failure_code(reason: object) -> str:
         return "peer_empty_result"
     if prefix == "subagent_execution_uncertain":
         return "peer_execution_uncertain"
+    if prefix == "llm_context_overflow":
+        return "peer_configuration_error"
     if prefix == "subagent_internal_error":
         return "peer_internal_error"
     if prefix == "unknown profile" or (prefix.startswith("tool '") and "not registered" in candidate):
@@ -1524,6 +1557,7 @@ def build_chat_turn_failure(
     reason_code: str,
     turn_id: str,
     clarification_stage: Literal["clarification_capture"] | None = None,
+    step_usage: dict[str, int] | None = None,
 ) -> ChatTurnFailure:
     """Create the one correlation object shared by turn_failed and failed done."""
 
@@ -1539,6 +1573,16 @@ def build_chat_turn_failure(
         if published is not None
         else {}
     )
+    if (
+        safe_reason in {"agent_step_limit", "agent_stalled", "agent_tool_call_limit", "wallclock_exceeded"}
+        and isinstance(step_usage, dict)
+        and set(step_usage) == {"used", "limit"}
+        and type(step_usage["used"]) is int
+        and type(step_usage["limit"]) is int
+        and 0 <= step_usage["used"] <= step_usage["limit"] <= 10_000
+        and step_usage["limit"] > 0
+    ):
+        diagnostics["step_usage"] = dict(step_usage)
     return ChatTurnFailure(
         reason_code=safe_reason,
         occurrence_id=occurrence_id,
@@ -1633,6 +1677,7 @@ def get_or_build_chat_turn_failure(
     reason_code: str,
     turn_id: str,
     cause: BaseException | None = None,
+    step_usage: dict[str, int] | None = None,
 ) -> ChatTurnFailure:
     """Reuse the first terminal projection across nested safety-net layers."""
 
@@ -1646,6 +1691,7 @@ def get_or_build_chat_turn_failure(
         reason_code=reason_code,
         turn_id=turn_id,
         clarification_stage=native_cause.stage if isinstance(native_cause, OrdinaryContinuationUnavailable) else None,
+        step_usage=step_usage,
     )
     with contextlib.suppress(Exception):
         carrier._chat_turn_failure = failure

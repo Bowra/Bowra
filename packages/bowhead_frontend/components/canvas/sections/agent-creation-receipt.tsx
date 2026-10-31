@@ -8,8 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChatCard, ChatCardHint } from "@/components/ui/card";
 
 /**
- * Created-Agent receipt (Canvas Objects Spec part 2 §6): a success ChatCard with the name, the saved tools, step
- * limit and visibility, a secondary “Manage agent” and the primary “Start using”. Creation is acknowledged even
+ * Created-Agent receipt (Canvas Objects Spec part 2 §6): a success ChatCard with the name, saved resources and visibility, a secondary “Manage agent” and the primary “Start using”. Creation is acknowledged even
  * when the saved configuration cannot be read back; the facts then give way to a retry.
  *
  * Creating releases v1 straight away, so the card says so and who can use it, then gives two next steps
@@ -25,7 +24,6 @@ export function AgentCreationReceipt({ name, visibility, created = true, summary
   summary: {
     /** "1 Plugin · 3 Tools", or null while the created Agent's resources are unknown. */
     resources: string | null;
-    iterations: number;
     visibility: string;
   } | null;
   readFailed: boolean;
@@ -66,8 +64,6 @@ export function AgentCreationReceipt({ name, visibility, created = true, summary
             <dt>{t("receipt_resources_label")}</dt>
             <dd>{summary.resources}</dd>
           </> : null}
-          <dt>{t("max_iters_label")}</dt>
-          <dd>{t("receipt_steps", { n: summary.iterations })}</dd>
           <dt>{t("canvas_receipt_visibility")}</dt>
           <dd>{t(summary.visibility === "team_wide" ? "chip_vis_team" : summary.visibility === "creator_only" ? "chip_vis_me" : "canvas_receipt_custom_visibility")}</dd>
         </dl>

@@ -1,6 +1,7 @@
 "use client";
 
 import { apiJson } from "./api-client";
+import type { ContextPolicy } from "./context-policy";
 import type { OutboundParams } from "./outbound-params";
 import type { ParameterPreview, RuntimeParameters } from "./runtime-parameters";
 
@@ -20,6 +21,7 @@ export interface V2ModelDeclaration {
   context_window?: number;
   max_output_tokens?: number;
   runtime_parameters?: RuntimeParameters;
+  context_policy?: ContextPolicy;
 }
 
 export interface V2ProviderDraft {
@@ -270,7 +272,9 @@ export function fetchContextWindowCatalog(): Promise<ContextWindowCatalog> {
 }
 
 /** The prefilled window for a model id and where it comes from. */
-export function suggestedContextWindow(catalog: ContextWindowCatalog, modelId: string): { value: number; source: "catalog" | "default" } {
+export function suggestedContextWindow(catalog: ContextWindowCatalog | null, modelId: string, inherited?: number): { value: number; source: "provider" | "catalog" | "default" } | null {
+  if (inherited !== undefined && Number.isSafeInteger(inherited) && inherited > 0) return { value: inherited, source: "provider" };
+  if (!catalog) return null;
   const known = catalog.models[modelId.trim().toLowerCase()];
   return known ? { value: known, source: "catalog" } : { value: catalog.default, source: "default" };
 }

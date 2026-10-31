@@ -103,7 +103,12 @@ async def test_open_review_and_confirm_use_original_governed_service(metadata_ct
         saved = await client.post(f"/api/v1/config-proposals/{result['proposal_id']}/apply")
         assert saved.status_code == 200, saved.text
         readback = (await client.get(f"/api/v1/workspace-settings/{ctx.workspace_id}/metadata")).json()
-        assert readback == {"name": "Finance", "description": "Shared analysis", "revision": original["revision"] + 1}
+        assert {key: readback[key] for key in ("name", "description", "revision")} == {
+            "name": "Finance",
+            "description": "Shared analysis",
+            "revision": original["revision"] + 1,
+        }
+        assert readback["field_contract"]["domain"] == "workspace_metadata"
         replay = await client.post(f"/api/v1/config-proposals/{result['proposal_id']}/apply")
         assert replay.json()["replayed"] is True
         assert (await client.get(f"/api/v1/workspace-settings/{ctx.workspace_id}/metadata")).json() == readback

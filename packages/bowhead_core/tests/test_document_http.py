@@ -78,6 +78,37 @@ async def test_exact_draft_reader_matches_list_without_publishing(http_case, ctx
         assert (await cursor.fetchone())[0] == 0
 
 
+async def test_superseded_review_remains_private_read_only_after_successor_failure(http_case, ctx, monkeypatch):
+    from bowhead_core.documents.delivery import DocumentDeliveryStore
+    from test_document_revision import admit_source
+    from test_document_revision_validation import revision_source
+
+    monkeypatch.setenv("FEATURE_TEMPLATE_DOCUMENT_REUSE", "1")
+    client, parent, draft, result = http_case
+    arguments = await admit_source(ctx, revision_source(ctx, parent, draft["draft_digest"]))
+    successor = await ctx.store.submit_revision_from_turn(**arguments)
+    delivery = DocumentDeliveryStore(ctx.artifacts)
+    owner = await delivery.claim(scope=SCOPE, job_id=successor.job_id)
+    assert owner is not None
+    await delivery.transition(scope=SCOPE, job_id=successor.job_id, owner=owner, state="failed", error_code="document_render_failed")
+    exact = await client.get(f"/api/v1/sessions/s_doc/documents/{parent}", headers=headers())
+    listed = await client.get("/api/v1/sessions/s_doc/documents", headers=headers())
+    assert exact.status_code == 200
+    assert exact.json() == next(job for job in listed.json()["jobs"] if job["id"] == parent)
+    assert exact.json()["superseded_by_job_id"] == successor.job_id
+    assert exact.json()["draft"] == draft["draft"]
+    assert exact.json()["can_confirm"] is False and exact.json()["can_revise"] is False
+    base = f"/api/v1/documents/{parent}"
+    preview = await client.get(base + "/preview/page-1.png", headers=headers())
+    assert preview.status_code == 200 and preview.content == result.files["page-1.png"]
+    assert preview.headers["cache-control"] == "no-store, private"
+    assert (await client.get(base + "/preview/page-1.png", headers=headers("u_other"))).status_code == 404
+    for name in ("candidate.pptx", "candidate.pdf"):
+        assert (await client.get(base + "/download/" + name, headers=headers())).status_code == 404
+    response = await client.post(base + "/confirm", headers=headers(), json={"command_id": "old-confirm", "draft_digest": draft["draft_digest"]})
+    assert response.status_code == 409
+
+
 async def test_exact_draft_reader_rejects_unknown_wrong_session_and_other_owner(http_case):
     client, job_id, _, _ = http_case
     url = f"/api/v1/sessions/s_doc/documents/{job_id}"

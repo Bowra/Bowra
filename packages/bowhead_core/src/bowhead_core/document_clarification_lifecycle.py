@@ -344,7 +344,12 @@ async def prior_document_answers_in_tx(db, *, worker: DocumentTurnOwner, job_id:
             raise DocumentContinuationUnavailable()
         rows = [row for row in rows if row["request_id"] != document_card_id]
     if job_id is not None:
+        from bowhead_core.documents.reference_answers import read_reference_document_answers_in_tx
         from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, read_ordinary_document_answer_in_tx
+
+        reference_answers = await read_reference_document_answers_in_tx(db, worker=worker, job_id=job_id, cards=rows)
+        if reference_answers is not None:
+            return reference_answers
 
         dispatch = await _row(db, "SELECT source_hash FROM document_turn_dispatches WHERE job_id=?", (job_id,))
         if dispatch is None:

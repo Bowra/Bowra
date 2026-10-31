@@ -1,7 +1,7 @@
 /** Prepared analytical bindings shared by native Table, Line and export. */
 import type { ChartColumn, ChartSpec } from "./types";
 import { tupleKey, type FocusBinding, type TypedCell } from "./linked-focus";
-import { formatObservedValue, formatDisplayValue, resolveDisplayMagnitude, resolvePercentScale, resolvePercentColumn, formatPercentCell, formatObservedPercentCell, axisUnitOf, formatDateLabel } from "./format";
+import { formatObservedValue, formatSourceValue, formatSourcePercent, formatDisplayValue, resolveDisplayMagnitude, resolvePercentScale, resolvePercentColumn, formatPercentCell, axisUnitOf, formatDateLabel } from "./format";
 
 export type AnalyticalRole = "observed" | "reference" | "primary" | "current" | "optimistic" | "baseline" | "pessimistic";
 export interface AnalyticalRange { lower_key: string; upper_key: string; kind: "scenario" | "estimate" | "confidence"; note_ids: string[]; origin_key?: string; coverage_key?: string }
@@ -84,13 +84,13 @@ export function analyticalDateTicks(domain: [number, number], granularity: numbe
 export function analyticalValue(spec: ChartSpec, key: string, value: TypedCell | undefined, locale: string, exact = true): string {
   if (value == null) return "—";
   const c = spec.columns.find((column) => column.key === key);
-  if (c?.type === "date") return formatDateLabel(String(value), locale);
+  if (c?.type === "date") return formatDateLabel(String(value), locale, c.date_pattern);
   if (typeof value !== "number" || !c) return String(value);
   const percent = resolvePercentColumn(c) ? resolvePercentScale((spec.rows ?? []).map((row) => row[key]), c) : undefined;
-  if (percent) return exact ? formatObservedPercentCell(value, percent, c.display) : formatPercentCell(value, percent, c.display);
+  if (percent) return exact ? formatSourcePercent(value, percent) : formatPercentCell(value, percent, c.display);
   const unit = axisUnitOf(c);
   const display = resolveDisplayMagnitude([value], unit, c.display, c.format);
-  return exact || !display ? formatObservedValue(value, unit, c.format, true, c.display, c.currency_code) : formatDisplayValue(value, display);
+  return exact ? formatSourceValue(value, unit) : !display ? formatObservedValue(value, unit, c.format, true, c.display, c.currency_code) : formatDisplayValue(value, display);
 }
 export function intervalColumn(spec: ChartSpec, label: string): ChartColumn {
   let key = "__interval";

@@ -34,7 +34,7 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
 # System Agents an @-mention can start only under the lead-delegation.v1 contract.
-LEAD_DELEGATION_ONLY_SYSTEM_AGENTS = frozenset({"agent-coach"})
+LEAD_DELEGATION_ONLY_SYSTEM_AGENTS = frozenset({"agent-coach", "configuration-agent"})
 
 _REASON_CODE_RE = re.compile(r"^[a-z0-9_.:-]{1,96}$")
 
@@ -242,24 +242,31 @@ async def current_reference_lead_peers_for_runtime(
 def require_supported_orchestration_contract(prepared: ReferenceStartAdmission, *, team_id: str) -> None:
     """Reject an @-mention whose Agent runs only through Lead's spawn handler under another contract.
 
-    Coach is admitted, bound to its draft and given its Tools only by that
-    handler; the legacy direct contract would skip all three. The code says
-    what the member can change: ``coach_mention_unavailable`` when this
-    deployment has the contract switched off (ask Coach on the Agent page), and
-    ``coach_mention_unsupported`` when the message itself selected another
-    contract (attached files, other references or a second Agent).
+    Coach and Configuration Agent receive their original draft/settings binding
+    and Tools through that handler. Refuse unsupported compositions before any
+    admission, with a specific recovery action for the selected specialist.
     """
     if prepared.profile_name in LEAD_DELEGATION_ONLY_SYSTEM_AGENTS and prepared.orchestration_contract != "lead-delegation.v1":
         deployment_disabled = os.environ.get("FEATURE_CHAT_REFERENCE_LEAD_DELEGATION", "1") != "1"
+        if prepared.profile_name == "configuration-agent":
+            error = (
+                HTTPException(409, detail={"error": {"code": "configuration_mention_unavailable"}})
+                if deployment_disabled
+                else HTTPException(409, detail={"error": {"code": "configuration_mention_unsupported"}})
+            )
+        else:
+            error = (
+                HTTPException(409, detail={"error": {"code": "coach_mention_unavailable"}})
+                if deployment_disabled
+                else HTTPException(409, detail={"error": {"code": "coach_mention_unsupported"}})
+            )
         logger.warning(
             "reference_start.rejected code=%s reason=lead_delegation_required profile=%s team_id=%s",
-            "coach_mention_unavailable" if deployment_disabled else "coach_mention_unsupported",
+            error.detail["error"]["code"],
             prepared.profile_name,
             team_id,
         )
-        if deployment_disabled:
-            raise HTTPException(409, detail={"error": {"code": "coach_mention_unavailable"}})
-        raise HTTPException(409, detail={"error": {"code": "coach_mention_unsupported"}})
+        raise error
 
 
 async def prepare_reference_http_start(

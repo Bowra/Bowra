@@ -1210,6 +1210,20 @@ class FeishuTurnBridge:
         if not values:
             raise ValueError("empty clarification choice")
         primary = values[0]
+        if pre.kind == "tool_context_select" and primary != "__bowhead_clarification_skip__":
+            if len(values) != 1:
+                raise ValueError("clarification_context_selection_invalid")
+            candidate = next((item for item in pre.candidates if primary in (item.value, item.label)), None)
+            if candidate is None:
+                raise ValueError("clarification_context_selection_invalid")
+            primary = values[0] = candidate.value
+            if pre.status == "pending" and (not pre.tool or pre.tool == "datarc"):
+                from bowhead_gateway.datarc_switch import prepare_picker_selection
+
+                try:
+                    await prepare_picker_selection(self.app, pre, user_id=pre.user_id, identifier=primary, name=candidate.label)
+                except ValueError as exc:
+                    raise ValueError("clarification_context_selection_unavailable") from exc
         resolution_owner = f"feishu_{uuid4().hex}"
         req, transitioned = await clarify.resolve_once(
             request_id,
@@ -1301,12 +1315,33 @@ class FeishuTurnBridge:
         req = await clarify.get(request_id)
         if req is None or req.status != "resolved":
             return None
-        rc = req.resume_context if isinstance(req.resume_context, dict) else None
+        from bowhead_gateway.datarc_context import clarification_runtime_context, resolve_datarc_recovery_context
+
+        rc = clarification_runtime_context(req, db_path=getattr(clarify, "db_path", None))
         if not rc:
             return None
-        # Reconstruct the resume TurnRequest via the channel-neutral helper shared with the web
-        # resume path; the user_text merge (B1) + field reconstruction live in one place.
-        datarc_client, datarc_unavailable, vector_client = await self._resolve_team_runtime_clients(rc.get("team_id"))
+        source_evidence = rc.get("datarc_selection")
+        recovered_context = None
+        recovered_member = ""
+        if source_evidence is not None:
+            recovered_context, recovered_member = await resolve_datarc_recovery_context(
+                self.app,
+                team_id=rc.get("team_id") or "",
+                user_id=req.user_id,
+                workspace_id=req.workspace_id,
+                session_id=req.session_id,
+                evidence=source_evidence,
+                selected_project=req.chosen_value
+                if req.kind == "tool_context_select" and req.chosen_value != "__bowhead_clarification_skip__"
+                else None,
+            )
+            datarc_client, datarc_unavailable, vector_client = (
+                recovered_context.datarc_client,
+                recovered_context.datarc_unavailable,
+                recovered_context.vector_client,
+            )
+        else:
+            datarc_client, datarc_unavailable, vector_client = await self._resolve_team_runtime_clients(rc.get("team_id"))
         from bowhead_gateway.turn_service import build_resume_turn_request
 
         if rc.get("team_id") and team_router is None:
@@ -1317,11 +1352,39 @@ class FeishuTurnBridge:
 
         turn_req = build_resume_turn_request(
             req,
+            source_db_path=getattr(clarify, "db_path", None),
             datarc_client=datarc_client,
             datarc_unavailable=datarc_unavailable,
             vector_client=vector_client,
             team_router=team_router,
         )
+        if turn_req is not None and recovered_context is not None:
+            from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
+
+            from bowhead_gateway.datarc_context import recovered_datarc_source
+
+            turn_req.datarc_binding = recovered_context.connection_binding
+            turn_req.member_uid = recovered_member
+            turn_req.active_datarc_project = recovered_context.active_datarc_project
+            turn_req.active_datarc_workspace_name = recovered_context.active_datarc_workspace_name
+            turn_req.accessible_datarc_workspaces = recovered_context.accessible_datarc_workspaces
+            turn_req.datarc_source_evidence = recovered_datarc_source(
+                recovered_context,
+                req.user_id,
+                rc.get("team_id") or "",
+                recovered_member,
+            )
+            if req.kind == "tool_context_select":
+                from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
+
+                outcome = await clarify.get_resolution_outcome(req.request_id)
+                persistence = (outcome or {}).get("tool_context_persistence")
+                turn_req.datarc_switch_resolution = DatarcSwitchResolution.from_card(
+                    req, source=turn_req.datarc_source_evidence, persistence=persistence
+                )
+                turn_req.datarc_helper_switch_resolution = DatarcHelperSwitchResolution.from_card(
+                    req, source=turn_req.datarc_source_evidence, persistence=persistence
+                )
         if turn_req is None:
             return None
         # feedback-0713 F2: IM resume (clarification-card click) follows new-message policy: revive soft-deleted sessions,

@@ -37,12 +37,8 @@ import {
   formatObservedPercentCell,
   formatObservedValue,
   comparePreparedNumbers,
-  axisUnitOf,
-  quantityUnitOf,
   resolvePercentColumn,
-  tableHeaderWithUnit,
   resolvePercentScale,
-  type PercentScale,
 } from "@/lib/chart/format";
 import { chartDatasetAvailable } from "@/lib/chart/presentation-plan";
 import { TABLE_FULL_ROWS_LIMIT, ensureFullRows } from "@/lib/chart/view-transforms";
@@ -50,8 +46,9 @@ import type { ChartSpec } from "@/lib/chart/types";
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
 import { appPath } from "@/lib/base-path";
 import { track } from "@/lib/metrics";
-import { formatExactSourceNumber } from "@/lib/source-content";
 import { TableActions } from "./table-actions";
+import { ChartTableUnits } from "./chart-table-units";
+import { qualifyTableUnitText, tableColumnDisplays } from "@/lib/chart/table-display";
 import { CharIcon } from "@/components/char-icon";
 
 /** Collapsed row count = production p50 (discussion in tech-design §4.1). */
@@ -225,16 +222,9 @@ export function ChartTable({
     setSort(null);
   }, [specSignature]);
 
-  // review R0-2: percentage scale is **column property** — per-cell detection for [0.83, 13.5] renders
-  // 83.0% / 13.5% (100-fold difference; 48 actual production columns mixed this way). Determine mode once per column.
-  const percentScales = useMemo(() => {
-    const out = new Map<string, PercentScale>();
-    for (const c of activeSpec.columns ?? []) {
-      if (c.type !== "numeric" || !resolvePercentColumn(c)) continue;
-      out.set(c.key, resolvePercentScale((activeSpec.rows ?? []).map((r) => r[c.key]), c));
-    }
-    return out;
-  }, [activeSpec.columns, activeSpec.rows]);
+  const columnDisplays = useMemo(() => tableColumnDisplays(activeSpec.columns, activeSpec.rows ?? [], locale, exactNumbers),
+    [activeSpec.columns, activeSpec.rows, locale, exactNumbers]);
+  const qualify = (text: string) => qualifyTableUnitText(text, columnDisplays.values(), (unit) => t("source_unit_label", { unit }));
 
   const totalRows = activeSpec.row_count ?? rows.length;
   // Export never collapses (PDF has no clickable "展开全部"), but cannot pretend complete: render only
@@ -456,27 +446,19 @@ export function ChartTable({
     });
   };
 
-  const scaleNotes = !isExport && !exactNumbers ? sourceSpec.columns.flatMap((column) => {
-    if (column.type !== "numeric" || percentScales.has(column.key)) return [];
-    const quantity = quantityUnitOf(column);
-    return quantity.exponent !== 0 && quantity.base
-      ? [t("source_scale", { measure: formatGrainLabel(column.header, locale), source: axisUnitOf(column)!, displayed: quantity.base })]
-      : [];
-  }) : [];
-
   return (
     <div
       className="v2-chart-table"
       role="region"
-      aria-label={spec.title}
+      aria-label={qualify(spec.title)}
       data-chart-chrome={chromeless ? "none" : undefined}
       aria-busy={exportFetching || undefined}
     >
       {chromeless ? null : (
         <div className="v2-chart-header">
-          <div className="v2-chart-title" style={{ color: theme.ink }}>{spec.title}</div>
+          <div className="v2-chart-title" style={{ color: theme.ink }}>{qualify(spec.title)}</div>
           {spec.subtitle ? (
-            <div className="v2-chart-subtitle" style={{ color: theme.inkSoft }}>{spec.subtitle}</div>
+            <div className="v2-chart-subtitle" style={{ color: theme.inkSoft }}>{qualify(spec.subtitle)}</div>
           ) : null}
           {sandboxBadge ? <span className="v2-dt-badge"><CharIcon ch="🐍" /> Python Sandbox</span> : null}
           <TableActions
@@ -487,6 +469,7 @@ export function ChartTable({
             >{switcher}</TableActions>
         </div>
       )}
+      <ChartTableUnits columns={[...columnDisplays.values()]} />
       {interval ? <ChartIntervalLegend spec={sourceSpec} profile={interval} /> : null}
       {trend ? <div className="mb-2 text-xs text-muted-foreground" data-chart-trend-scope>
         {summary ? t("trend_scope", { measure: spec.columns.find((column) => column.key === spec._export_table_trend!.measure_key)?.header ?? "", start: summary.series.values().next().value?.labels[0] ?? "", end: summary.series.values().next().value?.labels.at(-1) ?? "" }) : <Button variant="plain" size="sm" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onClick={(event) => { event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); setTrendRaw(false); setTrendEntity(null); setSort(null); }}>{t("trend_show_summary")}</Button>}
@@ -535,7 +518,7 @@ export function ChartTable({
                       cursor: sortable && (!summary || c.key !== "__trend_series") && c.key !== plotColumn?.key ? "pointer" : "default",
                     }}
                   >
-                    {c.key === plotColumn?.key && interval ? <ChartIntervalCell spec={sourceSpec} width={plotWidth} profile={interval} /> : numeric && !exactNumbers && !percentScales.has(c.key) ? tableHeaderWithUnit(formatGrainLabel(c.header, locale), axisUnitOf(c)) : formatGrainLabel(c.header, locale)}{arrow ? <>{" "}<CharIcon ch={arrow.trim()} /></> : ""}
+                    {c.key === plotColumn?.key && interval ? <ChartIntervalCell spec={sourceSpec} width={plotWidth} profile={interval} /> : columnDisplays.get(c.key)?.header ?? formatGrainLabel(c.header, locale)}{arrow ? <>{" "}<CharIcon ch={arrow.trim()} /></> : ""}
                   </th>
                 );
               })}
@@ -582,19 +565,13 @@ export function ChartTable({
                 {visibleColumns.map((c) => {
                   const v = r[c.key];
                   const annotations = (activeSpec._export_annotations ?? []).filter((item) => item.encoding === activeSpec.kind && item.measure_key === c.key && annotationMatchesRow(item, r));
-                  // Ordinary cells share hover precision and base units; source verification keeps available digits.
-                  const num = typeof v === "number" ? v : null;
                   const numeric = c.type === "numeric";
                   const display = numeric
-                    ? exactNumbers
-                      ? (typeof v === "string" ? v : formatExactSourceNumber(num))
-                      : (percentScales.has(c.key)
-                        ? formatObservedPercentCell(typeof v === "string" ? v : num, percentScales.get(c.key)!, c.display)
-                        : formatObservedValue(typeof v === "string" ? v : num, axisUnitOf(c), c.format, false, c.display, c.currency_code))
+                    ? columnDisplays.get(c.key)!.formatValue(v)
                     // review gap fix (2026-09-01): chart x-axis localized, table did not — English users requesting
                     // monthly **table** still saw `2026年1月`. Same data must not diverge across surfaces.
                     : c.type === "date"
-                      ? formatDateLabel(String(v ?? ""), locale) || "—"
+                      ? formatDateLabel(String(v ?? ""), locale, c.date_pattern) || "—"
                       : String(v ?? "—");
                   return (
                     <td
@@ -631,7 +608,6 @@ export function ChartTable({
           </tbody>
         </table>
       </div>
-      {scaleNotes.length ? <p className="v2-chart-table-unit-note text-xs text-muted-foreground" data-chart-unit-note>{scaleNotes.join(" · ")}</p> : null}
       {isExport && hiddenColumns > 0 ? (
         <div data-testid="table-hidden-columns" className="v2-chart-table-footer" style={{ color: theme.inkSoft }}>
           {t("hidden_columns", { n: hiddenColumns })}

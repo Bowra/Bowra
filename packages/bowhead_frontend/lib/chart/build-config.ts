@@ -27,6 +27,8 @@ import {
 import {
   abbrTick,
   formatObservedValue,
+  formatSourceValue,
+  formatSourcePercent,
   isUnsafeIntegerCell,
   formatDisplayValue,
   resolveDisplayMagnitude,
@@ -36,7 +38,6 @@ import {
   type DisplayMagnitude,
   formatDateLabel,
   formatPercentCell,
-  formatObservedPercentCell,
   calendarAxisTickLabels,
   axisUnitOf,
   isDisplayableUnit,
@@ -218,6 +219,21 @@ function themeWithEffectiveSeriesPalette(theme: ChartTheme): ChartTheme {
   return { ...theme, palette: [...palette], primary: palette[0]! };
 }
 
+/** The same selected dimension drives category data and its display format. */
+function categoryColumn(spec: ChartSpec): ChartColumn | undefined {
+  const dims = spec.columns.filter((c) => c.type === "date" || c.type === "categorical" || c.type === "geo");
+  if (["bar", "stacked_bar", "hbar"].includes(spec.kind)) {
+    const categories = roleOrderedDims(dims.filter((c) => c.type === "categorical" || c.type === "geo"));
+    if (spec.kind === "stacked_bar" && categories.length >= 2) return categories[0];
+    const ordered = roleOrderedDims(dims);
+    return preferIdentifyingDim(spec.rows ?? [], ordered[0], ordered);
+  }
+  return preferIdentifyingDim(
+    spec.rows ?? [], spec.columns.find((c) => c.type === "date")
+      ?? spec.columns.find((c) => c.type === "categorical" || c.type === "geo"), dims,
+  );
+}
+
 /** Entry point: dispatch by kind. kpi / table / geo use their own components and bypass this function. */
 export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: BuildOpts = {}): ChartJSConfig {
   if (spec.columns.some((column) => column.type === "numeric" && (spec.rows ?? []).some((row) => isUnsafeIntegerCell(row[column.key])))) {
@@ -254,6 +270,18 @@ export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: Bui
   // (same file :22), preserving custom dataset keys; existing `_yCol` has always worked
   // for exactly this reason. Precompute column-level context here; tooltip reads it directly, without rows crossing layers.
   const formatted = unifyPercentScalePerAxis(withColumnFormatCtx(config, spec.rows ?? []));
+  if (normalized.observedSpec) {
+    const original = normalized.observedSpec;
+    formatted.data.datasets = formatted.data.datasets.map((dataset) => {
+      const column = (dataset as { _yCol?: ChartColumn })._yCol;
+      const source = original.columns.find((item) => item.key === column?.key);
+      const rows = original.rows ?? [];
+      const pivotedStack = spec.kind === "stacked_bar" && spec.columns.filter((item) => item.type === "categorical" || item.type === "geo").length >= 2;
+      if (!column || !source || source.unit === column.unit || pivotedStack || dataset.data.length !== rows.length
+        || dataset.data.some((value, index) => value !== (spec.rows?.[index]?.[column.key] ?? null))) return dataset;
+      return { ...dataset, _observedValues: rows.map((row) => row[source.key]), _observedFmtCtx: columnFormatCtx(source, rows) };
+    }) as ChartData["datasets"];
+  }
   const styled = applyChartJsStylePresentation(formatted, spec, normalized.shape, theme, presentation);
   if (spec._export_analytical) styled.data.datasets = styled.data.datasets.map((dataset) => ({ ...dataset, ...(dataset as unknown as { _analyticalStyle?: object })._analyticalStyle })) as ChartData["datasets"];
   for (const scale of Object.values(styled.options.scales ?? {})) {
@@ -276,6 +304,15 @@ export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: Bui
   if (!spec._export_analytical && ["line", "bar", "hbar", "stacked_bar", "area_stacked", "combo", "dual_axis"].includes(spec.kind) && spec.columns.some((column) => column.type === "date") && styled.data.labels && categoryScale && (!categoryScale.type || categoryScale.type === "category") && categoryScale.ticks) {
     // Match the actual category labels, not an unrelated date column or repeated pivot rows.
     const labels = styled.data.labels.map(String);
+    const axisColumn = categoryColumn(spec);
+    const patterned = axisColumn?.type === "date" && axisColumn.date_pattern ? axisColumn : undefined;
+    if (patterned) {
+      const originals = new Map((spec.rows ?? []).flatMap((row) => {
+        const raw = String(row[patterned.key] ?? "");
+        return [[raw, raw], [formatDateLabel(raw, opts.locale), raw]] as const;
+      }));
+      styled.data.labels = labels.map((label) => formatDateLabel(originals.get(label)!, opts.locale, patterned.date_pattern));
+    }
     const dateLabels = spec.columns.filter((column) => column.type === "date").map((column) => {
       const originals = new Map((spec.rows ?? []).flatMap((row) => {
         const raw = String(row[column.key] ?? "");
@@ -284,7 +321,7 @@ export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: Bui
       return labels.every((label) => originals.has(label)) ? labels.map((label) => originals.get(label)!) : null;
     }).find((mapped) => mapped !== null);
     const monthTicks = dateLabels ? calendarAxisTickLabels(dateLabels, `${spec.title} ${spec.subtitle ?? ""}`, opts.locale) : null;
-    if (monthTicks) categoryScale.ticks.callback = (value) => monthTicks[Number(value)] ?? String(value);
+    if (monthTicks && !patterned) categoryScale.ticks.callback = (value) => monthTicks[Number(value)] ?? String(value);
   }
   if (spec.kind === "line" || spec.kind === "combo" || spec.kind === "dual_axis") {
     styled.data = {
@@ -645,13 +682,13 @@ function baseOptions(spec: ChartSpec, theme: ChartTheme, opts: BuildOpts = {}): 
               ?? (ctx.dataset as { _fmtCtx?: ColumnFormatCtx })._fmtCtx
               ?? { percent: null, unit: isDisplayableUnit(yCol?.unit) ? yCol?.unit : undefined };
             const exact = fmtCtx.percent
-              ? formatObservedPercentCell(v, fmtCtx.percent, fmtCtx.display)
-              : formatObservedValue(v, fmtCtx.unit, fmtCtx.format, true, fmtCtx.display, fmtCtx.currency_code);
+              ? formatSourcePercent(v, fmtCtx.percent)
+              : formatSourceValue(v, fmtCtx.unit);
             const xCol = (ctx.dataset as { _xCol?: ChartColumn })._xCol;
             if (xCol) {
               const x = (ctx.parsed as { x?: number }).x;
               const xFmt = (ctx.dataset as { _xFmtCtx?: ColumnFormatCtx })._xFmtCtx;
-              const xText = xFmt?.percent ? formatObservedPercentCell(x, xFmt.percent, xFmt.display) : formatObservedValue(x, xFmt?.unit, xFmt?.format, true, xFmt?.display, xFmt?.currency_code);
+              const xText = xFmt?.percent ? formatSourcePercent(x, xFmt.percent) : formatSourceValue(x, xFmt?.unit);
               return `${label}: ${measureDisplayName(xCol)} ${xText}; ${yCol ? measureDisplayName(yCol) : ""} ${exact}`;
             }
             return `${label}: ${exact}`;
@@ -1053,10 +1090,11 @@ function buildAnalyticalLine(spec: ChartSpec, theme: ChartTheme, opts: InternalB
   const display = axisDisplay(columns, spec.rows ?? [], opts, "y");
   const options = baseOptions(spec, theme, opts);
   const granularity = String(spec.rows?.[0]?.[a.x_key!] ?? "").length;
+  const datePattern = spec.columns.find((column) => column.key === a.x_key)?.date_pattern;
   options.scales = {
     x: { type: "linear", ...(a.x_kind === "date" ? { afterBuildTicks: (scale: import("chart.js").Scale) => { scale.ticks = analyticalDateTicks(a.binding.x_domain!, granularity).map((value) => ({ value })); } } : {}), min: a.binding.x_domain![0], max: a.binding.x_domain![1],
       title: { display: true, text: spec.columns.find((column) => column.key === a.x_key)?.header, color: theme.inkSoft, font: valueTickFont(theme, null) },
-      ticks: { includeBounds: false, maxTicksLimit: 6, color: theme.inkSoft, font: valueTickFont(theme, null), callback: (v) => a.x_kind === "date" ? new Intl.DateTimeFormat(opts.locale ?? "en-US", { year: "numeric", ...(granularity >= 7 ? { month: "short" as const } : {}), ...(granularity === 10 ? { day: "numeric" as const } : {}), timeZone: "UTC" }).format(Number(v)) : formatObservedValue(Number(v)) },
+      ticks: { includeBounds: false, maxTicksLimit: 6, color: theme.inkSoft, font: valueTickFont(theme, null), callback: (v) => a.x_kind === "date" ? (datePattern && (granularity === 4 || granularity === 7 || granularity === 10) ? formatDateLabel(new Date(Number(v)).toISOString().slice(0, granularity), opts.locale, datePattern) : new Intl.DateTimeFormat(opts.locale ?? "en-US", { year: "numeric", ...(granularity >= 7 ? { month: "short" as const } : {}), ...(granularity === 10 ? { day: "numeric" as const } : {}), timeZone: "UTC" }).format(Number(v))) : formatObservedValue(Number(v)) },
       grid: gridDashed(theme), border: axisBorder(theme) },
     y: { type: "linear", min: a.binding.value_domain[0], max: a.binding.value_domain[1], title: unitAxisTitle([value], theme, display),
       ticks: { includeBounds: false, callback: axisTickOf(value, spec.rows ?? [], display), maxTicksLimit: 6, color: theme.inkSoft, font: valueTickFont(theme, null) }, grid: gridDashed(theme), border: { display: false } },
@@ -1069,15 +1107,7 @@ function buildLine(
   pres: Presentation = { lead: null },
 ): ChartJSConfig {
   const rows = spec.rows ?? [];
-  const dimCols = spec.columns.filter(
-    (c) => c.type === "date" || c.type === "categorical" || c.type === "geo",
-  );
-  const xCol = preferIdentifyingDim(
-    spec.rows ?? [],
-    spec.columns.find((c) => c.type === "date")
-      ?? spec.columns.find((c) => c.type === "categorical" || c.type === "geo"),
-    dimCols,
-  );
+  const xCol = categoryColumn(spec);
   const yCols = spec.columns.filter((c) => c.type === "numeric");
   if (!xCol || yCols.length === 0) {
     throw new Error("line chart requires x (date/cat) + ≥1 numeric");
@@ -1220,10 +1250,6 @@ function buildBar(
   // review[2]: non-pivot path selects first date|categorical|geo in **column order** (restores original .find behavior).
   // Original `dateCol ?? catCols[0]` unconditionally preferred date over earlier categorical/geo columns,
   // silently switching old specs like [分行, 月份, 销量] from "分行" to "月份". Pivot path forces x=catCols[0].
-  const barDims = roleOrderedDims(
-    spec.columns.filter((c) => c.type === "date" || c.type === "categorical" || c.type === "geo"),
-  );
-  const orderedX = preferIdentifyingDim(spec.rows ?? [], barDims[0], barDims);
 
   // Feishu 07.06 #3: stacked bars + two category dimensions → pivot dimension 2 into stacked series; bar height uses one
   // primary measure. Correct stacking semantics = split the same measure by dimension 2; segment sum = dimension 1's actual
@@ -1231,7 +1257,7 @@ function buildBar(
   // e.g. card amount + customer count) into one bar: meaningless sum, invisible small measures, and discarded second dimension
   // (backend infer.py §8 already specifies cat2=series grouping, with multiple nums using only the sort_by primary series).
   const seriesCol = opts.stacked && catCols.length >= 2 ? catCols[1] : null;
-  const xCol = seriesCol ? catCols[0] : orderedX;
+  const xCol = categoryColumn(spec);
   if (!xCol || numCols.length === 0) {
     throw new Error("bar chart requires date/categorical/geo + ≥1 numeric");
   }
@@ -1425,15 +1451,7 @@ function buildDualAxis(
   // dual_axis x-col: prefer date (monthly trend) then categorical/geo — matches
   // buildLine. A date x-col (e.g. 每月) previously returned undefined here and
   // the chart silently degraded to ChartTable.
-  const dimCols = spec.columns.filter(
-    (c) => c.type === "date" || c.type === "categorical" || c.type === "geo",
-  );
-  const xCol = preferIdentifyingDim(
-    spec.rows ?? [],
-    spec.columns.find((c) => c.type === "date")
-      ?? spec.columns.find((c) => c.type === "categorical" || c.type === "geo"),
-    dimCols,
-  );
+  const xCol = categoryColumn(spec);
   const yCols = spec.columns.filter((c) => c.type === "numeric");
   if (!xCol || yCols.length < 2) {
     throw new Error("dual_axis requires x (date/categorical/geo) + ≥2 numeric");
@@ -1556,15 +1574,7 @@ function buildCombo(
   const rows = spec.rows ?? [];
   const recipe = renderRecipe(spec, theme, opts);
   const highContrast = usesPresetHighContrast(theme);
-  const dimCols = spec.columns.filter(
-    (c) => c.type === "date" || c.type === "categorical" || c.type === "geo",
-  );
-  const xCol = preferIdentifyingDim(
-    spec.rows ?? [],
-    spec.columns.find((c) => c.type === "date")
-      ?? spec.columns.find((c) => c.type === "categorical" || c.type === "geo"),
-    dimCols,
-  );
+  const xCol = categoryColumn(spec);
   const yCols = spec.columns.filter((c) => c.type === "numeric");
   if (!xCol || yCols.length < 2) {
     throw new Error("combo requires x (date/categorical/geo) + ≥2 numeric (1 bar + ≥1 line)");
@@ -1741,7 +1751,7 @@ function buildPie(
           const v = ctx.parsed as unknown as number;
           const pct = total > 0 ? formatPercentCell(v / total, "fraction") : "—";
           const fmt = columnFormatCtx(yCol, rows);
-          const observed = fmt.percent ? formatObservedPercentCell(v, fmt.percent, fmt.display) : formatObservedValue(v, fmt.unit, fmt.format, true, fmt.display, fmt.currency_code);
+          const observed = fmt.percent ? formatSourcePercent(v, fmt.percent) : formatSourceValue(v, fmt.unit);
           return `${ctx.label}: ${observed} (${opts.visibleShareLabel ?? "Share of visible items"}: ${pct})`;
         },
       },
@@ -2874,7 +2884,7 @@ function buildWaterfall(spec: ChartSpec, theme: ChartTheme, buildOpts: BuildOpts
           const i = ctx.dataIndex;
           const delta = i < rows.length ? Number(rows[i][vKey] ?? 0) : b - a;
           const fmt = columnFormatCtx(numCols[0], rows);
-          const value = fmt.percent ? formatObservedPercentCell(delta, fmt.percent, fmt.display) : formatObservedValue(delta, fmt.unit, fmt.format, true, fmt.display, fmt.currency_code);
+          const value = fmt.percent ? formatSourcePercent(delta, fmt.percent) : formatSourceValue(delta, fmt.unit);
           return `${delta >= 0 ? "+" : ""}${value}`;
         },
       },
@@ -2958,7 +2968,7 @@ function buildSankey(spec: ChartSpec, theme: ChartTheme, opts: BuildOpts = {}): 
         label: (ctx) => {
           const link = links[ctx.dataIndex];
           const fmt = columnFormatCtx(numCols[0], rows);
-          const value = fmt.percent ? formatObservedPercentCell(link.flow, fmt.percent, fmt.display) : formatObservedValue(link.flow, fmt.unit, fmt.format, true, fmt.display, fmt.currency_code);
+          const value = fmt.percent ? formatSourcePercent(link.flow, fmt.percent) : formatSourceValue(link.flow, fmt.unit);
           return `${link.from} → ${link.to}: ${value}`;
         },
       },
@@ -3026,7 +3036,7 @@ function buildHeatmap(spec: ChartSpec, theme: ChartTheme, opts: BuildOpts = {}):
         label: (ctx) => {
           const c = (ctx.dataset.data as Array<{ x: string; y: string; v: number }>)[ctx.dataIndex];
           const fmt = columnFormatCtx(numCols[0], rows);
-          const value = fmt.percent ? formatObservedPercentCell(c.v, fmt.percent, fmt.display) : formatObservedValue(c.v, fmt.unit, fmt.format, true, fmt.display, fmt.currency_code);
+          const value = fmt.percent ? formatSourcePercent(c.v, fmt.percent) : formatSourceValue(c.v, fmt.unit);
           return `${c.y} × ${c.x}: ${value}`;
         },
       },

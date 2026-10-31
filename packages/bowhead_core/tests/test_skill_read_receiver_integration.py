@@ -164,6 +164,8 @@ async def receiver_case(start_case, tmp_path, monkeypatch, request):
         )
     if "bi_metadata" in mode:
         definition["tool_refs"] = ["bi_query", "bi_schema", "bi_list_measures", "bi_list_dimensions"]
+    if mode == "admission_concept_resolve":
+        definition["tool_refs"] = ["bi_query", "bi_concept_resolve"]
     if "office" in mode:
         definition["tool_refs"] = ["attachment_read"]
     optional = None
@@ -178,6 +180,7 @@ async def receiver_case(start_case, tmp_path, monkeypatch, request):
         tool_catalog=replace(
             _catalog(
                 _tool("bi_query"),
+                *([_tool("bi_concept_resolve")] if mode == "admission_concept_resolve" else []),
                 *([_tool(name) for name in ("bi_schema", "bi_list_measures", "bi_list_dimensions")] if "bi_metadata" in mode else []),
                 _tool("image_generate", risk="artifact_write"),
                 _tool("skill_read"),
@@ -203,7 +206,7 @@ async def receiver_case(start_case, tmp_path, monkeypatch, request):
         }
         if mode in {"admission_capability", "admission_capability_skill"}
         else {"tool_refs": definition["tool_refs"]}
-        if "bi_metadata" in mode or "office" in mode
+        if "bi_metadata" in mode or "office" in mode or mode == "admission_concept_resolve"
         else None,
     )
     with sqlite3.connect(case.fixture.db_path) as db:

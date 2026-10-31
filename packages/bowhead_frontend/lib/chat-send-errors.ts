@@ -6,6 +6,11 @@ import { staticTranslator } from "./locale-messages";
  * error-messages.ts.
  */
 export const CHAT_SEND_BACKEND_CODES = [
+  "context_maintenance_unsupported",
+  "context_maintenance_inputs_unsupported",
+  "context_conversation_head_changed",
+  "context_maintenance_session_busy",
+  "context_maintenance_pending_operation",
   "document_not_found",
   "document_revision_conflict",
   "document_input_unavailable",
@@ -19,6 +24,8 @@ export const CHAT_SEND_BACKEND_CODES = [
   "unsupported_entry",
   "coach_mention_unsupported",
   "coach_mention_unavailable",
+  "configuration_mention_unsupported",
+  "configuration_mention_unavailable",
   "resource_unavailable",
   "plan_execution_claim_lost",
   "source_projection_unavailable",

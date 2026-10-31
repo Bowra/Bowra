@@ -1,3 +1,5 @@
+import type { FieldContract } from "./configuration-field-guidance";
+import { randomUuid } from "@/lib/random-id";
 import { appFetch as fetch, appPath } from "@/lib/base-path";
 import type { KbParseStatus } from "./kb-api";
 
@@ -1233,11 +1235,14 @@ export interface UserSettings {
   [k: string]: string | undefined;
 }
 
-export async function getUserSettings(): Promise<UserSettings> {
-  const body = await apiJson<{ settings: UserSettings }>(
+export async function getUserSettingsView(): Promise<{ settings: UserSettings; field_contract?: FieldContract }> {
+  return apiJson(
     "/api/v1/user-settings",
   );
-  return body.settings ?? {};
+}
+
+export async function getUserSettings(): Promise<UserSettings> {
+  return (await getUserSettingsView()).settings ?? {};
 }
 
 export async function setUserSetting(
@@ -1269,28 +1274,6 @@ export async function patchChartAccessibility(patch: {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
-  });
-}
-
-// Analysis-depth team setting — agent thoroughness knob (fast/standard/thorough).
-export type AnalysisDepth = "fast" | "standard" | "thorough";
-
-export async function getTeamAnalysisDepth(): Promise<{
-  value: AnalysisDepth;
-  label?: string | null;
-}> {
-  return apiJson<{ value: AnalysisDepth; label?: string | null }>(
-    "/api/v1/team-settings/analysis-depth",
-  );
-}
-
-export async function setTeamAnalysisDepth(
-  value: AnalysisDepth,
-): Promise<void> {
-  await apiVoid("/api/v1/team-settings/analysis-depth", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ value }),
   });
 }
 
@@ -1356,13 +1339,16 @@ export interface WorkspaceSettings {
   [k: string]: string | undefined;
 }
 
-export async function getWorkspaceSettings(
+export async function getWorkspaceSettingsView(
   workspaceId: string,
-): Promise<WorkspaceSettings> {
-  const body = await apiJson<{ settings: WorkspaceSettings }>(
+): Promise<{ settings: WorkspaceSettings; field_contract?: FieldContract }> {
+  return apiJson(
     `/api/v1/workspace-settings/${encodeURIComponent(workspaceId)}`,
   );
-  return body.settings ?? {};
+}
+
+export async function getWorkspaceSettings(workspaceId: string): Promise<WorkspaceSettings> {
+  return (await getWorkspaceSettingsView(workspaceId)).settings ?? {};
 }
 
 export async function setWorkspaceSetting(
@@ -1381,6 +1367,7 @@ export async function setWorkspaceSetting(
 }
 
 export interface WorkspaceMetadata {
+  field_contract?: FieldContract;
   name: string;
   description: string | null;
   revision: number;
@@ -1414,6 +1401,7 @@ export async function updateWorkspaceMetadata(
 
 // Space instructions — MIRRORS packages/bowhead_gateway/.../routes/space_instructions.py
 export interface SpaceInstructions {
+  field_contract?: FieldContract;
   workspace_id: string;
   /** 0 when the Space has never had instructions. */
   version: number;
@@ -1839,7 +1827,7 @@ export async function promoteFileToKb(
   const r = await fetch(`/api/v1/kb/files/from-artifact`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...workspaceHeaders() },
-    body: JSON.stringify({ artifact_id: fileId, scope }),
+    body: JSON.stringify({ artifact_id: fileId, scope, knowledge_intent: "add_to_knowledge", action_id: randomUuid() }),
   });
   if (!r.ok) {
     // Stable UI error codes: do not expose raw parser reasons or backend 500 text to users.
@@ -2455,6 +2443,7 @@ async function readSessionArchiveError(
 }
 
 export interface SessionDetailDTO {
+  context_generation?: string | null;
   chat_execution: import("./auth-api").ChatExecutionBootstrap;
   session: {
     id: string;
@@ -2468,6 +2457,7 @@ export interface SessionDetailDTO {
     intents: string[] | null;
   };
   turns: Array<{
+    operation_kind?: "context_maintenance" | null;
     id: string;
     seq: number;
     user_text: string;

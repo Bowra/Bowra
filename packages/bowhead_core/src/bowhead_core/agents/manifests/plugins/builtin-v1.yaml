@@ -1,21 +1,4 @@
-# Code-shipped built-in Plugins (docs/design/capability-center-plugins-tech-design.md §5).
-#
-# A Plugin is a reviewed bundle of Tools, system parts and exact Skill grants.
-# Entries are immutable: changing a Plugin's contents requires a new version,
-# and older versions stay listed so existing snapshots keep resolving.
-#
-# family:
-#   general  - user-visible Tools (kind: tool), optional prompt modules (<id>@<version>)
-#              and availability requirements; needs a listing in zh-CN, en-US, de-DE and fr-FR
-#              with a name, a description, a "use when" line and one example request.
-#   settings - used by the configuration Agent; carries system parts and one exact Skill grant.
-# selectable:
-#   whether custom Agents may select the Plugin: every general Plugin is selectable, settings
-#   Plugins never are. Selecting a Plugin is the Owner's grant: its Tools run without asking
-#   each time (Email and Google delivery included; Lead keeps its own confirmation).
-# A Tool belongs to at most one Plugin.
 schema_version: 1
-
 plugins:
   - name: data-analysis
     version: 1
@@ -23,332 +6,362 @@ plugins:
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "数据分析",
-          description: "查看数据字段、查询数据并确认数据口径。",
-          use_when: "要从团队的数据源里查数时",
-          example: "「上月华东销售额是多少」",
-        }
+        name: 数据分析
+        description: 查看数据字段、查询数据并确认数据口径。
+        use_when: 要从团队的数据源里查数时
+        example: 「上月华东销售额是多少」
       en-US:
-        {
-          name: "Data analysis",
-          description: "View data fields, query data and clarify data terms.",
-          use_when: "you need numbers from your team's data sources",
-          example: '"What were East China sales last month?"',
-        }
+        name: Data analysis
+        description: View data fields, query data and clarify data terms.
+        use_when: you need numbers from your team's data sources
+        example: '"What were East China sales last month?"'
       de-DE:
-        {
-          name: "Datenanalyse",
-          description: "Datenfelder ansehen, Daten abfragen und Datenbegriffe klären.",
-          use_when: "Sie Zahlen aus den Datenquellen Ihres Teams brauchen",
-          example: "„Wie hoch war der Umsatz in Ostchina im letzten Monat?“",
-        }
+        name: Datenanalyse
+        description: Datenfelder ansehen, Daten abfragen und Datenbegriffe klären.
+        use_when: Sie Zahlen aus den Datenquellen Ihres Teams brauchen
+        example: „Wie hoch war der Umsatz in Ostchina im letzten Monat?“
       fr-FR:
-        {
-          name: "Analyse de données",
-          description: "Consulter les champs, interroger les données et clarifier les termes métier.",
-          use_when: "vous avez besoin de chiffres issus des sources de données de l’équipe",
-          example: "« Quelles étaient les ventes de la Chine de l’Est le mois dernier ? »",
-        }
-    tools: [bi_schema, bi_query, bi_concept_resolve, tool_list_workspaces]
-    prompt_modules: [data-query-datarc-protocol@1]
-    availability: [datarc_connection]
+        name: Analyse de données
+        description: Consulter les champs, interroger les données et clarifier les termes métier.
+        use_when: vous avez besoin de chiffres issus des sources de données de l’équipe
+        example: « Quelles étaient les ventes de la Chine de l’Est le mois dernier ? »
+    tools:
+      - bi_schema
+      - bi_query
+      - bi_concept_resolve
+      - tool_list_workspaces
+    prompt_modules:
+      - data-query-datarc-protocol@1
+    availability:
+      - datarc_connection
   - name: reports-canvas
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "报告与画布",
-          description: "把分析写成报告，加入图表、图片和洞察。",
-          use_when: "要把结果做成带图表的报告时",
-          example: "「把这季度的销售情况写成一份带图表的报告」",
-        }
+        name: 报告与画布
+        description: 把分析写成报告，加入图表、图片和洞察。
+        use_when: 要把结果做成带图表的报告时
+        example: 「把这季度的销售情况写成一份带图表的报告」
       en-US:
-        {
-          name: "Reports and canvas",
-          description: "Write analysis into reports with charts, images and insights.",
-          use_when: "you want the result as a report with charts",
-          example: '"Write this quarter''s sales into a report with charts"',
-        }
+        name: Reports and canvas
+        description: Write analysis into reports with charts, images and insights.
+        use_when: you want the result as a report with charts
+        example: '"Write this quarter''s sales into a report with charts"'
       de-DE:
-        {
-          name: "Berichte und Canvas",
-          description: "Analysen als Berichte mit Diagrammen, Bildern und Erkenntnissen schreiben.",
-          use_when: "Sie das Ergebnis als Bericht mit Diagrammen möchten",
-          example: "„Fasse den Umsatz dieses Quartals in einem Bericht mit Diagrammen zusammen“",
-        }
+        name: Berichte und Canvas
+        description: Analysen als Berichte mit Diagrammen, Bildern und Erkenntnissen schreiben.
+        use_when: Sie das Ergebnis als Bericht mit Diagrammen möchten
+        example: „Fasse den Umsatz dieses Quartals in einem Bericht mit Diagrammen zusammen“
       fr-FR:
-        {
-          name: "Rapports et canevas",
-          description: "Rédiger l’analyse en rapports avec graphiques, images et constats.",
-          use_when: "vous voulez le résultat sous forme de rapport avec graphiques",
-          example: "« Rédige un rapport avec graphiques sur les ventes de ce trimestre »",
-        }
+        name: Rapports et canevas
+        description: Rédiger l’analyse en rapports avec graphiques, images et constats.
+        use_when: vous voulez le résultat sous forme de rapport avec graphiques
+        example: « Rédige un rapport avec graphiques sur les ventes de ce trimestre »
     tools:
-      [
-        write_report,
-        read_report,
-        add_chart,
-        remove_chart,
-        add_image,
-        canvas_add_insight,
-        canvas_add_spec_block,
-        canvas_add_html_artifact,
-        canvas_add_external_iframe,
-      ]
-    prompt_modules: [canvas-report-protocol@1]
+      - write_report
+      - read_report
+      - add_chart
+      - read_chart
+      - edit_chart
+      - remove_chart
+      - add_image
+      - canvas_add_insight
+      - canvas_add_spec_block
+      - canvas_add_html_artifact
+      - canvas_add_external_iframe
+    prompt_modules:
+      - canvas-report-protocol@1
+  - name: reports-canvas
+    version: 2
+    family: general
+    selectable: true
+    listing:
+      zh-CN:
+        name: 报告与画布
+        description: 把分析写成报告，加入图表、图片和洞察。
+        use_when: 要把结果做成带图表的报告时
+        example: 「把这季度的销售情况写成一份带图表的报告」
+      en-US:
+        name: Reports and canvas
+        description: Write analysis into reports with charts, images and insights.
+        use_when: you want the result as a report with charts
+        example: '"Write this quarter''s sales into a report with charts"'
+      de-DE:
+        name: Berichte und Canvas
+        description: Analysen als Berichte mit Diagrammen, Bildern und Erkenntnissen schreiben.
+        use_when: Sie das Ergebnis als Bericht mit Diagrammen möchten
+        example: „Fasse den Umsatz dieses Quartals in einem Bericht mit Diagrammen zusammen“
+      fr-FR:
+        name: Rapports et canevas
+        description: Rédiger l’analyse en rapports avec graphiques, images et constats.
+        use_when: vous voulez le résultat sous forme de rapport avec graphiques
+        example: « Rédige un rapport avec graphiques sur les ventes de ce trimestre »
+    tools:
+      - write_report
+      - read_report
+      - present_artifacts
+      - add_chart
+      - read_chart
+      - edit_chart
+      - remove_chart
+      - add_image
+      - canvas_add_insight
+      - canvas_add_spec_block
+      - canvas_add_html_artifact
+      - canvas_add_external_iframe
+    prompt_modules:
+      - canvas-report-protocol@1
   - name: designs
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "设计稿",
-          description: "创建和修改设计稿，导出为图片。",
-          use_when: "要做海报、卡片这类设计稿时",
-          example: "「做一张本周活动的宣传海报」",
-        }
+        name: 设计稿
+        description: 创建和修改设计稿，导出为图片。
+        use_when: 要做海报、卡片这类设计稿时
+        example: 「做一张本周活动的宣传海报」
       en-US:
-        {
-          name: "Designs",
-          description: "Create and edit designs and export them as images.",
-          use_when: "you need a design such as a poster or a card",
-          example: '"Make a poster for this week''s event"',
-        }
+        name: Designs
+        description: Create and edit designs and export them as images.
+        use_when: you need a design such as a poster or a card
+        example: '"Make a poster for this week''s event"'
       de-DE:
-        {
-          name: "Entwürfe",
-          description: "Entwürfe erstellen, bearbeiten und als Bild exportieren.",
-          use_when: "Sie einen Entwurf wie ein Plakat oder eine Karte brauchen",
-          example: "„Gestalte ein Plakat für die Veranstaltung dieser Woche“",
-        }
+        name: Entwürfe
+        description: Entwürfe erstellen, bearbeiten und als Bild exportieren.
+        use_when: Sie einen Entwurf wie ein Plakat oder eine Karte brauchen
+        example: „Gestalte ein Plakat für die Veranstaltung dieser Woche“
       fr-FR:
-        {
-          name: "Maquettes",
-          description: "Créer et modifier des maquettes, puis les exporter en image.",
-          use_when: "vous avez besoin d’une maquette, comme une affiche ou une carte",
-          example: "« Crée une affiche pour l’événement de cette semaine »",
-        }
-    tools: [canvas_create_design, canvas_update_design_text, canvas_flatten_design]
+        name: Maquettes
+        description: Créer et modifier des maquettes, puis les exporter en image.
+        use_when: vous avez besoin d’une maquette, comme une affiche ou une carte
+        example: « Crée une affiche pour l’événement de cette semaine »
+    tools:
+      - canvas_create_design
+      - canvas_update_design_text
+      - canvas_flatten_design
   - name: knowledge-base
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "知识库",
-          description: "搜索和查询团队知识库，读取附件正文。",
-          use_when: "要按团队知识库里的资料回答时",
-          example: "「报销制度里差旅住宿的标准是多少」",
-        }
+        name: 知识库
+        description: 搜索和查询团队知识库，读取附件正文。
+        use_when: 要按团队知识库里的资料回答时
+        example: 「报销制度里差旅住宿的标准是多少」
       en-US:
-        {
-          name: "Knowledge base",
-          description: "Search and query the team knowledge base and read attachment text.",
-          use_when: "answers should come from the team knowledge base",
-          example: '"What is the hotel limit in our travel policy?"',
-        }
+        name: Knowledge base
+        description: Search and query the team knowledge base and read attachment text.
+        use_when: answers should come from the team knowledge base
+        example: '"What is the hotel limit in our travel policy?"'
       de-DE:
-        {
-          name: "Wissensdatenbank",
-          description: "Die Team-Wissensdatenbank durchsuchen, abfragen und Anhangtext lesen.",
-          use_when: "Antworten aus der Team-Wissensdatenbank kommen sollen",
-          example: "„Wie hoch ist das Hotellimit in unserer Reiserichtlinie?“",
-        }
+        name: Wissensdatenbank
+        description: Die Team-Wissensdatenbank durchsuchen, abfragen und Anhangtext lesen.
+        use_when: Antworten aus der Team-Wissensdatenbank kommen sollen
+        example: „Wie hoch ist das Hotellimit in unserer Reiserichtlinie?“
       fr-FR:
-        {
-          name: "Base de connaissances",
-          description: "Rechercher et interroger la base de connaissances et lire le texte des pièces jointes.",
-          use_when: "les réponses doivent venir de la base de connaissances de l’équipe",
-          example: "« Quel est le plafond d’hôtel dans notre politique de voyage ? »",
-        }
-    tools: [kb_search, kb_query_records, kb_get_record, kb_list_tables, attachment_read]
+        name: Base de connaissances
+        description: Rechercher et interroger la base de connaissances et lire le texte des pièces jointes.
+        use_when: les réponses doivent venir de la base de connaissances de l’équipe
+        example: « Quel est le plafond d’hôtel dans notre politique de voyage ? »
+    tools:
+      - kb_search
+      - kb_query_records
+      - kb_get_record
+      - kb_list_tables
+      - attachment_read
+  - name: knowledge-management
+    version: 1
+    family: general
+    selectable: true
+    listing:
+      en-US:
+        name: Knowledge management
+        description: Add existing files to knowledge, remove membership and inspect operation status on explicit user requests.
+        use_when: you maintain knowledge sources
+        example: '"Add this policy to my personal knowledge base"'
+      zh-CN:
+        name: 知识库管理
+        description: 按用户明确请求添加已有文件、移出知识库并查询操作状态。
+        use_when: 需要维护知识来源时
+        example: 「把这份制度加入我的个人知识库」
+      de-DE:
+        name: Wissensverwaltung
+        description: Vorhandene Dateien auf ausdrücklichen Wunsch hinzufügen, aus der Wissensdatenbank entfernen und den Vorgangsstatus prüfen.
+        use_when: Sie Wissensquellen verwalten
+        example: „Diese Richtlinie zu meiner persönlichen Wissensdatenbank hinzufügen“
+      fr-FR:
+        name: Gestion des connaissances
+        description: Ajouter des fichiers existants sur demande explicite, les retirer de la base et consulter les opérations.
+        use_when: vous gérez les sources de connaissances
+        example: « Ajouter cette politique à ma base personnelle »
+    tools:
+      - kb_add_file
+      - kb_remove_file
+      - kb_operation_status
   - name: web-research
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "联网研究",
-          description: "搜索网页、读取和抓取网站内容。",
-          use_when: "要查公开网页上的信息时",
-          example: "「查一下竞品最近发布了什么新产品」",
-        }
+        name: 联网研究
+        description: 搜索网页、读取和抓取网站内容。
+        use_when: 要查公开网页上的信息时
+        example: 「查一下竞品最近发布了什么新产品」
       en-US:
-        {
-          name: "Web research",
-          description: "Search the web and read or crawl website content.",
-          use_when: "you need information from public web pages",
-          example: '"Find out what new products our competitor launched recently"',
-        }
+        name: Web research
+        description: Search the web and read or crawl website content.
+        use_when: you need information from public web pages
+        example: '"Find out what new products our competitor launched recently"'
       de-DE:
-        {
-          name: "Webrecherche",
-          description: "Im Web suchen und Website-Inhalte lesen oder durchsuchen.",
-          use_when: "Sie Informationen von öffentlichen Webseiten brauchen",
-          example: "„Finde heraus, welche neuen Produkte der Wettbewerber zuletzt vorgestellt hat“",
-        }
+        name: Webrecherche
+        description: Im Web suchen und Website-Inhalte lesen oder durchsuchen.
+        use_when: Sie Informationen von öffentlichen Webseiten brauchen
+        example: „Finde heraus, welche neuen Produkte der Wettbewerber zuletzt vorgestellt hat“
       fr-FR:
-        {
-          name: "Recherche web",
-          description: "Rechercher sur le web et lire ou explorer le contenu des sites.",
-          use_when: "vous avez besoin d’informations de pages web publiques",
-          example: "« Trouve les nouveaux produits lancés récemment par notre concurrent »",
-        }
-    tools: [web_search, web_fetch, web_extract, web_map, web_crawl, web_deep_research]
-    availability: [web_search_provider]
+        name: Recherche web
+        description: Rechercher sur le web et lire ou explorer le contenu des sites.
+        use_when: vous avez besoin d’informations de pages web publiques
+        example: « Trouve les nouveaux produits lancés récemment par notre concurrent »
+    tools:
+      - web_search
+      - web_fetch
+      - web_extract
+      - web_map
+      - web_crawl
+      - web_deep_research
+    availability:
+      - web_search_provider
   - name: code-computation
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "代码计算",
-          description: "在隔离的沙盒中运行 Python。",
-          use_when: "要精确计算、统计、整理表格时",
-          example: "「华东 120 万、华南 80 万…算合计和占比」",
-        }
+        name: 代码计算
+        description: 在隔离的沙盒中运行 Python。
+        use_when: 要精确计算、统计、整理表格时
+        example: 「华东 120 万、华南 80 万…算合计和占比」
       en-US:
-        {
-          name: "Code and computation",
-          description: "Run Python in an isolated sandbox.",
-          use_when: "you need exact calculations, statistics or tables",
-          example: '"East 1.2M, South 0.8M… work out the total and each share"',
-        }
+        name: Code and computation
+        description: Run Python in an isolated sandbox.
+        use_when: you need exact calculations, statistics or tables
+        example: '"East 1.2M, South 0.8M… work out the total and each share"'
       de-DE:
-        {
-          name: "Code und Berechnung",
-          description: "Python in einer isolierten Umgebung ausführen.",
-          use_when: "Sie genaue Berechnungen, Statistiken oder Tabellen brauchen",
-          example: "„Ost 1,2 Mio., Süd 0,8 Mio. … berechne Summe und Anteile“",
-        }
+        name: Code und Berechnung
+        description: Python in einer isolierten Umgebung ausführen.
+        use_when: Sie genaue Berechnungen, Statistiken oder Tabellen brauchen
+        example: „Ost 1,2 Mio., Süd 0,8 Mio. … berechne Summe und Anteile“
       fr-FR:
-        {
-          name: "Code et calcul",
-          description: "Exécuter Python dans un environnement isolé.",
-          use_when: "vous avez besoin de calculs exacts, de statistiques ou de tableaux",
-          example: "« Est 1,2 M, Sud 0,8 M… calcule le total et chaque part »",
-        }
-    tools: [python_sandbox]
-    prompt_modules: [sandbox-io-protocol@1]
-    availability: [sandbox]
+        name: Code et calcul
+        description: Exécuter Python dans un environnement isolé.
+        use_when: vous avez besoin de calculs exacts, de statistiques ou de tableaux
+        example: « Est 1,2 M, Sud 0,8 M… calcule le total et chaque part »
+    tools:
+      - python_sandbox
+    prompt_modules:
+      - sandbox-io-protocol@1
+    availability:
+      - sandbox
   - name: image-generation
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "图片生成",
-          description: "根据文字描述生成图片。",
-          use_when: "要根据文字描述生成图片时",
-          example: "「画一张适合做封面的城市夜景插图」",
-        }
+        name: 图片生成
+        description: 根据文字描述生成图片。
+        use_when: 要根据文字描述生成图片时
+        example: 「画一张适合做封面的城市夜景插图」
       en-US:
-        {
-          name: "Image generation",
-          description: "Generate images from a text description.",
-          use_when: "you want an image generated from a description",
-          example: '"Draw a city-at-night illustration for a cover"',
-        }
+        name: Image generation
+        description: Generate images from a text description.
+        use_when: you want an image generated from a description
+        example: '"Draw a city-at-night illustration for a cover"'
       de-DE:
-        {
-          name: "Bilderzeugung",
-          description: "Bilder aus einer Textbeschreibung erzeugen.",
-          use_when: "Sie ein Bild aus einer Beschreibung erzeugen möchten",
-          example: "„Zeichne eine nächtliche Stadtillustration für ein Titelbild“",
-        }
+        name: Bilderzeugung
+        description: Bilder aus einer Textbeschreibung erzeugen.
+        use_when: Sie ein Bild aus einer Beschreibung erzeugen möchten
+        example: „Zeichne eine nächtliche Stadtillustration für ein Titelbild“
       fr-FR:
-        {
-          name: "Génération d’images",
-          description: "Générer des images à partir d’une description.",
-          use_when: "vous voulez générer une image à partir d’une description",
-          example: "« Dessine une illustration de ville la nuit pour une couverture »",
-        }
-    tools: [image_generate]
-    availability: [image_model]
+        name: Génération d’images
+        description: Générer des images à partir d’une description.
+        use_when: vous voulez générer une image à partir d’une description
+        example: « Dessine une illustration de ville la nuit pour une couverture »
+    tools:
+      - image_generate
+    availability:
+      - image_model
   - name: google-delivery
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "Google 交付",
-          description: "把结果写入 Google 文档、表格和演示。",
-          use_when: "要把结果写进 Google 文档、表格或演示时",
-          example: "「把这份汇总写进我的 Google 表格」",
-        }
+        name: Google 交付
+        description: 把结果写入 Google 文档、表格和演示。
+        use_when: 要把结果写进 Google 文档、表格或演示时
+        example: 「把这份汇总写进我的 Google 表格」
       en-US:
-        {
-          name: "Google delivery",
-          description: "Write results to Google Docs, Sheets and Slides.",
-          use_when: "results should go into Google Docs, Sheets or Slides",
-          example: '"Put this summary into my Google Sheet"',
-        }
+        name: Google delivery
+        description: Write results to Google Docs, Sheets and Slides.
+        use_when: results should go into Google Docs, Sheets or Slides
+        example: '"Put this summary into my Google Sheet"'
       de-DE:
-        {
-          name: "Google-Übergabe",
-          description: "Ergebnisse in Google Docs, Sheets und Slides schreiben.",
-          use_when: "Ergebnisse in Google Docs, Sheets oder Slides landen sollen",
-          example: "„Übertrage diese Zusammenfassung in mein Google Sheet“",
-        }
+        name: Google-Übergabe
+        description: Ergebnisse in Google Docs, Sheets und Slides schreiben.
+        use_when: Ergebnisse in Google Docs, Sheets oder Slides landen sollen
+        example: „Übertrage diese Zusammenfassung in mein Google Sheet“
       fr-FR:
-        {
-          name: "Livraison Google",
-          description: "Écrire les résultats dans Google Docs, Sheets et Slides.",
-          use_when: "les résultats doivent aller dans Google Docs, Sheets ou Slides",
-          example: "« Mets ce résumé dans ma feuille Google Sheets »",
-        }
-    tools: [google_doc_write, google_sheet_write, google_slides_write]
-    availability: [google_workspace]
+        name: Livraison Google
+        description: Écrire les résultats dans Google Docs, Sheets et Slides.
+        use_when: les résultats doivent aller dans Google Docs, Sheets ou Slides
+        example: « Mets ce résumé dans ma feuille Google Sheets »
+    tools:
+      - google_doc_write
+      - google_sheet_write
+      - google_slides_write
+    availability:
+      - google_workspace
   - name: email
     version: 1
     family: general
     selectable: true
     listing:
       zh-CN:
-        {
-          name: "邮件",
-          description: "通过团队邮件服务发送邮件。",
-          use_when: "要把结果发邮件给别人时",
-          example: "「把今天的日报发给 sales@example.com」",
-        }
+        name: 邮件
+        description: 通过团队邮件服务发送邮件。
+        use_when: 要把结果发邮件给别人时
+        example: 「把今天的日报发给 sales@example.com」
       en-US:
-        {
-          name: "Email",
-          description: "Send email through the team email service.",
-          use_when: "results should be sent by email",
-          example: '"Send today''s report to sales@example.com"',
-        }
+        name: Email
+        description: Send email through the team email service.
+        use_when: results should be sent by email
+        example: '"Send today''s report to sales@example.com"'
       de-DE:
-        {
-          name: "E-Mail",
-          description: "E-Mails über den E-Mail-Dienst des Teams senden.",
-          use_when: "Ergebnisse per E-Mail verschickt werden sollen",
-          example: "„Schicke den heutigen Bericht an sales@example.com“",
-        }
+        name: E-Mail
+        description: E-Mails über den E-Mail-Dienst des Teams senden.
+        use_when: Ergebnisse per E-Mail verschickt werden sollen
+        example: „Schicke den heutigen Bericht an sales@example.com“
       fr-FR:
-        {
-          name: "E-mail",
-          description: "Envoyer des e-mails via le service de messagerie de l’équipe.",
-          use_when: "les résultats doivent être envoyés par e-mail",
-          example: "« Envoie le rapport du jour à sales@example.com »",
-        }
-    tools: [send_email]
-    availability: [email_service]
+        name: E-mail
+        description: Envoyer des e-mails via le service de messagerie de l’équipe.
+        use_when: les résultats doivent être envoyés par e-mail
+        example: « Envoie le rapport du jour à sales@example.com »
+    tools:
+      - send_email
+    availability:
+      - email_service
   - name: settings-space-metadata
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: &configuration_parts
+    parts: &id001
       - configuration_read
       - configuration_open
       - configuration_propose
@@ -362,124 +375,124 @@ plugins:
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:ec5b09b5b75bc40ed387353fad54dcc4b47b2ce4b35bcf7caff2a4d4dec61d3c
   - name: settings-space-metadata
     version: 3
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:6ae3049b423b7f1fcc29a8981faa4aa63b3edb02b643c22580a5ced769fcdfa2
   - name: settings-personal-appearance
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:71340bc85ccad269966f6285319305ffa4415749cac422fb4d237c27f152943a
   - name: settings-personal-appearance
     version: 2
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:5ee70edd62402d15d02face1f4541180cd8dddcf9b0941b1bb74b12191d8593c
   - name: settings-language-preferences
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:0fbc683dde70e842f5578a377cae92d7cba735b3ff42aa1428203c4025a5bb9e
   - name: settings-space-preferences
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:3814f914629c9834f7125b2ab6fc89ca3d3315c60fed82988652f00b9530b779
   - name: settings-space-preferences
     version: 2
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:4b26386ed0d81f6e447fe1b929edc50afa18019b6757bfc81ec14458d433a179
   - name: settings-space-preferences
     version: 3
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:686e7c1ea7dec9bf2b36387894d15f70f35f16b2abe460a4273a2d2dad6ba957
   - name: settings-space-preferences
     version: 4
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:52d424b80ec68286e39b5661d77185c98b9b5eee9a8cb3e3ec1b10b71ff098a4
   - name: settings-space-preferences
     version: 5
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:53376c0a84c50052c39fa4a9f28532439b10cfa038b04560feab0ac90cd306d0
   - name: settings-space-instructions
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:707fae3067a05db47f10c18d7474b40690f257cd9b5783d7bdf8703777f4a173
   - name: settings-personal-appearance
     version: 3
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:26045a6a992bc37e6c52633300bd3c0648969dd5f9a48515464c298a60ee8a37
   - name: settings-language-preferences
     version: 2
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:29a5d99bcef36258f2ed13844890d533b5e1c4c6b930a15b6d0b1b3f75a1a3a2
   - name: settings-space-preferences
     version: 6
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:43036ccc8b8d3ce27e49b9b7dca8a884807ad65175c8deede90281b14f47d337
   - name: settings-space-metadata
     version: 4
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:9330235b268820cae184412fc4f4e4ba9f2748ba390f8486e756a325379d5678
   - name: settings-space-instructions
     version: 2
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:dd668c41bf3c50c1f159174402c7b7bbb81e5741cb844eb3b7bccf9e40268271
   - name: settings-personal-appearance
     version: 4
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:6767b13c204c220e930f9729715a7d1b26e6645f29a0950703c6ed3f9e30ec2e
   - name: settings-team-administration
     version: 1
     family: settings
     selectable: false
     tools: []
-    parts: *configuration_parts
+    parts: *id001
     skill_revision: sha256:ff7fa6f5e7ae1105ab29e203cd17cfd22183d0583ba11fc716954e0fbe6ef547

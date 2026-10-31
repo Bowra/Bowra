@@ -85,6 +85,7 @@ def test_report_write_set_is_the_known_closed_set() -> None:
                 "canvas_reorder_sections",
                 # Batch B2-2: collapse prior-turn charts; also lacks an owner model.
                 "remove_chart",
+                "edit_chart",
             }
         )
         == REPORT_WRITE_TOOLS

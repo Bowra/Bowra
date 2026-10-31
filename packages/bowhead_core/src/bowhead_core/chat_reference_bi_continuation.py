@@ -196,6 +196,11 @@ def decision(question) -> tuple[str, str | None, str]:
 
 
 async def bind_question(db: aiosqlite.Connection, *, turn_id: str, clarification_id: str, context: dict, cipher: ReferenceCipher) -> None:
+    if context.get("datarc_selection") is not None:
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+        DatarcSelectionSnapshot.model_validate(context["datarc_selection"])
+        await require_datarc_context_migration(db)
     pause = await read_pause(db, turn_id)
     if pause is None or pause["state"] != "captured":
         raise ValueError("reference_continuation_unavailable")

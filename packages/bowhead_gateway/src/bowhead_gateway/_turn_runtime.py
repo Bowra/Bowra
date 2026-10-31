@@ -28,32 +28,13 @@ async def _resolve_team_datarc_client(request: Any, team_id: str | None) -> Any:
     configured for the team. Raises ``DatarcResolutionError`` when a configured
     team connection is present but unusable.
     """
-    if not team_id:
-        return None
-    store = getattr(request.app.state, "datarc_connection_store", None)
-    factory = getattr(request.app.state, "datarc_client_factory", None)
-    if store is None or factory is None:
-        return None
-    try:
-        conns = await store.list_connections(team_id)
-        if not conns:
-            return None
-        conn = conns[0]
-        auth_key = await store.get_connection_auth(conn.id, team_id)
-        if not auth_key:
-            raise DatarcResolutionError(f"datarc connection {conn.id} has no usable auth")
-        return factory.get_client(conn.base_url, auth_key)
-    except DatarcResolutionError:
-        raise
-    except Exception as e:
-        from bowhead_core.scrub import scrub
+    from bowhead_gateway.datarc_context import DatarcResolutionError as NativeResolutionError
+    from bowhead_gateway.datarc_context import resolve_team_datarc_client
 
-        logger.warning(
-            "datarc_connection.resolve_failed team_id=%s err=%s",
-            team_id,
-            scrub(str(e)),
-        )
-        raise DatarcResolutionError("datarc connection resolution failed") from e
+    try:
+        return await resolve_team_datarc_client(request, team_id)
+    except NativeResolutionError as error:
+        raise DatarcResolutionError("Datarc connection resolution failed") from error
 
 
 async def _resolve_team_embed_client(

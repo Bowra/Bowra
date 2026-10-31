@@ -127,6 +127,24 @@ export function formatExact(v: number | null | undefined, unit?: string): string
   return withUnit(formatExactSourceNumber(v), unit);
 }
 
+/** Source-unit readout for tooltips and explicitly distinct table columns. */
+export function formatSourceValue(value: number | string | null | undefined, unit?: string, includeUnit = true, display?: NumericDisplay): string {
+  const precision = validNumericDisplay(display);
+  const digits = isUnsafeIntegerCell(value)
+    ? readoutFormatter(precision ? precisionOptions(precision) : { maximumFractionDigits: 0 }).format(BigInt(value as string))
+    : typeof value === "number" && Number.isFinite(value)
+      ? precision ? ordinaryDigits(value, 0, precision.decimal_places, true, precision.decimal_mode === "fixed") : formatExactSourceNumber(value, 0, getCurrentLocale())
+      : "—";
+  if (digits === "—") return digits;
+  return includeUnit ? withLocalizedUnit(digits, unit) : digits;
+}
+
+/** Preserve the supplied percentage observation while honoring its declared storage scale. */
+export function formatSourcePercent(value: number | null | undefined, scale: PercentScale): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return withLocalizedUnit(formatExactSourceNumber(value, scale === "fraction" ? 2 : 0, getCurrentLocale()), "%");
+}
+
 /** Short month ticks require an explicitly supplied, single-year scope; readouts keep full labels. */
 export function monthlyAxisTickLabels(labels: readonly unknown[], scope: string, locale = "zh-CN"): string[] | null {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -145,15 +163,68 @@ export function monthlyAxisTickLabels(labels: readonly unknown[], scope: string,
   return parsed.map((period) => formatter.format(new Date(Date.UTC(period!.year, period!.month - 1, 1))));
 }
 
-interface CalendarCell { date: Date; year: number; month: number; day: number; grain: "month" | "date" | "minute" | "second"; offset: string }
+interface CalendarCell { date: Date; year: number; month: number; day: number; grain: "year" | "month" | "date" | "minute" | "second"; offset: string }
 function calendarCell(raw: string): CalendarCell | null {
-  const match = /^(\d{4})[-年](\d{1,2})(?:月|-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?)?$/.exec(raw);
+  const match = /^(\d{4})[-年](\d{1,2})(?:月|-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?)?$/.exec(raw)
+    ?? /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
   if (!match) return null;
   const year = Number(match[1]), month = Number(match[2]), day = Number(match[3] ?? 1);
   const hour = Number(match[4] ?? 0), minute = Number(match[5] ?? 0), second = Number(match[6] ?? 0);
   const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) return null;
   return { date, year, month, day, grain: match[6] ? "second" : match[4] ? "minute" : match[3] ? "date" : "month", offset: match[7] ?? "" };
+}
+
+/** Format supplied calendar components with a bounded, non-executable pattern.
+ * Returns null for unsupported patterns, invalid dates, or unavailable precision. */
+export function formatDatePattern(raw: string, pattern: string): string | null {
+  if (!pattern || pattern.length > 80) return null;
+  if (["yyyymmdd", "yyyy-mm-dd", "yyyy/mm/dd", "yyyy.mm.dd"].includes(pattern)) pattern = pattern.replace("mm", "MM");
+  else if (/(?:yyyy|yy)[/.-]?mm[/.-]?dd/.test(pattern)) return null;
+  const yearOnly = /^(\d{4})年?$/.exec(raw);
+  const year = Number(yearOnly?.[1]);
+  const yearDate = new Date(0);
+  if (yearOnly) yearDate.setUTCFullYear(year, 0, 1);
+  const cell: CalendarCell | null = calendarCell(raw) ?? (yearOnly
+    ? { date: yearDate, year, month: 1, day: 1, grain: "year", offset: "" }
+    : null);
+  if (!cell) return null;
+  if (cell.offset && cell.offset !== "Z") {
+    const zone = /^([+-])(\d{2}):?(\d{2})$/.exec(cell.offset);
+    if (!zone || Number(zone[2]) > 23 || Number(zone[3]) > 59) return null;
+  }
+  const tokens = /yyyy|yy|MM|dd|HH|mm|ss|XXX|[\s/.:\-]/gy;
+  const parts: string[] = [];
+  let offset = 0;
+  let hasField = false;
+  const pad = (value: number, width = 2) => String(value).padStart(width, "0");
+  while (offset < pattern.length) {
+    tokens.lastIndex = offset;
+    const match = tokens.exec(pattern);
+    if (!match) return null;
+    const token = match[0];
+    if (/^[A-Za-z]+$/.test(token)) hasField = true;
+    if (token === "yyyy") parts.push(pad(cell.year, 4));
+    else if (token === "yy") parts.push(pad(cell.year % 100));
+    else if (token === "MM") {
+      if (cell.grain === "year") return null;
+      parts.push(pad(cell.month));
+    }
+    else if (token === "dd") {
+      if (cell.grain === "year" || cell.grain === "month") return null;
+      parts.push(pad(cell.day));
+    } else if (token === "HH" || token === "mm" || token === "ss") {
+      if (cell.grain !== "minute" && cell.grain !== "second") return null;
+      if (token === "ss" && cell.grain !== "second") return null;
+      const value = token === "HH" ? cell.date.getUTCHours() : token === "mm" ? cell.date.getUTCMinutes() : cell.date.getUTCSeconds();
+      parts.push(pad(value));
+    } else if (token === "XXX") {
+      if (!cell.offset) return null;
+      parts.push(cell.offset === "Z" ? "Z" : cell.offset.replace(/^([+-]\d{2})(\d{2})$/, "$1:$2"));
+    } else parts.push(token);
+    offset = tokens.lastIndex;
+  }
+  return hasField ? parts.join("") : null;
 }
 
 /** Calendar membership controls context; local timestamps never acquire an invented zone. */
@@ -578,9 +649,10 @@ export function inlineCellUnit(unit?: string): string | undefined {
 
 /** Column header for a table: appends a unit that `inlineCellUnit` keeps out of the cells, once, unless the header
  *  already names it (`营业额（万元）`). CJK headers use full-width brackets: `销售金额（亿元）`, `Revenue (USD)`. */
-export function tableHeaderWithUnit(header: string, unit?: string): string {
+export function tableHeaderWithUnit(header: string, unit?: string, preserveSource = false, currencyCode?: string): string {
   const source = unit?.trim();
-  const trimmed = monetaryMagnitude(source)?.base ?? source;
+  const base = monetaryMagnitude(source)?.base ?? source;
+  const trimmed = preserveSource ? source : currencyCode && /^[¥￥$€£]$/.test(base ?? "") ? currencyCode : base;
   if (source && trimmed !== source) {
     for (const suffix of [`_${source}`, `（${source}）`, `(${source})`, ` / ${source}`]) {
       if (header.endsWith(suffix)) { header = header.slice(0, -suffix.length).trim(); break; }
@@ -588,6 +660,18 @@ export function tableHeaderWithUnit(header: string, unit?: string): string {
   }
   if (!trimmed || !isDisplayableUnit(trimmed) || inlineCellUnit(trimmed) || header.includes(trimmed)) return header;
   return /[㐀-鿿豈-﫿]/.test(header) ? `${header}（${trimmed}）` : `${header} (${trimmed})`;
+}
+
+/** Preserve declared units where base-unit headers would collapse distinct columns. */
+export function sourceUnitColumns(columns: readonly ChartColumn[], locale: string): Set<string> {
+  const groups = new Map<string, ChartColumn[]>();
+  for (const column of columns) {
+    if (column.type !== "numeric" || resolvePercentColumn(column)) continue;
+    const header = tableHeaderWithUnit(formatGrainLabel(column.header, locale), axisUnitOf(column));
+    groups.set(header, [...(groups.get(header) ?? []), column]);
+  }
+  return new Set([...groups.values()].filter((group) => group.length > 1 && new Set(group.map(axisUnitOf)).size > 1)
+    .flatMap((group) => group.map((column) => column.key)));
 }
 
 /** KPI swap threshold: from 1 million upward the **approximate magnitude becomes the main line** (≈856万) and the exact
@@ -738,8 +822,9 @@ const _EN_MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"
  * (`2026年1月` ⇄ `Jan 2026` denote same fact); translation neither loses information nor fabricates.
  * Product `诺易1000IU` lacks English equivalent and datarc supplies none — preserve original.
  */
-export function formatDateLabel(raw: string, locale: string = getCurrentLocale()): string {
+export function formatDateLabel(raw: string, locale: string = getCurrentLocale(), pattern?: string): string {
   if (!raw) return "";
+  if (pattern) return formatDatePattern(raw, pattern) ?? raw;
   if (/^\d{4}-(?:\d{2}(?:-\d{2})?|Q[1-4])$/.test(raw)) return raw;
   const cell = calendarCell(raw);
   if (cell) {

@@ -55,7 +55,7 @@ Return one JSON object with:
   optional clarification_question, and a stable short reason_code.
 - blueprint: null unless outcome=clear. For clear, blueprint must contain the same
   purpose_assessment plus goal_summary, display_name, slug_seed, description,
-  structured system_prompt sections, resource_mode, capability_intents, max_iterations_hint,
+  structured system_prompt sections, resource_mode, capability_intents,
   assumptions, and warnings.
 
 Set resource_mode=provided_text only when the requested work uses text supplied

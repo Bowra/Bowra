@@ -6,6 +6,8 @@
  * Owners and Team admins only (the module and the API are admin-only).
  */
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -161,6 +163,15 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
         )}
       </div>
       <p className="ui-page-desc">{t("intro")}</p>
+      {limits.runtimeControls ? (
+        <Notice tone="info">
+          {t("effective_policy", {
+            effective: limits.runtimeControls.effectiveStepLimit ?? t("steps_unlimited"),
+            system: limits.runtimeControls.systemStepLimit ?? t("steps_unlimited"),
+            seconds: limits.runtimeControls.stallTimeoutS,
+          })}
+        </Notice>
+      ) : null}
       {error ? <Notice tone="error">{t(`error_${error}`)}</Notice> : null}
       {saved ? <Notice tone="success">{t("saved")}</Notice> : null}
       <form className="ui-group-card agent-run-limits__rows" onSubmit={(event) => { event.preventDefault(); save(); }}>
@@ -168,6 +179,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           className="agent-run-limits__row"
           titleId="arl-turn-time-title"
           title={t("turn_time_title")}
+          help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_run_limits.turn_time_limit_s" label={t("turn_time_title")} />}
           description={t("turn_time_desc")}
           control={
             <span className="agent-run-limits__control">
@@ -203,6 +215,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           className="agent-run-limits__row"
           titleId="arl-model-call-title"
           title={t("model_call_title")}
+          help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_run_limits.model_call_time_limit_s" label={t("model_call_title")} />}
           description={t("model_call_desc")}
           control={
             <span className="agent-run-limits__control">
@@ -244,6 +257,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           className="agent-run-limits__row"
           titleId="arl-steps-title"
           title={t("steps_title")}
+          help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_run_limits.step_limit" label={t("steps_title")} />}
           description={t("steps_desc")}
           control={
             <span className="agent-run-limits__control">
@@ -286,6 +300,7 @@ function RunLimitsEditor({ initial }: { initial: AgentRunLimits }) {
           className="agent-run-limits__row"
           titleId="arl-tool-calls-title"
           title={t("tool_calls_title")}
+          help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_run_limits.tool_call_limit" label={t("tool_calls_title")} />}
           description={t("tool_calls_desc")}
           control={
             <span className="agent-run-limits__control">

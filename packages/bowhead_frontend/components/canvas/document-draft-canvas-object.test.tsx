@@ -26,6 +26,7 @@ vi.mock("@/lib/api-client", async (original) => ({
 const context = fixture.context;
 const review = parseDocumentJob(fixture.review, context.jobId);
 const published = parseDocumentJob(fixture.published, context.jobId);
+const superseded = { ...review, state: "cancelled" as const, can_confirm: false, can_revise: false, superseded_by_job_id: "djob_successor" };
 const get = vi.fn<() => Promise<unknown>>();
 const post = vi.fn<(body: string) => Promise<unknown>>();
 const isCurrent = vi.fn(() => true);
@@ -64,6 +65,32 @@ function confirmButton() {
     name: "Confirm and publish",
   }) as HTMLButtonElement;
 }
+
+it("shows required page review instead of a zero-change subtitle when comparison is unavailable", async () => {
+  get.mockResolvedValue({ ...review, draft: { ...review.draft!,
+    manifest: { ...review.draft!.manifest, comparison: "unavailable", changes: [] },
+  } });
+  render(view());
+  expect(await screen.findByText("1 page · Review every page")).toBeTruthy();
+  expect(screen.getByText(messages.documents.comparison_unavailable)).toBeTruthy();
+  expect(post).not.toHaveBeenCalled();
+});
+
+it("keeps a superseded draft named and previewable without publication or revision actions", async () => {
+  get.mockResolvedValue(superseded);
+  const onReturnToChat = vi.fn();
+  render(view({ onRequestRevision: vi.fn(), onReturnToChat }));
+  expect(await screen.findByRole("img", { name: "Slide 1 of 1" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: documentCanvasTitle(review, "") })).toBeTruthy();
+  expect(screen.getByText("Superseded")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Confirm and publish" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Revise in Chat" })).toBeNull();
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ objectStatus: "read_only", status: "Superseded" }));
+  expect(post).not.toHaveBeenCalled();
+  expect(onPublished).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: messages.documents.canvas_return_to_chat }));
+  expect(onReturnToChat).toHaveBeenCalledWith(context);
+});
 async function acknowledge() {
   // Changed slides count as viewed after the loaded preview stays on screen (decision D5).
   fireEvent.load(await screen.findByRole("img", { name: "Slide 1 of 1" }));

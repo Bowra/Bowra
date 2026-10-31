@@ -79,7 +79,7 @@ async def test_direct_bundle_enqueues_single_parse_and_index_many(initialize_mig
         kb_files_store=files_store,
         kb_worker=worker,
     )
-    request = SimpleNamespace(app=SimpleNamespace(state=app_state))
+    request = SimpleNamespace(app=SimpleNamespace(state=app_state), headers={"X-Space-Id": "ws_test"})
     user = User(
         id="u_alice",
         email="alice@test.com",

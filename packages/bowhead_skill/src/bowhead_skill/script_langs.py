@@ -114,10 +114,10 @@ def _raw_spec() -> dict[str, Any]:
     return data
 
 
-def script_execution_mode(*, has_scripts: bool, builtin: bool = False, knowledge: bool = False) -> str:
+def script_execution_mode(*, has_scripts: bool, builtin: bool = False, knowledge: bool = False, name: str = "") -> str:
     """配置层可执行性；sandbox 表示允许调度，不代表环境健康或脚本已经试跑。"""
     if not has_scripts or knowledge:
         return "none"
     if builtin:
-        return "builtin"
+        return "sandbox" if name == "latex-report" else "builtin"
     return "sandbox" if multiruntime_enabled() else "disabled"

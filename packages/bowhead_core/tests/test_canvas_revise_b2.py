@@ -91,6 +91,18 @@ async def test_ledger_when_nothing_was_removed(store: CanvasStore) -> None:
     assert {c["section_id"] for c in cc["prior_charts_visible"]} == {ids["trend_chart"], ids["rank_chart"]}
 
 
+async def test_ledger_reports_prior_chart_edits_without_claiming_replacement(store: CanvasStore) -> None:
+    ids = await _seed_prior_report(store)
+    await store.patch_section(section_id=ids["trend_chart"], patch={"spec": {"title": "Updated trend"}}, by_turn_id="t2", caller=None)
+
+    cc = await build_canvas_changes(store, canvas_id=ids["canvas"], turn_id="t2")
+
+    assert cc is not None
+    assert cc["patched"] == [{"section_id": ids["trend_chart"], "kind": "chart", "heading": "Updated trend"}]
+    assert cc["added_charts"] == [] and cc["removed_charts"] == []
+    assert {c["section_id"] for c in cc["prior_charts_visible"]} == {ids["trend_chart"], ids["rank_chart"]}
+
+
 async def test_ledger_unavailable_is_none_not_an_empty_ledger(store: CanvasStore) -> None:
     """取不到就不挂字段：空账单会被读成「什么都没改」。"""
     assert await build_canvas_changes(None, canvas_id="cv", turn_id="t2") is None
@@ -145,6 +157,47 @@ async def test_spawn_result_carries_ledger_and_directive_in_revise_mode(store: C
     assert cc["removed_charts"] == []
     assert {c["section_id"] for c in cc["prior_charts_visible"]} == {ids["trend_chart"], ids["rank_chart"]}
     assert CANVAS_CHANGES_DIRECTIVE in str(res.get("directive") or "")
+
+
+async def test_spawn_reports_confirmed_in_place_chart_edit(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.types import ToolInvocation
+
+    ids = await _seed_prior_report(store)
+
+    class ChartEditingRunner:
+        async def run(self, **kwargs):
+            updated = await store.patch_section(
+                section_id=ids["trend_chart"], patch={"spec": {"title": "Updated trend"}}, by_turn_id="parent_t", caller=None
+            )
+            return SubagentResult(
+                profile="compute",
+                subagent_id="peer",
+                ok=True,
+                final_answer="",
+                payload={"exec_summary": "Updated title", "insights": [], "kpis": [], "recommendations": []},
+                tool_invocations=[ToolInvocation(tool_name="edit_chart", arguments={}, result={"section_id": updated.id, "rev": updated.rev})],
+            )
+
+    monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    ctx = ToolExecutionContext(
+        workspace_id="1",
+        member_uid="m",
+        user_id="u",
+        turn_id="parent_t",
+        datarc=None,
+        subagent_runner=ChartEditingRunner(),
+        parent_bus=_Bus(),
+        session_id="s1",
+    )
+    ctx.canvas_store = store
+    inv = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Edit the title", "canvas_mode": "revise"}, ctx)
+    assert inv.error is None
+    assert inv.result["delivered"] == "payload"
+    assert inv.result["canvas_changes"]["patched"] == [{"section_id": ids["trend_chart"], "kind": "chart", "heading": "Updated trend"}]
+    assert not inv.result["canvas_changes"]["added_charts"] and not inv.result["canvas_changes"]["removed_charts"]
+    assert "没有产出任何可交付内容" not in inv.result["directive"]
 
 
 async def test_spawn_result_has_no_ledger_for_new_report(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -686,6 +739,29 @@ def test_mixed_plan_doc_lists_non_chapter_sections_grouped_by_heading() -> None:
     assert resolve_revise_scope(units, ["整体结论"]) == ({"z_1", "z_2"}, [])
 
 
+def test_chart_revision_scope_requires_a_unique_user_named_visible_chart() -> None:
+    from types import SimpleNamespace
+
+    from bowhead_core.canvas_revise import resolve_chart_revise_scope
+
+    def chart(section_id, title, **state):
+        return SimpleNamespace(id=section_id, kind="chart", turn_id="t1", payload={"spec": {"title": title}}, **state)
+
+    charts = [chart("sec_a", "Trend"), chart("sec_b", "Other"), chart("sec_hidden", "Hidden", superseded=True)]
+
+    def resolve(items, text):
+        return resolve_chart_revise_scope(charts, items, user_text=text, this_turn_id="t2")
+
+    assert resolve(["Trend"], "Edit chart sec_a") == ({"sec_a"}, [])
+    assert resolve(["Trend"], "Edit Trend") == ({"sec_a"}, [])
+    assert resolve(["Trend"], "Edit Other") == (set(), ["Trend"])
+    assert resolve(["Trend"], "Edit sec_a_extra") == (set(), ["Trend"])
+    assert resolve(["Hidden"], "Edit Hidden") == (set(), ["Hidden"])
+    charts.append(chart("sec_c", "Trend"))
+    assert resolve(["Trend"], "Edit Trend") == (set(), ["Trend"])
+    assert resolve(["sec_a"], "Edit sec_a") == ({"sec_a"}, [])
+
+
 def test_plan_chapter_without_an_h1_is_listed_by_its_first_heading() -> None:
     """116 dogfood（1.3.47，`s_6f8297c12cd1`）：月度章四段都带 chapter meta、没有章 h1——原先要求有 h1 才列，
     整章从清单里消失（清单只剩 3 个单元），它的段也不进章外分组，点名月度章永远对不上。"""
@@ -772,7 +848,17 @@ def test_revise_scope_units_fall_back_to_headed_narratives_for_plain_reports() -
 
 
 async def _revise_spawn(
-    monkeypatch: pytest.MonkeyPatch, store: CanvasStore, bus: _Bus, scope, runner=None, batch=None, *, mode="revise", resumed=False, lang=None
+    monkeypatch: pytest.MonkeyPatch,
+    store: CanvasStore,
+    bus: _Bus,
+    scope,
+    runner=None,
+    batch=None,
+    *,
+    mode="revise",
+    resumed=False,
+    lang=None,
+    user_text="",
 ):
     monkeypatch.setenv("FEATURE_CANVAS_SECTION_REVISE", "1")
     registry = build_default_registry()
@@ -789,6 +875,7 @@ async def _revise_spawn(
         subagent_runner=runner or _Cap(), parent_bus=bus, session_id="s1",
     )  # fmt: skip
     ctx.canvas_store = store
+    ctx.user_text = user_text
     if batch is not None:
         ctx._lead_spawn_batch_seq = batch
     if resumed:
@@ -814,6 +901,34 @@ async def test_spawn_resolves_scope_and_tells_compute(store: CanvasStore, monkey
     assert res.get("ok") is True
     assert not out_of_revise_scope(bus, ids["ch3_n"]) and out_of_revise_scope(bus, ids["summary"]) and out_of_revise_scope(bus, ids["ch1_n"])
     assert "「2026年月度营业额趋势」" in str(cap.get("extra_instructions") or "")
+
+
+async def test_spawn_admits_only_the_named_chart_in_revision_scope(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.canvas_revise import out_of_revise_scope
+
+    ids = await _seed_prior_report(store)
+    bus = _Bus()
+    title = "2026年1-9月各月营业额趋势"
+    result, captured = await _revise_spawn(monkeypatch, store, bus, [title], user_text=f"Edit chart {ids['trend_chart']}")
+    assert result.get("ok") is True
+    assert not out_of_revise_scope(bus, ids["trend_chart"])
+    assert out_of_revise_scope(bus, ids["rank_chart"])
+    assert out_of_revise_scope(bus, ids["trend_text"])
+    assert title in str(captured.get("extra_instructions") or "")
+
+
+async def test_explicit_chart_id_does_not_expand_to_a_matching_chapter(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.canvas_revise import out_of_revise_scope
+
+    canvas = await store.get_canvas_by_session("s1")
+    await store.append_section(canvas_id=canvas.id, kind="h1", payload={"text": "Report"}, by_turn_id="t1")
+    chapter = await store.append_section(canvas_id=canvas.id, kind="narrative", payload={"markdown": "## Revenue\n\nText."}, by_turn_id="t1")
+    chart = await store.append_section(canvas_id=canvas.id, kind="chart", payload={"spec": {"title": "Revenue"}}, by_turn_id="t1")
+    bus = _Bus()
+    result, _ = await _revise_spawn(monkeypatch, store, bus, ["Revenue"], user_text=f"Edit chart {chart.id}")
+    assert result.get("ok") is True
+    assert not out_of_revise_scope(bus, chart.id)
+    assert out_of_revise_scope(bus, chapter.id)
 
 
 async def test_resolved_scopes_in_later_steps_still_dispatch(store: CanvasStore, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1229,7 +1344,6 @@ async def test_parallel_spawns_each_see_their_own_ref_table(monkeypatch: pytest.
     from bowhead_router import AgentBinding, LLMResponse, MockAdapter, ProviderConfig, ProviderRegistry, Router, TokenUsage, ToolCall
 
     monkeypatch.setenv("BOWHEAD_REF_ALLOWLIST_INJECT", "1")
-    monkeypatch.setenv("BOWHEAD_PEER_FORCE_BAIL_ITER", "99")
     monkeypatch.setitem(
         PROFILES, "lead", SubagentProfile(name="lead", llm_agent_type="lead", tool_whitelist=("kb_search",), system_prompt="x", max_iterations=4)
     )

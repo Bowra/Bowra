@@ -20,7 +20,6 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.fixture
 async def configuration(app_ctx, client, monkeypatch):
-    monkeypatch.setenv("FEATURE_CONFIGURATION_TEAM_SETTINGS", "1")
     reset_registry_for_tests()
     register_gateway_forms(app_ctx.app)
     store = ConfigDraftStore(app_ctx.users.db_path)
@@ -78,6 +77,26 @@ async def propose(app, user, form="team_run_limits", **args):
     return child, read, result
 
 
+async def test_configuration_agent_explains_but_cannot_write_system_controls(configuration, client, monkeypatch):
+    from bowhead_core.agent_run_limits import get_runtime_controls
+
+    monkeypatch.setenv("BOWHEAD_AGENT_MAX_STEPS", "100")
+    get_runtime_controls.cache_clear()
+    try:
+        child = await child_for(configuration.owner, "team_run_limits")
+        result = await call(configuration.app, child, "configuration_read", form_id="team_run_limits")
+        assert result["runtime_controls"]["effective_step_limit"] == 100
+        assert result["fields"]["step_limit"]["value"] is None
+        assert "runtime_controls" not in result["editable_fields"]
+        denied = await call(
+            configuration.app, child, "configuration_propose", form_id="team_run_limits", patch={"runtime_controls": {"system_step_limit": None}}
+        )
+        assert not denied.get("ok"), denied
+        assert client.get(URL, cookies=_as(configuration.owner)).json()["is_default"]
+    finally:
+        get_runtime_controls.cache_clear()
+
+
 async def test_integer_null_confirm_and_reset_use_original_limits(configuration, client):
     ctx = configuration
     _, read, proposal = await propose(ctx.app, ctx.owner, patch={"tool_call_limit": 450, "step_limit": 12})
@@ -103,17 +122,14 @@ async def test_typed_invalid_values_never_create_proposals(configuration, patch)
     assert not result["ok"] and result["error"] == "invalid_patch", result
 
 
-async def test_directory_filters_roles_and_closed_admission(configuration, monkeypatch):
+async def test_directory_filters_roles(configuration):
     admin = await call(configuration.app, await child_for(configuration.owner), "configuration_list")
     member = await call(configuration.app, await child_for(configuration.member), "configuration_list")
     assert "team_run_limits" in {item["form_id"] for item in admin["forms"]}
     assert not any(item["scope"] == "team" for item in member["forms"])
-    monkeypatch.setenv("FEATURE_CONFIGURATION_TEAM_SETTINGS", "0")
-    closed = await call(configuration.app, await child_for(configuration.owner), "configuration_list")
-    assert not any(item["scope"] == "team" for item in closed["forms"])
 
 
-async def test_reset_rejects_concurrent_write_and_closed_admission(configuration, client, monkeypatch):
+async def test_reset_rejects_concurrent_write(configuration, client):
     ctx = configuration
     initial = client.get(URL, cookies=_as(ctx.owner)).json()
     body = {key: initial[key] for key in ("turn_time_limit_s", "step_limit", "tool_call_limit", "model_call_time_limit_s")}
@@ -126,8 +142,6 @@ async def test_reset_rejects_concurrent_write_and_closed_admission(configuration
     path = f"/api/v1/config-proposals/{reset['proposal_id']}/apply"
     assert client.post(path, cookies=_as(ctx.owner)).status_code == 409
     assert client.get(URL, cookies=_as(ctx.owner)).json()["tool_call_limit"] == 500
-    monkeypatch.setenv("FEATURE_CONFIGURATION_TEAM_SETTINGS", "0")
-    assert client.post(path, cookies=_as(ctx.owner)).status_code == 409
     assert client.get(f"/api/v1/config-proposals/{reset['proposal_id']}", cookies=_as(ctx.member)).status_code == 404
 
 
@@ -143,12 +157,11 @@ async def test_role_loss_blocks_confirmation_and_receipt(configuration, client):
     assert client.get(URL, cookies=_as(ctx.owner)).json()["tool_call_limit"] == 300
 
 
-async def test_sandbox_and_html_limits_save_reset_independently_of_agent_loop_flag(configuration, client, monkeypatch):
+async def test_sandbox_and_html_limits_save_reset_independently_of_task_limits(configuration, client, monkeypatch):
     ctx = configuration
-    monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
     directory = await call(ctx.app, await child_for(ctx.owner), "configuration_list")
     names = {form["form_id"] for form in directory["forms"]}
-    assert "team_execution_limits" in names and "team_run_limits" not in names
+    assert {"team_execution_limits", "team_run_limits"} <= names
     path = "/api/v1/team-settings/execution-limits"
     _, read, proposal = await propose(
         ctx.app, ctx.owner, "team_execution_limits", patch={"sandbox_default_timeout_s": 60, "sandbox_max_timeout_s": 120, "html_max_bytes": 1048576}
@@ -179,3 +192,12 @@ async def test_sandbox_cross_field_limits_and_stale_proposals_are_rejected(confi
     assert client.put(path, json={"limits": body, "expected_version": current["version"]}, cookies=_as(ctx.owner)).status_code == 200
     assert client.post(f"/api/v1/config-proposals/{proposal['proposal_id']}/apply", cookies=_as(ctx.owner)).status_code == 409
     assert client.get(path, cookies=_as(ctx.owner)).json()["html_max_bytes"] == 2097152
+
+
+async def test_page_help_preserves_settings_and_cannot_grant_member_access(configuration, client):
+    before = await configuration.app.state.team_settings_store.get(configuration.owner.team_id, "agent_run_limits")
+    response = client.get(URL, cookies=_as(configuration.owner))
+    assert response.status_code == 200
+    assert response.json()["field_contract"]["domain"] == "team_run_limits"
+    assert client.get(URL, cookies=_as(configuration.member)).status_code == 403
+    assert await configuration.app.state.team_settings_store.get(configuration.owner.team_id, "agent_run_limits") == before

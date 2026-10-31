@@ -28,6 +28,7 @@ vi.mock("next-intl", () => ({
     if (key === "video_play") return `Play ${values?.filename ?? ""}`;
     if (key === "table_open_row") return `Open row ${values?.row ?? ""}`;
     if (key === "workbook_column") return `Column ${values?.number ?? ""}`;
+    if (key === "safe_html_too_large") return `HTML exceeds the ${values?.limit} preview limit. Download the original file.`;
     const labels: Record<string, string> = {
       close: "Close",
       download: "Download",
@@ -221,6 +222,18 @@ describe("ArtifactPreview", () => {
     expect(dialog.querySelector("iframe[title='result.html']")).toHaveFocus();
   });
 
+  it("shows the served HTML limit and preserves download access after rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<p>Oversize report</p>", {
+      headers: { "content-type": "text/html", "X-Bowhead-HTML-Max-Bytes": "16" },
+    })));
+    const onOpenFailed = vi.fn();
+    render(<ArtifactPreview fileId="art_large" filename="report.html" mime="text/html" preview={null} onOpenFailed={onOpenFailed} />);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("16 B preview limit"));
+    await waitFor(() => expect(onOpenFailed).toHaveBeenCalledWith("too_large"));
+    expect(screen.getAllByRole("link", { name: "Download" })[0]).toHaveAttribute("href", "/api/v1/files/art_large");
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
   it("explains a script-only HTML rejection without contradicting its MIME", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response("<html><body><script>document.body.textContent='unsafe'</script></body></html>", {
@@ -410,7 +423,7 @@ describe("ArtifactPreview", () => {
     expect(screen.getByRole("dialog", { name: /Row details/ })).toHaveTextContent("2");
   });
 
-  it("traps full-view focus, closes on Escape, restores focus, and unlocks body scroll", () => {
+  it("traps full-view focus, closes on Escape, restores focus, and unlocks body scroll", async () => {
     render(
       <ArtifactPreview
         fileId="art_focus"
@@ -428,7 +441,7 @@ describe("ArtifactPreview", () => {
     expect(within(dialog).getAllByRole("button", { name: "Close" })[0]).toHaveFocus();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "focus.txt" })).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
+    await waitFor(() => expect(trigger).toHaveFocus());
     expect(document.body.style.overflow).toBe("");
   });
 

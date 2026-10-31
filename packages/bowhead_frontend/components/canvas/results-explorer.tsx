@@ -525,7 +525,7 @@ export function ResultsExplorer(props: Props) {
     <div className="results-explorer-page-error" role="status">
       <span>{t(anchorError
         ? anchorMessage
-        : "explorer_page_error")}</span>
+        : error === "results_artifact_contract_unsupported" ? "artifact_contract_unsupported" : "explorer_page_error")}</span>
       <button
         type="button"
         onClick={recoverAnchor
@@ -624,7 +624,7 @@ export function ResultsExplorer(props: Props) {
         ) : initialError ? (
           <div className="results-explorer-state" role="alert">
             <ResultsStateIcon tone="error" />
-            <strong>{t(anchorError ? anchorMessage : "quick_error")}</strong>
+            <strong>{t(anchorError ? anchorMessage : error === "results_artifact_contract_unsupported" ? "artifact_contract_unsupported" : "quick_error")}</strong>
             <button
               type="button"
               onClick={recoverAnchor

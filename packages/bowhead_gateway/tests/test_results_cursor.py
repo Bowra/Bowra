@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from bowhead_gateway.results_cursor import (
@@ -25,6 +26,25 @@ def _binding(suffix: str = "") -> ResultsCursorBinding:
         query_filter_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
         sort_version="results-sort-v1",
     )
+
+
+def test_old_snapshot_reader_and_new_presentation_watermark():
+    codec = ResultsCursorCodec(_root_key(), now=lambda: 1000)
+    token, snapshot = codec.issue_snapshot(
+        high_water_created_at=None,
+        high_water_artifact_id=None,
+        membership_cutoff_at=_MEMBERSHIP_CUTOFF,
+        binding=_binding(),
+        projection_digest="a" * 64,
+        presentation_high_water=42,
+    )
+    assert codec.read_snapshot(token, expected=_binding()).presentation_high_water == 42
+    payload = json.loads(codec._fernet.decrypt(token.encode()))
+    assert payload["version"] == 2
+    payload["version"] = 1
+    payload.pop("presentation_high_water")
+    historical = codec._fernet.encrypt(json.dumps(payload).encode()).decode()
+    assert codec.read_snapshot(historical, expected=_binding()).presentation_high_water == 0
 
 
 @pytest.mark.unit

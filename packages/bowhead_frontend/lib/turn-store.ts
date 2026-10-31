@@ -19,6 +19,7 @@
  */
 
 import type { CoachCanvasBinding } from "./coach-canvas-target";
+import type { ContextActivity } from "./context-activity";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import type {
@@ -142,6 +143,7 @@ export interface PeerTerminal {
   failureDiagnostics?: ErrorDiagnostics;
   /** Which agent run limit stopped a `partial` peer (step_limit, time_limit, …). */
   stopReason?: string;
+  stepUsage?: { used: number; limit: number };
   /** Saved run a later turn can continue in place (Continue button, `lead.subagent_summary`). */
   resumeCheckpointId?: string;
   /** Why this run could not continue its saved work and started fresh (expired, tools_changed, …). */
@@ -252,9 +254,11 @@ export type TurnBeat =
   | { kind: "draft"; draftId: string };
 
 export interface TurnState {
+  operationKind?: "context_maintenance";
   turnId: string;
   /** Committed collaboration revision. Private message bodies never enter replay state. */
   collaborationRevision?: number;
+  contextActivities?: Record<string, ContextActivity>;
   coachCanvasTarget?: CoachCanvasBinding | null;
   /** Card id == turnId (single source of truth). */
   cardId: string;
@@ -485,6 +489,7 @@ export function hasPeerDisclosureFacts(
   if (!state) return false;
   return (
     (state.collaborationRevision ?? 0) > 0 ||
+    Object.keys(state.contextActivities ?? {}).length > 0 ||
     Object.keys(state.peerNames).length > 0 ||
     Object.keys(state.peerDisplayNames).length > 0 ||
     Object.keys(state.peerAgentAttribution).length > 0 ||
@@ -579,6 +584,24 @@ export function applyCollaborationRevision(turnId: string, revision: number): vo
   const current = _states.get(turnId) ?? _emptyTurnState(turnId);
   if (revision <= (current.collaborationRevision ?? 0)) return;
   _commit(turnId, { ...current, collaborationRevision: revision });
+}
+
+export function applyContextActivity(turnId: string, activity: ContextActivity): void {
+  const current = _states.get(turnId) ?? _emptyTurnState(turnId);
+  const previous = current.contextActivities?.[activity.operation_id];
+  if (previous && (previous.phase !== "running"
+    || previous.phase === activity.phase
+    || previous.execution_id !== activity.execution_id
+    || previous.lane !== activity.lane
+    || previous.subagent_id !== activity.subagent_id
+    || previous.source_generation !== activity.source_generation)) return;
+  _commit(turnId, {
+    ...current,
+    contextActivities: { ...current.contextActivities, [activity.operation_id]: activity },
+    peerNames: activity.subagent_id
+      ? { ...current.peerNames, [activity.subagent_id]: current.peerNames[activity.subagent_id] ?? activity.profile }
+      : current.peerNames,
+  });
 }
 
 export function subscribeTurn(turnId: string, listener: () => void): () => void {
@@ -725,6 +748,7 @@ export function applyCoachCanvasTarget(turnId: string, target: CoachCanvasBindin
 }
 
 export interface ApplyTurnStartedInput {
+  operationKind?: "context_maintenance";
   turnId: string;
   /** Backend `turn_started.started_at` (ISO8601). Do not write when absent: hide the timer
    *  rather than use a wrong baseline (old backends omit this field). */
@@ -741,7 +765,7 @@ export function applyTurnStarted(input: ApplyTurnStartedInput): void {
   if (!input.startedAt) return;
   const d = new Date(input.startedAt);
   if (Number.isNaN(d.getTime())) return;
-  _commit(input.turnId, { ...prev, startedAt: d });
+  _commit(input.turnId, { ...prev, startedAt: d, ...(input.operationKind ? { operationKind: input.operationKind } : {}) });
 }
 
 export interface ApplyCardFinalizedInput {
@@ -1233,6 +1257,7 @@ export function applyPeerTerminal(input: ApplyPeerTerminalInput): void {
       : prior?.stopReason && input.status === "partial"
         ? { stopReason: prior.stopReason }
         : {}),
+    ...((input.stepUsage ?? prior?.stepUsage) ? { stepUsage: input.stepUsage ?? prior?.stepUsage } : {}),
     ...(keepSuccess
       ? {}
       : prior?.failureDiagnostics
@@ -1262,6 +1287,8 @@ export function applyPeerTerminal(input: ApplyPeerTerminalInput): void {
     prior.failureReason === next.failureReason &&
     prior.failureDiagnostics === next.failureDiagnostics &&
     prior.stopReason === next.stopReason &&
+    prior.stepUsage?.used === next.stepUsage?.used &&
+    prior.stepUsage?.limit === next.stepUsage?.limit &&
     prior.resumeCheckpointId === next.resumeCheckpointId &&
     prior.resumeRefused === next.resumeRefused &&
     prior.evtSeq === next.evtSeq &&

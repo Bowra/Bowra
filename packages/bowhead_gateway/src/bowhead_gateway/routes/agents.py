@@ -96,6 +96,7 @@ from bowhead_core.agent_fork_service import (
     AgentForkService,
     read_agent_fork_policies,
 )
+from bowhead_core.agent_knowledge_policy import MAX_SELECTED_FILES, KnowledgeAccess, KnowledgeAccessError
 from bowhead_core.agent_listing_safety import (
     AgentListingSafetyStore,
     PersistedListingSafetyReport,
@@ -926,13 +927,18 @@ async def _revision_store(
     user: User,
     store: UserStore,
 ) -> AgentRevisionStore:
+    from bowhead_gateway.agent_knowledge_sources import source_validator
+
     configured = getattr(request.app.state, "agent_revision_store", None)
     if isinstance(configured, AgentRevisionStore):
+        if configured._knowledge_source_validator is None:
+            configured._knowledge_source_validator = source_validator(request, store)
         return configured
     return AgentRevisionStore(
         store.db_path,
         validator=await _publication_validator(request, user=user, store=store),
         eval_gate=AgentEvalReleaseGate(),
+        knowledge_source_validator=source_validator(request, store),
     )
 
 
@@ -1373,7 +1379,7 @@ def _raise_release_http(exc: Exception, *, reviewer_surface: bool = False) -> No
         details["blocked_items"] = list(blocked_items)
     if isinstance(exc, AgentReleaseStaleError):
         details["candidate_id"] = exc.candidate_id
-    if isinstance(exc, (AgentPublicationBlockedError, AgentRevisionConflictError)) and exc.details:
+    if isinstance(exc, (AgentPublicationBlockedError, AgentRevisionConflictError, KnowledgeAccessError)) and exc.details:
         # Safe identifiers only: the current policy revision to resend, or the expired case to remove.
         details.update(exc.details)
     if isinstance(exc, AgentReleaseCutoverRequiredError):
@@ -3219,6 +3225,47 @@ async def get_agent_optional_skill_catalog(
         current = await readers.working_copy(team_id=user.team_id, agent_id=agent_id, actor_user_id=user.id)
         if not current["actions"]["edit"]:
             raise AgentRevisionForbiddenError("agent_optional_skill_catalog_unavailable")
+        return result
+    except Exception as exc:
+        _raise_release_http(exc)
+
+
+@router.get("/{agent_id}/knowledge-sources")
+async def get_agent_knowledge_sources(
+    agent_id: str,
+    request: Request,
+    response: Response,
+    q: str = Query(default="", max_length=120),
+    selected: list[str] = Query(default=[]),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=50),
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    from bowhead_gateway.agent_knowledge_sources import source_catalog
+
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        if len(selected) > MAX_SELECTED_FILES:
+            raise KnowledgeAccessError()
+        KnowledgeAccess.model_validate_json(json.dumps({"schema_version": 1, "mode": "selected_files", "file_ids": selected}))
+        readers = _read_store(store)
+        detail = await readers.working_copy(team_id=user.team_id, agent_id=agent_id, actor_user_id=user.id)
+        if not detail["actions"]["edit"]:
+            raise AgentRevisionForbiddenError("agent_knowledge_sources_unavailable")
+        result = await source_catalog(
+            request,
+            store,
+            team_id=user.team_id,
+            user_id=user.id,
+            query=q,
+            selected=selected,
+            offset=offset,
+            limit=limit,
+        )
+        current = await readers.working_copy(team_id=user.team_id, agent_id=agent_id, actor_user_id=user.id)
+        if not current["actions"]["edit"]:
+            raise AgentRevisionForbiddenError("agent_knowledge_sources_unavailable")
         return result
     except Exception as exc:
         _raise_release_http(exc)

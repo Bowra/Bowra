@@ -19,6 +19,14 @@ import {
 } from "./models";
 
 describe("model source connect progress", () => {
+  it("round-trips an explicit off context policy through the saved provider and model editor", () => {
+    const policy = { enabled: false, trigger_input_tokens: 90000, keep_recent_tokens: 15000 };
+    const source = { type: "openai_compatible", base_url: "https://example.com/v1", models: [{ id: "model", capabilities: ["chat"], context_policy: policy }] };
+    const draft = v2ProviderDraftFromSavedConfig("example", "llmp_example", source as never);
+    expect(draft.models[0].context_policy).toEqual(policy);
+    expect(buildProviderModelSpec("openai_compatible", { id: "model", caps: ["chat"], source: "manual", contextPolicy: policy }).context_policy).toEqual(policy);
+    expect(buildProviderModelSpec("openai_compatible", { id: "model", caps: ["chat"], source: "manual" })).not.toHaveProperty("context_policy");
+  });
   it("round-trips declared output capacity without saving automatic defaults", () => {
     const row = { id: "deployment", caps: ["chat"], source: "manual" as const, maxOutputTokens: 128000 };
     expect(buildProviderModelSpec("openai_compatible", row).max_output_tokens).toBe(128000);

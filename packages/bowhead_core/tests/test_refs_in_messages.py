@@ -184,10 +184,7 @@ async def _run(
     # ⚠ Pin this too: shape logging defaults on, but exporting `=0` silences it entirely;
     # ⑤ then fails with zero log rows, the same environment dependency as the earlier env leak.
     monkeypatch.setenv("BOWHEAD_LLM_SHAPE_LOG", "1")
-    # ⚠ Pin bail thresholds too: resolve_peer_bail_iters reads both
-    # BOWHEAD_PEER_FORCE_BAIL_ITER and BOWHEAD_ANALYSIS_DEPTH; if force parses to ≤1,
     # run exits via force-bail before soft injection triggers, so ⑧ fails its own positive control.
-    monkeypatch.setenv("BOWHEAD_PEER_FORCE_BAIL_ITER", "99")
     monkeypatch.delenv("BOWHEAD_ANALYSIS_DEPTH", raising=False)
     # Without a language_context, language decision v2 adds the fallback language rule in the final
     # tail slot (context_assembly's "language last" contract). These cases measure refs placement
@@ -316,26 +313,6 @@ async def test_peer_stream_path_also_carries_refs(monkeypatch, _stub_profiles) -
     assert REFS_OPEN in r.messages[i][-1][1], "流式那条出口的请求末尾没有 refs"
     assert r.messages[i][-1][0] == "user"
     assert REFS_OPEN not in r.systems[i], "流式那条出口的 system 里仍有 refs"
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_hard_bail_directive_keeps_the_last_slot(monkeypatch, _stub_profiles) -> None:
-    """hard-bail「下一步必须立即 subagent_return」是**指令**，靠最末位置吃 recency。
-
-    refs 只是上下文；刚注入 bail 的那一圈必须让位（refs 排它前面）。
-    ⚠ 但 refs **不能整圈跳过**：收尾 payload 要引清单里的 id，没清单就只能编，ν1 一律拒。
-    突变：把那圈也改成 `[*messages, refs]` ⇒ 本条红。
-    """
-    monkeypatch.setenv("BOWHEAD_PEER_HARD_BAIL_ITER", "1")
-    r = await _run(monkeypatch, flag_on=True, profile="compute", n_tool_rounds=6, min_rounds=2)
-
-    bail_rounds = [i for i, msgs in enumerate(r.messages) if any("强制收尾" in c for _role, c in msgs)]
-    assert bail_rounds, "没触发 hard-bail 注入——判据是死的（检查 BOWHEAD_PEER_HARD_BAIL_ITER 是否被读）"
-    i = bail_rounds[0]
-    msgs = r.messages[i]
-    assert "强制收尾" in msgs[-1][1], f"第 {i} 圈最末是 refs 而不是 bail 指令：{[m[0] for m in msgs]}"
-    assert REFS_OPEN in msgs[-2][1], "refs 没排在 bail 指令之前——那一圈把清单整个丢了"
 
 
 # ─────────────────────────────────────────────────────────────

@@ -618,6 +618,9 @@ class EvalDatarcLiveRoute:
         identity = self._identity
         assert identity is not None
         call_ctx = copy.copy(ctx)
+        call_ctx.datarc_run_state = None
+        call_ctx.datarc_execution_scope = None
+        call_ctx.datarc_binding = None
         call_ctx.datarc = binding.reader  # type: ignore[assignment]
         call_ctx.vector_client = binding.vector_reader
         call_ctx.member_uid = identity.member_uid

@@ -37,7 +37,7 @@ export function assertComposerTextDraftFormat(value: object): void {
   const draft = value as Record<string, unknown>;
   if (
     (draft.schemaVersion !== undefined && draft.schemaVersion !== 1) ||
-    Object.hasOwn(draft, "input_document") || Object.hasOwn(draft, "documentRevision") || Object.hasOwn(draft, "documentRevisionTarget")
+    Object.hasOwn(draft, "input_document") || Object.hasOwn(draft, "documentRevision") || Object.hasOwn(draft, "documentRevisionTarget") || Object.hasOwn(draft, "contextMaintenance") || Object.hasOwn(draft, "terminalAction")
   ) {
     throw new ComposerPersistenceVersionError(
       "composer draft format requires a newer client",

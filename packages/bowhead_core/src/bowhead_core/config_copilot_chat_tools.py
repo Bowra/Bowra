@@ -430,12 +430,8 @@ async def _read_handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict
         if rejection is not None:
             return rejection
     if not form_id:
-        from bowhead_core.configuration_contracts import DOMAINS, domain_enabled
-
         forms = []
         for fid in list_forms():
-            if fid in DOMAINS and not domain_enabled(fid):
-                continue
             reg = get_form(fid)
             if reg is None or reg.read_accessor is None:
                 continue

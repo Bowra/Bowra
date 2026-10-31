@@ -1,7 +1,9 @@
 import { projectDocumentDraftOpen } from "./document-canvas-events";
 import { parseCoachCanvasBinding } from "./coach-canvas-target";
+import { parseContextActivity } from "./context-activity";
+import { parseContextMaintenanceAction } from "./context-maintenance";
 import { projectCoachResourceOpen } from "./coach-resource-editors";
-import { projectCoachOperationOpen } from "./coach-operations";
+import { projectCoachCaseEffects, projectCoachOperationOpen } from "./coach-operations";
 import { projectCoachAlignmentCard } from "./coach-alignment-cards";
 /**
  * turn-store-dispatch — route raw SSE event payloads into lib/turn-store
@@ -33,6 +35,7 @@ import type {
 import { normalizePeerFailureReasonCode } from "./error-messages";
 import {
   normalizeErrorDiagnostics,
+  readAgentStepUsage,
   parseErrorDiagnosticsWire,
   type ErrorDiagnostics,
 } from "./error-presentation";
@@ -46,6 +49,7 @@ import {
   applyCardFinalized,
   applyCardResumed,
   applyCollaborationRevision,
+  applyContextActivity,
   applyTurnDuration,
   applyTurnStarted,
   applyCoachCanvasTarget,
@@ -227,6 +231,8 @@ export function dispatchToTurnStore(
   if (!rawPayload || typeof rawPayload !== "object") return false;
   const payload = rawPayload as Record<string, unknown>;
   const cardId = pickCardId(payload);
+  if (eventName === "tool_result" || eventName === "step_done")
+    projectCoachCaseEffects(payload, streamTurnId ?? cardId ?? null);
   // A pending model retry is a transient running status: the next model output
   // or terminal event clears it. Live SSE and replay share this rule, so a
   // replayed finished turn always ends without it.
@@ -260,6 +266,7 @@ export function dispatchToTurnStore(
       const startedAt = payload.started_at;
       applyTurnStarted({
         turnId,
+        ...(parseContextMaintenanceAction(payload.context_maintenance) ? { operationKind: "context_maintenance" as const } : {}),
         startedAt: typeof startedAt === "string" ? startedAt : null,
       });
       const revision = parseDocumentRevisionReceipt(payload.document_revision);
@@ -300,6 +307,15 @@ export function dispatchToTurnStore(
         applyCardResumed({ turnId });
       }
       return false;
+    }
+
+    case "agent.context": {
+      if (!cardId) return false;
+      const activity = parseContextActivity(payload);
+      if (!activity) return true;
+      if (shouldSkipAppliedSeq(cardId, payload)) return true;
+      applyContextActivity(cardId, activity);
+      return true;
     }
 
     case "agent.collaboration": {
@@ -410,7 +426,7 @@ export function dispatchToTurnStore(
       return true;
     }
     case "coach.operation_open": {
-      projectCoachOperationOpen(payload);
+      projectCoachOperationOpen(payload, source);
       return true;
     }
     case "coach.alignment_card": {
@@ -579,6 +595,7 @@ export function dispatchToTurnStore(
             turnId: cardId,
             peerId: sid,
             status: "partial",
+            stepUsage: readAgentStepUsage(payload.step_usage),
             evtSeq: readEvtSeq(payload),
             ...(typeof payload.stop_reason === "string"
               ? { stopReason: payload.stop_reason }
@@ -676,6 +693,7 @@ export function dispatchToTurnStore(
         ...(status === "partial" && typeof payload.stop_reason === "string"
           ? { stopReason: payload.stop_reason }
           : {}),
+        ...(status === "partial" ? { stepUsage: readAgentStepUsage(payload.step_usage) } : {}),
         ...(typeof payload.resume_checkpoint_id === "string" && payload.resume_checkpoint_id
           ? { resumeCheckpointId: payload.resume_checkpoint_id }
           : {}),
@@ -940,6 +958,7 @@ const MODEL_RETRY_PRESERVING_EVENTS: ReadonlySet<string> = new Set([
   "turn.llm_invocation",
   "turn.effect_disclosure_settled",
   "agent.collaboration",
+  "agent.context",
   "emoji_ack",
 ]);
 
@@ -1120,6 +1139,8 @@ function mapOutputArtifacts(
       : undefined;
     refs.push({
       artifactId,
+      ...(typeof item.title === "string" && item.title ? { title: item.title.slice(0, 120) } : {}),
+      ...(typeof item.description === "string" && item.description ? { description: item.description.slice(0, 256) } : {}),
       ...(typeof filenameValue === "string" && filenameValue
         ? { filename: filenameValue.slice(0, OUTPUT_ARTIFACT_TEXT_CAP) }
         : {}),

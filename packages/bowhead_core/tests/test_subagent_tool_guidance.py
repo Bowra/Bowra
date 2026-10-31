@@ -7,17 +7,48 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from bowhead_core.agent_run_limits import reset_tool_call_budget, set_tool_call_budget
 from bowhead_core.events import TurnEventBus
 from bowhead_core.language_context import LanguageContext
 from bowhead_core.resource_disable import DisableState
-from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentRunner
+from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentRunner, _unasked_resolve_question
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec, _caller_sandbox_entry
+from bowhead_core.types import ToolInvocation
 from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse, ToolCall, ToolSchema
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope
 from bowhead_skill.sandbox_call_shape import sandbox_inputs_hint
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("tool_name", ["bi_concept_resolve", "bi_query", "teammcp.catalog.search", "skill_invoke"])
+def test_resolver_question_protocol_requires_its_producer(tool_name: str) -> None:
+    question = {"question": "Which sales metric?", "options": ["Net sales", "Gross sales"], "type": "single_select"}
+    payload = {"delivery_surface": "chat", "exec_summary": "Sales metrics are available."}
+    invocations = [
+        ToolInvocation(
+            tool_name=tool_name,
+            arguments={},
+            result={"results": [{"next_action_hint": "call_clarification_ask", "clarification_payload": {"questions": [question]}}]},
+            started_at="2026-10-29T00:00:00Z",
+            ended_at="2026-10-29T00:00:01Z",
+        ),
+        ToolInvocation(
+            tool_name="subagent_return",
+            arguments={"payload": payload},
+            result=payload,
+            started_at="2026-10-29T00:00:01Z",
+            ended_at="2026-10-29T00:00:02Z",
+        ),
+    ]
+
+    promoted = _unasked_resolve_question(payload, invocations)
+
+    if tool_name == "bi_concept_resolve":
+        assert promoted is not None
+        assert promoted["error"]["kind"] == "needs_user_input"
+        assert promoted["error"]["clarification_payload"] == {"questions": [question]}
+    else:
+        assert promoted is None
 
 
 class _ScriptedRouter:
@@ -150,37 +181,6 @@ async def test_language_guidance_follows_advertised_connector_tools(
     assert "data_language=zh-CN" in prompt
     assert "bi_concept_resolve" not in prompt
     assert "bi_schema()" not in prompt
-
-
-async def test_legacy_query_limit_closes_out_without_suggesting_unavailable_tools() -> None:
-    attempted = 0
-
-    async def query(_args: dict, _ctx: ToolExecutionContext) -> dict:
-        nonlocal attempted
-        attempted += 1
-        return {"ok": True}
-
-    registry = ToolRegistry()
-    registry.register(ToolSpec(schema=ToolSchema(name="bi_query", description="Query", input_schema={"type": "object"}), handler=query))
-    ctx = _context()
-    ctx._psi_bi_query_count = 20
-    budget_token = set_tool_call_budget(None)
-    try:
-        invocation = await SubagentRunner(router=_ScriptedRouter(), tool_registry=registry)._execute_tool(
-            ToolCall(id="budget", name="bi_query", arguments={"text": "sales"}),
-            ctx,
-            TurnEventBus(),
-            "t_guidance",
-            "sub_guidance",
-            running_profile="custom",
-        )
-    finally:
-        reset_tool_call_budget(budget_token)
-
-    assert attempted == 0
-    assert invocation.error.startswith("budget_exhausted:")
-    assert "verified" in invocation.error
-    assert "python_sandbox" not in invocation.error and "subagent_return" not in invocation.error
 
 
 @pytest.mark.parametrize("availability", ["available", "unregistered", "hidden", "unconfigured"])

@@ -12,8 +12,9 @@ from bowhead_router.types import ImageRef, Message, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from bowhead_core.agent_behavior_contract import canonical_fingerprint
-from bowhead_core.agent_run_limits import MAX_STEP_LIMIT, persisted_step_limit
+from bowhead_core.agent_run_limits import MAX_STEP_LIMIT, AgentLoopBudget, persisted_step_limit
 from bowhead_core.chat_references import decode_reference_json
+from bowhead_core.output_recovery import STATE_NAME, OutputRecovery
 
 if TYPE_CHECKING:
     from bowhead_core.agent_execution_binding import ExactAgentExecutionBinding
@@ -68,6 +69,8 @@ class ReferenceReadQuestion(BaseModel):
     tool_deny: tuple[str, ...]
     effective_tools: tuple[str, ...]
     max_iterations: int | None = Field(ge=2, le=MAX_STEP_LIMIT)
+    loop_budget: AgentLoopBudget | None = Field(default=None, exclude_if=lambda value: value is None)
+    output_recovery_json: str | None = Field(default=None, max_length=65536, repr=False, exclude_if=lambda value: value is None)
     completed_read_rounds: int = Field(ge=1, le=8)
     repair_rounds: Literal[0, 1] = 0
     messages_json: str = Field(max_length=65536, repr=False)
@@ -173,6 +176,20 @@ class ReferenceReadQuestion(BaseModel):
             for index, inv in enumerate(invocations)
         )
 
+    def invocations(self) -> list[ToolInvocation]:
+        """Rebuild private receipt state without dispatching retained Tools."""
+        from bowhead_core.types import ToolInvocation
+
+        messages = self.transcript()
+        return [
+            ToolInvocation(
+                tool_name=assistant.tool_calls[0].name,
+                arguments=assistant.tool_calls[0].arguments,
+                result=json.loads(result.content),
+            )
+            for assistant, result in zip(messages[1::2], messages[2::2], strict=True)
+        ]
+
     def transcript(self) -> list[Message]:
         raw, _ = self._decode()
         read_tools = self.read_tools()
@@ -240,6 +257,13 @@ class ReferenceReadQuestion(BaseModel):
             raise ValueError("reference_continuation_changed")
         self.transcript()
         self.attachment_reads()
+        if self.output_recovery_json is not None:
+            try:
+                recovery = OutputRecovery.restore([Message(role="user", name=STATE_NAME, content=self.output_recovery_json)])
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ValueError("reference_continuation_changed") from exc
+            if recovery.attempts or recovery.context_reduced:
+                raise ValueError("reference_continuation_changed")
         return self
 
     @classmethod
@@ -260,7 +284,25 @@ class ReferenceReadQuestion(BaseModel):
         max_iterations: int,
         language_override: str | None = None,
         attachment_context: str | None = None,
+        loop_budget: AgentLoopBudget | None = None,
     ) -> ReferenceReadQuestion | None:
+        # Private runtime state is not another native read/question round.
+        # Retain its exact receipt fingerprints separately; they cannot be
+        # rebuilt from model-projected Tool text without changing recovery.
+        notes = [message for message in messages if message.role == "user" and message.name == STATE_NAME]
+        recovery = None
+        recovery_json = None
+        if notes:
+            if len(notes) != 1 or notes[0].tool_calls or notes[0].images:
+                return None
+            try:
+                recovery = OutputRecovery.restore(notes)
+            except (ValueError, TypeError, KeyError):
+                return None
+            if recovery.attempts or recovery.context_reduced:
+                return None
+            recovery_json = notes[0].content
+            messages = [message for message in messages if not (message.role == "user" and message.name == STATE_NAME)]
         repair_rounds = int(len(invocations) == model_turn_count - 1)
         reads = model_turn_count - repair_rounds - 1
         mcp_receipts = getattr(ctx, "reference_mcp_read_receipts", None)
@@ -328,10 +370,17 @@ class ReferenceReadQuestion(BaseModel):
                 tool_deny=tuple(sorted(tool_deny)),
                 effective_tools=tuple(sorted(effective_tools)),
                 max_iterations=max_iterations,
+                loop_budget=loop_budget,
+                output_recovery_json=recovery_json,
                 completed_read_rounds=reads,
                 repair_rounds=repair_rounds,
                 messages_json=encoded,
             )
+            if recovery is not None:
+                retained_recovery = OutputRecovery()
+                retained_recovery.observe(invocations)
+                if retained_recovery != recovery:
+                    return None
             return checkpoint if checkpoint.matches_reads(invocations[:-1]) else None
         except (ValueError, TypeError, RecursionError):
             return None
@@ -379,6 +428,9 @@ class ReferenceReadQuestion(BaseModel):
         if messages[0].content != task:
             raise ValueError("reference_continuation_changed")
         messages[0].images = [ImageRef(base64=item.base64, mime=item.mime) for item in message_images or []]
+        if self.output_recovery_json is not None:
+            recovery = OutputRecovery.restore([Message(role="user", name=STATE_NAME, content=self.output_recovery_json)])
+            recovery.sync(messages)
         return [*messages, Message(role="user", content=answer)]
 
 

@@ -598,6 +598,7 @@ def _candidate_detail(
     can_withdraw: bool,
 ) -> dict[str, Any]:
     candidate_risk = _decode_object(row["risk_json"], name="candidate risk")
+    from bowhead_core.agent_knowledge_policy import knowledge_access_expanded
     from bowhead_core.agent_runtime_extensions import extension_policy_summary
 
     base_definition = base["definition"] if base else {}
@@ -612,6 +613,8 @@ def _candidate_detail(
         "skill_set_changed": base_definition.get("skill_grants") != definition.get("skill_grants"),
         "plugin_set_changed": _plugin_selection(base_definition) != _plugin_selection(definition),
         "plugin_changes": _plugin_changes(base_definition, definition),
+        "knowledge_access_changed": base_definition.get("knowledge_access") != definition.get("knowledge_access"),
+        "knowledge_access_expanded": knowledge_access_expanded(base_definition, definition),
         "runtime_extensions_changed": base_definition.get("runtime_extensions") != definition.get("runtime_extensions"),
         "primary_capability_changed": base_definition.get("primary_capability_ref") != definition.get("primary_capability_ref"),
         "capability_protocol_block_changed": (base_definition.get("capability_protocol_block") is True)

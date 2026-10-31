@@ -7,14 +7,13 @@ test_plan_midrun_resolve.py(gateway 侧)。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from bowhead_core.agents.lead_orchestrator import (
     LeadRuntime,
-    _midrun_binding_lookup,
     _put_datarc_picker_card,
     _run_plan_execution_turn,
 )
@@ -25,44 +24,7 @@ from bowhead_core.plan_reify import assign_levels
 from bowhead_core.plan_store import PlanStatus, PlanStore, new_step
 from bowhead_core.subagent import SubagentResult
 
-# ── Binding-pickup criterion (D3 lookup, review P0-3) ────────────
-
-
-class _FakeUmem:
-    def __init__(self, explicit: dict | None = None, session: dict | None = None) -> None:
-        self._e, self._s = explicit, session
-
-    async def get_tool_context(self, user_id: str, tool: str, slot: str = "workspace", *, session_scoped: bool = False):
-        return self._s if session_scoped else self._e
-
-
 _WS = ({"id": "101", "name": "华东"}, {"id": "102", "name": "华南"})
-
-
-@pytest.mark.asyncio
-async def test_lookup_explicit_hit() -> None:
-    hit = await _midrun_binding_lookup(_FakeUmem({"id": "101", "name": "华东"}), user_id="u", session_id="s", accessible=_WS)
-    assert hit == ("101", "华东")
-
-
-@pytest.mark.asyncio
-async def test_lookup_session_overlay_same_session_only() -> None:
-    umem = _FakeUmem(None, {"id": "102", "name": "华南", "session_id": "s"})
-    assert await _midrun_binding_lookup(umem, user_id="u", session_id="s", accessible=_WS) == ("102", "华南")
-    # Session-only "do not remember" preference cannot cross sessions.
-    assert await _midrun_binding_lookup(umem, user_id="u", session_id="other", accessible=_WS) is None
-
-
-@pytest.mark.asyncio
-async def test_lookup_not_in_accessible_set_rejected() -> None:
-    umem = _FakeUmem({"id": "999", "name": "外部"})
-    assert await _midrun_binding_lookup(umem, user_id="u", session_id="s", accessible=_WS) is None
-
-
-@pytest.mark.asyncio
-async def test_lookup_none_cases() -> None:
-    assert await _midrun_binding_lookup(None, user_id="u", session_id="s", accessible=_WS) is None
-    assert await _midrun_binding_lookup(_FakeUmem(), user_id="u", session_id="s", accessible=_WS) is None
 
 
 # ── Two picker-card helper shapes (D1) ──────────────────────────
@@ -90,7 +52,9 @@ class _FakeClarStore:
 
     async def put(self, **kw: Any) -> Any:
         self.puts.append(kw)
-        return SimpleNamespace(request_id=f"req_{len(self.puts)}")
+        request_id = f"req_{len(self.puts)}"
+        self.resume_ctx[request_id] = kw.get("resume_context") or {}
+        return SimpleNamespace(request_id=request_id)
 
     async def set_resume_context(self, rid: str, ctx: dict) -> bool:
         self.resume_ctx[rid] = ctx
@@ -350,32 +314,11 @@ async def test_store_expire_pending_for_turn(tmp_path) -> None:
 # ── S4 critical assertion (implementation review P1-1): revived redispatch ctx resolves project ──
 
 
-class _ReviveCtx:
-    """真实形状关键件: resolve_datarc_project **现读** active_datarc_project——
-    回填链(闭包写 attr → adapter 派发时惰性读)有回归钉, 谁改成入口快照谁变红."""
-
-    def __init__(self, umem: Any, clar: Any) -> None:
-        self.active_datarc_project = ""
-        self.active_datarc_workspace_name = ""
-        self.accessible_datarc_workspaces = _WS
-        self.user_memory_store = umem
-        self.clarification_store = clar
-        self.canvas_store = None
-        self.artifact_store = None
-        self.kb_files_store = None
-        self.member_uid = ""
-        self.language_context = None
-        self.agent_registry = None
-
-    def resolve_datarc_project(self) -> str:
-        return self.active_datarc_project or ""
-
-
 class _SentinelThenOkRunner:
     """第一派返回 needs_user_input 信封(adapter ②-a 路);第二派记录派发时
     ctx 可解出的 project 并成功。"""
 
-    def __init__(self, ctx: _ReviveCtx) -> None:
+    def __init__(self, ctx: Any) -> None:
         self._ctx = ctx
         self.calls = 0
         self.projects_at_dispatch: list[str] = []
@@ -420,9 +363,27 @@ async def test_revive_backfills_ctx_iron_assertion(tmp_path) -> None:
     await store.add_steps([st])
     await store.update_plan_status(plan.id, PlanStatus.RUNNING)
 
-    umem = _FakeUmem({"id": "101", "name": "华东"})  # Binding persisted (user answered).
+    from bowhead_core.tool_registry import ToolExecutionContext
+
+    class PreparedSelection:
+        async def resolve_saved_selection(self):
+            return "101", "华东"
+
+        async def prepare_selection(self, identifier, name, *, current):
+            return replace(current, datarc_workspace_id=identifier, name=name, member_uid="member_101")
+
     clar = _FakeClarStore()
-    ctx = _ReviveCtx(umem, clar)
+    ctx = ToolExecutionContext(
+        workspace_id="w",
+        user_id="u",
+        member_uid="",
+        turn_id="t_iron",
+        datarc=object(),
+        session_id="s",
+        accessible_datarc_workspaces=_WS,
+        clarification_store=clar,
+        datarc_context_switcher=PreparedSelection(),
+    )
     runner = _SentinelThenOkRunner(ctx)
     bus = _FakeBus()
     bus._d6_canvas_store = None  # type: ignore[attr-defined]
@@ -442,6 +403,7 @@ async def test_revive_backfills_ctx_iron_assertion(tmp_path) -> None:
     assert runner.projects_at_dispatch == ["", "101"]
     assert ctx.active_datarc_project == "101"
     assert ctx.active_datarc_workspace_name == "华东"
+    assert ctx.member_uid == "member_101"
     # Midrun card issued with plan_midrun resume_context shape.
     assert clar.resume_ctx and next(iter(clar.resume_ctx.values()))["plan_midrun_plan_id"] == plan.id
     # Step ends done; normal terminal turn, not clarification_pending (successful pickup removes card block).

@@ -7,6 +7,61 @@ from bowhead_core import agent_run_limits as rl
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def runtime_config(monkeypatch):
+    rl.get_runtime_controls.cache_clear()
+    yield
+    rl.get_runtime_controls.cache_clear()
+
+
+@pytest.mark.parametrize("system,team,expected", [(None, None, None), (1000, None, 1000), (None, 200, 200), (1000, 200, 200), (100, 200, 100)])
+def test_effective_ceiling_preserves_the_saved_team_choice(system, team, expected):
+    limits = rl.AgentRunLimits(step_limit=team)
+    before = limits.to_json()
+    controls = rl.AgentRuntimeControls(system_step_limit=system)
+    assert controls.budget(limits).step_limit == expected
+    assert controls.view(limits)["effective_step_limit"] == expected
+    assert limits.to_json() == before
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("BOWHEAD_AGENT_MAX_STEPS", "0"),
+        ("BOWHEAD_AGENT_MAX_STEPS", "-1"),
+        ("BOWHEAD_AGENT_MAX_STEPS", "true"),
+        ("BOWHEAD_AGENT_MAX_STEPS", "1.5"),
+        ("BOWHEAD_AGENT_MAX_STEPS", "10001"),
+        ("BOWHEAD_AGENT_STALL_TIMEOUT_SEC", "29"),
+        ("BOWHEAD_AGENT_STALL_TIMEOUT_SEC", "36001"),
+        ("BOWHEAD_AGENT_STALL_TIMEOUT_SEC", ""),
+    ],
+)
+def test_active_invalid_operator_values_fail_with_the_field_name(monkeypatch, runtime_config, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        rl.get_runtime_controls()
+
+
+def test_runtime_policy_is_a_startup_snapshot(monkeypatch, runtime_config):
+    controls = rl.get_runtime_controls()
+    assert controls == rl.AgentRuntimeControls()
+    monkeypatch.setenv("BOWHEAD_AGENT_MAX_STEPS", "40")
+    assert rl.get_runtime_controls() is controls
+
+
+def test_saved_runtime_budget_requires_a_version_and_valid_used_count():
+    budget = rl.AgentRuntimeControls().budget(rl.AgentRunLimits(step_limit=3))
+    raw = budget.model_dump()
+    assert rl.AgentLoopBudget.model_validate({**raw, "model_steps_used": 3}).model_steps_used == 3
+    for patch in ({"model_steps_used": 4}, {"model_steps_used": True}, {"contract": "unknown"}):
+        with pytest.raises(ValueError):
+            rl.AgentLoopBudget.model_validate({**raw, **patch})
+    raw.pop("contract")
+    with pytest.raises(ValueError):
+        rl.AgentLoopBudget.model_validate(raw)
+
+
 def test_defaults_are_thirty_minutes_unlimited_steps_and_300_tool_calls() -> None:
     assert rl.AgentRunLimits(turn_time_limit_s=1800, step_limit=None, tool_call_limit=300) == rl.DEFAULT_LIMITS
     assert rl.DEFAULT_LIMITS.wrap_up_reserve_s == 300
@@ -65,8 +120,6 @@ def test_subagents_stop_five_minutes_before_the_turn_deadline_and_lead_uses_all_
 
 
 def test_unlimited_steps_are_recorded_as_none_not_as_the_loop_bound() -> None:
-    assert rl.loop_step_limit(rl.AgentRunLimits(step_limit=None)) == rl.UNBOUNDED_STEPS
-    assert rl.loop_step_limit(rl.AgentRunLimits(step_limit=40)) == 40
     assert rl.persisted_step_limit(rl.UNBOUNDED_STEPS) is None
     assert rl.persisted_step_limit(40) == 40
 

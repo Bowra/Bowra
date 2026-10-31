@@ -277,7 +277,7 @@ async def test_b5_handler_maps_legacy_rank_priorities_to_multi_select() -> None:
 
 @pytest.mark.asyncio
 async def test_b5_handler_invalid_type_falls_back_to_single_select() -> None:
-    """Defensive: unknown type values normalize to single_select."""
+    """Retain the existing unknown-type compatibility for renderable choices."""
     ctx = SimpleNamespace(turn_id="t_b5_4")
     args = {
         "questions": [
@@ -290,6 +290,7 @@ async def test_b5_handler_invalid_type_falls_back_to_single_select() -> None:
     }
     result = await _clarification_ask(args, ctx)
     assert result["type"] == "single_select"
+    assert result["questions"][0]["type"] == "single_select"
 
 
 @pytest.mark.asyncio

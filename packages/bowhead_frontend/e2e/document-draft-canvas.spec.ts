@@ -6,7 +6,7 @@ const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1cAAAAASUVORK5CYII=",
   "base64",
 );
-async function start(page: Page, prefix: string) {
+async function start(page: Page, prefix: string, reviewing = true) {
   await page.route(
     "**/api/v1/documents/djob_canvas_fixture/preview/page-1.png",
     (route) => route.fulfill({ contentType: "image/png", body: png }),
@@ -18,6 +18,7 @@ async function start(page: Page, prefix: string) {
   );
   await page.goto(`${prefix}/__reference_component_test`);
   await expect(page.getByRole("img")).toBeVisible();
+  if (!reviewing) return;
   await page.getByRole("checkbox").check();
   await expect(
     page.getByRole("button", { name: "Confirm and publish" }),
@@ -28,6 +29,27 @@ for (const [prefix, width] of [
   ["", 1280],
   ["/bowhead", 320],
 ] as const) {
+  test(`keeps a superseded draft read-only after reopen at ${prefix || "root"} / ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const requests: string[] = [];
+    page.on("request", (request) => { if (request.method() !== "GET") requests.push(request.url()); });
+    await page.route("**/api/v1/sessions/s_doc/documents/djob_canvas_fixture", (route) => route.fulfill({
+      json: { ...fixture.review, state: "cancelled", can_confirm: false, can_revise: false, superseded_by_job_id: "djob_successor" },
+    }));
+    await start(page, prefix, false);
+    await expect(page.getByRole("heading", { name: "fixture - Updated.pptx" })).toBeVisible();
+    await expect(page.getByText("Superseded", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm and publish" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Revise in Chat" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    await page.getByRole("button", { name: "Reopen view", exact: true }).click();
+    await expect(page.getByRole("img")).toBeVisible();
+    await expect(page.getByText("Superseded", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Unsent input")).toHaveValue("Keep my input");
+    expect(requests).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("superseded-adapter.png"), fullPage: true });
+  });
+
   test(`recovers the original confirmation without changing input at ${prefix || "root"} / ${width}px`, async ({
     page,
   }, testInfo) => {

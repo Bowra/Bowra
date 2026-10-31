@@ -13,7 +13,6 @@ import math
 from typing import Any
 
 from bowhead_router.outbound import (
-    OUTBOUND_PARAMS,
     OutboundParams,
     ParamRule,
     ProtocolFamily,
@@ -205,28 +204,9 @@ def _validate_advanced(raw: Any, where: str) -> None:
 
 def runtime_parameters_schema() -> dict[str, Any]:
     """Describe the same versioned fields accepted by runtime and configuration validation."""
-    outbound = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            name: {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "mode": {
-                        "type": "string",
-                        "enum": ["follow", "fixed", "omit", "cap"],
-                        "description": "Follow the caller, fix a value, omit the parameter, or cap output tokens.",
-                    },
-                    "value": {
-                        "type": ["number", "boolean", "null"],
-                        "description": "Required for fixed/cap; omit for follow/omit. parallel_tool_calls uses a boolean.",
-                    },
-                },
-            }
-            for name in OUTBOUND_PARAMS
-        },
-    }
+    from bowhead_router.outbound import outbound_parameters_schema
+
+    outbound = outbound_parameters_schema()
     policy = {
         "type": "object",
         "additionalProperties": False,
@@ -244,6 +224,7 @@ def runtime_parameters_schema() -> dict[str, Any]:
             "thinking_budget": {
                 "type": "integer",
                 "minimum": 1,
+                "x-bowhead-field": {"unit": "tokens"},
                 "description": "Manual thinking tokens; the selected profile's bounds and model output headroom also apply.",
             },
             "outbound_params": {**outbound, "description": "Typed sampling, output-token and parallel-tool controls."},
@@ -267,7 +248,13 @@ def runtime_parameters_schema() -> dict[str, Any]:
             "capability_overrides": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": dict.fromkeys(sorted(CONVERSATIONAL_CAPABILITIES), policy),
+                "properties": {
+                    cap: {
+                        **policy,
+                        "description": "Override the shared model policy for this declared capability; omitted fields inherit shared defaults.",
+                    }
+                    for cap in sorted(CONVERSATIONAL_CAPABILITIES)
+                },
                 "description": "Field-level exceptions for capabilities declared by this model.",
             },
         },

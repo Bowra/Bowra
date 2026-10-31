@@ -1139,6 +1139,11 @@ class ClarificationStore:
                     raise ValueError("ordinary_question_contract_invalid")
                 inserted_context = await bind_ordinary_capture_in_tx(db, card=req, capture=ordinary_question)
                 inserted_json = json.dumps(inserted_context, ensure_ascii=False, allow_nan=False)
+            if isinstance(inserted_context, dict) and inserted_context.get("datarc_selection") is not None:
+                from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+                DatarcSelectionSnapshot.model_validate(inserted_context["datarc_selection"])
+                await require_datarc_context_migration(db)
             await db.execute(
                 """
                 INSERT INTO clarification_requests
@@ -1983,6 +1988,11 @@ class ClarificationStore:
         """
         async with aiosqlite.connect(self.db_path) as db:
             # A3: same storage-boundary rule as put(); this later snapshot also needs a version.
+            if ctx.get("datarc_selection") is not None:
+                from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
+
+                DatarcSelectionSnapshot.model_validate(ctx["datarc_selection"])
+                await require_datarc_context_migration(db)
             ctx_json = json.dumps(stamp_resume_context(ctx), ensure_ascii=False, default=str)
             cursor = await db.execute(
                 "UPDATE clarification_requests SET resume_context_json=? WHERE request_id=?",

@@ -6,8 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from bowhead_core.access_control import normalize_workspace_role
-from bowhead_core.agent_run_limits import agent_run_limits_enabled
-from bowhead_core.configuration_contracts import TEAM_FORMS, domain_enabled
+from bowhead_core.configuration_contracts import TEAM_FORMS
 from bowhead_core.tool_registry import ToolExecutionContext
 from fastapi import FastAPI
 
@@ -25,8 +24,6 @@ def configuration_access_resolver(app: FastAPI):
         user = replace(user, team_id=ctx.team_id, active_team_id=ctx.team_id)
         access: dict[str, Any] = {"configuration_readonly": False, "workspace_role": None}
         if form_id in TEAM_FORMS:
-            if not domain_enabled(form_id) or (form_id == "team_run_limits" and not agent_run_limits_enabled()):
-                raise PermissionError("configuration domain unavailable")
             role = await store.get_team_role(ctx.user_id, ctx.team_id)
             if role not in {"owner", "team_admin"}:
                 raise PermissionError("team administrator required")

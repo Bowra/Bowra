@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from bowhead_router.input_admission import LLMInputAdmissionError
@@ -56,6 +57,54 @@ def _recovery_allowance_note(request: LLMRequest, body: dict[str, Any], family: 
 
 class OutputBudgetError(LLMInputAdmissionError):
     """An impossible local allowance must never be retried as a provider error."""
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedRequestBudget:
+    """Content-free accounting of the actual serialized input and reservation."""
+
+    input_estimate: int
+    estimate_coverage: str
+    context_window: int
+    context_source: str
+    required_output: int
+    framing_margin: int = FRAMING_MARGIN
+
+    @property
+    def charged_input(self) -> int:
+        return math.ceil(self.input_estimate * 1.15)
+
+    @property
+    def output_room(self) -> int:
+        return self.context_window - self.charged_input - self.framing_margin
+
+    @property
+    def input_limit(self) -> int:
+        return max(0, math.floor((self.context_window - self.required_output - self.framing_margin) / 1.15))
+
+    @property
+    def fits(self) -> bool:
+        return self.output_room >= self.required_output
+
+
+class ContextCapacityError(OutputBudgetError):
+    """Typed capacity rejection; authority and malformed policy failures differ."""
+
+    def __init__(self, message: str, *, model: str, budget: RenderedRequestBudget) -> None:
+        super().__init__(message)
+        self.model = model
+        self.budget = budget
+        self.provider: str | None = None
+        self.configuration_version: int | None = None
+
+
+def rendered_request_budget(request: LLMRequest, body: dict[str, Any], provider: Any, *, required_output: int) -> RenderedRequestBudget:
+    """Measure the same body for preflight and final admission without edits."""
+    window = model_token_capacity(provider, request.model, field="context_window")
+    if type(request.input_admission_window) is int and request.input_admission_window > 0 and request.input_admission_window != window.value:
+        window = TokenCapacity(request.input_admission_window, "resolved_target")
+    estimated, coverage = estimate_body_input(body)
+    return RenderedRequestBudget(estimated, coverage, window.value, window.source, required_output)
 
 
 def initial_output_allowance(request: LLMRequest, provider: Any) -> int:
@@ -141,6 +190,23 @@ def finalize_output_allowance(
         if family == "anthropic":
             raise OutputBudgetError("Anthropic requires a positive max_tokens parameter")
         recovery_note(None)
+        reservation = output_reservation(
+            provider,
+            request.model,
+            request.max_output_tokens,
+            capability=capability,
+            family=family,
+            thinking_budget=request.thinking_budget_tokens if request.extended_thinking else 0,
+        )
+        accounting = rendered_request_budget(request, body, provider, required_output=reservation)
+        request.context_budget = accounting
+        diagnostics.update(input_estimate=accounting.input_estimate, estimate_coverage=accounting.estimate_coverage)
+        if not accounting.fits:
+            raise ContextCapacityError(
+                "Input leaves insufficient output space; reduce optional context or correct the model context window",
+                model=request.model,
+                budget=accounting,
+            )
         return
     key = fields[0]
     selected = body[key]
@@ -159,8 +225,22 @@ def finalize_output_allowance(
     allowance = selected
     for _ in range(4):
         recovery_note(allowance)
-        estimated, coverage = estimate_body_input(body)
-        room = window.value - math.ceil(estimated * 1.15) - FRAMING_MARGIN
+        reservation = (
+            output_reservation(
+                provider,
+                request.model,
+                request.max_output_tokens,
+                capability=capability,
+                family=family,
+                thinking_budget=request.thinking_budget_tokens if request.extended_thinking else 0,
+            )
+            if automatic
+            else selected
+        )
+        accounting = rendered_request_budget(request, body, provider, required_output=reservation)
+        request.context_budget = accounting
+        estimated, coverage = accounting.input_estimate, accounting.estimate_coverage
+        room = accounting.output_room
         input_output_room = getattr(request.input_admission, "output_room", None)
         if callable(input_output_room):
             room = min(room, input_output_room(request, body, family=family))
@@ -171,13 +251,24 @@ def finalize_output_allowance(
     else:
         raise OutputBudgetError("Output recovery allowance could not stabilize; reduce optional input")
     if allowance <= 0 or (automatic and allowance < min(MIN_PROGRESS_OUTPUT, selected)):
-        raise OutputBudgetError("Input leaves insufficient output space; reduce optional context or correct the model context window")
+        if accounting.fits and callable(input_output_room):
+            request.input_admission.validate_outbound(request, body, family=family)
+            raise OutputBudgetError("Required input leaves insufficient output space")
+        raise ContextCapacityError(
+            "Input leaves insufficient output space; reduce optional context or correct the model context window",
+            model=request.model,
+            budget=accounting,
+        )
     if not automatic and selected > room:
         if callable(input_output_room):
             # Preserve the protected-input gate's finite failure code when it
             # is the constraint; it remains authoritative for required sources.
             request.input_admission.validate_outbound(request, body, family=family)
-        raise OutputBudgetError("Configured output allowance does not fit with the input; lower the output limit or correct the context window")
+        raise ContextCapacityError(
+            "Configured output allowance does not fit with the input; lower the output limit or correct the context window",
+            model=request.model,
+            budget=accounting,
+        )
     if capacity.source != "fallback" and allowance > capacity.value:
         raise OutputBudgetError("Output allowance exceeds model capacity; lower the request limit or correct the declared model output capacity")
     thinking = body.get("thinking")

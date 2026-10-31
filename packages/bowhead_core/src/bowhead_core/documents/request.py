@@ -73,11 +73,26 @@ class InputRoleProposal(InputRoleArguments):
     )
 
 
+class CanvasInputSelection(_FrozenModel):
+    section_ids: Annotated[tuple[Identity, ...], Field(min_length=1, max_length=64)] | None = None
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> Self:
+        if self.section_ids is not None and len(set(self.section_ids)) != len(self.section_ids):
+            raise PydanticCustomError("document_canvas_selection_invalid", "Canvas sections must be unique")
+        return self
+
+
 class DocumentProposal(_FrozenModel):
     action: Literal["generate"] = "generate"
     evidence: UserQuote
     inputs: Annotated[tuple[InputRoleProposal, ...], Field(min_length=1, max_length=32)]
     requested_outputs: tuple[Literal["source", "pdf"], ...] = ("source",)
+    canvas: CanvasInputSelection | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Optional current Chat Canvas material. Use canvas={} for current visible content; supply section_ids only when exact IDs are already available. The server resolves scope and freezes data; do not transcribe rows.",
+    )
 
     @model_validator(mode="after")
     def validate_shape(self) -> Self:

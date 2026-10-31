@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 from bowhead_core.access_control import AccessControlStore
@@ -130,7 +131,7 @@ async def test_promote_creates_kb_row_reusing_the_same_artifact(ctx) -> None:
 
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "personal"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
         headers=_H,
     )
     assert r.status_code == 201, r.text
@@ -149,7 +150,7 @@ async def test_promote_without_embedding_model_explains_why_no_kb_row_was_create
 
     response = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "space"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "space"},
         headers=_H,
     )
 
@@ -165,12 +166,12 @@ async def test_promoting_someone_elses_artifact_is_forbidden(ctx) -> None:
     art = await _art(artifacts, owner=_OTHER, filename="theirs.pdf")
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "personal"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
         headers=_H,
     )
     missing = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": "art_missing", "scope": "personal"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": "art_missing", "scope": "personal"},
         headers=_H,
     )
     # Someone else's file is refused exactly like a missing one.
@@ -185,7 +186,13 @@ async def test_scope_id_is_server_resolved_not_client_supplied(ctx) -> None:
     art = await _art(artifacts)
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "space", "scope_id": "ws_someone_else"},
+        json={
+            "knowledge_intent": "add_to_knowledge",
+            "action_id": uuid4().hex,
+            "artifact_id": art.id,
+            "scope": "space",
+            "scope_id": "ws_someone_else",
+        },
         headers=_H,
     )
     assert r.status_code == 201, r.text
@@ -204,7 +211,7 @@ async def test_unparsable_mime_is_code_only_422_not_500(ctx) -> None:
     art = await _art(artifacts, filename="deck.ppt", mime="application/vnd.ms-powerpoint")
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "personal"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
         headers=_H,
     )
     assert r.status_code == 422, r.text
@@ -218,7 +225,7 @@ async def test_remove_drops_kb_row_but_keeps_the_file(ctx) -> None:
     assert (
         client.post(
             "/api/v1/kb/files/from-artifact",
-            json={"artifact_id": art.id, "scope": "personal"},
+            json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
             headers=_H,
         ).status_code
         == 201
@@ -238,7 +245,7 @@ async def test_space_remove_uses_the_active_space_context(ctx) -> None:
     assert (
         client.post(
             "/api/v1/kb/files/from-artifact",
-            json={"artifact_id": art.id, "scope": "space"},
+            json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "space"},
             headers=_H,
         ).status_code
         == 201
@@ -273,7 +280,7 @@ async def test_personal_promote_works_without_a_space_header(ctx) -> None:
     art = await _art(artifacts)
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "personal"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
     )
     assert r.status_code == 201, r.text
     assert await files_store.find_active_by_artifact(art.id) is not None
@@ -286,7 +293,7 @@ async def test_personal_remove_works_without_a_space_header(ctx) -> None:
     assert (
         client.post(
             "/api/v1/kb/files/from-artifact",
-            json={"artifact_id": art.id, "scope": "personal"},
+            json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "personal"},
         ).status_code
         == 201
     )
@@ -300,6 +307,6 @@ async def test_space_scope_still_requires_a_space(ctx) -> None:
     art = await _art(artifacts)
     r = client.post(
         "/api/v1/kb/files/from-artifact",
-        json={"artifact_id": art.id, "scope": "space"},
+        json={"knowledge_intent": "add_to_knowledge", "action_id": uuid4().hex, "artifact_id": art.id, "scope": "space"},
     )
     assert r.status_code == 400, r.text

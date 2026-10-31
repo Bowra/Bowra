@@ -270,6 +270,8 @@ class TerminalAdmissionRequest:
                 "user_text": self.execution_intent.get("text"),
                 "workspace_id": self.execution_intent.get("workspace_id"),
             }
+            if "context_maintenance" in self.execution_intent:
+                request_envelope["context_maintenance"] = self.execution_intent["context_maintenance"]
             if canonical_json_v1(request_envelope) != canonical_json_v1(source_envelope):
                 raise ValueError("terminal admission user source envelope changed")
         if not isinstance(self.create_session_if_missing, bool):
@@ -1552,6 +1554,7 @@ class TerminalCandidateVariant:
     final_answer_digest: str | None
     session_mutation_template: Mapping[str, object]
     events: tuple[StagedTerminalEvent, ...]
+    operation_kind: str | None = None
 
     def __post_init__(self) -> None:
         if any(not isinstance(value, str) or not value for value in (self.variant_key, self.message_key)):
@@ -1568,6 +1571,7 @@ class TerminalCandidateVariant:
             status=self.status,
             mode=self.final_answer_mode,
             final_answer_event_id=self.final_answer_event_id,
+            operation_kind=self.operation_kind,
         ):
             raise ValueError("terminal candidate final answer mode is invalid")
         if self.final_answer_mode is FinalAnswerMode.NONE:
@@ -1583,6 +1587,8 @@ class TerminalCandidateVariant:
         if any(not isinstance(event, StagedTerminalEvent) for event in self.events):
             raise TypeError("terminal candidate staged event is invalid")
         terminal_event = self.events[-1]
+        if terminal_event.payload.get("operation_kind") != self.operation_kind:
+            raise ValueError("terminal candidate operation kind changed")
         if terminal_event.event_type != "done" or terminal_event.actor_scope is not ActorScope.ROOT:
             raise ValueError("terminal candidate variant must end with root done")
         staged_answers = [event for event in self.events[:-1] if event.event_type == "final_answer"]
@@ -1651,6 +1657,7 @@ class TerminalCandidateVariant:
     @property
     def variant_projection(self) -> dict[str, object]:
         return {
+            **({"operation_kind": self.operation_kind} if self.operation_kind is not None else {}),
             "variant_key": self.variant_key,
             "outcome_variant": self.outcome_variant.value,
             "session_variant": self.session_variant.value,
@@ -1823,8 +1830,11 @@ class CommittedReceipt:
     first_event_seq: int
     last_event_seq: int
     status: TerminalStatus
+    operation_kind: str | None = None
 
     def __post_init__(self) -> None:
+        if self.operation_kind not in (None, "context_maintenance"):
+            raise ValueError("terminal receipt operation kind is invalid")
         strings = (
             self.receipt_id,
             self.candidate_id,
@@ -3178,6 +3188,7 @@ def validate_final_answer_mode(
     status: TerminalStatus | str,
     mode: FinalAnswerMode | str,
     final_answer_event_id: str | None,
+    operation_kind: str | None = None,
 ) -> bool:
     """验证 §4.3 的正文模式，不生成或猜测正文。"""
 
@@ -3187,6 +3198,10 @@ def validate_final_answer_mode(
     except ValueError:
         return False
     has_identity = isinstance(final_answer_event_id, str) and bool(final_answer_event_id)
+    if operation_kind not in (None, "context_maintenance"):
+        return False
+    if operation_kind == "context_maintenance":
+        return parsed_mode is FinalAnswerMode.NONE and final_answer_event_id is None
     if parsed_status is TerminalStatus.COMPLETED:
         return parsed_mode is not FinalAnswerMode.NONE and has_identity
     if parsed_status in {

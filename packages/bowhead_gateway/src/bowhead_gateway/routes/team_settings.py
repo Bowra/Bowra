@@ -7,11 +7,6 @@ import json
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
-from bowhead_core.agents.analysis_depth import (
-    DEPTH_LABELS,
-    KEY_TEAM_ANALYSIS_DEPTH,
-    normalize_depth,
-)
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chart_style import (
     KEY_TEAM_CHART_STYLE_POLICY,
@@ -50,6 +45,7 @@ from bowhead_core import agent_run_limits as run_limits
 from bowhead_core import execution_limits
 from bowhead_gateway._entitlement_gate import require_not_readonly
 from bowhead_gateway.conditional_headers import entity_tags_match
+from bowhead_gateway.configuration_field_guidance import with_field_contract
 from bowhead_gateway.routes.auth import _current_user, _require_team_role_dep
 from bowhead_gateway.routes.auth import _store as _user_store
 
@@ -60,7 +56,6 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/api/v1/team-settings", tags=["team-settings"])
 
 _REQUIRE_TEAM_CHART_STYLE_ADMIN = _require_team_role_dep("owner", "team_admin")
-_REQUIRE_TEAM_ANALYSIS_DEPTH_ADMIN = _require_team_role_dep("owner", "team_admin")
 _REQUIRE_TEAM_LANGUAGE_ADMIN = _require_team_role_dep("owner", "team_admin")
 _REQUIRE_TEAM_REFERENCE_RETENTION_ADMIN = _require_team_role_dep("owner", "team_admin")
 _REQUIRE_TEAM_RUN_LIMITS_ADMIN = _require_team_role_dep("owner", "team_admin")
@@ -224,101 +219,6 @@ async def _audit_chart_style_policy_change(
         },
         ip=request.client.host if request.client else None,
     )
-
-
-# ─────────────────────────────────────────────────────────────
-# analysis depth — agent thoroughness knob (fast / standard / thorough).
-# Stored as a plain depth-key string; maps to internal budget profiles
-# (analysis_depth.py). Same admin gate + audit shape as theme-policy.
-# ─────────────────────────────────────────────────────────────
-class AnalysisDepthValue(BaseModel):
-    value: str = Field(..., description="fast | standard | thorough")
-    label: str | None = Field(None, description="display label (read-only)")
-
-
-async def _audit_analysis_depth_change(
-    *,
-    request: Request,
-    user_store: UserStore,
-    actor: User,
-    operation: str,
-    before: str | None,
-    after: str | None,
-) -> None:
-    await user_store.write_admin_audit_log(
-        actor_user_id=actor.id,
-        team_id=actor.team_id,
-        action=AuditAction.TEAM_SETTINGS_CHANGED,
-        target_kind="team_settings",
-        target_id=KEY_TEAM_ANALYSIS_DEPTH,
-        target_team_id=actor.team_id,
-        scope="team",
-        payload={
-            "setting_key": KEY_TEAM_ANALYSIS_DEPTH,
-            "operation": operation,
-            "before": before,
-            "after": after,
-        },
-        ip=request.client.host if request.client else None,
-    )
-
-
-@router.get("/analysis-depth", response_model=AnalysisDepthValue)
-async def get_analysis_depth_setting(
-    team_store: TeamSettingsStore = Depends(_team_settings_store),
-    user: User = Depends(_current_user),
-) -> AnalysisDepthValue:
-    raw = await team_store.get(user.team_id, KEY_TEAM_ANALYSIS_DEPTH)
-    depth = normalize_depth(raw)  # unknown/unset → standard
-    return AnalysisDepthValue(value=depth, label=DEPTH_LABELS.get(depth))
-
-
-@router.put(
-    "/analysis-depth",
-    response_model=AnalysisDepthValue,
-    dependencies=[Depends(require_not_readonly)],
-)
-async def set_analysis_depth_setting(
-    body: AnalysisDepthValue,
-    request: Request,
-    team_store: TeamSettingsStore = Depends(_team_settings_store),
-    user_store: UserStore = Depends(_user_store),
-    user: User = Depends(_REQUIRE_TEAM_ANALYSIS_DEPTH_ADMIN),
-) -> AnalysisDepthValue:
-    depth = normalize_depth(body.value)
-    if depth != (body.value or "").strip().lower():
-        raise HTTPException(400, "value must be one of: fast, standard, thorough")
-    before = await team_store.get(user.team_id, KEY_TEAM_ANALYSIS_DEPTH)
-    await team_store.set(user.team_id, KEY_TEAM_ANALYSIS_DEPTH, depth, updated_by=user.id)
-    await _audit_analysis_depth_change(
-        request=request,
-        user_store=user_store,
-        actor=user,
-        operation="put",
-        before=before,
-        after=depth,
-    )
-    return AnalysisDepthValue(value=depth, label=DEPTH_LABELS.get(depth))
-
-
-@router.delete("/analysis-depth", dependencies=[Depends(require_not_readonly)])
-async def delete_analysis_depth_setting(
-    request: Request,
-    team_store: TeamSettingsStore = Depends(_team_settings_store),
-    user_store: UserStore = Depends(_user_store),
-    user: User = Depends(_REQUIRE_TEAM_ANALYSIS_DEPTH_ADMIN),
-) -> dict[str, Any]:
-    before = await team_store.get(user.team_id, KEY_TEAM_ANALYSIS_DEPTH)
-    await team_store.delete(user.team_id, KEY_TEAM_ANALYSIS_DEPTH)
-    await _audit_analysis_depth_change(
-        request=request,
-        user_store=user_store,
-        actor=user,
-        operation="delete",
-        before=before,
-        after=None,
-    )
-    return {"ok": True, "key": KEY_TEAM_ANALYSIS_DEPTH}
 
 
 @router.get(
@@ -589,7 +489,7 @@ async def delete_language_policy(
 
 
 # ─────────────────────────────────────────────────────────────
-# Agent run limits (FEATURE_AGENT_RUN_LIMITS): turn time, subagent steps, tool calls.
+# Agent run limits: turn time, subagent steps, tool calls.
 # ─────────────────────────────────────────────────────────────
 class AgentRunLimitsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -607,14 +507,11 @@ def _run_limits_version(raw: str | None) -> str:
     return "default" if raw is None else hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _require_run_limits_feature() -> None:
-    if not run_limits.agent_run_limits_enabled():
-        raise HTTPException(404, detail={"error": {"code": "not_found"}})
-
-
 def _run_limits_view(raw: str | None) -> dict[str, Any]:
     limits = run_limits.parse_stored(raw)
+    controls = run_limits.get_runtime_controls()
     return {
+        "runtime_controls": controls.view(limits),
         "turn_time_limit_s": limits.turn_time_limit_s,
         "step_limit": limits.step_limit,
         "tool_call_limit": limits.tool_call_limit,
@@ -658,8 +555,7 @@ async def get_agent_run_limits(
     team_store: TeamSettingsStore = Depends(_team_settings_store),
     user: User = Depends(_REQUIRE_TEAM_RUN_LIMITS_ADMIN),
 ) -> dict[str, Any]:
-    _require_run_limits_feature()
-    return _run_limits_view(await team_store.get(user.team_id, run_limits.SETTINGS_KEY))
+    return with_field_contract("team_run_limits", _run_limits_view(await team_store.get(user.team_id, run_limits.SETTINGS_KEY)))
 
 
 @router.put("/agent-run-limits", dependencies=[Depends(require_not_readonly)])
@@ -670,7 +566,6 @@ async def put_agent_run_limits(
     user_store: UserStore = Depends(_user_store),
     user: User = Depends(_REQUIRE_TEAM_RUN_LIMITS_ADMIN),
 ) -> dict[str, Any]:
-    _require_run_limits_feature()
     before = await team_store.get(user.team_id, run_limits.SETTINGS_KEY)
     payload = body.model_dump(exclude={"expected_version"})
     if "model_call_time_limit_s" not in body.model_fields_set:
@@ -688,7 +583,7 @@ async def put_agent_run_limits(
     if not await team_store.compare_and_set(user.team_id, run_limits.SETTINGS_KEY, expected_value=before, value=after, updated_by=user.id):
         raise HTTPException(409, detail={"error": {"code": "agent_run_limits_conflict"}})
     await _audit_run_limits_change(request=request, user_store=user_store, actor=user, operation="put", before=before, after=after)
-    return _run_limits_view(after)
+    return with_field_contract("team_run_limits", _run_limits_view(after))
 
 
 @router.delete("/agent-run-limits", dependencies=[Depends(require_not_readonly)])
@@ -699,14 +594,13 @@ async def delete_agent_run_limits(
     user: User = Depends(_REQUIRE_TEAM_RUN_LIMITS_ADMIN),
     expected_version: str | None = None,
 ) -> dict[str, Any]:
-    _require_run_limits_feature()
     before = await team_store.get(user.team_id, run_limits.SETTINGS_KEY)
     if expected_version is not None and _run_limits_version(before) != expected_version:
         raise HTTPException(409, detail={"error": {"code": "agent_run_limits_conflict"}})
     if not await team_store.compare_and_set(user.team_id, run_limits.SETTINGS_KEY, expected_value=before, value=None, updated_by=user.id):
         raise HTTPException(409, detail={"error": {"code": "agent_run_limits_conflict"}})
     await _audit_run_limits_change(request=request, user_store=user_store, actor=user, operation="delete", before=before, after=None)
-    return _run_limits_view(None)
+    return with_field_contract("team_run_limits", _run_limits_view(None))
 
 
 class ExecutionLimitsBody(BaseModel):
@@ -742,7 +636,7 @@ async def get_execution_limits(
     user: User = Depends(_REQUIRE_TEAM_RUN_LIMITS_ADMIN),
 ) -> dict[str, Any]:
     response.headers["Cache-Control"] = "private, no-store"
-    return _execution_limits_view(await team_store.get(user.team_id, execution_limits.SETTINGS_KEY))
+    return with_field_contract("team_execution_limits", _execution_limits_view(await team_store.get(user.team_id, execution_limits.SETTINGS_KEY)))
 
 
 @router.put("/execution-limits", dependencies=[Depends(require_not_readonly)])
@@ -784,4 +678,4 @@ async def put_execution_limits(
         },
         ip=request.client.host if request.client else None,
     )
-    return _execution_limits_view(after)
+    return with_field_contract("team_execution_limits", _execution_limits_view(after))

@@ -44,7 +44,7 @@ def capture_skill_package(root: Path, *, resource: SkillResourceRef, expected_na
     """Capture exact source bytes without imposing the reference envelope limit."""
     try:
         resource = SkillResourceRef.model_validate(resource.model_dump(mode="python", warnings="error"))
-        files = _capture(root)
+        files = _capture(root, builtin=resource.source_kind == "builtin")
         _manifest_name(files, expected_name)
         if (resource.source_kind == "builtin" and resource.id != "builtin:" + expected_name) or _bundle_hash(files) != resource.version:
             raise ValueError()
@@ -162,7 +162,7 @@ def prepare_skill_package(root: Path, *, resource: SkillResourceRef, expected_na
     """Capture in a worker thread after resolving current exact source authority."""
     try:
         resource = SkillResourceRef.model_validate(resource.model_dump(mode="python", warnings="error"))
-        content = _encode_package(_capture(root), resource=resource, name=expected_name)
+        content = _encode_package(_capture(root, builtin=resource.source_kind == "builtin"), resource=resource, name=expected_name)
         return restore_skill_package(content, resource=resource, expected_name=expected_name, content_hash=_hash(content))
     except Exception:
         raise SkillPackageMaterialError("reference_skill_package_unavailable") from None

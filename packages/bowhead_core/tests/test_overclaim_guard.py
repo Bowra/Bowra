@@ -586,3 +586,32 @@ def test_sibling_list_items_do_not_absorb_each_other() -> None:
 
 def test_unknown_caveat_locale_uses_english() -> None:
     assert caveat_for(("file",), "ja-JP") == caveat_for(("file",), "en-US")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "文件已完成处理，现在可以在个人知识库中检索。",
+        "状态显示可用，说明处理已完成，文件内容现在可以被检索到。",
+        "附件已完成索引，原始文件保留。",
+        "文件解析已完成，知识库成员关系已加入。",
+        "已按你的选择处理完成：synthetic-ambiguous.md 已加入你的个人知识库，处理与索引均已就绪，现在可以直接检索到它。原始文件仍保留在存储中。",
+        "已把附件 synthetic-team_admin.md 加入团队知识库，并核对了实际处理状态：操作已完成，状态为 available（处理与索引均已完成，该条目现在可被检索），原始文件仍然保留。",
+        "文件入库已完成，知识处理与索引均已完成，现在可以检索到它。",
+        "已完成：synthetic-remove_replay.md 已加入你的个人知识库，索引处理完毕，现在可以直接检索到它。",
+        "已把 synthetic-personal.md 加入您的个人知识库，实际处理状态是已完成并可用：知识处理与索引都已完成，这份文件现在可以被检索到。",
+        "附件 synthetic-helper.md 已入库，状态为 available（已就绪）。这次没有生成任何可下载的导出文件。",
+    ],
+)
+def test_existing_file_ingestion_does_not_claim_a_downloadable_delivery(text: str) -> None:
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ()
+
+
+def test_ingestion_status_does_not_hide_an_unfulfilled_export_claim() -> None:
+    text = "文件的处理与索引均已就绪；PDF 已导出，可直接下载。"
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ("file",)
+
+
+@pytest.mark.parametrize("text", ["没有生成 PDF，Word 已导出，可下载。", "没有生成 PDF 但 Word 已导出，可下载。", "没有数据，但 PDF 已生成。"])
+def test_negated_export_does_not_hide_a_different_positive_file_claim(text: str) -> None:
+    assert overclaimed_kinds(text, DeliverableLedger(files=0)) == ("file",)

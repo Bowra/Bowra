@@ -6,7 +6,6 @@ from dataclasses import asdict, fields
 from typing import Any, get_type_hints
 
 from bowhead_core.config_copilot import POLICY_GENERATED, FieldIssue, FormContext, FormRegistration, LiteApplyError, MaterializeResult, register_form
-from bowhead_core.configuration_contracts import team_configuration_enabled
 from fastapi import Response
 from pydantic import ConfigDict, Field, create_model
 
@@ -23,6 +22,7 @@ RunLimitsDraft = create_model(
             Field(
                 default=item.default,
                 description=item.metadata["description"],
+                json_schema_extra={"x-bowhead-field": {"unit": item.metadata.get("unit", "count")}},
                 ge=item.metadata["minimum"],
                 le=item.metadata["maximum"],
             ),
@@ -33,11 +33,12 @@ RunLimitsDraft = create_model(
 
 
 async def run_limits_read(ctx: FormContext) -> dict[str, Any]:
-    team_settings._require_run_limits_feature()
     raw = await ctx.deps["team_settings_store"].get(ctx.team_id, limits.SETTINGS_KEY)
     values = asdict(limits.parse_stored(raw))
     defaults = asdict(limits.DEFAULT_LIMITS)
+    controls = limits.get_runtime_controls()
     return {
+        "runtime_controls": controls.view(limits.parse_stored(raw)),
         "revision": team_settings._run_limits_version(raw),
         "fields": {key: {"value": value, "unset": raw is None, "default": defaults[key]} for key, value in values.items()},
     }
@@ -132,7 +133,7 @@ async def domain_context(ctx: FormContext) -> str:
 def team_adapter(with_deps, handler):
     async def guarded(ctx, *args):
         store = ctx.deps.get("user_store")
-        if not team_configuration_enabled() or not ctx.team_id or store is None:
+        if not ctx.team_id or store is None:
             raise LiteApplyError("form_unavailable", "Team configuration assistance is unavailable.")
         actor = await store.get_user(ctx.user_id)
         if (
@@ -152,7 +153,7 @@ def register_team_configuration_forms(with_deps) -> None:
         FormRegistration(
             form_id="team_run_limits",
             schema=RunLimitsDraft,
-            guidance="Change only requested Team execution limits. Null step_limit means unlimited; null model_call_time_limit_s means automatic. Use reset_all to remove the Team override and restore product defaults. Changes affect subsequent turns.",
+            guidance="Change only requested Team execution limits using the registered field contract. Deployment controls are read-only context and remain effective after reset_all. Reset restores Team defaults. Changes affect newly admitted turns, not existing continuations.",
             field_policy=dict.fromkeys(RunLimitsDraft.model_fields, POLICY_GENERATED),
             context_provider=team_adapter(with_deps, domain_context),
             materializer=team_adapter(with_deps, run_limits_materialize),
@@ -178,6 +179,7 @@ def register_team_configuration_forms(with_deps) -> None:
                 Field(
                     default=view["defaults"][item.name],
                     description=item.metadata["description"],
+                    json_schema_extra={"x-bowhead-field": {"unit": item.metadata.get("unit", "count")}},
                     ge=view["ranges"][item.name]["min"],
                     le=view["ranges"][item.name]["max"],
                 ),

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ApiError } from "@/lib/api-client";
@@ -44,6 +45,8 @@ export function RuntimeParametersSection(props: Props) {
   const t = useTranslations("settings.models.runtime");
   const [expanded, setExpanded] = useState(false);
   const [scope, setScope] = useState("defaults");
+  const guidancePath = "team_model_config.providers.*.models.*.runtime_parameters";
+  const policyPath = `${guidancePath}.${scope === "defaults" ? "defaults" : `capability_overrides.${scope}`}`;
   const [previewCapability, setPreviewCapability] = useState("");
   const [preview, setPreview] = useState<{
     key: string;
@@ -239,7 +242,7 @@ export function RuntimeParametersSection(props: Props) {
       {expanded ? (
         <div className="mset-runtime__content">
           <div className="mset-runtime__profile">
-            <label htmlFor={`${id}-profile`}>{t("profile")}</label>
+            <span className="configuration-field-label"><label htmlFor={`${id}-profile`}>{t("profile")}</label><ConfigurationFieldHelp field={`${guidancePath}.profile`} label={t("profile")} facts={{ enum: availableProfiles.map((item) => item.id) }} /></span>
             <select
               className="inp"
               id={`${id}-profile`}
@@ -397,7 +400,7 @@ export function RuntimeParametersSection(props: Props) {
                   disabled={props.disabled}
                 >
                   <legend>{t("reasoning")}</legend>
-                  <label htmlFor={`${id}-thinking`}>{t("thinking")}</label>
+                  <span className="configuration-field-label"><label htmlFor={`${id}-thinking`}>{t("thinking")}</label><ConfigurationFieldHelp field={`${policyPath}.thinking_mode`} label={t("thinking")} facts={{ enum: profile.thinking_modes }} /></span>
                   <select
                     className="inp"
                     id={`${id}-thinking`}
@@ -431,7 +434,7 @@ export function RuntimeParametersSection(props: Props) {
                   </p>
                   {profile.efforts.length || policy.reasoning_effort ? (
                     <>
-                      <label htmlFor={`${id}-effort`}>{t("effort")}</label>
+                      <span className="configuration-field-label"><label htmlFor={`${id}-effort`}>{t("effort")}</label><ConfigurationFieldHelp field={`${policyPath}.reasoning_effort`} label={t("effort")} facts={{ enum: [...profile.efforts, "omit"] }} /></span>
                       <select
                         className="inp"
                         id={`${id}-effort`}
@@ -464,7 +467,7 @@ export function RuntimeParametersSection(props: Props) {
                   {profile.budget_min !== undefined ||
                   policy.thinking_budget !== undefined ? (
                     <>
-                      <label htmlFor={`${id}-budget-mode`}>{t("budget")}</label>
+                      <span className="configuration-field-label"><label htmlFor={`${id}-budget-mode`}>{t("budget")}</label><ConfigurationFieldHelp field={`${policyPath}.thinking_budget`} label={t("budget")} facts={{ minimum: profile.budget_min, maximum: profile.budget_max }} /></span>
                       <div className="mset-runtime__value-row">
                         <select
                           className="inp"
@@ -570,7 +573,7 @@ export function RuntimeParametersSection(props: Props) {
                 disabled={props.disabled}
               >
                 <legend>{t("generation")}</legend>
-                <OutboundParamsSection
+                <OutboundParamsSection temperatureMaximum={profile?.temperature_max} guidancePath={`${policyPath}.outbound_params`}
                   embedded
                   index={props.index}
                   providerKey=""
@@ -595,7 +598,7 @@ export function RuntimeParametersSection(props: Props) {
                   <summary>
                     {t("advanced")} · {scopeLabel}
                   </summary>
-                  <p className="mset-runtime__help">{t("advanced_help")}</p>
+                  <p className="mset-runtime__help">{t("advanced_help")}<ConfigurationFieldHelp field={`${policyPath}.advanced`} label={t("advanced")} /></p>
                   <div
                     className="mset-runtime__scopes"
                     role="group"

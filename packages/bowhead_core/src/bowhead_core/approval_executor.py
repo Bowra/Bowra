@@ -33,6 +33,7 @@ class ApprovalExecutor:
     tool_registry: ToolRegistry
     datarc: DatarcClient | None
     active_datarc_project: str | None = None
+    datarc_binding: Any = None
     datarc_unavailable: bool = False
     vector_client: Any | None = None
     event_registry: EventBusRegistry | None = None
@@ -231,6 +232,7 @@ class ApprovalExecutor:
             session_id=appr.session_id,
             reference_source_db_path=getattr(self.user_store, "db_path", None),
             active_datarc_project=self.active_datarc_project,
+            datarc_binding=self.datarc_binding,
             datarc=None if self.datarc_unavailable else self.datarc,
             vector_client=self.vector_client,
             team_id=team_id,
@@ -307,6 +309,7 @@ class ApprovalExecutor:
             session_id=appr.session_id,
             reference_source_db_path=getattr(self.user_store, "db_path", None),
             active_datarc_project=self.active_datarc_project,
+            datarc_binding=self.datarc_binding,
             datarc=None if self.datarc_unavailable else self.datarc,
             vector_client=self.vector_client,
             team_id=team_id,

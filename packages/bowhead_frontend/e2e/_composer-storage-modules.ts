@@ -25,6 +25,9 @@ export async function installComposerStorageModules(page: Page): Promise<void> {
     "composer-persistence-scope",
     "composer-chat-action",
     "composer-submission-recovery",
+    "context-maintenance",
+    "chart/selected-context",
+    "chart/linked-focus",
     "coach-canvas-target",
     "composer-transient-draft",
     "composer-reference-transfer",
@@ -32,9 +35,11 @@ export async function installComposerStorageModules(page: Page): Promise<void> {
     "random-id",
     "sha256-fallback",
     "base-path",
+    "locale",
+    "source-content",
   ]);
-  await page.route(`**${STORAGE_MODULE_PATH}/*`, async (route) => {
-    const name = new URL(route.request().url()).pathname.split("/").at(-1)!;
+  await page.route(`**${STORAGE_MODULE_PATH}/**`, async (route) => {
+    const name = new URL(route.request().url()).pathname.slice(STORAGE_MODULE_PATH.length + 1);
     if (name === "api-client") {
       await route.fulfill({
         contentType: "text/javascript",
@@ -42,7 +47,7 @@ export async function installComposerStorageModules(page: Page): Promise<void> {
       });
       return;
     }
-    if (!modules.has(name)) throw new Error(`Unexpected storage module: ${name}`);
+    if (!modules.has(name) && !/^chart\/[a-z-]+(?:\.generated)?$/.test(name)) throw new Error(`Unexpected storage module: ${name}`);
     const source = await readFile(resolve(__dirname, `../lib/${name}.ts`), "utf8");
     const { outputText } = transpileModule(source, {
       compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },

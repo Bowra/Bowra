@@ -697,17 +697,19 @@ def register_agent_coach_tools(registry: ToolRegistry) -> None:
         (
             "agent_operation_open",
             OperationReadInput,
-            "Read the original operation and request its read-only Canvas view, including a saved engineering Tool requirement. Use the returned operation_ref. To show a requirement receipt, use this Tool; agent_tool_requirement_open starts connection onboarding instead. This does not edit, retry, resume or cancel work. View delivery may be unconfirmed.",
+            "Show/open the original result: call this Tool directly; it already reads and authorizes before requesting the read-only Canvas view. A separate get is unnecessary unless selecting among unresolved operations. Use the original operation_ref, including a saved engineering Tool requirement. To show a requirement receipt, use this Tool; agent_tool_requirement_open starts connection onboarding instead. This does not edit, retry, resume or cancel work. event_emitted means a view request was sent, not that the browser displayed it. not_confirmed remains unconfirmed.",
         ),
         (
             "agent_operation_get",
             OperationReadInput,
-            "Read one exact returned operation_ref under current authority. Returns original domain status without retrying, reconciling, cancelling or starting work. A successful read can describe a failed or unknown operation. Use domain-specific actions for explicit recovery or cancellation; never replace an uncertain operation with a new request.",
+            "Inspect status only, without opening a view. For a request to show/open the result, use agent_operation_open directly instead. Read one exact returned operation_ref under current authority. Returns original domain status without retrying, reconciling, cancelling or starting work. A successful read can describe a failed or unknown operation. Use domain-specific actions for explicit recovery or cancellation; never replace an uncertain operation with a new request.",
         ),
         (
             "agent_eval_evidence_get",
             EvalEvidenceInput,
             "Read bounded Owner evaluation overview, an exact run or Snapshot. Use returned targets and page fingerprint; "
+            "Overview suite_id/suite_name identify the suite across revisions; coverage distinguishes total runs from this page. "
+            "An incomplete page cannot prove suite/revision absence or a global passing result. "
             "changed pages require a fresh read. Optional failure excerpts require the same current Owner scope. "
             "Unknown cost stays unknown; historical passing results are not current release authority. No execution. "
             "In replies, call subject_side=candidate 'this change' and the control the released version, and describe failed checks in plain words, not by scorer name.",

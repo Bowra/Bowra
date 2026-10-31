@@ -116,6 +116,7 @@ REPORT_WRITE_TOOLS = frozenset(
         "canvas_reorder_sections",  # retired with Canvas Writer (2026-09-30) — kept fenced defensively
         # canvas-update-turn batch B2-2: can hide any prior-turn chart without an owner model ⇒ same tier as the two above.
         "remove_chart",
+        "edit_chart",
     }
 )
 

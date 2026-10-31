@@ -9,7 +9,7 @@ const saveMock = vi.fn();
 vi.mock("@/lib/execution-limits-api", () => ({ getExecutionLimits: (...args: unknown[]) => getMock(...args), saveExecutionLimits: (...args: unknown[]) => saveMock(...args) }));
 import { ExecutionLimitsSettings } from "./execution-limits";
 
-const values = { sandbox_default_timeout_s: 120, sandbox_max_timeout_s: 600, html_max_bytes: 5242880 };
+const values = { sandbox_default_timeout_s: 120, sandbox_max_timeout_s: 600, html_max_bytes: 26214400 };
 const initial: ExecutionLimits = { ...values, defaults: values, version: "default", is_default: true, ranges: {
   sandbox_default_timeout_s: { min: 5, max: 600 }, sandbox_max_timeout_s: { min: 5, max: 600 }, html_max_bytes: { min: 1, max: 52428800 },
 } };
@@ -45,7 +45,7 @@ describe("ExecutionLimitsSettings", () => {
     render(<ExecutionLimitsSettings />);
     await screen.findByLabelText("html_max_bytes_title");
     fireEvent.click(screen.getByRole("button", { name: "reset" }));
-    expect((screen.getByLabelText("html_max_bytes_title") as HTMLInputElement).value).toBe("5");
+    expect((screen.getByLabelText("html_max_bytes_title") as HTMLInputElement).value).toBe("25");
     expect(saveMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "save" }));
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));

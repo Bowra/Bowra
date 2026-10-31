@@ -47,6 +47,7 @@ tools:
     - canvas_update_design_text
     - canvas_flatten_design
     - add_chart
+    - read_chart
     # General analysis framework (no marketing-only methods until real marketing data arrives).
     - skill_list
     - skill_read

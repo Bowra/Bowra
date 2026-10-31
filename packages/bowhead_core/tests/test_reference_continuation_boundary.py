@@ -11,9 +11,10 @@ import json
 import httpx2
 import pytest
 import respx
+from bowhead_core.datarc_selection import ensure_datarc_run
 from bowhead_core.events import TurnEventBus
 from bowhead_core.subagent import SubagentRunner
-from bowhead_core.tool_registry import build_default_registry
+from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
 from test_skill_model_invocation import adapter_for, router_for
 from test_skill_reference_runtime import claimed_case as _claimed_case
 from test_skill_reference_runtime import receiver_case as _receiver_case
@@ -59,12 +60,32 @@ def workspace_question(_request):
     )
 
 
-def bind_ambiguous_workspace(ctx):
+def bind_ambiguous_workspace(ctx: ToolExecutionContext) -> None:
     # The real registry returns its connector sentinel before touching a
     # client; this object deliberately has no network methods to fall back to.
     ctx.datarc = object()
     ctx.accessible_datarc_workspaces = ({"id": "project_a", "name": "A"}, {"id": "project_b", "name": "B"})
     ctx.active_datarc_project = None
+    # This fixture establishes a fresh root source, before any call is admitted.
+    ctx.datarc_run_state = None
+    ctx.datarc_execution_scope = None
+    ensure_datarc_run(ctx)
+
+
+def question_response(request: httpx2.Request) -> httpx2.Response:
+    response = workspace_question(request)
+    if not json.loads(request.content).get("stream"):
+        return response
+    body = response.json()
+    message = body["choices"][0]["message"]
+    calls = [{"index": index, **call} for index, call in enumerate(message["tool_calls"])]
+    events = [
+        {"choices": [{"delta": {"content": message["content"], "tool_calls": calls}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": body["usage"]},
+    ]
+    content = "".join("data: " + json.dumps(event) + "\n\n" for event in events) + "data: [DONE]\n\n"
+    return httpx2.Response(200, text=content, headers={"content-type": "text/event-stream"})
 
 
 async def test_initial_reference_cannot_record_a_bi_question_as_completed(runtime_case):
@@ -75,7 +96,7 @@ async def test_initial_reference_cannot_record_a_bi_question_as_completed(runtim
     bus = TurnEventBus()
     try:
         with respx.mock() as mock:
-            route = mock.post(url__regex=r"https://api\..*").mock(side_effect=workspace_question)
+            route = mock.post(url__regex=r"https://api\..*").mock(side_effect=question_response)
             result = await case.runtime.run(runner=runner, parent_ctx=case.ctx, parent_bus=bus)
             assert not result.ok and result.error == "reference_continuation_unavailable"
             assert result.final_answer == "" and result.payload is None

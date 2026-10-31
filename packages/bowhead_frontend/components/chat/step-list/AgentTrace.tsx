@@ -18,6 +18,7 @@ import { formatObservedValue } from "@/lib/chart/format";
 import type { ReactNode } from "react";
 import { AgentBlock } from "./AgentBlock";
 import { CollaborationTrace } from "./CollaborationTrace";
+import { ContextActivityRows, useContextActivities } from "./ContextActivity";
 import { useCollaborationTrace } from "./collaboration-trace-state";
 import { MultiAgentGroup, Prose } from "./block-frames";
 import { ReadableProv } from "./block-chrome";
@@ -372,7 +373,8 @@ function StepFromView({ s }: StepFromViewProps) {
     <div className="stp-output-artifacts">
       {s.outputArtifacts.map((artifact, index) => {
         const filename = artifact.filename || `${tResults("evidence")} ${index + 1}`;
-        const openLabel = tResults("open_object", { filename });
+        const displayName = artifact.title && artifact.title !== filename ? `${artifact.title} · ${filename}` : filename;
+        const openLabel = tResults("open_object", { filename: displayName });
         return (
           <button
             key={artifact.artifactId}
@@ -382,10 +384,10 @@ function StepFromView({ s }: StepFromViewProps) {
               entryPoint: "chat",
             })}
             aria-label={openLabel}
-            title={openLabel}
+            title={artifact.description || openLabel}
           >
             <span aria-hidden><CharIcon ch="→" aria-hidden /></span>
-            <span>{filename}</span>
+            <span>{displayName}</span>
           </button>
         );
       })}
@@ -465,6 +467,7 @@ const PEER_PARTIAL_REASONS = new Set([
   "tool_call_limit",
   "no_progress",
   "budget",
+  "agent_stalled",
 ]);
 
 /** Copy for a peer that stopped at an agent run limit; unknown reasons use the generic line. */
@@ -500,6 +503,7 @@ function PeerBlockView({ block }: PeerBlockViewProps) {
       outcomeReason={
         [
           block.resumeRefused !== null ? t(resumeRefusedMessageKey(block.resumeRefused)) : null,
+          block.stepUsage ? t("peer_partial.step_usage", block.stepUsage) : null,
           block.stopReason !== null
             ? t(peerPartialMessageKey(block.stopReason))
             : failureCode
@@ -519,6 +523,7 @@ function PeerBlockView({ block }: PeerBlockViewProps) {
         />
       ))}
       {block.prose ? <Prose>{block.prose}</Prose> : null}
+      <ContextActivityRows subagentId={block.peerId} />
     </AgentBlock>
   );
 }
@@ -533,6 +538,8 @@ export function AgentTrace({
   peerFailureRecovered = false,
 }: AgentTraceProps) {
   const turnRunning = useTurnRunning();
+  const contextActivities = useContextActivities();
+  const leadContext = contextActivities.filter((activity) => activity.subagent_id === null);
   const collaboration = useCollaborationTrace();
   const { leadSteps, peerBlocks: groupedBlocks } = buildAgentGrouping(
     collaboration?.enabled ? steps.filter((step) => step.toolName !== "agent_message" || step.state !== "done") : steps,
@@ -565,10 +572,10 @@ export function AgentTrace({
 
   return (
     <div className="ag-trace">
-      {leadSteps.length > 0 && (
+      {(leadSteps.length > 0 || leadContext.length > 0) && (
         <AgentBlock
           agent="lead"
-          status={statusOf(leadSteps)}
+          status={turnRunning && leadContext.some((activity) => activity.phase === "running") ? "run" : statusOf(leadSteps)}
           open
         >
           {leadSteps.map((s) => (
@@ -577,6 +584,7 @@ export function AgentTrace({
               s={s}
             />
           ))}
+          <ContextActivityRows subagentId={null} />
         </AgentBlock>
       )}
 

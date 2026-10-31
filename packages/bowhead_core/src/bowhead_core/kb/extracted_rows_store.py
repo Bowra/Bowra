@@ -704,6 +704,7 @@ class KbExtractedRowsStore:
         workspace_id: str,
         doc_type_id: str,
         needs_review_only: bool = False,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> int:
         """COUNT(*) for Records page filter chip + cap check.
 
@@ -712,6 +713,9 @@ class KbExtractedRowsStore:
         """
         clauses = ["workspace_id = ?", "doc_type_id = ?", "soft_deleted_at IS NULL"]
         params: list[Any] = [workspace_id, doc_type_id]
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        append_source_filter(clauses, params, allowed_file_ids)
         if needs_review_only:
             clauses.append("verify_status = 'needs_review'")
         sql = f"SELECT COUNT(*) FROM kb_extracted_rows WHERE {' AND '.join(clauses)}"
@@ -731,6 +735,7 @@ class KbExtractedRowsStore:
         limit: int = 50,
         offset: int = 0,
         cast_numeric: list[str] | None = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> list[KbExtractedRowDTO]:
         """SQL filter + sort + paginate. workspace_id 强制过滤 (P0-R1).
 
@@ -760,6 +765,9 @@ class KbExtractedRowsStore:
 
         clauses = ["workspace_id = ?", "doc_type_id = ?", "soft_deleted_at IS NULL"]
         params: list[Any] = [workspace_id, doc_type_id]
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        append_source_filter(clauses, params, allowed_file_ids)
 
         # Top-level column filters (SAFE — int cast)
         if top_level_filters:
@@ -826,6 +834,7 @@ class KbExtractedRowsStore:
         where: list[dict] | None = None,
         top_level_filters: dict | None = None,
         raw_compare: bool = False,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> list[AggregateResult]:
         """SQL aggregate (SUM/COUNT/AVG/MIN/MAX) with optional group_by.
 
@@ -869,6 +878,9 @@ class KbExtractedRowsStore:
         # WHERE clauses (same as query_rows)—M4 extracted a helper shared with aggregate_coverage
         # (denominator/filters must have byte-identical origin, or coverage will not match the aggregate).
         clauses, params = _rows_where_clauses(workspace_id, doc_type_id, where, top_level_filters)
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        append_source_filter(clauses, params, allowed_file_ids)
 
         group_clause = ""
         if group_by:
@@ -898,6 +910,7 @@ class KbExtractedRowsStore:
         top_level_filters: dict | None = None,
         sample_limit: int = 5,
         numeric: bool = True,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """M4 FR-44 聚合诚实：数值聚合的**覆盖**——included（真被计入聚合的行数）/
         total（同过滤全行数）/ excluded_samples（被排除的 raw_string 哨兵原话 ≤N 条，
@@ -910,6 +923,9 @@ class KbExtractedRowsStore:
         """
         _validate_field_name(field)
         clauses, params = _rows_where_clauses(workspace_id, doc_type_id, where, top_level_filters)
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        append_source_filter(clauses, params, allowed_file_ids)
         expr = _coalesce_field_expr(field)
         where_sql = " AND ".join(clauses)
         included_expr = f"COUNT(CAST({expr} AS REAL))" if numeric else f"COUNT({expr})"

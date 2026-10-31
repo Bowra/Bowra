@@ -230,6 +230,7 @@ class KbStore:
         query_embedding: list[float],
         top_k: int = DEFAULT_SEARCH_TOP_K,
         scope_filter: list[str] | None = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> KbSearchCandidates:
         """[P0-O1] caller 传 ScopeContext.
 
@@ -240,6 +241,8 @@ class KbStore:
         不存在的集合（从没上传过）不算跳过。
         """
         all_results = KbSearchCandidates()
+        if allowed_file_ids == ():
+            return all_results
         allowed_scopes = (
             {"personal", "space", "team"}
             if scope_filter is None
@@ -315,6 +318,8 @@ class KbStore:
                 (self._ws_collection_name(extra_ws), personal_only_filter, "ws_personal_extra"),
             )
         for coll_name, coll_filter, coll_kind in targets:
+            if allowed_file_ids is not None:
+                coll_filter = {"$and": [coll_filter, {"file_id": {"$in": list(allowed_file_ids)}}]}
             try:
                 results = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -446,6 +451,27 @@ class KbStore:
 
     async def get_chunks_for_file(self, file: KbFileDTO) -> list[tuple[str, str]]:
         return [(cid, content) for cid, content, _ in await self.list_active_chunks(file)]
+
+    async def preview_current_chunks(self, file: KbFileDTO) -> list[tuple[str, str, dict[str, Any]]]:
+        """Read only the first three published chunks for bounded source navigation."""
+        if not file.active_generation_id:
+            return []
+        coll = await self._file_collection(file)
+        if coll is None:
+            return []
+        where = {"$and": [self._current_chunks_where(file), {"chunk_index": {"$gte": 0}}, {"chunk_index": {"$lte": 3}}]}
+        got = await asyncio.to_thread(coll.get, where=where, include=["documents", "metadatas"], limit=3)
+        docs, metas = got.get("documents") or [], got.get("metadatas") or []
+        rows = [
+            (cid, docs[i], metas[i])
+            for i, cid in enumerate(got.get("ids") or [])
+            if i < len(docs)
+            and i < len(metas)
+            and isinstance(metas[i], dict)
+            and metas[i].get("generation_id") == file.active_generation_id
+            and isinstance(docs[i], str)
+        ]
+        return sorted(rows, key=lambda row: int(row[2]["chunk_index"]))
 
     async def get_ordered_chunks_for_file(self, file: KbFileDTO) -> list[tuple[str, str, int]]:
         rows = await self.list_active_chunks(file)

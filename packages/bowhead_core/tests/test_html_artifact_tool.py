@@ -77,7 +77,7 @@ async def test_add_html_artifact_rejects_oversized(monkeypatch, limit: int) -> N
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("size", [10 * 1024, 600 * 1024, 5 * 1024 * 1024])
+@pytest.mark.parametrize("size", [10 * 1024, 600 * 1024, 6 * 1024 * 1024, 25 * 1024 * 1024])
 async def test_add_html_artifact_happy_path(size: int) -> None:
     from bowhead_core.canvas_tools import _add_html_artifact
 
@@ -183,20 +183,6 @@ async def test_add_html_artifact_rejects_filename_suffix_when_mime_wrong() -> No
         ctx,  # type: ignore[arg-type]
     )
     assert "not html" in result["error"]
-
-
-def test_add_html_artifact_schema_requires_materialized_static_html() -> None:
-    from bowhead_core.canvas_tools import _add_html_artifact_schema
-
-    schema = _add_html_artifact_schema()
-    rendered = f"{schema.description} {schema.input_schema}"
-
-    assert "已物化" in rendered
-    assert "不能依赖 JavaScript" in rendered
-    assert "不会注入 iframe" in rendered
-    assert "allow-scripts" not in rendered
-    assert "window.__BOWHEAD_DATA__" not in rendered
-    assert "交互式沙盒" not in rendered
 
 
 def _capturing_ctx(captured: dict[str, object]) -> object:

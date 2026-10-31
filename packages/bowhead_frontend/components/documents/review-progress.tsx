@@ -19,9 +19,11 @@ export interface ReviewPage {
 
 /**
  * Pages that must be viewed before publishing (decision D5): only pages with changes. When a draft has
- * no changes at all, every page is required so the reviewer still sees the preview.
+ * no changes at all, every page is required so the reviewer still sees the preview. Script-authored
+ * drafts can require all pages because their observed changes do not verify every effect.
  */
-export function requiredReviewPages(pages: readonly ReviewPage[]): ReviewPage[] {
+export function requiredReviewPages(pages: readonly ReviewPage[], requireAllPages = false): ReviewPage[] {
+  if (requireAllPages) return [...pages];
   const changed = pages.filter((page) => page.changeCount > 0);
   return changed.length ? changed : [...pages];
 }
@@ -39,6 +41,7 @@ export function ReviewProgress({
   onThumbsVisible,
   status,
   orientation = "slide",
+  requireAllPages = false,
 }: {
   pages: readonly ReviewPage[];
   current: number;
@@ -49,13 +52,15 @@ export function ReviewProgress({
   /** Object status shown on this row on narrow canvases (the toolbar row is folded there). */
   status?: ReactNode;
   orientation?: "slide" | "page";
+  requireAllPages?: boolean;
 }) {
   const t = useTranslations("documents");
   const total = pages.length;
   const viewed = pages.filter((page) => page.viewed).length;
-  const required = requiredReviewPages(pages);
+  const required = requiredReviewPages(pages, requireAllPages);
   const requiredLeft = required.filter((page) => !page.viewed).length;
-  const changed = pages.some((page) => page.changeCount > 0);
+  const changed = !requireAllPages && pages.some((page) => page.changeCount > 0);
+  const nextLabel = t(requireAllPages ? "next_unviewed" : "next_change");
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const selected = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
@@ -96,9 +101,9 @@ export function ReviewProgress({
         ) : null}
         <span className={styles.spacer} />
         {status ? <NarrowStatus>{status}</NarrowStatus> : null}
-        {onNextChange && requiredLeft > 0 && changed ? (
-          <Button size="sm" variant="ghost" aria-label={t("next_change")} title={t("next_change")} onClick={onNextChange}>
-            <span className={styles.collapsibleText}>{t("next_change")}</span><ArrowDown size={14} aria-hidden />
+        {onNextChange && requiredLeft > 0 && (changed || requireAllPages) ? (
+          <Button size="sm" variant="ghost" aria-label={nextLabel} title={nextLabel} onClick={onNextChange}>
+            <span className={styles.collapsibleText}>{nextLabel}</span><ArrowDown size={14} aria-hidden />
           </Button>
         ) : null}
       </div>

@@ -55,6 +55,7 @@ class _Store:
         assert (team_id, tool_id) == ("team_1", "ibt_1")
         return SimpleNamespace(
             id="ibt_1",
+            connection_revision=1,
             provider="datarc",
             display_name="销售数据",
             endpoint="https://datarc.example",
@@ -70,11 +71,14 @@ class _Store:
 @pytest.mark.anyio
 async def test_builtin_datarc_tool_binds_instance_identity_and_workspace(monkeypatch) -> None:
     import bowhead_core.builtin_datarc_tool as module
+    from bowhead_core.datarc_selection import accepted_datarc_selection, ensure_datarc_run
 
     monkeypatch.setattr(module, "DatarcClient", _Client)
     captured: dict[str, Any] = {}
 
     async def _bi_query(args: dict[str, Any], ctx: ToolExecutionContext):
+        assert accepted_datarc_selection(ctx).datarc_workspace_id == "2"
+        assert accepted_datarc_selection(ctx).member_uid == "member_2"
         captured.update(args=args, member_uid=ctx.member_uid, workspace=ctx.active_datarc_project)
         return {"rows": [{"营业额": 10}]}
 
@@ -94,6 +98,7 @@ async def test_builtin_datarc_tool_binds_instance_identity_and_workspace(monkeyp
     specs = build_builtin_datarc_specs(team_id="team_1", tools=[tool], store=store, base_registry=base)
     spec = next(item for item in specs if item.schema.name == datarc_tool_ref("ibt_1"))
     ctx = ToolExecutionContext(workspace_id="ws_local", member_uid="", user_id="user_1", turn_id="turn_1", datarc=object(), team_id="team_1")
+    ensure_datarc_run(ctx)
 
     result = await spec.handler({"question": "今年销售额"}, ctx)
 

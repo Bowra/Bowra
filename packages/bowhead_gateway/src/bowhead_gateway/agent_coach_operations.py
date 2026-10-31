@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
-from bowhead_core.coach_operation_reference import OPERATION_REFERENCE
+from bowhead_core.coach_operation_reference import OPERATION_REFERENCE, operation_view_action
 
 if TYPE_CHECKING:
     from bowhead_gateway.agent_coach_resources import AgentCoachResources
@@ -69,6 +69,7 @@ class AgentCoachOperations:
             "ok": True,
             "schema_version": 1,
             "operation_ref": ref,
+            "view_action": operation_view_action(ref),
             "read_status": "available",
             "domain_result": result,
             "effects_applied_by_this_read": False,

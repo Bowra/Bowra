@@ -559,6 +559,7 @@ export interface AgentProgress {
 }
 
 export interface TurnRunnerState {
+  operationKind?: "context_maintenance" | null;
   user: string | null;
   intent: IntentType | null;
   complexity: number | null;
@@ -702,6 +703,7 @@ export interface TurnRunnerState {
     executionGeneration?: number,
     terminalProtocolVersion?: number,
   ) => void;
+  attachContextMaintenance?: (receipt: import("./context-maintenance").ContextMaintenanceReceipt) => boolean;
   /** dogfood-0708 F3 — clear the live clarificationPending (collapse the card)
    *  without reconnecting a stream. Used by "换个问法" dismissal, which — unlike
    *  resolve — has no resume/attachStream to clear pending as a side effect.
@@ -775,6 +777,7 @@ export interface CitationKbRef {
 
 /** Sprint canvas-pipeline-fix B4: full historical turn snapshot. */
 export interface ArchivedTurn {
+  operationKind?: "context_maintenance" | null;
   turnId: string | null;
   /** Durable terminal status copied from the event or session detail. */
   terminalStatus?: string | null;
@@ -890,6 +893,7 @@ export interface ThetaClarificationState {
   options?: { value: string; label: string }[];
   /** Batch 2: render "记住选择" checkbox (explicit vs session soft-preference states). */
   rememberOption?: boolean;
+  rememberDefault?: boolean;
   /** connector-context T1#6: connector discriminator (e.g. "datarc"). Informational passthrough; rendering
    *  still branches by kind, resolve omits it (server store value authoritative). */
   tool?: string;

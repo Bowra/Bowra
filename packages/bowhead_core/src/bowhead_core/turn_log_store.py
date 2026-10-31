@@ -363,7 +363,7 @@ class OrderedTurnLogSink:
                 event.payload = dict(row.payload)
                 event.seq = int(row.payload.get("evt_seq", row.payload.get("seq", row.seq)))
                 event.occurred_at = row.occurred_at
-                event.suppress_live_delivery = True
+                event.suppress_live_delivery = not getattr(event, "deliver_existing_durable", False)
             return row is not None
         return True
 

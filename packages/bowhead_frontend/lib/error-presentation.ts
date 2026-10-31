@@ -27,7 +27,19 @@ export type ErrorActionKind =
   | "contact_admin"
   | "view_task";
 
+export interface AgentStepUsage { used: number; limit: number }
+
+export function readAgentStepUsage(value: unknown): AgentStepUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  const used = candidate.used, limit = candidate.limit;
+  if (typeof used !== "number" || typeof limit !== "number" || !Number.isSafeInteger(used) || !Number.isSafeInteger(limit)
+    || used < 0 || limit < 1 || limit > 10000 || used > limit) return undefined;
+  return { used, limit };
+}
+
 export interface ErrorDiagnostics {
+  stepUsage?: AgentStepUsage;
   schemaVersion: 1;
   disclosure: ErrorDisclosure;
   status?: number;
@@ -378,6 +390,7 @@ export function normalizeErrorDiagnostics(
   const turnId = optionalOtherId(value, "turnId");
   const operationId = optionalOtherId(value, "operationId");
   const safeDetail = optionalSafeDetail(value, "safeDetail");
+  const stepUsage = readAgentStepUsage(value.stepUsage);
   const providerMessage = optionalProviderMessage(value, "providerMessage");
   const retryable = optionalBoolean(value, "retryable");
   const observedAt = optionalObservedAt(value, "observedAt");
@@ -418,6 +431,7 @@ export function normalizeErrorDiagnostics(
     ...(turnId ? { turnId } : {}),
     ...(operationId ? { operationId } : {}),
     ...(safeDetail ? { safeDetail } : {}),
+    ...(disclosure === "authenticated" && stepUsage ? { stepUsage } : {}),
     ...(disclosure === "authenticated" && diagnosticCode === "chat_llm_failed" && providerMessage ? { providerMessage } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     ...(observedAt ? { observedAt } : {}),
@@ -514,6 +528,7 @@ function diagnosticsFromWire(
   const turnId = optionalOtherId(value, "turn_id");
   const operationId = optionalOtherId(value, "operation_id");
   const safeDetail = optionalSafeDetail(value, "safe_detail");
+  const stepUsage = readAgentStepUsage(value.step_usage);
   const providerMessage = optionalProviderMessage(value, "provider_message");
   const retryable = optionalBoolean(value, "retryable");
   const observedAt = optionalObservedAt(value, "observed_at");
@@ -542,6 +557,7 @@ function diagnosticsFromWire(
     ...(turnId ? { turnId } : {}),
     ...(operationId ? { operationId } : {}),
     ...(safeDetail ? { safeDetail } : {}),
+    ...(disclosure === "authenticated" && stepUsage ? { stepUsage } : {}),
     ...(disclosure === "authenticated" && diagnosticCode === "chat_llm_failed" && providerMessage ? { providerMessage } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     ...(observedAt ? { observedAt } : {}),

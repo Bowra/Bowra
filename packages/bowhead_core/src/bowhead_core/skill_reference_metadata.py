@@ -13,9 +13,10 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from bowhead_skill.bundle_files import is_python_cache_path
 from bowhead_skill.loader import load_skill
 
-from bowhead_core.skill_upload import MAX_SKILL_SIZE, bundle_sha256
+from bowhead_core.skill_upload import MAX_SKILL_SIZE, builtin_bundle_sha256
 from bowhead_skill.catalog import builtin_catalog_dir
 
 
@@ -51,7 +52,11 @@ def _package_revision(root: Path) -> str:
     if root.is_symlink() or not root.is_dir():
         raise ValueError("builtin_metadata_unavailable")
     total = 0
-    for count, path in enumerate(root.rglob("*"), 1):
+    count = 0
+    for path in root.rglob("*"):
+        if is_python_cache_path(path.relative_to(root)):
+            continue
+        count += 1
         info = path.lstat()
         if count > 1024 or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
             raise ValueError("builtin_metadata_unavailable")
@@ -59,7 +64,7 @@ def _package_revision(root: Path) -> str:
             total += info.st_size
         if total > MAX_SKILL_SIZE:
             raise ValueError("builtin_metadata_unavailable")
-    return f"sha256:{bundle_sha256(root)}"
+    return f"sha256:{builtin_bundle_sha256(root)}"
 
 
 def build_builtin_skill_metadata(*, builtin_root: Path | None = None) -> BuiltinSkillMetadataIndex:
@@ -78,6 +83,8 @@ def build_builtin_skill_metadata(*, builtin_root: Path | None = None) -> Builtin
             raise ValueError("builtin_metadata_unavailable")
         for path in sorted(root.rglob("SKILL.md")):
             try:
+                if is_python_cache_path(path.relative_to(root)):
+                    continue
                 if path.is_symlink() or any((root / parent).is_symlink() for parent in path.relative_to(root).parents):
                     raise ValueError("builtin_metadata_unavailable")
                 revision = _package_revision(path.parent)

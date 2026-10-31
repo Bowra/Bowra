@@ -480,9 +480,12 @@ async def test_exact_builtin_skill_emits_same_publish_and_runtime_scope() -> Non
 
 @pytest.mark.anyio
 async def test_builtin_skill_revision_drift_is_rebased_to_the_current_bundle() -> None:
+    from bowhead_core.agent_dependency_compiler import builtin_skill_bundle_revision
+
     from bowhead_skill.catalog import builtin_catalog_dir
 
-    current = _revision(builtin_catalog_dir() / "python_sandbox")
+    current = builtin_skill_bundle_revision(str(builtin_catalog_dir() / "python_sandbox"))
+    assert current is not None
     stale = _grant(kind="builtin", skill_id="builtin:python_sandbox", name="python_sandbox", revision="sha256:" + "0" * 64)
     catalog = _catalog(_tool("skill_read"), _tool("skill_invoke"))
     compiled = await AgentDependencyCompiler().compile({"skill_grants": [stale]}, context=_context(), tool_catalog=catalog)

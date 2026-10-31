@@ -424,3 +424,45 @@ def test_invalid_groups_say_which_rule_failed_on_which_group(groups, operation_c
     assert {key: details.get(key) for key in expected} == expected
     # The message names the fix and the shape a group must have, so a retry can be right.
     assert '"operation_indexes"' in details["message"] and details["message"].startswith(("Group", "Operations"))
+
+
+async def test_coach_source_changes_use_original_writer_and_cannot_remove_the_policy(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+
+    from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_SOURCE_BINDINGS", "1")
+    db_path = _db(tmp_path)
+    _seed(db_path)
+    working = await _working(db_path)
+    authorize = AsyncMock(return_value=False)
+    revisions = AgentRevisionStore(str(db_path), validator=_Validator(), knowledge_source_validator=authorize)
+    store = AgentChangeProposalStore(str(db_path), revision_store=revisions)
+    policy = {"schema_version": 1, "mode": "selected_files", "file_ids": ["kbf_allowed"]}
+    args = {
+        "team_id": "team_release",
+        "agent_id": "osa_release",
+        "effective_owner_user_id": "user_owner",
+        "source_ref": "coach:sources",
+        "operations": [{"op": "add", "path": "/definition/knowledge_access", "value": policy}],
+        "atomic_groups": [{"id": "sources", "operation_indexes": [0]}],
+        "expected_baseline": AgentProposalBaseline(working.id, working.row_version, working.base_release_id),
+    }
+    with pytest.raises(KnowledgeAccessError, match="source_unavailable"):
+        await store.create_applied(**args)
+    authorize.return_value = True
+    _, version, written = await store.create_applied(**args)
+    assert written
+    with sqlite3.connect(db_path) as db:
+        saved = json.loads(db.execute("SELECT definition_json FROM team_subagent_working_copy WHERE id=?", (working.id,)).fetchone()[0])
+    assert saved["knowledge_access"] == policy
+    with pytest.raises(KnowledgeAccessError, match="preservation_required"):
+        await store.create_applied(
+            **{
+                **args,
+                "source_ref": "coach:remove-sources",
+                "expected_baseline": AgentProposalBaseline(working.id, version, working.base_release_id),
+                "operations": [{"op": "remove", "path": "/definition/knowledge_access"}],
+            }
+        )

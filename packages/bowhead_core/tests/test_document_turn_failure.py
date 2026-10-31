@@ -178,3 +178,51 @@ async def test_unsupported_ordinary_history_records_a_finite_failure(ctx: Contex
             assert await cursor.fetchone() == (None, selected)
         async with db.execute("SELECT count(*) FROM document_planning_attempts WHERE job_id=?", (outcome.job_id,)) as cursor:
             assert (await cursor.fetchone())[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("error_code", "reason", "message"),
+    [
+        ("document_authoring_script_failed", "document_authoring_script_failed", "editing script failed"),
+        ("pptx_slide_identity_invalid", "document_candidate_invalid", "file-structure check"),
+        ("pptx_shape_identity_invalid", "document_candidate_invalid", "file-structure check"),
+        ("pptx_structure_unsupported", "document_candidate_invalid", "file-structure check"),
+        ("document_execution_failed", "document_planning_failed", "could not finish"),
+    ],
+)
+async def test_known_document_failure_survives_original_terminal_persistence(ctx, native, error_code, reason, message):
+    import json
+    from dataclasses import replace
+
+    from bowhead_core.document_chat_runtime import finish_document_planning
+    from bowhead_core.events import TurnEventBus
+    from bowhead_core.turn_runner import TurnRunner
+
+    native.context.language_context = replace(native.context.language_context, output_language="en-US")
+    receipt = await native.service.submit(native.context, ctx.proposal)
+    outcome = await fail_document_turn(native.service.delivery, worker_for(native), receipt.job_id, error_code)
+    logs = TurnLogStore(str(ctx.path))
+    live = []
+
+    async def sink(event):
+        live.append((event.event_type, json.loads(event.to_sse()["data"])))
+        return await logs.record(turn_id=event.turn_id, event_type=event.event_type, payload=event.payload)
+
+    bus = TurnEventBus(log_sink=sink, persist_before_live=True)
+    runner = TurnRunner(SimpleNamespace(session_store=ctx.sessions))
+    bus._pi_persist_turn_state = runner._persist_turn_state
+    bus._pi_turn_state = {}
+    result = await finish_document_planning(native.context, outcome, bus=bus)
+    turn = await ctx.sessions.get_turn("t_doc")
+    assert turn.status == "failed" and turn.error_kind == reason
+    assert message in result.final_answer == turn.final_answer
+    assert error_code not in result.final_answer
+    events = await logs.list_events("t_doc")
+    done = next(event for event in events if event.event_type == "done")
+    assert done.payload["reason_code"] == reason
+    assert done.payload["diagnostics"]["retryable"] is False
+    assert next(payload for event_type, payload in live if event_type == "done")["diagnostics"] == done.payload["diagnostics"]
+    assert not any(event.event_type == "document.draft_open" for event in events)
+    saved = await native.service.delivery.get(scope=SCOPE, job_id=receipt.job_id)
+    assert saved["state"] == "failed" and saved["error_code"] == error_code
+    assert not native.calls and not native.worker.runs

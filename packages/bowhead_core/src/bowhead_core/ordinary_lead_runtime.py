@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.agent_run_limits import AgentLoopBudget
+from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS, KnowledgeReadState
 from bowhead_core.ordinary_lead_checkpoint import (
     OrdinaryHelperOutcome,
     OrdinaryLeadCheckpoint,
@@ -225,11 +227,14 @@ async def capture_ordinary_lead_loop(
     overflow_retried: bool,
     deadline_retried: bool,
     reference_allowlist: RefAllowlist | None = None,
+    knowledge_read: KnowledgeReadState | None = None,
+    loop_budget: AgentLoopBudget | None = None,
 ) -> OrdinaryLeadCheckpoint | None:
     state = getattr(ctx, "ordinary_lead_state", None)
+    retained_knowledge = knowledge_read is not None or bool(state and state.knowledge_sources)
     # Effect-free questions still use the existing bounded contract. An
     # unsupported post-helper pause must not pretend it can restart safely.
-    if not any(inv.tool_name == "subagent_spawn" for inv in invocations):
+    if not any(inv.tool_name == "subagent_spawn" or (retained_knowledge and inv.tool_name in KNOWLEDGE_READ_TOOLS) for inv in invocations):
         return None
     if state is None or state.checkpoint is not None:
         raise OrdinaryContinuationUnavailable()
@@ -256,6 +261,21 @@ async def capture_ordinary_lead_loop(
     # Lead's own settled calls stay in its transcript and are never rerun.
     lead_calls = [inv for inv in helpers if retained_lead_call(inv)]
     helpers = [inv for inv in helpers if not retained_lead_call(inv)]
+    if (
+        helpers
+        and len(state.helper_bindings) != len(helpers)
+        and any(
+            inv.tool_name == "subagent_spawn"
+            and not inv.nested
+            and isinstance(inv.result, dict)
+            and inv.result.get("error_kind") == "invalid_args"
+            and inv.result.get("reason_code") == "revise_scope_unresolved"
+            for inv in helpers
+        )
+    ):
+        raise OrdinaryQuestionUnavailable(
+            "No question card was created after a rejected revision scope. Preserve confirmed earlier results and explain any remaining input needed in your answer."
+        )
     if any(helper.tool_name != "subagent_spawn" for helper in helpers):
         raise OrdinaryQuestionUnavailable(
             "No question was created because the current Tool sequence cannot be retained for a durable pause. "
@@ -270,7 +290,7 @@ async def capture_ordinary_lead_loop(
             "Continue with the existing results, or ask the user in your answer which input is still needed."
         )
     if (
-        not helpers
+        (not helpers and knowledge_read is None)
         or len(state.helper_bindings) != len(helpers)
         or question.tool_name != "clarification_ask"
         or question.error
@@ -278,7 +298,12 @@ async def capture_ordinary_lead_loop(
     ):
         raise OrdinaryContinuationUnavailable()
     parallel = any(len(message.tool_calls or []) > 1 for message in current_messages)
-    if any(call.name != "subagent_spawn" for message in current_messages if len(message.tool_calls or []) > 1 for call in message.tool_calls):
+    if any(
+        call.name not in ({"subagent_spawn"} | (KNOWLEDGE_READ_TOOLS if retained_knowledge else set()))
+        for message in current_messages
+        if len(message.tool_calls or []) > 1
+        for call in message.tool_calls
+    ):
         raise OrdinaryQuestionUnavailable(
             "No question was created because the current Tool sequence cannot be retained for a durable pause. "
             "Continue with the existing results or explain which user input is still needed."
@@ -321,7 +346,7 @@ async def capture_ordinary_lead_loop(
     has_retained_context = bool(retained_ids(source, input_context))
     if has_retained_context and not ordinary_multi_helper_question_enabled():
         raise OrdinaryContinuationUnavailable()
-    shared_outcomes = collaboration is not None or extended_outcomes or has_retained_context or parallel
+    shared_outcomes = retained_knowledge or collaboration is not None or extended_outcomes or has_retained_context or parallel
     helper_materials = []
     for helper, binding in zip(helpers, bindings, strict=True):
         if (
@@ -377,7 +402,7 @@ async def capture_ordinary_lead_loop(
 
     for entry in helper_materials:
         await revalidate_tool_materials(ctx, entry["tools"])
-    if parallel:
+    if parallel or retained_knowledge:
         material["input_context"] = None
     if has_retained_context:
         from bowhead_core.ordinary_lead_input_context import capture_context
@@ -402,7 +427,7 @@ async def capture_ordinary_lead_loop(
         "pinned": pinned,
         "pinned_total": getattr(ctx, "_psi_pinned_total", 0),
     }
-    if has_retained_context or parallel:
+    if has_retained_context or parallel or retained_knowledge:
         context["reference_inventory"] = reference_allowlist.snapshot() if reference_allowlist is not None else None
     if (len(helpers) > 1 or shared_outcomes) and context["spawn_count"] != len(helpers) + sum(
         inv.tool_name == "subagent_spawn" and inv.call_id in state.blocked_calls for inv in prefix
@@ -412,8 +437,17 @@ async def capture_ordinary_lead_loop(
     if remaining_wallclock_s <= 0:
         raise OrdinaryContinuationUnavailable()
     checkpoint = OrdinaryLeadCheckpoint(
+        storage_format="segmented.v1",
+        context_projection_enabled=getattr(ctx, "_model_context_history", None) is not None,
+        context_base_generation=getattr(getattr(ctx, "_model_context_history", None), "generation_id", None),
         collaboration=await collaboration.runtime.checkpoint(collaboration) if collaboration is not None else None,
-        contract="ordinary-lead-loop.v11"
+        knowledge_read=knowledge_read,
+        knowledge_sources=dict(state.knowledge_sources) if state.knowledge_sources else None,
+        contract="ordinary-lead-loop.v13"
+        if state.knowledge_sources
+        else "ordinary-lead-loop.v12"
+        if retained_knowledge
+        else "ordinary-lead-loop.v11"
         if parallel
         else "ordinary-lead-loop.v10"
         if has_retained_context
@@ -434,6 +468,7 @@ async def capture_ordinary_lead_loop(
         language_tail=language_tail,
         attachment_context=attachment_context,
         max_iterations=max_iterations,
+        loop_budget=loop_budget,
         next_iteration=next_iteration,
         tool_schema_hash=content_hash([asdict(schema) for schema in schemas]),
         preferred_provider=getattr(ctx, "preferred_provider", None),
@@ -496,7 +531,7 @@ async def _validate_input_context(
 
     material = json.loads(checkpoint.material_json)
     context = json.loads(checkpoint.context_json)
-    if checkpoint.contract == "ordinary-lead-loop.v11" and material["input_context"] is None:
+    if checkpoint.contract in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"} and material["input_context"] is None:
         if retained_ids(source, context):
             raise OrdinaryContinuationUnavailable()
     else:
@@ -520,7 +555,7 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
             row = await cursor.fetchone()
             if row is None or row[0] != checkpoint.model_config_version:
                 raise OrdinaryContinuationUnavailable()
-    if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"}:
+    if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}:
         async with open_shared_ctx(ctx.session_store.db_path) as db:
             await db.execute("BEGIN")
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=True)
@@ -558,9 +593,14 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
     async with open_shared_ctx(ctx.session_store.db_path) as db:
         await db.execute("BEGIN")
         record = await read_ordinary_card_in_tx(db, card_id=state.card_id)
-        if reopen_ordinary_checkpoint(record) != checkpoint:
+        if reopen_ordinary_checkpoint(record, db_path=ctx.session_store.db_path) != checkpoint:
             raise OrdinaryContinuationUnavailable()
         await require_live_worker_in_tx(db, worker=worker_identity(ctx))
+    from bowhead_core.knowledge_source_runtime import validate_retained_sources
+
+    if checkpoint.knowledge_sources is not None:
+        await validate_retained_sources(ctx, checkpoint.knowledge_sources)
+        state.knowledge_sources = dict(checkpoint.knowledge_sources)
     await validate_ordinary_retained_materials(ctx, checkpoint)
     from bowhead_core.attachments_injector import PreparedAttachment
 
@@ -579,7 +619,7 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             await revalidate_material_authority_in_connection(ctx, db, entry, contract=checkpoint.contract)
         source = await _source(ctx, db)
         await _uploads(ctx, source)
-        if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"}:
+        if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}:
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=False)
         if checkpoint.contract in {
             "ordinary-lead-loop.v5",
@@ -589,12 +629,15 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }:
             await revalidate_material_authority_in_connection(ctx, db, material, contract=checkpoint.contract)
         record = await consume_ordinary_resume_in_tx(db, worker=worker_identity(ctx), card_id=state.card_id)
         state.answers = typed_answer(record).answers
         await db.commit()
     state.consumed = True
+    ctx.knowledge_direct_use = checkpoint.knowledge_read is not None
     state.final_bounce_count["n"] = checkpoint.final_bounce_count
     ctx._psi_parsed_results = parsed
     ctx._psi_pinned_snapshot = context["pinned"]

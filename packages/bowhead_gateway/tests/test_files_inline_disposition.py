@@ -164,7 +164,7 @@ async def test_remote_html_stream_retains_policy_without_a_presigned_redirect(ap
     monkeypatch.setattr(store, "download_url", redirect)
     response = client.get(f"/api/v1/files/{art.id}", headers={"X-Bowhead-User-Id": _OWNER}, follow_redirects=False)
     assert response.status_code == 200 and response.content == content
-    assert response.headers["x-bowhead-html-max-bytes"] == str(5 * 1024 * 1024)
+    assert response.headers["x-bowhead-html-max-bytes"] == str(25 * 1024 * 1024)
     redirect.assert_not_called()
 
 

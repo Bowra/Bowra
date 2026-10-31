@@ -64,6 +64,7 @@ LEFT JOIN agent_answer_feedback feedback
 """
 _TURN_SCOPE_WHERE = """
 binding.team_id=:team AND binding.agent_source_kind='team' AND session.origin='normal'
+  AND turn.operation_kind IS NULL
   AND turn.status='completed' AND turn.final_answer IS NOT NULL AND TRIM(turn.final_answer)!=''
   AND TRIM(COALESCE(source.user_text,turn.user_text))!=''
 """

@@ -77,6 +77,10 @@ import { captureCoachCanvasBinding, CoachCanvasNotReadyError } from "@/lib/coach
 import { agentEditorsToReload, useCoachResourceEditors } from "@/lib/use-coach-resource-editors";
 import { coachResourceOpens, coachResourcesVersion, subscribeCoachResources } from "@/lib/coach-resource-editors";
 import { CoachOperationView, type CoachOperationTarget } from "@/components/canvas/coach-operation-view";
+import { useAppRouter } from "@/lib/use-app-router";
+import { agentCaseProposalPath } from "@/lib/agent-case-proposal-path";
+import { CoachReceiptScopeContext } from "@/lib/coach-receipt-scope";
+import { maySelectCoachOperation, type CoachOperationIntent } from "@/lib/coach-operation-selection";
 import { useCoachOperationViews } from "@/lib/use-coach-operation-views";
 import { coachOperationOpens, coachOperationsVersion, subscribeCoachOperations, type CoachOperationOpen } from "@/lib/coach-operations";
 import { useAgentCanvasObjects } from "@/lib/use-agent-canvas-objects";
@@ -201,6 +205,7 @@ import {
   type CurrentTurnHydrationPatch,
   type UseTurnRunnerArgs,
 } from "@/lib/use-turn-runner";
+import { useContextMaintenance } from "@/lib/use-context-maintenance";
 import { trackComposerTransportFailure, trackInteraction } from "@/lib/metrics";
 import {
   clearCancelRequest,
@@ -622,6 +627,7 @@ function _toArchivedTurn(
   const projection = hydrated?.projection ?? null;
   return {
     turnId: turn.id,
+    operationKind: turn.operation_kind,
     terminalStatus: turn.status,
     executionGeneration:
       hydrated?.currentGeneration ?? turn.execution_generation ?? 1,
@@ -712,6 +718,7 @@ function _buildSessionHydrationBase(
     : detail.turns;
   const messages: ChatMessage[] = [];
   for (const turn of historyTurns) {
+    if (turn.operation_kind === "context_maintenance") continue;
     const attachments = turn.attachments ?? [];
     if (turn.user_text || attachments.length > 0) {
       messages.push({
@@ -750,6 +757,7 @@ function _buildSessionHydrationBase(
         projection,
       }),
       lastTurnId: lastTurn?.id ?? null,
+      lastOperationKind: lastTurn?.operation_kind ?? null,
       lastStartedAt: lastTurn ? Date.parse(lastTurn.started_at) : null,
       lastTerminalStatus: lastTurn?.status ?? null,
       lastExecutionGeneration: lastTurn?.execution_generation ?? null,
@@ -816,6 +824,7 @@ function CanvasHomeInner() {
   const authSession = useOptionalAuthSession();
   // #13 notification deep link: observe ?session= changes after soft navigation through this (outer layer already wraps Suspense).
   const searchParams = useSearchParams();
+  const router = useAppRouter();
   // ② (bug 0708): picking a session from the rail (or restoring from ?session= on
   // refresh) runs a chain of network round-trips (session detail → canvas → turn
   // replay → hydrate) with no UI feedback — the main area sat blank / on stale
@@ -1817,7 +1826,13 @@ function CanvasHomeInner() {
       current = false;
     };
   }, [composerSubmissionProtocolEnabled, referenceInputEnabled, submissionRecoveryScope]);
-  const handleSendInitSettled = (attemptKey: string, accepted: boolean) => {
+  const handleSendInitSettled = (attemptKey: string, accepted: boolean, turn?: { turnId: string; sessionId: string | null }) => {
+    const intent = operationSendIntents.current.get(attemptKey);
+    operationSendIntents.current.delete(attemptKey);
+    if (accepted && turn && intent) {
+      operationTurnIntents.current.set(turn.turnId, { ...intent, sessionId: turn.sessionId });
+      if (operationTurnIntents.current.size > 8) operationTurnIntents.current.delete(operationTurnIntents.current.keys().next().value!);
+    }
     referenceRecoveryCleanups.current.delete(attemptKey);
     documentRevisionCleanups.current.delete(attemptKey);
     setPendingReferenceSourceRevision(null);
@@ -2560,6 +2575,8 @@ function CanvasHomeInner() {
   const canvasScopeRef = useRef(canvasScopeKey);
   canvasScopeRef.current = canvasScopeKey;
   const canvasOpenIntentRef = useRef(0);
+  const operationSendIntents = useRef(new Map<string, CoachOperationIntent>());
+  const operationTurnIntents = useRef(new Map<string, CoachOperationIntent>());
   const multipleCanvasEnabled = authSession?.me?.capabilities?.configuration_canvas === true;
   const agentCanvas = useAgentCanvasObjects(canvasScopeKey, multipleCanvasEnabled);
   const resourceCanvas = useCoachResourceEditors(canvasScopeKey && activeSessionId && multipleCanvasEnabled
@@ -2596,6 +2613,11 @@ function CanvasHomeInner() {
     cardOpen: subagentCardOpen || agentCanvas.objects.length > 0,
     scope: { teamId: authSession?.me?.team_id || null, workspaceId: activeWorkspaceId || null, sessionId: activeSessionId },
     onScopeChange: () => {
+      // Accepted creation of this Chat is not a later manual selection.
+      for (const intent of operationTurnIntents.current.values()) {
+        if (intent.scope === canvasScopeKey && intent.sessionId === activeSessionId && intent.generation === canvasOpenIntentRef.current)
+          intent.generation += 1;
+      }
       canvasOpenIntentRef.current += 1;
       lastEditorKeyRef.current = null;
       agentCanvas.clear();
@@ -2780,6 +2802,13 @@ function CanvasHomeInner() {
     onSubmissionPending: handleSubmissionPending,
     onSubmissionCleared: handleSubmissionCleared,
     onSendInitSettled: handleSendInitSettled,
+  });
+
+  const contextMaintenance = useContextMaintenance({
+    scope: submissionRecoveryScope,
+    blocked: Boolean(runner.running || runner.clarificationPending || sendReadOnlyRef.current || chatActionAttempt || recoveredChatAction || recoveredSubmission || sendChatInFlightRef.current),
+    attach: runner.attachContextMaintenance,
+    onMessage: setBanner,
   });
 
   // ② clear the loading skeleton once the destination is actually on screen: the
@@ -3274,7 +3303,11 @@ function CanvasHomeInner() {
     supersededActionId: string | null = null,
   ): boolean => {
     if (workspace.loading || workspace.error || !activeWorkspaceId) return true;
-    if (sendReadOnlyRef.current) return true;
+    if (sendReadOnlyRef.current || contextMaintenance.busy || contextMaintenance.pending) return true;
+    if (runner.running && runner.operationKind === "context_maintenance") {
+      setBanner(tChat("compact_context_busy"));
+      return true;
+    }
     if (submissionRecoveryScope && !submissionRecoveryChecked) return true;
     const unresolvedAction = [
       chatActionAttemptRef.current,
@@ -3312,6 +3345,7 @@ function CanvasHomeInner() {
     // Capture before asynchronous preparation. A retained object can be
     // selected or edited while preflight runs, without retargeting this send.
     // An empty binding is also a snapshot: do not attach a later selection.
+    const operationIntent = { scope: canvasScopeKey, generation: canvasOpenIntentRef.current, sessionId: activeSessionId, submittedText: text };
     const capturedWireSnapshot = referenceRecovery?.wireSnapshot
       ?? recoveredSubmission?.wireSnapshot
       ?? submissionContext?.wireSnapshot
@@ -3416,6 +3450,8 @@ function CanvasHomeInner() {
       }
       const attemptKey = preparedAction?.action.actionId
         ?? `send_${++sendAttemptSequenceRef.current}`;
+      operationSendIntents.current.set(attemptKey, operationIntent);
+      if (operationSendIntents.current.size > 8) operationSendIntents.current.delete(operationSendIntents.current.keys().next().value!);
       if (documentRevisionTarget && submissionRecoveryScope) documentRevisionCleanups.current.set(attemptKey, {
         scope: { ...submissionRecoveryScope }, pending: null,
       });
@@ -3569,6 +3605,10 @@ function CanvasHomeInner() {
   ) => {
     const steerScopeKey = recoveredScopeKey ?? composerDraftScopeKeyRef.current;
     if (steerScopeKey !== composerDraftScopeKeyRef.current) return false;
+    if (contextMaintenance.busy || contextMaintenance.pending || (runner.running && runner.operationKind === "context_maintenance")) {
+      setBanner(tChat("compact_context_busy"));
+      return false;
+    }
     const recoveredReference = recovered && "input_document" in recovered
       ? recovered as RecoveredReferenceSubmission
       : null;
@@ -4756,8 +4796,19 @@ function CanvasHomeInner() {
     for (const pointer of openedOperations) {
       if (pointer.userId !== authSession?.me?.id || pointer.teamId !== authSession.me.team_id
         || pointer.workspaceId !== activeWorkspaceId || pointer.sessionId !== activeSessionId) continue;
-      operationCanvas.open(pointer, !subagentCardOpen && !settingsCanvas.selected
-        && !agentCanvas.selectedKey && !operationCanvas.selectedKey && !resourceCanvas.selectedKey && !documentCanvas.selectedKey && !canvasResultsSelected);
+      const focus = document.activeElement;
+      const input = focus instanceof HTMLInputElement || focus instanceof HTMLTextAreaElement ? focus.value
+        : focus instanceof HTMLElement && focus.isContentEditable ? focus.textContent ?? "" : "";
+      // WebKit may still paint the just-accepted message before Composer clears it.
+      const intent = operationTurnIntents.current.get(pointer.turnId);
+      const editing = Boolean(input.trim()) && input.trim() !== intent?.submittedText?.trim();
+      const select = maySelectCoachOperation(pointer, {
+        intent, scope: canvasScopeKey, generation: canvasOpenIntentRef.current,
+        selectedKey: operationCanvas.selectedKey,
+        available: !editing && !subagentCardOpen && !settingsCanvas.selected && !agentCanvas.selectedKey
+          && !resourceCanvas.selectedKey && !documentCanvas.selectedKey && !canvasResultsSelected,
+      });
+      if (operationCanvas.open(pointer, select)) revealCanvasResults();
     }
   }, [openedOperations, canvasScopeKey, multipleCanvasEnabled, runner.sessionId, activeSessionId,
     authSession?.me?.id, authSession?.me?.team_id, activeWorkspaceId, operationCanvas.open]);
@@ -4832,6 +4883,10 @@ function CanvasHomeInner() {
   const openOperationTarget = (pointer: CoachOperationOpen, target: CoachOperationTarget) => {
     if (pointer.userId !== authSession?.me?.id || pointer.teamId !== authSession.me.team_id
       || pointer.workspaceId !== activeWorkspaceId || pointer.sessionId !== activeSessionId) return;
+    if (target.kind === "agent_cases") {
+      router.push(agentCaseProposalPath(target.agentId, target.pending));
+      return;
+    }
     if (target.kind === "agent_draft") {
       void openAgentCanvas({ draft_id: target.draftId, draft_version: null, purpose_hint: null, draft_status: null, draft_title: null });
       return;
@@ -5008,7 +5063,7 @@ function CanvasHomeInner() {
     canvasObjects.push({
       key: object.key, kind: "operation", title: ordinal > 1 ? tCoachOperation("ordinal", { kind: label, number: ordinal }) : label,
       marker: canvasMarkers[object.key]?.marker ?? null, statusLabel: canvasMarkers[object.key]?.statusLabel ?? null,
-      onClose: () => operationCanvas.close(object.key),
+      onClose: () => { canvasOpenIntentRef.current += 1; operationCanvas.close(object.key); },
       content: <CoachOperationView pointer={object.pointer} active={activeCanvasSelection?.key === object.key}
         onMarker={(value) => reportCanvasMarker(object.key, value)}
         onLabel={(value) => setOperationLabels((previous) => {
@@ -5173,6 +5228,7 @@ function CanvasHomeInner() {
           />
         ) : null}
         <V2Composer
+          onInputInteraction={() => { canvasOpenIntentRef.current += 1; }}
           surface="home"
           key={composerResetKey}
           draftControlRef={homeComposerDraftControlRef}
@@ -5291,6 +5347,8 @@ function CanvasHomeInner() {
   const sessionMenu = menuSessionId ? (
     <SessionTopbarMenu
       sessionId={menuSessionId}
+      onCompactContext={sendReadOnlyRef.current ? undefined : contextMaintenance.run}
+      compactDisabledReason={runner.running || runner.clarificationPending || contextMaintenance.busy ? tChat("compact_context_busy") : null}
       turnId={runner.turnId}
       transport={runner.transportRef?.current ?? null}
       pinned={currentSessionItem ? Boolean(currentSessionItem.pinned) : undefined}
@@ -5364,6 +5422,8 @@ function CanvasHomeInner() {
       }
     >
       <SessionTurnOrdinalsContext.Provider value={turnOrdinalsForReports}>
+      <CoachReceiptScopeContext.Provider value={authSession?.me?.id && authSession.me.team_id && activeWorkspaceId && activeSessionId
+        ? { userId: authSession.me.id, teamId: authSession.me.team_id, workspaceId: activeWorkspaceId, sessionId: activeSessionId } : null}>
       {banner ? <div className="v2-banner">{banner}</div> : null}
       {canvasSaveBlockObject ? (
         <div className="v2-banner v2-banner--actions" role="alert">
@@ -5519,7 +5579,8 @@ function CanvasHomeInner() {
               <ConfigDrawer draftId={configDraftId} layout={layout} onClose={() => setConfigDraftId(null)} />
             ) : null
           }
-          resultsRevealRequest={canvasResultsSelected && canvasResultsReveal?.sessionId === activeSessionId ? canvasResultsReveal.sequence : 0}
+          onCanvasInteraction={() => { canvasOpenIntentRef.current += 1; }}
+          resultsRevealRequest={canvasResultsReveal?.sessionId === activeSessionId ? canvasResultsReveal.sequence : 0}
           creationPanelOpen={editorCanvas !== null && !canvasResultsSelected}
           canvasObjectOpener={canvasObjectTabs ? null : documentOpener}
           canvasObjectTabs={canvasObjectTabs}
@@ -5639,6 +5700,7 @@ function CanvasHomeInner() {
           onConfirm={(title) => void submitTopbarRename(renamingSessionId, title)}
         />
       ) : null}
+      </CoachReceiptScopeContext.Provider>
       </SessionTurnOrdinalsContext.Provider>
     </AppShell>
   );

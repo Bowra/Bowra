@@ -17,6 +17,7 @@ from bowhead_core.published_diagnostics import normalize_chat_peer_failure_code
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
 
+from bowhead_core import agent_run_limits as rl
 from bowhead_router import (
     AgentBinding,
     LLMChunk,
@@ -28,6 +29,15 @@ from bowhead_router import (
     TokenUsage,
     ToolCall,
 )
+
+
+@pytest.fixture
+def runtime_controls():
+    rl.get_runtime_controls.cache_clear()
+    token = rl.set_run_limits(None)
+    yield
+    rl.reset_run_limits(token)
+    rl.get_runtime_controls.cache_clear()
 
 
 class _HangRouter(Router):
@@ -54,8 +64,6 @@ class _HangRouter(Router):
 
 
 async def _run(monkeypatch: pytest.MonkeyPatch, *, hang_on: set[int], first_tool_call: bool, wallclock: str = "900"):
-    monkeypatch.setenv("BOWHEAD_SUBAGENT_LLM_TIMEOUT_SEC", "0.3")
-    monkeypatch.setenv("BOWHEAD_PEER_WALLCLOCK_SEC", wallclock)
     adapter = MockAdapter(provider_name="p1")
     answer = LLMResponse(content="直答", usage=TokenUsage(input_tokens=10, output_tokens=5))
     # Call a nonexistent tool first: once messages contain a tool result, the next peer iteration streams (the production deadline-hit path).
@@ -73,13 +81,17 @@ async def _run(monkeypatch: pytest.MonkeyPatch, *, hang_on: set[int], first_tool
         router.bind(AgentBinding(agent_type=t, primary=("p1", "mock")))
     runner = SubagentRunner(router=router, tool_registry=build_default_registry(), backend="legacy")
     ctx = ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t", datarc=None)  # type: ignore[arg-type]
+    # Accelerate only the internal test snapshot; settings validation keeps its real minimums.
+    ctx.agent_run_limits = rl.AgentRunLimits(turn_time_limit_s=float(wallclock) + rl.WRAP_UP_RESERVE_S, model_call_time_limit_s=0.3)
     result = await runner.run(profile_name="compute", task="时限闸", parent_turn_id="t", parent_bus=TurnEventBus(), parent_ctx=ctx)
     return router, result
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_streamed_call_that_hits_the_deadline_is_resent_once_and_the_run_succeeds(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+async def test_streamed_call_that_hits_the_deadline_is_resent_once_and_the_run_succeeds(
+    monkeypatch: pytest.MonkeyPatch, caplog, runtime_controls
+) -> None:
     caplog.set_level(logging.WARNING, logger="bowhead_core.subagent")
     router, result = await _run(monkeypatch, hang_on={2}, first_tool_call=True)
 
@@ -93,7 +105,7 @@ async def test_streamed_call_that_hits_the_deadline_is_resent_once_and_the_run_s
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_non_streamed_first_call_deadline_is_resent_too(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_non_streamed_first_call_deadline_is_resent_too(monkeypatch: pytest.MonkeyPatch, runtime_controls) -> None:
     """peer 第一圈走非流式，时限是外层 wait_for 直接抛的 TimeoutError（没有类型化投影）。"""
     router, result = await _run(monkeypatch, hang_on={1}, first_tool_call=False)
 
@@ -103,7 +115,7 @@ async def test_non_streamed_first_call_deadline_is_resent_too(monkeypatch: pytes
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_second_deadline_fails_as_a_timeout_not_an_internal_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_second_deadline_fails_as_a_timeout_not_an_internal_error(monkeypatch: pytest.MonkeyPatch, runtime_controls) -> None:
     router, result = await _run(monkeypatch, hang_on={2, 3}, first_tool_call=True)
 
     assert router.calls == 3, "只重发一次"
@@ -116,7 +128,7 @@ async def test_second_deadline_fails_as_a_timeout_not_an_internal_error(monkeypa
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_no_resend_when_the_wallclock_budget_cannot_fit_another_full_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_no_resend_when_the_wallclock_budget_cannot_fit_another_full_deadline(monkeypatch: pytest.MonkeyPatch, runtime_controls) -> None:
     router, result = await _run(monkeypatch, hang_on={2}, first_tool_call=True, wallclock="0.5")
 
     assert router.calls == 2

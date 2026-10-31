@@ -879,7 +879,7 @@ async def get_session(
         operation=SpaceOperation.READ_HISTORY,
     )
 
-    turns = await store.list_turns(session_id=session_id)
+    turns = await store.list_turns(session_id=session_id, include_maintenance=True)
     art_store = getattr(request.app.state, "artifact_store", None)
 
     # chat-hydrate-overhaul: batch-fetch traces + summaries to avoid N+1.
@@ -950,6 +950,7 @@ async def get_session(
 
         turns_out.append(
             TurnDTO(
+                operation_kind=t.operation_kind,
                 id=t.id,
                 seq=t.seq,
                 user_text=(canonical_source.user_text if canonical_source is not None else t.user_text),
@@ -990,6 +991,7 @@ async def get_session(
         )
 
     return SessionDetailDTO(
+        context_generation=await store.context_conversation_generation(session_id=session_id),
         session=SessionDTO(
             id=session.id,
             workspace_id=session.workspace_id,

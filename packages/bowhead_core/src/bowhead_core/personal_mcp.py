@@ -43,7 +43,6 @@ from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
 CONFIRM_SECONDS = 120
 MAX_RESULT_BYTES = 256 * 1024
 MAX_SCHEMA_BYTES = 128 * 1024
-MAX_CALLS = 20
 VALIDATION_SECONDS = 3
 # Waiting for the per-loop validation slot is bounded so hostile schemas cannot
 # build an unbounded queue in front of other users' calls.
@@ -679,20 +678,6 @@ class PersonalMcpStore:
         expires = (datetime.now(UTC) + timedelta(seconds=CONFIRM_SECONDS)).isoformat()
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            existing = await (
-                await db.execute(
-                    "SELECT 1 FROM personal_mcp_invocation WHERE turn_id=? AND execution_id=? AND call_id=?",
-                    (manifest["turn_id"], manifest["execution_id"], call_id),
-                )
-            ).fetchone()
-            count = (
-                await (
-                    await db.execute("SELECT COUNT(*) FROM personal_mcp_invocation WHERE owner_user_id=? AND turn_id=?", (owner, manifest["turn_id"]))
-                ).fetchone()
-            )[0]
-            if not existing and count >= MAX_CALLS:
-                await db.rollback()
-                raise PersonalMcpError("personal_mcp_call_limit")
             await db.execute(
                 "INSERT OR IGNORE INTO personal_mcp_invocation VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,NULL)",
                 (
@@ -856,7 +841,6 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
     specs = []
     for tool in tools:
         await store.revalidate(owner, manifest, tool, ctx)
-    budget = [0]
 
     def make_handler(tool: dict[str, Any]) -> Any:
         async def handler(args: dict[str, Any], call_ctx: ToolExecutionContext) -> dict[str, Any]:
@@ -867,13 +851,6 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                 if getattr(call_ctx, "personal_mcp_execution_id", None) != binding.execution_id:
                     raise PersonalMcpError("personal_mcp_scope_denied")
                 await store.revalidate(owner, manifest, tool, call_ctx)
-                from bowhead_core.agent_run_limits import get_tool_call_budget
-
-                # With agent run limits on, the Team's per-turn tool-call limit replaces this cap.
-                if get_tool_call_budget() is None:
-                    budget[0] += 1
-                    if budget[0] > MAX_CALLS:
-                        raise PersonalMcpError("personal_mcp_call_limit")
                 args_blob = canonical(args)
                 if len(args_blob.encode()) > 64 * 1024:
                     raise PersonalMcpError("personal_mcp_arguments_limit")

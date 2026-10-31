@@ -12,6 +12,7 @@ from typing import Any
 
 from bowhead_router.tool_args import loads_tool_arguments
 
+from bowhead_core.chart.numeric_display import currency_identity
 from bowhead_core.chart.types import VALID_HINTS, ChartColumn
 
 MAX_VIEWS = 6
@@ -31,7 +32,7 @@ KINDS = {
     "heatmap",
     "table",
 }
-VIEW_FIELDS = {"id", "title", "subtitle", "hint", "force_kind", "series", "sort_by", "limit"}
+VIEW_FIELDS = {"id", "title", "subtitle", "hint", "force_kind", "series", "sort_by", "limit", "show_legend", "show_data_labels"}
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
 
@@ -54,8 +55,19 @@ def schema_properties() -> dict[str, Any]:
                 "required": ["id", "title", "series"],
                 "properties": {
                     "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
-                    "title": {"type": "string"},
-                    "subtitle": {"type": "string"},
+                    "title": {
+                        "type": "string",
+                        "description": "Chart subject; source units belong in column_units, while the renderer owns displayed unit disclosure.",
+                    },
+                    "subtitle": {
+                        "type": "string",
+                        "description": "Optional analytical context; identify source units as source units, never guess display units or claim no display conversion.",
+                    },
+                    "show_legend": {"type": "boolean", "description": "False hides the legend; true permits the existing layout policy to show it."},
+                    "show_data_labels": {
+                        "type": "boolean",
+                        "description": "Optional view-specific data-label visibility; omit for responsive defaults.",
+                    },
                     "hint": {"type": "string", "enum": sorted(VALID_HINTS), "default": "raw"},
                     "force_kind": {"type": "string", "enum": sorted(KINDS)},
                     "series": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "string"}},
@@ -76,15 +88,20 @@ def schema_properties() -> dict[str, Any]:
             "type": "array",
             "minItems": 1,
             "maxItems": 3,
-            "description": "Optional simple row equations only when the needed value is not already computed. Finite literals, bound column names, + - * / and parentheses; no functions or cross-row calculations. inputs maps short identifiers to exact existing numeric column keys. Derived keys and input aliases must not contain the reserved provenance word source. Declare output unit (empty for dimensionless); unit % requires percent_scale fraction or points. Missing operands/zero division become null, never zero. Original columns stay intact.",
+            "description": "Optional simple row equations only when the needed value is not already computed. For a unit-only currency conversion, use convert_from with the exact source column key and declare its actual source unit in column_units; declare the target unit in unit. The host calculates the scale, not the model. Otherwise supply expression: finite literals, bound column names, + - * / and parentheses; no functions or cross-row calculations. inputs maps short identifiers to exact existing numeric column keys. Derived keys and input aliases must not contain the reserved provenance word source. Declare output unit (empty for dimensionless); unit % requires percent_scale fraction or points. Missing operands/zero division become null, never zero. Original columns stay intact.",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["key", "header", "expression", "unit"],
+                "required": ["key", "header", "unit"],
+                "anyOf": [{"required": ["expression"]}, {"required": ["convert_from"]}],
                 "properties": {
                     "key": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
                     "header": {"type": "string"},
                     "expression": {"type": "string", "maxLength": 200},
+                    "convert_from": {
+                        "type": "string",
+                        "description": "Exact numeric source column for a unit-only currency magnitude conversion; do not supply expression or inputs.",
+                    },
                     "inputs": {"type": "object", "additionalProperties": {"type": "string"}},
                     "unit": {"type": "string", "maxLength": 30},
                     "percent_scale": {"type": "string", "enum": ["fraction", "points"]},
@@ -129,6 +146,9 @@ def composition(args: dict[str, Any], *, fallbacks: list[dict[str, str]] | None 
         ids.append(vid)
         if not isinstance(view.get("title"), str) or not view["title"].strip():
             raise ValueError(f"view {vid}: title is required")
+        for field in ("show_legend", "show_data_labels"):
+            if field in view and type(view[field]) is not bool:
+                raise ValueError(f"view {vid}: {field} must be true or false")
         if "hint" not in view and fallbacks is not None:
             view = {**view, "hint": "raw"}
             fallbacks.append({"code": "hint_defaulted", "path": f"/views/{index}/hint"})
@@ -318,6 +338,62 @@ def _validate_stored_plan(spec: dict[str, Any]) -> None:
         raise ChartExpressionError(str(exc)) from exc
 
 
+def _currency_magnitude(unit: str | None) -> tuple[str, int] | None:
+    """Resolve explicit currency magnitude, without inferring currency from locale or name."""
+    if not isinstance(unit, str):
+        return None
+    cjk_codes = {
+        "元": "CNY",
+        "人民币": "CNY",
+        "美元": "USD",
+        "欧元": "EUR",
+        "日元": "JPY",
+        "港元": "HKD",
+        "港币": "HKD",
+        "英镑": "GBP",
+        "澳元": "AUD",
+        "加元": "CAD",
+        "韩元": "KRW",
+        "新台币": "TWD",
+    }
+    cjk_powers = {"": 0, "千": 3, "万": 4, "十万": 5, "百万": 6, "千万": 7, "亿": 8, "十亿": 9, "百亿": 10, "千亿": 11, "万亿": 12}
+    text = unit.strip()
+    match = re.fullmatch(r"(万亿|千亿|百亿|十亿|亿|千万|百万|十万|万|千)?(元|人民币|美元|欧元|日元|港元|港币|英镑|澳元|加元|韩元|新台币)", text)
+    if match:
+        return cjk_codes[match[2]], cjk_powers[match[1] or ""]
+    # Billion/trillion have different meanings across English and several
+    # European languages. Require an unambiguous numerical magnitude instead.
+    powers = {
+        "": 0,
+        "k": 3,
+        "thousand": 3,
+        "10k": 4,
+        "m": 6,
+        "mn": 6,
+        "mm": 6,
+        "million": 6,
+        "millions": 6,
+        "millionen": 6,
+        "mio": 6,
+        "mio.": 6,
+        "1e9": 9,
+        "1e12": 12,
+    }
+    match = re.fullmatch(r"([A-Za-z]{3})(?:\s+([\w.]+))?", text) or re.fullmatch(r"([\w.]+)\s+([A-Za-z]{3})", text)
+    if not match:
+        return None
+    first, second = match[1], match[2] or ""
+
+    def identity_of(value: str) -> str | None:
+        return "CNY" if value.upper() == "RMB" else currency_identity(value)
+
+    code, magnitude = (first, second) if identity_of(first) else (second, first)
+    identity = identity_of(code)
+    if not identity or magnitude.lower() not in powers:
+        return None
+    return identity, powers[magnitude.lower()]
+
+
 def derive_columns(
     value: Any, rows: list[dict[str, Any]], columns: list[ChartColumn]
 ) -> tuple[list[dict[str, Any]], list[ChartColumn], list[dict[str, Any]], dict[str, int]]:
@@ -330,8 +406,9 @@ def derive_columns(
     existing = {column.key for column in columns}
     compiled: list[tuple[dict[str, Any], ast.Expression, dict[str, str]]] = []
     for definition in definitions:
-        if not isinstance(definition, dict) or set(definition) - {"key", "header", "expression", "inputs", "unit", "percent_scale"}:
+        if not isinstance(definition, dict) or set(definition) - {"key", "header", "expression", "inputs", "unit", "percent_scale", "convert_from"}:
             raise ValueError("derived columns must use the declared equation fields")
+        definition = dict(definition)
         key, expression = definition.get("key"), definition.get("expression")
         if not isinstance(key, str) or not _ID.fullmatch(key) or key in existing:
             raise ValueError("derived column keys must be new, unique lowercase identifiers")
@@ -346,6 +423,21 @@ def derive_columns(
         scale = definition.get("percent_scale")
         if (unit == "%" and scale not in ("fraction", "points")) or (unit != "%" and scale is not None):
             raise ValueError(f"{key}: percent_scale is required only for unit %")
+        if "convert_from" in definition:
+            source_key = definition["convert_from"]
+            if not isinstance(source_key, str) or source_key not in numeric or "expression" in definition or "inputs" in definition:
+                raise ValueError(f"{key}: convert_from must name one numeric column and cannot be combined with an equation")
+            source_unit = _currency_magnitude(numeric[source_key].unit)
+            target_unit = _currency_magnitude(unit)
+            if source_unit is None or target_unit is None or source_unit[0] != target_unit[0]:
+                raise ValueError(
+                    f"{key}: use explicit recognized units of the same currency, for example USD million or USD 1e9; ambiguous magnitudes and exchange rates are not inferred"
+                )
+            factor = Decimal(10) ** (source_unit[1] - target_unit[1])
+            expression = f"value * {factor}"
+            definition["expression"] = expression
+            definition["inputs"] = {"value": source_key}
+            definition["conversion"] = {"input_unit": numeric[source_key].unit, "target_unit": unit, "factor": str(factor)}
         if not isinstance(expression, str) or not 1 <= len(expression) <= 200:
             raise ValueError(f"{key}: expression must contain at most 200 characters")
         try:

@@ -36,6 +36,43 @@ function longSpec(kind: ChartSpec["kind"], nCat = 3, nMonth = 4): ChartSpec {
 }
 
 describe("认长表", () => {
+  it("keeps equivalent source and display dates in one connected series", () => {
+    const spec: ChartSpec = {
+      kind: "line", title: "Revenue", row_count: 3,
+      columns: [
+        { key: "date", header: "Date", type: "date" },
+        { key: "raw", header: "Original date", type: "categorical" },
+        { key: "revenue", header: "Revenue", type: "numeric", unit: "亿元" },
+      ],
+      rows: [
+        { date: "2026-01-02", raw: "20260102", revenue: 0.0009 },
+        { date: "2026-01-28", raw: "20260128", revenue: 0.0012 },
+        { date: "2026-03-03", raw: "20260303", revenue: -0.00004 },
+      ],
+    };
+    const original = structuredClone(spec);
+    expect(pivotLongSpec(spec)).toBeNull();
+    const config = buildChartJSConfig(spec, THEME);
+    expect(config.data.datasets).toHaveLength(1);
+    expect(config.data.datasets[0]!.data).toEqual([0.0009, 0.0012, -0.00004]);
+    expect(spec).toEqual(original);
+
+    const explicit = structuredClone(spec);
+    explicit.columns[1]!.role = "color";
+    expect(pivotLongSpec(explicit)).not.toBeNull();
+    const mismatched = structuredClone(spec);
+    mismatched.rows![1]!.raw = "20260129";
+    expect(pivotLongSpec(mismatched)).not.toBeNull();
+    const invalid = structuredClone(spec);
+    invalid.rows![1]!.date = "2026-02-30";
+    invalid.rows![1]!.raw = "20260230";
+    expect(pivotLongSpec(invalid)).not.toBeNull();
+    const repeated = structuredClone(spec);
+    repeated.rows![1]!.date = repeated.rows![0]!.date;
+    repeated.rows![1]!.raw = repeated.rows![0]!.raw;
+    expect(pivotLongSpec(repeated)).not.toBeNull();
+  });
+
   it("★★ 1 数值 + 2 维度 + x 重复 → 摊成一列一个品类", () => {
     const out = pivotLongSpec(longSpec("line", 3, 4))!;
     expect(out).not.toBeNull();

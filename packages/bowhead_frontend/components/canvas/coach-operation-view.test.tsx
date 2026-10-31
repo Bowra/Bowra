@@ -24,6 +24,94 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+function caseReceipt(decision: string): CoachOperationReceipt {
+  return {
+    operation_ref: { kind: "eval_cases", agent_id: "osa_original", proposal_id: "acp_original" },
+    domain_result: { proposal: {
+      status: decision === "pending" ? "open" : decision,
+      rationale: "Keep the original change available",
+      suggested_cases: [{
+        task: "Check the note before calculating the total.", decision_status: decision,
+        case_spec: { expected_contract: { points: [{ id: "p_saved", text: "The total is 300." }] } },
+        edit: { before: { task: "Calculate the total, then check the note.", case_spec: { expected_contract: { points: [{ id: "p_before", text: "Report the total." }] } } }, changed_fields: ["task", "expected_contract"] },
+      }],
+    } },
+  };
+}
+
+it.each(["pending", "accepted", "dismissed", "unknown"])("keeps original %s case changes collapsed and readable on demand", async (decision) => {
+  const original = caseReceipt(decision);
+  vi.mocked(readCoachOperation).mockResolvedValue(original);
+  renderIntl(<CoachOperationView pointer={{ ...pointer, reference: original.operation_ref }} active onOpen={vi.fn()} />, { locale: "en-US" });
+  const toggle = await screen.findByText("View saved changes");
+  expect(screen.getByText("Calculate the total, then check the note.")).not.toBeVisible();
+  fireEvent.click(toggle);
+  expect(screen.getByText("Calculate the total, then check the note.")).toBeVisible();
+  expect(screen.getByText("Check the note before calculating the total.")).toBeVisible();
+  expect(screen.getByText("Report the total.")).toBeVisible();
+  expect(screen.getByText("The total is 300.")).toBeVisible();
+  expect(screen.queryByText("p_saved")).not.toBeInTheDocument();
+  expect(readCoachOperation).toHaveBeenCalledOnce();
+  fireEvent.click(toggle);
+  expect(screen.getByText("Report the total.")).not.toBeVisible();
+});
+
+it("preserves each item's decision and excludes held-out details", async () => {
+  const original = caseReceipt("pending");
+  const proposal = original.domain_result.proposal as { suggested_cases: Array<Record<string, unknown>> };
+  proposal.suggested_cases.push({ ...proposal.suggested_cases[0], decision_status: "accepted", task: "Accepted saved question" });
+  proposal.suggested_cases.push({ held_out: true, task: "Hidden question", edit: { before: { task: "Hidden baseline" } } });
+  vi.mocked(readCoachOperation).mockResolvedValue(original);
+  renderIntl(<CoachOperationView pointer={{ ...pointer, reference: original.operation_ref }} active />, { locale: "en-US" });
+  fireEvent.click(await screen.findByText("View saved changes"));
+  expect(screen.getByRole("region", { name: "Suggestion 1" })).toHaveTextContent("Awaiting review");
+  expect(screen.getByRole("region", { name: "Suggestion 2" })).toHaveTextContent("Accepted");
+  expect(screen.getByText("Held-out content is excluded.")).toBeVisible();
+  expect(screen.queryByText("Hidden question")).not.toBeInTheDocument();
+  expect(screen.queryByText("Hidden baseline")).not.toBeInTheDocument();
+});
+
+it("marks missing baselines and bounded excerpts without rendering raw settings or active markup", async () => {
+  const original = caseReceipt("accepted");
+  const proposal = original.domain_result.proposal as { suggested_cases: Array<Record<string, unknown>> };
+  const item = { ...proposal.suggested_cases[0], task: `<script>unsafe()</script>${"x".repeat(1800)}END_OF_QUESTION`, edit: { changed_fields: ["task", "scorer_config"] } };
+  proposal.suggested_cases = Array.from({ length: 9 }, () => item);
+  vi.mocked(readCoachOperation).mockResolvedValue(original);
+  renderIntl(<CoachOperationView pointer={{ ...pointer, reference: original.operation_ref }} active />, { locale: "en-US" });
+  fireEvent.click(await screen.findByText("View saved changes"));
+  expect(screen.getAllByText("No readable excerpt was saved for this content.")).toHaveLength(8);
+  expect(screen.getAllByText("This excerpt is shortened.")).toHaveLength(8);
+  expect(screen.getByText("1 more suggestion is not shown.")).toBeVisible();
+  expect(screen.getAllByText(/Those settings are not included in this excerpt/)).toHaveLength(8);
+  expect(screen.queryByText(/END_OF_QUESTION/)).not.toBeInTheDocument();
+  expect(screen.getByTestId("coach-operation-card").querySelector("script")).toBeNull();
+});
+
+it("removes expanded saved changes after ownership is revoked", async () => {
+  const original = caseReceipt("accepted");
+  vi.mocked(readCoachOperation).mockResolvedValueOnce(original).mockRejectedValueOnce(new Error("Revoked"));
+  renderIntl(<CoachOperationView pointer={{ ...pointer, reference: original.operation_ref }} active />, { locale: "en-US" });
+  fireEvent.click(await screen.findByText("View saved changes"));
+  expect(screen.getByText("Check the note before calculating the total.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await screen.findByText("This result can’t be shown right now");
+  expect(screen.queryByText("Check the note before calculating the total.")).not.toBeInTheDocument();
+  expect(screen.queryByText("View saved changes")).not.toBeInTheDocument();
+});
+
+it("uses the original Owner review page for pending cases and current tests for decided cases", async () => {
+  const reference = { kind: "eval_cases" as const, agent_id: "osa_1", proposal_id: "acp_original" };
+  const accepted = { operation_ref: reference, domain_result: { proposal: { status: "accepted", rationale: "Original order change" } } };
+  expect(operationTarget(accepted)).toEqual({ action: "view_current_cases", target: { kind: "agent_cases", agentId: "osa_1", pending: false } });
+  expect(operationTarget({ ...accepted, domain_result: { proposal: { status: "dismissed" } } })?.action).toBe("view_current_cases");
+  expect(operationTarget({ ...accepted, domain_result: { proposal: { status: "open", suggested_cases: [{ decision_status: "accepted" }, { decision_status: "pending" }] } } })).toEqual({ action: "review_in_agent", target: { kind: "agent_cases", agentId: "osa_1", pending: true } });
+  vi.mocked(readCoachOperation).mockResolvedValue(accepted);
+  renderIntl(<CoachOperationView pointer={{ ...pointer, reference }} active onOpen={vi.fn()} />);
+  expect(await screen.findByTestId("coach-operation-card")).toHaveTextContent("当前用例可能之后又有修改");
+  expect(screen.queryByRole("button", { name: "去智能体中审阅" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "查看当前用例" })).toBeVisible();
+});
 const pointer: CoachOperationOpen = {
   requestId: "original",
   turnId: "t_original",

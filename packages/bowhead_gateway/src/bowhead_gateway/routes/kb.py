@@ -90,6 +90,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/kb", tags=["knowledge-base"])
 
 
+def _require_ingestion_admission() -> None:
+    from bowhead_core.kb.ingestion import explicit_ingestion_enabled
+
+    if not explicit_ingestion_enabled():
+        raise _kb_error(
+            503, "knowledge_ingestion_admission_closed", hint="Keep the original file in Files; ask an administrator to enable knowledge ingestion."
+        )
+
+
 def _kb_error(status_code: int, code: str, **payload: Any) -> HTTPException:
     """Return the finite KB error envelope used by routes and bulk results."""
     return HTTPException(
@@ -623,6 +632,8 @@ async def _kb_scope_check(
     ctx: ScopeContext,
     files_store,
     request: Request,
+    *,
+    include_deleted: bool = False,
 ) -> KbFileDTO:
     """Return the file only if the caller may read it; every other case is one 404.
 
@@ -633,7 +644,7 @@ async def _kb_scope_check(
     denial record are written exactly as before.
     """
     file = await files_store.get(file_id)
-    if not file or file.soft_deleted_at:
+    if not file or (file.soft_deleted_at and not include_deleted):
         raise _kb_file_not_found()
     if file.team_id != ctx.team_id or not KbPermission.can_read(file, ctx):
         emit_audit(
@@ -813,6 +824,7 @@ async def upload_file(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    knowledge_intent: Literal["add_to_knowledge"] = Form(...),
     scope: KbScopeIn = Form(...),
     scope_id: str = Form(...),
     use_llm: bool = Form(False),
@@ -827,6 +839,7 @@ async def upload_file(
     P0-R1: 验 scope_id 跟 caller context 匹配 (防跨 ws/team/user 写 leak).
     P1-O12: server-side mime 检测 (python-magic) + filename ext fallback (P1-S1).
     """
+    _require_ingestion_admission()
     ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id)
 
     # [V3 P0-V3-1 fix] cross-workspace doc_type_id leak defense:
@@ -958,7 +971,11 @@ async def ingest_kb_file_bytes(
 
     # ── create kb_files row ──
     files_store = _get_files_store(request)
-    file_id = await files_store.create(
+    from bowhead_core.kb.ingestion import KnowledgeAction
+
+    file_id, _, _ = await files_store.create_admitted(
+        action=KnowledgeAction(f"upload:{artifact.id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+        source_fingerprint=artifact.id,
         artifact_id=artifact_id,
         filename=filename or "unnamed",
         mime_type=detected_mime,
@@ -1102,6 +1119,7 @@ async def _process_zip_bundle(
     import io
     import zipfile
 
+    _require_ingestion_admission()
     if len(raw) > _BUNDLE_MAX_SIZE:
         raise _kb_error(413, "kb_bundle_too_large")
     try:
@@ -1241,7 +1259,18 @@ async def _process_zip_bundle(
                     ),
                 )
                 await db.commit()
-            file_id = await files_store.create(
+            from bowhead_core.kb.ingestion import KnowledgeAction
+
+            ctx = await authorize_kb_scope_write(request, user, scope=scope, scope_id=scope_id)
+            file_id, _, _ = await files_store.create_admitted(
+                action=KnowledgeAction(
+                    f"bundle:{bundle_artifact.id}:{artifact.id}",
+                    "admin_import" if attribution_route == "kb_admin_import" else "kb_ui",
+                    user.id,
+                    ctx.team_id,
+                    ctx.workspace_id,
+                ),
+                source_fingerprint=artifact.id,
                 artifact_id=artifact.id,
                 filename=display_name,
                 mime_type=detected_mime,
@@ -1318,6 +1347,7 @@ async def upload_bundle(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    knowledge_intent: Literal["add_to_knowledge"] = Form(...),
     scope: KbScopeIn = Form(...),
     scope_id: str = Form(...),
     use_llm: bool = Form(False),
@@ -1338,6 +1368,7 @@ async def upload_bundle(
         permission="write",
     )
 
+    _require_ingestion_admission()
     bundle_name = file.filename or "bundle.zip"
     if not (
         bundle_name.lower().endswith(".zip")
@@ -1823,6 +1854,8 @@ async def _delete_file_core(
     ctx: Any,
     request: Request,
     user: User,
+    *,
+    action=None,
 ) -> None:
     """Per-file delete (scope-check + perms + soft-delete + cascade + audit).
 
@@ -1831,7 +1864,7 @@ async def _delete_file_core(
     kb-management REQ-1.4a.
     """
     files_store = _get_files_store(request)
-    file = await _kb_scope_check(file_id, ctx, files_store, request)
+    file = await _kb_scope_check(file_id, ctx, files_store, request, include_deleted=True)
 
     if not KbPermission.can_delete(file, ctx, ctx.role):
         raise _kb_error(403, "kb_file_access_denied")
@@ -1851,8 +1884,11 @@ async def _delete_file_core(
 
     # P0-B: soft delete chunks (chromadb metadata.is_active=False) + SQL row soft_deleted_at
     kb_store = await _get_effective_kb_store(request, user)
+    from bowhead_core.kb.ingestion import KnowledgeAction
+
+    action = action or KnowledgeAction(f"remove:{file_id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id)
+    await files_store.remove_admitted(file_id, action=action)
     await kb_store.soft_delete_file(file)
-    await files_store.soft_delete(file_id)
     # kb-knowledge-tables sprint v1.0: cascade soft-delete records + decrement doc_type.record_count
     record_store = getattr(request.app.state, "kb_extracted_record_store", None)
     dt_store = getattr(request.app.state, "kb_doc_type_store", None)
@@ -1917,6 +1953,8 @@ class PromoteArtifactRequest(BaseModel):
 
     artifact_id: str
     scope: KbScopeIn = "personal"
+    knowledge_intent: Literal["add_to_knowledge"]
+    action_id: str = Field(min_length=1, max_length=128)
 
 
 @router.post(
@@ -1937,6 +1975,19 @@ async def promote_artifact(
     目标 scope。`scope_id` **由服务端按 scope 解析**，不接受客户端传入
     （否则可以拿别的 workspace/team id 越权写）。
     """
+    from bowhead_core.kb.ingestion import KnowledgeAction
+
+    action = KnowledgeAction(body.action_id, "kb_ui", user.id, user.team_id, _make_scope_context(user, request).workspace_id)
+    return await _promote_with_action(request, body=body, user=user, action=action)
+
+
+async def _promote_with_action(request: Request, *, body: PromoteArtifactRequest, user: User, action) -> KbFileDTO:
+    from bowhead_core.kb.ingestion import KnowledgeWriteError
+
+    try:
+        action.require(user_id=user.id, team_id=user.team_id)
+    except KnowledgeWriteError as exc:
+        raise _kb_error(503, exc.code, hint="Use Files to keep the original file; ask an administrator to enable knowledge ingestion.") from exc
     artifact_store = _get_artifact_store(request)
     art = await artifact_store.get(body.artifact_id)
     if art is None:
@@ -1955,6 +2006,9 @@ async def promote_artifact(
     # gate; supplied headers still trigger build_access_context's membership check,
     # so the defense is not relaxed.
     ctx = await _make_scope_context_checked(user, request, allow_missing_workspace=True)
+    from bowhead_gateway.routes.files import _require_artifact_visible
+
+    await _require_artifact_visible(request, artifact_store, art, operation=SpaceOperation.READ_HISTORY, user_id=user.id)
     scope = body.scope
     # Resolve scope_id server-side (same as list endpoint 1194-1215).
     if scope == "personal":
@@ -1985,8 +2039,13 @@ async def promote_artifact(
             team_id=ctx.team_id,
             user_id=user.id,
             trigger="manual",
+            action=action,
             worker=await _get_effective_worker(request, user),
         )
+    except KnowledgeWriteError as exc:
+        raise _kb_error(
+            409, exc.code, hint="Check the file's current knowledge membership and destination; use a new explicit action after removal."
+        ) from exc
     except PromotionSkipped as e:
         # Unsupported by rules (unparseable MIME etc.), not a failure: 422 for readable frontend messaging.
         raise _kb_error(422, "kb_promotion_not_supported") from e

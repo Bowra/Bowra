@@ -1,5 +1,7 @@
 "use client";
 
+
+import { ConfigurationFieldHelp, ConfigurationFieldProvider } from "@/components/settings/configuration-field-help";
 import { modelExternalCapabilitiesPath } from "@/lib/team-settings-paths";
 
 /**
@@ -11,6 +13,8 @@ import { modelExternalCapabilitiesPath } from "@/lib/team-settings-paths";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
+import { claimBowraImport, startBowraConnection, type BowraImport } from "@/lib/bowra-connect-api";
+import { ApiError } from "@/lib/api-client";
 import { fetchModelConfigurationProposal } from "@/lib/llm-config-api";
 import { refreshLiteState } from "@/lib/config-copilot-lite";
 
@@ -22,6 +26,8 @@ import {
   type OutboundParams,
 } from "@/lib/outbound-params";
 import { OutboundParamsSection } from "@/components/settings/models/outbound-params-section";
+import { ContextPolicyFields } from "@/components/settings/models/context-policy-fields";
+import { contextPolicyValid, type ContextPolicy } from "@/lib/context-policy";
 import { OutputBudgetField } from "@/components/settings/models/output-budget-field";
 import { RuntimeParametersSection } from "@/components/settings/models/runtime-parameters-section";
 import { RetrySettingSection } from "@/components/settings/models/retry-setting-section";
@@ -122,6 +128,7 @@ type ModelObj = {
   request_body_overrides?: Record<string, Record<string, unknown>>;
   outbound_params?: OutboundParams;
   runtime_parameters?: RuntimeParameters;
+  context_policy?: ContextPolicy;
   credit_rates?: CreditRates;
   /** Model-declared context window (tokens); omit when unknown. */
   context_window?: number;
@@ -246,6 +253,7 @@ interface NModel {
   requestBodyOverrides?: Record<string, Record<string, unknown>>;
   outboundParams?: OutboundParams;
   runtimeParameters?: RuntimeParameters;
+  contextPolicy?: ContextPolicy;
   creditRates?: CreditRates;
   /** Declared capacities only; inferred defaults are never persisted by an unrelated save. */
   contextWindow?: number;
@@ -263,6 +271,7 @@ interface DraftModel {
   /** Typed outbound-parameter declarations (the raw-JSON escape hatch remains the string field above). */
   outboundParams?: OutboundParams;
   runtimeParameters?: RuntimeParameters;
+  contextPolicy?: ContextPolicy;
   creditRates?: CreditRates;
   parameterError?: string;
   /** Declared capacities only; inherited values remain unset in the draft. */
@@ -428,6 +437,7 @@ export function v2ProviderDraftFromConnect(draft: ConnectDraft): V2ProviderDraft
       ...(model.contextWindow ? { context_window: model.contextWindow } : {}),
       ...(model.maxOutputTokens ? { max_output_tokens: model.maxOutputTokens } : {}),
       ...(model.runtimeParameters ? { runtime_parameters: model.runtimeParameters } : {}),
+      ...(model.contextPolicy !== undefined ? { context_policy: model.contextPolicy } : {}),
       ...(providerConsumesBodyOverrides(draft.protocol) && model.requestBodyOverrides
         ? { request_body_overrides: parseModelRequestBodyOverrides(model.requestBodyOverrides) || {} }
         : {}),
@@ -568,6 +578,7 @@ export function v2ProviderDraftFromSavedConfig(
       ...(model.contextWindow ? { context_window: model.contextWindow } : {}),
       ...(model.maxOutputTokens ? { max_output_tokens: model.maxOutputTokens } : {}),
       ...(model.runtimeParameters ? { runtime_parameters: model.runtimeParameters } : {}),
+      ...(model.contextPolicy !== undefined ? { context_policy: model.contextPolicy } : {}),
     }];
   });
   const baseUrl = spec.endpoint || spec.base_url || "";
@@ -881,6 +892,7 @@ export interface SaveGateInput {
     requestBodyOverrides?: string;
     outboundParams?: OutboundParams;
     runtimeParameters?: RuntimeParameters;
+  contextPolicy?: ContextPolicy;
     creditRates?: CreditRates;
     maxOutputTokens?: number;
     parameterError?: string;
@@ -956,7 +968,7 @@ export function saveBlockReason(
   if (!draft.models.every((model) => outboundParamsValid(model.outboundParams))) {
     return "outbound_value_missing";
   }
-  if (!draft.models.every((model) => !model.parameterError && (model.maxOutputTokens === undefined || (Number.isSafeInteger(model.maxOutputTokens) && model.maxOutputTokens > 0)) && runtimeParametersValid(model.runtimeParameters))) return "runtime_parameters_invalid";
+  if (!draft.models.every((model) => !model.parameterError && (model.maxOutputTokens === undefined || (Number.isSafeInteger(model.maxOutputTokens) && model.maxOutputTokens > 0)) && runtimeParametersValid(model.runtimeParameters) && contextPolicyValid(model.contextPolicy))) return "runtime_parameters_invalid";
   if (!draft.models.every((model) => creditRatesValid(model.creditRates))) return "credit_rates_invalid";
   if (
     !draft.models.every((model) =>
@@ -970,7 +982,7 @@ export function saveBlockReason(
 
 export function buildProviderModelSpec(
   protocol: string,
-  model: { id: string; caps: string[]; source: "preset" | "manual"; deployment?: string; protocol?: string; apiSurface?: string; requestBodyOverrides?: Record<string, Record<string, unknown>>; outboundParams?: OutboundParams; runtimeParameters?: RuntimeParameters; creditRates?: CreditRates; contextWindow?: number; maxOutputTokens?: number },
+  model: { id: string; caps: string[]; source: "preset" | "manual"; deployment?: string; protocol?: string; apiSurface?: string; requestBodyOverrides?: Record<string, Record<string, unknown>>; outboundParams?: OutboundParams; runtimeParameters?: RuntimeParameters; contextPolicy?: ContextPolicy; creditRates?: CreditRates; contextWindow?: number; maxOutputTokens?: number },
 ): ModelObj {
   return {
     id: model.id,
@@ -997,6 +1009,7 @@ export function buildProviderModelSpec(
       ? { outbound_params: serializeOutboundParams(model.outboundParams) }
       : {}),
     ...(model.runtimeParameters ? { runtime_parameters: model.runtimeParameters } : {}),
+      ...(model.contextPolicy !== undefined ? { context_policy: model.contextPolicy } : {}),
     credit_rates: model.creditRates || DEFAULT_CREDIT_RATES,
     ...(model.caps.includes("rerank") ? { protocol: model.protocol || DEFAULT_RERANK_PROTOCOL } : {}),
     ...(model.maxOutputTokens !== undefined ? { max_output_tokens: model.maxOutputTokens } : {}),
@@ -1136,6 +1149,7 @@ function normModels(spec: ProviderSpec): NModel[] {
             : undefined,
         outboundParams: parseOutboundParams(m.outbound_params),
         runtimeParameters: m.runtime_parameters,
+        contextPolicy: m.context_policy,
         creditRates: m.credit_rates || DEFAULT_CREDIT_RATES,
         maxOutputTokens: m.max_output_tokens,
         contextWindow: Number.isInteger(m.context_window) && (m.context_window as number) > 0
@@ -1264,7 +1278,7 @@ export function providerSignature(
   protocol: ProviderType,
   baseUrl: string,
   messagesPath: string,
-  models: Array<{ id: string; caps?: string[]; protocol?: string; apiSurface?: string; outboundParams?: OutboundParams; runtimeParameters?: RuntimeParameters; requestBodyOverrides?: unknown; contextWindow?: number; maxOutputTokens?: number }>,
+  models: Array<{ id: string; caps?: string[]; protocol?: string; apiSurface?: string; outboundParams?: OutboundParams; runtimeParameters?: RuntimeParameters; contextPolicy?: ContextPolicy; requestBodyOverrides?: unknown; contextWindow?: number; maxOutputTokens?: number }>,
   secretToken: string,
   transportOptions?: unknown,
 ): string {
@@ -1281,6 +1295,7 @@ export function providerSignature(
         apiSurface: model.apiSurface === "responses" ? "responses" : null,
         outboundParams: model.outboundParams,
         runtimeParameters: model.runtimeParameters,
+        contextPolicy: model.contextPolicy,
         requestBodyOverrides: model.requestBodyOverrides,
         contextWindow: model.contextWindow,
         maxOutputTokens: model.maxOutputTokens,
@@ -1540,6 +1555,13 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 }) {
   const router = useAppRouter();
   const requestedProposalId = useSearchParams()?.get("configuration_proposal") ?? null;
+  const [bowraCallback] = useState(() => {
+    const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    return { token: query.get("bowra_import"), error: query.get("bowra_error") };
+  });
+  const bowraImportRequest = useRef<Promise<BowraImport> | null>(null);
+  const bowraImportLoaded = useRef(false);
+  const [bowraImported, setBowraImported] = useState(false);
   const loadedProposal = useRef<string | null>(null);
   const draftDirtyRef = useRef(false);
   const [configurationSource, setConfigurationSource] = useState<{ id: string; fingerprint: string } | null>(null);
@@ -1954,10 +1976,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       setValidation(null);
       setReviewOpen(false);
       setError(null);
-    }).catch(() => {
+    }).catch((error: unknown) => {
       if (!cancelled) {
         loadedProposal.current = requestedProposalId;
-        setError(t("configuration_proposal_unavailable"));
+        setError(t(modelSettingsErrorKey(error) === "err_config_version_conflict"
+          ? "configuration_proposal_stale"
+          : "configuration_proposal_unavailable"));
       }
     }).finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; setBusy(false); };
@@ -1969,6 +1993,71 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     const timer = window.setTimeout(() => void refreshOverviewReadiness(config, data.version, v2Enabled), 250);
     return () => window.clearTimeout(timer);
   }, [scoped, section, loading, config, data?.version, v2Enabled, refreshOverviewReadiness]);
+
+  useEffect(() => {
+    if (section !== "overview" || loading || !data || bowraImportLoaded.current) return;
+    if (!bowraCallback.token && !bowraCallback.error) return;
+    const clean = new URL(window.location.href);
+    if (!clean.pathname.endsWith("/")) clean.pathname += "/";
+    clean.searchParams.delete("bowra_import");
+    clean.searchParams.delete("bowra_error");
+    window.history.replaceState(window.history.state, "", `${clean.pathname}${clean.search}${clean.hash}`);
+    if (bowraCallback.error) {
+      bowraImportLoaded.current = true;
+      const reasons = ["invalid_callback", "unavailable", "permission_changed", "cancelled", "rate_limited", "service_unavailable", "exchange_rejected", "exchange_uncertain", "no_models"];
+      setError(t(`bowra.${reasons.includes(bowraCallback.error) ? bowraCallback.error : "exchange_uncertain"}`));
+      return;
+    }
+    // Strict Mode may rerun this effect; share the single credential claim.
+    bowraImportRequest.current ??= claimBowraImport(bowraCallback.token!);
+    let cancelled = false;
+    setBusy(true);
+    void bowraImportRequest.current.then((result) => {
+      if (cancelled) return;
+      bowraImportLoaded.current = true;
+      bowraImportRequest.current = null;
+      let key = "bowra";
+      for (let suffix = 2; config.providers[key]; suffix++) key = `bowra_${suffix}`;
+      const draft: TeamConfig = {
+        ...config,
+        providers: { ...config.providers, [key]: {
+          type: "openai_compatible", display_name: "Bowra", base_url: result.base_url, api_key: result.api_key,
+          // Intended uses are declarations, never successful verification evidence.
+          models: result.models.map((id) => ({ id, capabilities: ["chat", "tool"] })),
+        } },
+        tiers: !config.tiers.primary?.provider && result.models.length === 1
+          ? { ...config.tiers, primary: { provider: key, model: result.models[0] } }
+          : config.tiers,
+      };
+      setConfig(draft);
+      setPageMode("edit");
+      setBowraImported(true);
+      setValidation(null);
+      setError(null);
+    }).catch(() => {
+      if (!cancelled) {
+        bowraImportLoaded.current = true;
+        setError(t("bowra.import_expired"));
+      }
+    }).finally(() => { if (!cancelled) setBusy(false); });
+    return () => { cancelled = true; };
+  }, [section, loading, data, bowraCallback, config, t]);
+
+  const connectBowra = async () => {
+    if ((isDirty || connectionDirty) && !(await confirmLeave())) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await startBowraConnection();
+      window.location.assign(result.authorize_url);
+    } catch (cause) {
+      const code = cause instanceof ApiError ? cause.code : undefined;
+      setError(t(code === "bowra_https_callback_required" ? "bowra.https_required"
+        : code === "bowra_encryption_required" ? "bowra.encryption_required"
+        : code === "bowra_service_url_invalid" ? "bowra.service_url_invalid" : "bowra.start_failed"));
+      setBusy(false);
+    }
+  };
 
   const changedSections = useMemo(
     () => ["providers", "tiers", "kb", "media", "search"].filter(
@@ -2034,6 +2123,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 
   const discardDraft = useCallback(() => {
     setConfigurationSource(null);
+    setBowraImported(false);
     setConfig(baseConfig);
     if (scoped) { connectionInitializedRef.current = false; connectionBaselineRef.current = null; }
     setValidation(null);
@@ -2120,6 +2210,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       setConfigurationSource(null);
       setBaseConfig(normalized);
       setConfig(normalized);
+      setBowraImported(false);
       setReviewOpen(false);
       setReviewStale(null);
       setApplyReindexConfirmed(false);
@@ -2433,6 +2524,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           || "",
         modelCount: normModels(spec).length + mediaCount + searchCount,
         fingerprint: fingerprints[runtimeKey] || spec.fingerprint || null,
+        authType: spec.auth?.type,
       };
     })
   ), [baseConfig, fingerprints]);
@@ -2680,6 +2772,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       ),
       outboundParams: m.outboundParams || {},
       runtimeParameters: m.runtimeParameters,
+      contextPolicy: m.contextPolicy,
       creditRates: m.creditRates,
       contextWindow: m.contextWindow,
       maxOutputTokens: m.maxOutputTokens,
@@ -3468,6 +3561,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         parseModelRequestBodyOverrides(m.requestBodyOverrides || "{}") || {},
       outboundParams: m.outboundParams,
       runtimeParameters: m.runtimeParameters,
+      contextPolicy: m.contextPolicy,
       creditRates: m.creditRates,
       contextWindow: m.contextWindow,
       maxOutputTokens: m.maxOutputTokens,
@@ -3934,12 +4028,13 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           } : undefined}
       retryIndexDisabled={busy || isDirty}
       onAddProvider={() => router.push("/team/settings/models/connections/new/")}
+      onConnectBowra={data?.features?.bowra_connect ? () => void connectBowra() : undefined}
       onEditProvider={(key) => router.push(`/team/settings/models/connections/edit/?id=${encodeURIComponent(draftProviderIds[key] || "")}`)}
       onRetryReadiness={() => void refreshOverviewReadiness(baseConfig, data?.version ?? 0, v2Enabled)}
       onVerify={() => setVerificationSelectionOpen(true)}
       verificationBusy={verificationBusy}
       verificationAvailable={verificationCandidates.length > 0 && !verificationWorkflowOpen && !overviewReadinessLoading}
-      configurationActionsDisabled={verificationWorkflowOpen}
+      configurationActionsDisabled={verificationWorkflowOpen || busy}
     />
   ) : null;
 
@@ -3966,7 +4061,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   }
 
   return (
-    <div ref={pageRef} className={`mset${LLM_SETTINGS_V4_ENABLED ? " v4" : ""}`}>
+    <ConfigurationFieldProvider contracts={data?.field_contracts}><div ref={pageRef} className={`mset${LLM_SETTINGS_V4_ENABLED ? " v4" : ""}`}>
       <PageHead
         t={t}
         v4={LLM_SETTINGS_V4_ENABLED}
@@ -3983,6 +4078,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         actionsDisabled={verificationWorkflowOpen}
         backDisabled={verificationBatchRunning}
       />
+      {bowraImported ? <p role="status">{t("bowra.imported")}</p> : null}
       {scoped && section === "connection" && pageMode === "overview" ? <p role="status">{t("sections.saved")}</p> : null}
       {error ? (
         <div className="test-result err" role="alert"><span className="ti"><AlertTriangle size={15} /></span><div>{error}</div></div>
@@ -4320,7 +4416,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           <div className="default-sel">
             {/* Primary model */}
             <div className="tier-row">
-              <div className="tier-label"><span className="tdot" /> {t("tier.primary_label")}</div>
+              <div className="tier-label"><span className="tdot" /> {t("tier.primary_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.primary" label={t("tier.primary_label")} /></div>
               <span className="tier-hint">{t("default.tool_only")}</span>
             </div>
             <div className="selbox">
@@ -4343,7 +4439,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             ) : null}
             {/* Fallback chain (primary model only) */}
             <div className="fallback">
-              <div className="fl-lab"><Layers size={11} /> {t("default.fallback_label")} <span className="fl-note">{t("default.fallback_note")}</span></div>
+              <div className="fl-lab"><Layers size={11} /> {t("default.fallback_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.primary_fallback" label={t("default.fallback_label")} /> <span className="fl-note">{t("default.fallback_note")}</span></div>
               {fallbackChain.length > 0 ? (
                 <div className="fb-chain">
                   {fallbackChain.map((f, i) => (
@@ -4423,7 +4519,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               <div className="tier-adv-body">
                 {/* Lightweight model */}
                 <div className="tier-item">
-                  <div className="tier-row"><div className="tier-label"><span className="tdot soft" /> {t("tier.fast_label")}</div></div>
+                  <div className="tier-row"><div className="tier-label"><span className="tdot soft" /> {t("tier.fast_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.fast" label={t("tier.fast_label")} /></div></div>
                   <div className="ti-desc"><span>{t("tier.fast_desc1")}</span><span>{t("tier.fast_desc2")}</span></div>
                   <div className="selbox">
                     <select
@@ -4448,7 +4544,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 </div>
                 {/* Judge model */}
                 <div className={`tier-item${evalSameAsPrimary ? " warn" : ""}`}>
-                  <div className="tier-row"><div className="tier-label"><span className="tdot soft" /> {t("tier.judge_label")}</div></div>
+                  <div className="tier-row"><div className="tier-label"><span className="tdot soft" /> {t("tier.judge_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.judge" label={t("tier.judge_label")} /></div></div>
                   <div className="ti-desc"><span>{t("tier.judge_desc1")}</span><span>{t("tier.judge_desc2")}</span></div>
                   <div className="selbox">
                     <select
@@ -4495,7 +4591,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         <div className="kb-sel">
           <div className="kb-row kb-retrieval-row">
             <div className="kbl">
-              <label className="n" htmlFor="kb-retrieval-count">{t("kb.retrieval_count")}</label>
+              <span className="configuration-field-label"><label className="n" htmlFor="kb-retrieval-count">{t("kb.retrieval_count")}</label><ConfigurationFieldHelp field="team_model_config.kb.retrieval_top_k" label={t("kb.retrieval_count")} /></span>
               <div id="kb-retrieval-count-hint" className="opt">{t("kb.retrieval_hint", { count: 15, max: 50 })}</div>
             </div>
             <div className="selbox">
@@ -4528,7 +4624,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         ) : (
           <div className={`kb-sel${!activeEmbed ? " required" : ""}`}>
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vector")}</div>
+              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vector")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.embed" label={t("kb.vector")} /></div>
                 <div className={activeEmbed ? "opt" : "req"}>{activeEmbed ? t("kb.embedding") : t("kb.required_unset")}</div></div>
               <div className="selbox">
                 <select
@@ -4552,7 +4648,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               <div className="kb-inflight"><span className="spin" /><span>{t("kb.inflight")}</span><span className="bar" /></div>
             ) : null}
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Layers size={14} /> {t("kb.rerank")}</div><div className="opt">{t("kb.rerank_opt")}</div></div>
+              <div className="kbl"><div className="n"><Layers size={14} /> {t("kb.rerank")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.rerank" label={t("kb.rerank")} /></div><div className="opt">{t("kb.rerank_opt")}</div></div>
               <div className="selbox">
                 <select
                   name="rerank_model"
@@ -4567,7 +4663,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             </div>
             {/* P1.5: document-image recognition (vision) + row extraction (row_extractor) — optional, do not trigger index rebuilding. */}
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vision")}</div><div className="opt">{t("kb.vision_opt")}</div></div>
+              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vision")}<ConfigurationFieldHelp field="team_model_config.kb.active.vision" label={t("kb.vision")} /></div><div className="opt">{t("kb.vision_opt")}</div></div>
               <div className="selbox">
                 <select
                   name="vision_model"
@@ -4581,7 +4677,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               </div>
             </div>
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Bot size={14} /> {t("kb.row_extractor")}</div><div className="opt">{t("kb.row_extractor_opt")}</div></div>
+              <div className="kbl"><div className="n"><Bot size={14} /> {t("kb.row_extractor")}<ConfigurationFieldHelp field="team_model_config.kb.active.row_extractor" label={t("kb.row_extractor")} /></div><div className="opt">{t("kb.row_extractor_opt")}</div></div>
               <div className="selbox">
                 <select
                   name="row_extractor_model"
@@ -4624,7 +4720,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         ) : (
           <div className="kb-sel">
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Palette size={14} /> {t("media.image_label")}</div><div className="opt">{t("media.optional")}</div></div>
+              <div className="kbl"><div className="n"><Palette size={14} /> {t("media.image_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.media.active.image_gen" label={t("media.image_label")} /></div><div className="opt">{t("media.optional")}</div></div>
               <div className="selbox">
                 <select
                   name="image_generation_model"
@@ -4665,7 +4761,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         ) : (
           <div className="kb-sel">
             <div className="kb-row">
-              <div className="kbl"><div className="n"><Search size={14} /> {t("search.model_label")}</div><div className="opt">{t("search.optional")}</div></div>
+              <div className="kbl"><div className="n"><Search size={14} /> {t("search.model_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.search.active.web_search" label={t("search.model_label")} /></div><div className="opt">{t("search.optional")}</div></div>
               <div className="selbox">
                 <select
                   name="web_search_model"
@@ -4959,7 +5055,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           <h3 id="mset-rebuild-title" className="modal-title">{t("kb.rebuild_title")}</h3>
           <p id="mset-rebuild-body" className="modal-body">{t("kb.rebuild_body", { model: rebuild.id })}</p>
           <div className="fld">
-            <label htmlFor="mset-embedding-dim">{t("kb.dim_label")}</label>
+            <span className="configuration-field-label"><label htmlFor="mset-embedding-dim">{t("kb.dim_label")}</label><ConfigurationFieldHelp field="team_model_config.kb.models.*.dim" label={t("kb.dim_label")} /></span>
             <input id="mset-embedding-dim" name="embedding_dim" className="inp mono" inputMode="numeric" value={rebuildDim} placeholder="1024"
               onChange={(e) => setRebuildDim(e.target.value.replace(/[^0-9]/g, ""))} />
             <span className="hint">{t("kb.dim_hint")}</span>
@@ -4984,7 +5080,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         </DialogShell>
       ) : null}
       {confirmDialog}
-    </div>
+    </div></ConfigurationFieldProvider>
   );
 }
 
@@ -5265,7 +5361,7 @@ export function ConnectPanel(props: {
           all form controls together, aligning values and protection. */}
       <fieldset className="connect-body legacy-mset-connect-fieldset" disabled={busy}>
         {aiFill ? <div className="ccp">{aiFill}</div> : null}
-        <div className="fld"><label>{t("connect.protocol")}</label>
+        <div className="fld"><span className="configuration-field-label"><label>{t("connect.protocol")}</label><ConfigurationFieldHelp field="team_model_config.providers.*.type" label={t("connect.protocol")} /></span>
           {/* Protocol switches filter model capabilities: arrowing through Anthropic deletes embed/rerank,
               so arrows only move focus; space / enter / click switches protocols. */}
           <RadioGroup
@@ -5304,7 +5400,7 @@ export function ConnectPanel(props: {
             </span>
           </div>
         </div>
-        <div className="fld"><label htmlFor="mset-provider-name">{v2 ? t("v2.runtime_key") : t("connect.name")}<RequiredMark /></label>
+        <div className="fld"><span className="configuration-field-label"><label htmlFor="mset-provider-name">{v2 ? t("v2.runtime_key") : t("connect.name")}<RequiredMark /></label><ConfigurationFieldHelp field="team_model_config.providers.*.display_name" label={t("connect.name")} /></span>
           <input
             id="mset-provider-name"
             name="provider_name"
@@ -5322,7 +5418,7 @@ export function ConnectPanel(props: {
             : v2
               ? <span className="hint">{t("v2.runtime_key_hint")}</span>
               : null}</div>
-        <div className="fld"><label htmlFor="mset-provider-base-url">
+        <div className="fld"><span className="configuration-field-label"><label htmlFor="mset-provider-base-url">
           {draft.protocol === "azure_openai"
             ? t("sources.base_url")
             : draft.protocol === "custom_http"
@@ -5330,7 +5426,7 @@ export function ConnectPanel(props: {
               : t("sources.base_url")}
           {/* custom_http templates may contain a complete URL, allowing empty base_url (the label already says "可选"). */}
           {draft.protocol === "custom_http" ? null : <RequiredMark />}
-        </label>
+        </label><ConfigurationFieldHelp field="team_model_config.providers.*.base_url" label={t("sources.base_url")} /></span>
           <input
             id="mset-provider-base-url"
             name="provider_base_url"
@@ -5388,7 +5484,7 @@ export function ConnectPanel(props: {
           ) : null}</div>
         {draft.protocol === "azure_openai" ? (
           <div className="fld">
-            <label htmlFor="mset-provider-api-version">API Version<RequiredMark /></label>
+            <span className="configuration-field-label"><label htmlFor="mset-provider-api-version">API Version<RequiredMark /></label><ConfigurationFieldHelp field="team_model_config.providers.*.api_version" label="API Version" /></span>
             <input
               id="mset-provider-api-version"
               name="provider_api_version"
@@ -5484,7 +5580,7 @@ export function ConnectPanel(props: {
           </div>
         ) : null}
         {draft.protocol === "anthropic_compatible" ? (
-          <div className="fld"><label htmlFor="mset-provider-messages-path">messages_path</label>
+          <div className="fld"><span className="configuration-field-label"><label htmlFor="mset-provider-messages-path">messages_path</label><ConfigurationFieldHelp field="team_model_config.providers.*.messages_path" label="messages_path" /></span>
             <input id="mset-provider-messages-path" name="provider_messages_path" className="inp mono" value={draft.messagesPath} placeholder="/messages"
               autoComplete="off"
               spellCheck={false}
@@ -5652,7 +5748,7 @@ export function ConnectPanel(props: {
           </div>
         ) : null}
         {/* Every model must declare capabilities; independent external-service connections may save URL and authentication first. */}
-        <div className="fld"><label>{t("connect.catalog")}{!modelsOptional ? <RequiredMark /> : null}</label>
+        <div className="fld"><span className="configuration-field-label"><label>{t("connect.catalog")}{!modelsOptional ? <RequiredMark /> : null}</label><ConfigurationFieldHelp field="team_model_config.providers.*.models" label={t("connect.catalog")} /></span>
           <div className="catalog-tools">
             <span className="lab">{t("connect.catalog_hint")}</span>
             <button
@@ -5681,6 +5777,7 @@ export function ConnectPanel(props: {
                 <div key={idx} className="medit-row">
                   <div className="medit-id">
                     <span className="cat-src">{m.source === "manual" ? t("connect.src_manual") : t("connect.src_preset")}</span>
+                    <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.id" label={t("connect.catalog")} />
                     <input
                       className="mid"
                       name={`provider_model_${idx}`}
@@ -5695,7 +5792,7 @@ export function ConnectPanel(props: {
                   {draft.protocol === "azure_openai"
                     || draft.protocol === "custom_http" ? (
                     <div className="medit-proto">
-                      <span className="mp-lab">Deployment</span>
+                      <span className="configuration-field-label"><span className="mp-lab">Deployment</span><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.deployment" label="Deployment" /></span>
                       <input
                         className="inp mono"
                         name={`provider_deployment_${idx}`}
@@ -5721,7 +5818,7 @@ export function ConnectPanel(props: {
                       the hint (design S1/S3). */}
                   {draft.protocol === "openai_compatible" && m.caps.some((c) => ["chat", "tool", "vision"].includes(c)) ? (
                     <div className="medit-proto medit-setting-row">
-                      <label className="mp-lab" htmlFor={`mset-model-api-surface-${idx}`}>{t("connect.api_surface_label")}</label>
+                      <span className="configuration-field-label"><label className="mp-lab" htmlFor={`mset-model-api-surface-${idx}`}>{t("connect.api_surface_label")}</label><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.api_surface" label={t("connect.api_surface_label")} /></span>
                       <div className="selbox">
                         <select
                           id={`mset-model-api-surface-${idx}`}
@@ -5744,7 +5841,7 @@ export function ConnectPanel(props: {
                   ) : null}
                   {m.caps.some((c) => c === "chat" || c === "tool") ? (
                     <div className="medit-proto medit-setting-row">
-                      <label className="mp-lab" htmlFor={`mset-model-context-window-${idx}`}>{t("connect.context_window_label")}</label>
+                      <span className="configuration-field-label"><label className="mp-lab" htmlFor={`mset-model-context-window-${idx}`}>{t("connect.context_window_label")}</label><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.context_window" label={t("connect.context_window_label")} /></span>
                       <input
                         id={`mset-model-context-window-${idx}`}
                         className="inp mono"
@@ -5752,17 +5849,19 @@ export function ConnectPanel(props: {
                         min={1}
                         step={1}
                         name={`provider_model_context_window_${idx}`}
-                        value={m.contextWindow ?? (windowCatalog && m.id.trim() ? suggestedContextWindow(windowCatalog, m.id).value : "")}
+                        value={m.contextWindow ?? (m.id.trim() ? suggestedContextWindow(windowCatalog, m.id, draft.providerContextWindow)?.value ?? "" : "")}
                         placeholder={t("connect.context_window_placeholder")}
                         onChange={(event) => setRowContextWindow(idx, event.target.value)}
                       />
                       {(() => {
                         // The source tag shows only while the prefilled value is unchanged (design §8.2).
-                        const suggestion = m.contextWindow === undefined && windowCatalog && m.id.trim() ? suggestedContextWindow(windowCatalog, m.id) : null;
+                        const suggestion = m.contextWindow === undefined && m.id.trim() ? suggestedContextWindow(windowCatalog, m.id, draft.providerContextWindow) : null;
                         return (
                           <span className="mp-hint">
                             <span>
-                              {suggestion ? `${suggestion.source === "catalog"
+                              {suggestion ? `${suggestion.source === "provider"
+                                ? t("connect.context_window_from_provider")
+                                : suggestion.source === "catalog"
                                 ? t("connect.context_window_from_catalog")
                                 : t("connect.context_window_default_tag", { value: suggestion.value.toLocaleString(locale) })} · ` : ""}
                               {/* The explanation always shows; an unknown model adds what to do about the default. */}
@@ -5773,6 +5872,10 @@ export function ConnectPanel(props: {
                         );
                       })()}
                     </div>
+                  ) : null}
+                  {m.caps.some((capability) => ["chat", "tool", "vision"].includes(capability)) ? (
+                    <ContextPolicyFields index={idx} value={m.contextPolicy} disabled={busy}
+                      onChange={(value) => patchModelRows(draft.models.map((model, index) => index === idx ? { ...model, contextPolicy: value } : model))} />
                   ) : null}
                   {m.caps.some((capability) => ["chat", "tool", "vision"].includes(capability)) ? (
                     <OutputBudgetField
@@ -5788,19 +5891,20 @@ export function ConnectPanel(props: {
                       <legend className="mp-lab">{t("connect.credit_rates_label")}</legend>
                       <div className="mp-rate-fields">
                         {(["input", "cached_input", "output"] as const).map((kind) => (
-                          <label key={kind} className="mp-rate-row">
-                            <span className="mp-lab">{t(`connect.credit_rate_${kind}`)}</span>
+                          <div key={kind} className="mp-rate-row">
+                            <span className="configuration-field-label"><label className="mp-lab" htmlFor={`mset-model-${idx}-credit-${kind}`}>{t(`connect.credit_rate_${kind}`)}</label><ConfigurationFieldHelp field={`team_model_config.providers.*.models.*.credit_rates.${kind}`} label={t(`connect.credit_rate_${kind}`)} /></span>
                             <input
                               className="inp mono"
                               type="number"
                               min={0}
                               max={1000}
                               step="0.000001"
+                              id={`mset-model-${idx}-credit-${kind}`}
                               name={`provider_model_credit_rate_${kind}_${idx}`}
                               value={m.creditRates?.[kind] ?? "1"}
                               onChange={(event) => setRowCreditRate(idx, kind, event.target.value)}
                             />
-                          </label>
+                          </div>
                         ))}
                       </div>
                       {!creditRatesValid(m.creditRates) ? <span className="hint field-error">{t("connect.credit_rates_invalid")}</span> : null}
@@ -5829,6 +5933,7 @@ export function ConnectPanel(props: {
                       adaptations={adaptations}
                       rawSlot={providerConsumesBodyOverrides(draft.protocol) ? (
                         <>
+                          <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.request_body_overrides" label={t("connect.model_body_overrides")} />
                           <textarea
                             className="inp mono"
                             name={`provider_model_overrides_${idx}`}
@@ -5855,7 +5960,7 @@ export function ConnectPanel(props: {
                     />
                   ) : null}
                   <div className="medit-caps">
-                    {caps.map((c) => {
+                    <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.capabilities" label={t("v2.capability_required_title")} />{caps.map((c) => {
                       const state = modelCapabilityTestState(m.id, m.caps, c, draft.testing, testResult?.steps);
                       const status = state === "verified" ? t("connect.verified")
                         : state === "degraded" ? t("connect.degraded")
@@ -5869,7 +5974,7 @@ export function ConnectPanel(props: {
                   <button type="button" className="medit-x" title={t("common.remove")} aria-label={`${t("common.remove")} ${m.id || idx + 1}`} onClick={() => removeRow(idx)}><XSm size={14} /></button>
                   {m.caps.includes(IMAGE_CAP) ? (
                     <div className="medit-proto">
-                      <span className="mp-lab">{t("connect.protocol_label")}</span>
+                      <span className="configuration-field-label"><span className="mp-lab">{t("connect.protocol_label")}</span><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.protocol" label={t("connect.protocol_label")} /></span>
                       <div className="selbox">
                         <select
                           name={`provider_model_protocol_${idx}`}
@@ -5885,7 +5990,7 @@ export function ConnectPanel(props: {
                     </div>
                   ) : m.caps.includes(SEARCH_CAP) ? (
                     <div className="medit-proto">
-                      <span className="mp-lab">{t("connect.protocol_label")}</span>
+                      <span className="configuration-field-label"><span className="mp-lab">{t("connect.protocol_label")}</span><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.protocol" label={t("connect.protocol_label")} /></span>
                       <div className="selbox">
                         <select
                           name={`provider_model_protocol_${idx}`}
@@ -5901,7 +6006,7 @@ export function ConnectPanel(props: {
                     </div>
                   ) : m.caps.includes("rerank") ? (
                     <div className="medit-proto">
-                      <span className="mp-lab">{t("connect.protocol_label")}</span>
+                      <span className="configuration-field-label"><span className="mp-lab">{t("connect.protocol_label")}</span><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.protocol" label={t("connect.protocol_label")} /></span>
                       <div className="selbox">
                         <select
                           name={`provider_model_protocol_${idx}`}

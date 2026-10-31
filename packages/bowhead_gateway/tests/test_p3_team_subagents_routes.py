@@ -768,23 +768,6 @@ def test_injection_lint_rejects_poisoned_text(tmp_path):
     assert "lint" in r.text.lower()
 
 
-def test_max_iterations_range(tmp_path):
-    store = _store(tmp_path)
-    client = _client(store, User(id="u", team_id="team_a", email="a@x.com"))
-    assert (
-        client.post(
-            _BASE, json={"name": "hi", "system_prompt": "Test operating instructions.", "tool_refs": ["bi_query"], "max_iterations": 999}
-        ).status_code
-        == 422
-    )
-    assert (
-        client.post(
-            _BASE, json={"name": "lo", "system_prompt": "Test operating instructions.", "tool_refs": ["bi_query"], "max_iterations": 0}
-        ).status_code
-        == 422
-    )
-
-
 def test_patch_keeps_name_and_delete_is_team_bound(tmp_path):
     store = _store(tmp_path)
     client = _client(store, User(id="u_a", team_id="team_a", email="a@x.com"))
@@ -1988,7 +1971,7 @@ def test_governed_definition_write_says_which_path_is_closed_not_refresh_and_ret
     r = client.patch(
         f"{_BASE}/{sid}/configuration",
         headers={"If-Match": f'W/"{sid}:{version}"'},
-        json={"max_iterations": 13},
+        json={"system_prompt": "Updated operating instructions."},
     )
     assert r.status_code == 409, r.text
     code = r.json()["detail"]["error"]["code"]
@@ -2008,7 +1991,7 @@ def test_governed_verdict_does_not_depend_on_guessing_the_right_etag(tmp_path):
     r = client.patch(
         f"{_BASE}/{sid}/configuration",
         headers={"If-Match": f'W/"{sid}:{version + 7}"'},
-        json={"max_iterations": 13},
+        json={"system_prompt": "Updated operating instructions."},
     )
     assert r.status_code == 409, r.text
     assert r.json()["detail"]["error"]["code"] == "agent_revision_writer_required", r.text
@@ -2026,10 +2009,10 @@ def test_ungoverned_agent_still_patches_normally(tmp_path):
     r = client.patch(
         f"{_BASE}/{sid}/configuration",
         headers={"If-Match": f'W/"{sid}:{version}"'},
-        json={"max_iterations": 13},
+        json={"system_prompt": "Updated operating instructions."},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["max_iterations"] == 13
+    assert r.json()["system_prompt"] == "Updated operating instructions."
 
 
 def test_status_only_write_is_not_a_definition_write(tmp_path):

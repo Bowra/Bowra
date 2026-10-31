@@ -32,6 +32,40 @@ def test_raw_spec_normalization_matches_canonical_fixture(fixture: dict) -> None
     assert fixture["rawSpec"] == original
 
 
+def test_equivalent_date_dimensions_do_not_create_false_line_series() -> None:
+    spec = {
+        "kind": "line",
+        "title": "Revenue",
+        "row_count": 3,
+        "columns": [
+            {"key": "date", "header": "Date", "type": "date"},
+            {"key": "raw", "header": "Original date", "type": "categorical"},
+            {"key": "revenue", "header": "Revenue", "type": "numeric", "unit": "亿元"},
+        ],
+        "rows": [
+            {"date": "2026-01-02", "raw": "20260102", "revenue": 0.0009},
+            {"date": "2026-01-28", "raw": "20260128", "revenue": 0.0012},
+            {"date": "2026-03-03", "raw": "20260303", "revenue": -0.00004},
+        ],
+    }
+    original = copy.deepcopy(spec)
+    normalized, shape = normalize_chart_for_rendering_v1(spec)
+    assert normalized["rows"] == spec["rows"] and shape["seriesCount"] == 1
+    assert spec == original
+    explicit = copy.deepcopy(spec)
+    explicit["columns"][1]["role"] = "color"
+    assert normalize_chart_for_rendering_v1(explicit)[1]["seriesCount"] == 3
+    mismatched = copy.deepcopy(spec)
+    mismatched["rows"][1]["raw"] = "20260129"
+    assert normalize_chart_for_rendering_v1(mismatched)[1]["seriesCount"] == 3
+    invalid = copy.deepcopy(spec)
+    invalid["rows"][1].update(date="2026-02-30", raw="20260230")
+    assert normalize_chart_for_rendering_v1(invalid)[1]["seriesCount"] == 3
+    repeated = copy.deepcopy(spec)
+    repeated["rows"][1].update(date="2026-01-02", raw="20260102")
+    assert normalize_chart_for_rendering_v1(repeated)[1]["seriesCount"] == 2
+
+
 @pytest.mark.parametrize("fixture", _fixture("presentation_fixtures.json")["fixtures"], ids=lambda value: value["name"])
 def test_presentation_matches_canonical_fixture(fixture: dict) -> None:
     resolved = resolve_chart_presentation_v2(

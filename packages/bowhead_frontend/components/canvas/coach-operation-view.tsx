@@ -22,6 +22,7 @@ import {
   type CoachOperationReceipt,
 } from "@/lib/coach-operations";
 import type { CoachResourceReference } from "@/lib/coach-resource-editors";
+import { CoachCaseDetails } from "./coach-case-details";
 
 const text = (value: unknown) =>
   typeof value === "string" ? value.slice(0, 4000) : "";
@@ -54,7 +55,9 @@ export function operationSummary(receipt: CoachOperationReceipt) {
   const target = record(result.result_target ?? result.original_target);
   const requirement = record(result.requirement);
   const status = text(
-    receipt.operation_ref.kind === "tool_requirement"
+    receipt.operation_ref.kind === "eval_cases"
+      ? caseProposalState(receipt)
+      : receipt.operation_ref.kind === "tool_requirement"
       ? "requirement_recorded"
       : (result.outcome ??
           result.state ??
@@ -88,7 +91,8 @@ export function operationSummary(receipt: CoachOperationReceipt) {
 /** Where a receipt's card action goes: a hosted Skill / Plugin / Agent editor, or the original Agent draft. */
 export type CoachOperationTarget =
   | { kind: "resource"; reference: CoachResourceReference }
-  | { kind: "agent_draft"; draftId: string };
+  | { kind: "agent_draft"; draftId: string }
+  | { kind: "agent_cases"; agentId: string; pending: boolean };
 
 export type CoachOperationAction =
   | "open_skill"
@@ -96,7 +100,8 @@ export type CoachOperationAction =
   | "review_in_agent"
   | "view_in_agent"
   | "open_draft"
-  | "review_in_draft";
+  | "review_in_draft"
+  | "view_current_cases";
 
 const textId = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 512 ? value : null;
 
@@ -123,7 +128,11 @@ export function operationTarget(receipt: CoachOperationReceipt): { action: Coach
     const revision = target.revision == null ? null : textId(String(target.revision));
     return id && revision ? { action: "open_plugin", target: { kind: "resource", reference: { kind: "capability", id, revision } } } : null;
   }
-  if (ref.kind === "agent_change" || ref.kind === "eval_cases" || ref.kind === "ci_delegation") {
+  if (ref.kind === "eval_cases") {
+    const pending = caseProposalState(receipt) === "pending";
+    return { action: pending ? "review_in_agent" : "view_current_cases", target: { kind: "agent_cases", agentId: ref.agent_id, pending } };
+  }
+  if (ref.kind === "agent_change" || ref.kind === "ci_delegation") {
     // Agent editors are opened by identity; the server reads the current working copy (no exact revision check),
     // so the reference carries a placeholder revision instead of a stale one.
     // Coach writes the draft directly: an accepted change is there to look at, not to review.
@@ -137,6 +146,16 @@ export function operationTarget(receipt: CoachOperationReceipt): { action: Coach
     return { action: ref.kind === "draft_record" ? "open_draft" : "review_in_draft", target: { kind: "agent_draft", draftId: ref.draft_id } };
   }
   return null;
+}
+
+/** Decisions belong to the original proposal, not the currently active suite. */
+export function caseProposalState(receipt: CoachOperationReceipt): "pending" | "accepted" | "dismissed" | "unknown" {
+  const proposal = record(receipt.domain_result.proposal);
+  const cases = Array.isArray(proposal.suggested_cases) ? proposal.suggested_cases : [];
+  if (cases.some((item) => record(item).decision_status === "pending")) return "pending";
+  if (proposal.status === "open" || proposal.status === "pending") return "pending";
+  if (proposal.status === "accepted" || proposal.status === "dismissed") return proposal.status;
+  return "unknown";
 }
 
 type OperationIntent = Exclude<ChatCardIntent, "progress">;
@@ -249,8 +268,9 @@ export function CoachOperationView({
 
   const titleId = `coach-operation-${pointer.requestId}-title`;
   const eyebrow = intent === "info" ? statusLabel : label;
+  const caseState = current?.receipt && kind === "eval_cases" ? caseProposalState(current.receipt) : null;
   const lines = summary?.status === "unknown" ? [t("unknown_body")]
-    : [summary?.summary, summary?.observation ? t(summary.observation) : null, t(`limits.${kind}`)];
+    : [summary?.summary, summary?.observation ? t(summary.observation) : null, caseState ? t(`case_limits.${caseState}`) : t(`limits.${kind}`)];
   return (
     <CanvasObjectSurface
       labelledBy={summary ? titleId : undefined}
@@ -278,7 +298,7 @@ export function CoachOperationView({
             icon={<ListChecks size={14} aria-hidden />}
             eyebrow={t("eyebrow")}
             title={summary.title || label}
-            subtitle={t("read_only")}
+            subtitle={t(kind === "eval_cases" ? "case_read_only" : "read_only")}
           />
           <ChatCard
             intent={intent}
@@ -290,6 +310,7 @@ export function CoachOperationView({
             {lines.filter(Boolean).map((line, index) => (
               <p key={index} className="ui-card__text">{line}</p>
             ))}
+            {kind === "eval_cases" && current?.receipt ? <CoachCaseDetails key={pointer.requestId} proposal={record(current.receipt.domain_result.proposal)} /> : null}
           </ChatCard>
         </>
       ) : (

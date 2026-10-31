@@ -123,6 +123,7 @@ class KbFileDTO(BaseModel):
     truncated_rows: KbTruncatedRows | None = None
 
     version: int = 1
+    ingestion_action_id: str | None = None
     active_generation_id: str | None = None
     source_observation_json: str | None = Field(default=None, exclude=True)
     source_health: dict[str, Any] | None = None

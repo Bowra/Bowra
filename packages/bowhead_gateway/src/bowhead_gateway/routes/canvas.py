@@ -1041,6 +1041,7 @@ async def report_results_query(
             "results_anchor_not_in_view": status.HTTP_409_CONFLICT,
             "results_filter_unavailable": status.HTTP_409_CONFLICT,
             "results_read_model_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "results_artifact_contract_unsupported": status.HTTP_409_CONFLICT,
         }[exc.code]
     except Exception as exc:
         cause = exc

@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core.kb.ingestion import KnowledgeAction
 from bowhead_core.kb.parse_recovery import (
     UNFINISHED_PARSE_STATUSES,
     heartbeat_iso,
@@ -194,6 +195,7 @@ def _row_to_dto(row: aiosqlite.Row) -> KbFileDTO:
         source_absent=bool(row["source_absent"]) if "source_absent" in keys else False,
         parse_attempts=row["parse_attempts"] if "parse_attempts" in keys else 0,
         soft_deleted_at=row["soft_deleted_at"],
+        ingestion_action_id=row["ingestion_action_id"] if "ingestion_action_id" in keys else None,
         # Routes fill can_delete/can_change_scope from caller permissions; DTO defaults False.
         can_delete=False,
         can_change_scope=False,
@@ -727,6 +729,8 @@ class KbFilesStore:
         q: str | None = None,
         order_by: str = "uploaded_at",
         order_dir: str = "desc",
+        candidate_limit: int | None = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> list[KbFileDTO]:
         """Cross-scope listing: the union of the single-scope branches of
         :meth:`list_for_scope_filtered` in one query.
@@ -742,6 +746,10 @@ class KbFilesStore:
         """
         if not team_id:
             return []
+        if candidate_limit is not None and (type(candidate_limit) is not int or not 1 <= candidate_limit <= 256):
+            raise ValueError("Invalid candidate limit")
+        if allowed_file_ids == ():
+            return []
         branches: list[str] = []
         params: list[Any] = []
         if personal_owner_id:
@@ -755,9 +763,14 @@ class KbFilesStore:
             params.append(team_scope_id)
         if not branches:
             return []
+        where = ["team_id = ?", f"({' OR '.join(branches)})"]
+        params = [team_id, *params]
+        if allowed_file_ids is not None:
+            where.append("file_id IN ({})".format(",".join("?" for _ in allowed_file_ids)))
+            params.extend(allowed_file_ids)
         return await self._list_filtered(
-            ["team_id = ?", f"({' OR '.join(branches)})"],
-            [team_id, *params],
+            where,
+            params,
             statuses=statuses,
             mime_prefixes=mime_prefixes,
             doc_type_id=doc_type_id,
@@ -766,6 +779,7 @@ class KbFilesStore:
             q=q,
             order_by=order_by,
             order_dir=order_dir,
+            candidate_limit=candidate_limit,
         )
 
     async def _list_filtered(
@@ -781,6 +795,7 @@ class KbFilesStore:
         q: str | None,
         order_by: str,
         order_dir: str,
+        candidate_limit: int | None = None,
     ) -> list[KbFileDTO]:
         where = [*where, "soft_deleted_at IS NULL"]
         params = list(params)
@@ -811,6 +826,9 @@ class KbFilesStore:
         order_sql = f"{col} {direction}, file_id {direction}"
 
         sql = f"SELECT * FROM kb_files WHERE {' AND '.join(where)} ORDER BY {order_sql}"
+        if candidate_limit is not None:
+            sql += " LIMIT ?"
+            params.append(candidate_limit)
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
@@ -1014,6 +1032,17 @@ class KbFilesStore:
             )
             await db.commit()
 
+    async def fail_unstarted_ingestion(self, file: KbFileDTO, *, reason: str) -> None:
+        """Report revoked/unavailable admission without touching a running parse."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE kb_files SET parse_status='failed',parse_error=?,parse_heartbeat_at=? "
+                "WHERE file_id=? AND version=? AND parse_attempts=? AND soft_deleted_at IS NULL "
+                "AND ingestion_action_id IS NOT NULL AND parse_status IN ('pending','queued')",
+                (reason, heartbeat_iso(), file.file_id, file.version, file.parse_attempts),
+            )
+            await db.commit()
+
     async def claim_parse_start(self, file_id: str, *, allow_terminal: bool = False) -> bool:
         """FR1：worker 真正开跑前的原子领取（排队态 → parsing，计一次运行）。
 
@@ -1203,3 +1232,183 @@ class KbFilesStore:
                 (_now(), file_id),
             )
             await db.commit()
+
+    async def create_admitted(
+        self, *, action: KnowledgeAction, source_fingerprint: str, parent_file_id: str | None = None, **values: Any
+    ) -> tuple[str, bool, str]:
+        """Reconcile one explicit action and create membership in one write transaction."""
+        import json
+
+        from bowhead_core.kb.ingestion import KnowledgeWriteError, canonical_hash
+
+        action.require(user_id=values["uploaded_by"], team_id=values["team_id"])
+        destination = {key: values[key] for key in ("scope", "scope_id", "team_id")}
+        if destination["scope"] == "workspace":
+            destination["scope"] = "space"
+            values["scope"] = "space"
+        intent_hash = canonical_hash({"source": values["artifact_id"], "version": source_fingerprint, "destination": destination})
+        action_key = canonical_hash({"actor": action.actor_user_id, "team": action.team_id, "action": "add", "ref": action.action_ref})
+        operation_id = f"kbo_{uuid4().hex}"
+        now = _now()
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA foreign_keys=ON")
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                if parent_file_id is not None:
+                    async with db.execute(
+                        "SELECT team_id,uploaded_by,scope,scope_id,soft_deleted_at,ingestion_action_id FROM kb_files WHERE file_id=?",
+                        (parent_file_id,),
+                    ) as cursor:
+                        parent = await cursor.fetchone()
+                    if (
+                        parent is None
+                        or parent["soft_deleted_at"]
+                        or not parent["ingestion_action_id"]
+                        or (parent["team_id"], parent["uploaded_by"], parent["scope"], parent["scope_id"])
+                        != (action.team_id, action.actor_user_id, values["scope"], values["scope_id"])
+                    ):
+                        raise KnowledgeWriteError("knowledge_bundle_operation_retired")
+                async with db.execute("SELECT * FROM kb_membership_operations WHERE action_key=?", (action_key,)) as cursor:
+                    previous = await cursor.fetchone()
+                if previous:
+                    if previous["intent_hash"] != intent_hash:
+                        raise KnowledgeWriteError("knowledge_operation_intent_conflict")
+                    if previous["state"] == "removed":
+                        raise KnowledgeWriteError("knowledge_operation_removed")
+                    return str(previous["file_id"]), False, str(previous["id"])
+                async with db.execute("SELECT * FROM kb_files WHERE artifact_id=? AND soft_deleted_at IS NULL", (values["artifact_id"],)) as cursor:
+                    existing = await cursor.fetchall()
+                if len(existing) > 1:
+                    raise KnowledgeWriteError("knowledge_membership_conflict")
+                created = not existing
+                if existing:
+                    row = existing[0]
+                    observed = {key: row[key] for key in destination}
+                    if observed["scope"] == "workspace":
+                        observed["scope"] = "space"
+                    if observed != destination:
+                        raise KnowledgeWriteError("knowledge_destination_mismatch")
+                    file_id, revision = str(row["file_id"]), int(row["membership_revision"])
+                else:
+                    file_id, revision = f"kbf_{uuid4().hex[:12]}", 1
+                    status = values.get("initial_parse_status", "pending")
+                    if status not in _PARSE_STATUS_VALUES:
+                        raise ValueError("Unsupported initial parse status")
+                    await db.execute(
+                        """INSERT INTO kb_files
+                        (file_id,artifact_id,filename,mime_type,size_bytes,scope,scope_id,workspace_id,team_id,
+                         uploaded_by,uploaded_at,use_llm_marker,doc_type_id,parse_status,parse_heartbeat_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            file_id,
+                            values["artifact_id"],
+                            values["filename"],
+                            values["mime_type"],
+                            values["size_bytes"],
+                            values["scope"],
+                            values["scope_id"],
+                            values["workspace_id"],
+                            values["team_id"],
+                            values["uploaded_by"],
+                            now,
+                            int(values.get("use_llm_marker", False)),
+                            values.get("doc_type_id"),
+                            status,
+                            now,
+                        ),
+                    )
+                if created:
+                    await db.execute("UPDATE kb_files SET ingestion_action_id=? WHERE file_id=?", (operation_id, file_id))
+                await db.execute(
+                    """INSERT INTO kb_membership_operations
+                    (id,action_key,intent_hash,action,actor_user_id,team_id,workspace_id,artifact_id,file_id,
+                     destination_json,source_fingerprint,action_ref,origin,membership_revision,state,created_at)
+                    VALUES (?,?,?,'add',?,?,?,?,?,?,?,?,?,?,'applied',?)""",
+                    (
+                        operation_id,
+                        action_key,
+                        intent_hash,
+                        action.actor_user_id,
+                        action.team_id,
+                        action.workspace_id,
+                        values["artifact_id"],
+                        file_id,
+                        json.dumps(destination, sort_keys=True),
+                        source_fingerprint,
+                        action.action_ref,
+                        action.origin,
+                        revision,
+                        now,
+                    ),
+                )
+                await db.commit()
+                return file_id, created, operation_id
+            except BaseException:
+                await db.rollback()
+                raise
+
+    async def remove_admitted(self, file_id: str, *, action: KnowledgeAction) -> str:
+        """Retire membership before cleanup; all prior add receipts remain retired."""
+        from bowhead_core.kb.ingestion import canonical_hash
+
+        action.require(user_id=action.actor_user_id, team_id=action.team_id, addition=False)
+        key = canonical_hash({"actor": action.actor_user_id, "team": action.team_id, "action": "remove", "ref": action.action_ref})
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute("SELECT * FROM kb_files WHERE file_id=? AND team_id=?", (file_id, action.team_id)) as cursor:
+                file = await cursor.fetchone()
+            if file is None:
+                raise ValueError("Knowledge membership unavailable")
+            async with db.execute("SELECT id,file_id FROM kb_membership_operations WHERE action_key=?", (key,)) as cursor:
+                previous = await cursor.fetchone()
+            if previous:
+                if previous["file_id"] != file_id:
+                    from bowhead_core.kb.ingestion import KnowledgeWriteError
+
+                    raise KnowledgeWriteError("knowledge_operation_intent_conflict")
+                return str(previous["id"])
+            now, operation_id = _now(), f"kbo_{uuid4().hex}"
+            await db.execute(
+                "UPDATE kb_files SET soft_deleted_at=COALESCE(soft_deleted_at,?), membership_revision=membership_revision+1,version=version+1 WHERE file_id=? AND soft_deleted_at IS NULL",
+                (now, file_id),
+            )
+            await db.execute("UPDATE kb_membership_operations SET state='removed' WHERE file_id=?", (file_id,))
+            await db.execute(
+                """INSERT INTO kb_membership_operations
+                (id,action_key,intent_hash,action,actor_user_id,team_id,workspace_id,artifact_id,file_id,
+                 destination_json,source_fingerprint,action_ref,origin,membership_revision,state,created_at)
+                VALUES (?,?,?,'remove',?,?,?,?,?,'{}','',?,?,?,'removed',?)""",
+                (
+                    operation_id,
+                    key,
+                    canonical_hash({"file_id": file_id}),
+                    action.actor_user_id,
+                    action.team_id,
+                    action.workspace_id,
+                    file["artifact_id"],
+                    file_id,
+                    action.action_ref,
+                    action.origin,
+                    int(file["membership_revision"]) + int(file["soft_deleted_at"] is None),
+                    now,
+                ),
+            )
+            await db.commit()
+            return operation_id
+
+    async def get_operation(self, operation_id: str) -> dict[str, Any] | None:
+        """Read a receipt; the caller must reauthorize its member/file before projection."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM kb_membership_operations WHERE id=?", (operation_id,)) as cursor:
+                row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def find_operation_by_key(self, key: str) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM kb_membership_operations WHERE action_key=?", (key,)) as cursor:
+                row = await cursor.fetchone()
+        return dict(row) if row else None

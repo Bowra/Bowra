@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 _ROOT_KEY_ENV = "BOWHEAD_FERNET_KEY"
 _KEY_DOMAIN = b"bowhead/results-cursor/v1"
-_TOKEN_VERSION = 1
+_TOKEN_VERSION = 2
 _MAX_TTL_SECONDS = 2 * 60 * 60
 _MAX_CLOCK_SKEW_SECONDS = 60
 
@@ -65,6 +65,7 @@ class ResultsSnapshot:
     query_filter_hash: str
     sort_version: str
     projection_digest: str
+    presentation_high_water: int = 0
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ class _TokenModel(BaseModel):
 
 
 class _SnapshotPayload(_TokenModel):
-    version: Literal[1] = _TOKEN_VERSION
+    version: Literal[1, 2] = _TOKEN_VERSION
     kind: Literal["snapshot"] = "snapshot"
     issued_at: int = Field(ge=0)
     expires_at: int = Field(ge=0)
@@ -91,10 +92,11 @@ class _SnapshotPayload(_TokenModel):
     query_filter_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     sort_version: str = Field(min_length=1, max_length=64)
     projection_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    presentation_high_water: int = Field(default=0, ge=0)
 
 
 class _PagePayload(_TokenModel):
-    version: Literal[1] = _TOKEN_VERSION
+    version: Literal[1, 2] = _TOKEN_VERSION
     kind: Literal["page"] = "page"
     issued_at: int = Field(ge=0)
     expires_at: int = Field(ge=0)
@@ -162,6 +164,7 @@ class ResultsCursorCodec:
         membership_cutoff_at: str,
         binding: ResultsCursorBinding,
         projection_digest: str,
+        presentation_high_water: int = 0,
         ttl_seconds: int = _MAX_TTL_SECONDS,
     ) -> tuple[str, ResultsSnapshot]:
         if not 1 <= ttl_seconds <= _MAX_TTL_SECONDS:
@@ -179,6 +182,7 @@ class ResultsCursorCodec:
             query_filter_hash=binding.query_filter_hash,
             sort_version=binding.sort_version,
             projection_digest=projection_digest,
+            presentation_high_water=presentation_high_water,
         )
         token = self._fernet.encrypt(_canonical_json(payload)).decode("ascii")
         return token, self._snapshot_from_payload(payload)
@@ -271,6 +275,7 @@ class ResultsCursorCodec:
             query_filter_hash=payload.query_filter_hash,
             sort_version=payload.sort_version,
             projection_digest=payload.projection_digest,
+            presentation_high_water=payload.presentation_high_water,
         )
 
 

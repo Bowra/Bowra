@@ -1,5 +1,7 @@
 "use client";
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Field } from "@/components/ui/field";
@@ -247,7 +249,7 @@ function SpaceGeneralPage({
       ) : metadata ? (
         <>
           <GroupShell hosted={Boolean(hosted)} title={t("group_title")}>
-              <Field id="space-general-name" label={t("name_label")}>
+              <Field id="space-general-name" help={<ConfigurationFieldHelp contract={metadata?.field_contract} field="workspace_metadata.name" label={t("name_label")} />} label={t("name_label")}>
                 <input
                   id="space-general-name"
                   className="settings-input"
@@ -257,7 +259,7 @@ function SpaceGeneralPage({
                   onChange={(event) => edit("name", event.target.value)}
                 />
               </Field>
-              <Field id="space-general-description" label={t("description_label")}>
+              <Field id="space-general-description" help={<ConfigurationFieldHelp contract={metadata?.field_contract} field="workspace_metadata.description" label={t("description_label")} />} label={t("description_label")}>
                 <textarea
                   id="space-general-description"
                   className="settings-input"

@@ -1,5 +1,6 @@
 "use client";
 
+import { type FieldContract } from "./configuration-field-guidance";
 import { apiJson } from "./api-client";
 import type { ParameterProfile } from "./runtime-parameters";
 
@@ -22,6 +23,7 @@ export interface LlmCatalog {
 }
 
 export interface AdminLlmConfigResp {
+  field_contracts?: Record<string, FieldContract>;
   version: number;
   config: Record<string, unknown>;
   providers: Array<{
@@ -33,6 +35,7 @@ export interface AdminLlmConfigResp {
   }>;
   features?: {
     model_discovery_v2?: boolean;
+    bowra_connect?: boolean;
     model_runtime_parameters?: boolean;
     capability_probes?: boolean;
     azure_openai?: boolean;

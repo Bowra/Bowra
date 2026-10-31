@@ -128,6 +128,18 @@ describe("TurnContainer · narrative-vs-answer dedup (0.39.8 #5)", () => {
     expect(text).toContain("5.32 亿元");
   });
 
+  it.each(["kbf", "kbo"])("keeps distinct %s receipt identities visible", (prefix) => {
+    const turnId = `t-receipt-${prefix}`;
+    const original = `Receipt ${prefix}_111122223333 is available.`;
+    const answer = `Receipt ${prefix}_aaaabbbbcccc is available.`;
+    applyCardCreated({ turnId });
+    applyNarrativeAppend({ turnId, text: original, segId: "original-receipt" });
+    applyFinalAnswer({ turnId, text: answer, payload: { turnId } });
+    const { container } = render(<TurnContainer runner={runner({ turnId, user: "Check the receipt", answer })} />);
+    expect(container.textContent).toContain(original);
+    expect(container.textContent).toContain(answer);
+  });
+
   it("post-stream: hides narrative beat that overlaps with answer text", () => {
     applyCardCreated({ turnId: "t-5" });
     // narrative beat 0 — KB intro (unique to narrative, not in answer)

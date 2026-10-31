@@ -50,6 +50,12 @@ from bowhead_core.agent_dependency_compiler import (
 )
 from bowhead_core.agent_eval_plan_store import AgentEvalPlanError, AgentEvalPlanStore, AgentPreparationActor
 from bowhead_core.agent_eval_policy_store import AgentEvalPolicyError, AgentEvalPolicyStore
+from bowhead_core.agent_knowledge_policy import (
+    KnowledgeAccessError,
+    require_policy_preserved,
+    require_supported_knowledge_access,
+    source_bindings_enabled,
+)
 from bowhead_core.agent_listing_safety import LISTING_SAFETY_SCANNER_VERSION, scan_agent_listing
 from bowhead_core.agent_runtime_extension_store import require_extension_policy_write, retain_extension_policy_in_connection
 from bowhead_core.agent_taxonomy import AgentTaxonomyError, validate_taxonomy_listing_conn
@@ -100,7 +106,7 @@ def _expand_builtin_plugins_for_publication(definition: dict[str, Any]) -> dict[
     try:
         return expand_builtin_plugins(definition)
     except BuiltinPluginSelectionError as exc:
-        raise AgentPublicationBlockedError(exc.code) from exc
+        raise AgentPublicationBlockedError(exc.code, blocked_items=exc.blocked_items) from exc
 
 
 class AgentRevisionError(RuntimeError):
@@ -595,6 +601,7 @@ class DeterministicAgentPublicationValidator:
         the dependency fingerprint (which leaves Skill revisions out) is still
         matched against ``definition``'s own compilation.
         """
+        require_supported_knowledge_access(definition)
         try:
             effective_definition = await expand_plugins_conn(db, team_id=team_id, definition=definition)
         except TeamPluginError as exc:
@@ -894,9 +901,11 @@ class AgentRevisionStore:
         validator: AgentPublicationValidator,
         eval_gate: AgentPublicationEvalGate | None = None,
         clock: _Clock | None = None,
+        knowledge_source_validator: Any | None = None,
         behavior_authoring: AgentBehaviorAuthoringService | None = None,
         behavior_materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
+        self._knowledge_source_validator = knowledge_source_validator
         self.db_path = str(db_path)
         self._validator = validator
         self._eval_gate = eval_gate
@@ -1213,6 +1222,7 @@ class AgentRevisionStore:
                 behavior_intent = self._behavior_authoring.validate_definition_intent(
                     definition_value,
                 )
+                await self._validate_knowledge_write(db, definition_value, team_id=team_id, actor_user_id=actor_user_id)
                 await require_extension_policy_write(db, definition_value, audience_mode=audience.mode)
                 validation_json = _canonical_json(
                     behavior_intent.working_copy_validation(),
@@ -1223,6 +1233,15 @@ class AgentRevisionStore:
                 if expected_base_release_id is not None and base_release_id != expected_base_release_id:
                     raise AgentRevisionConflictError("agent_working_copy_base_stale")
                 existing = await self._working_copy_conn(db, team_id=team_id, agent_id=agent_id)
+                if existing is not None:
+                    require_policy_preserved(json.loads(str(existing["definition_json"])), definition_value)
+                async with db.execute(
+                    "SELECT definition_json FROM team_subagent_revision WHERE id=? AND team_id=? AND subagent_id=?",
+                    (aggregate["live_revision_id"], team_id, agent_id),
+                ) as cursor:
+                    knowledge_preimage = await cursor.fetchone()
+                if knowledge_preimage is not None:
+                    require_policy_preserved(json.loads(str(knowledge_preimage[0])), definition_value)
                 if "runtime_extensions" not in definition_value:
                     if existing is not None:
                         had_extensions = json.loads(str(existing["definition_json"])).get("runtime_extensions") is not None
@@ -3070,6 +3089,7 @@ class AgentRevisionStore:
         candidate_id = str(candidate["id"])
         team_id = str(candidate["team_id"])
         agent_id = str(candidate["subagent_id"])
+        await self._validate_knowledge_write(db, definition, team_id=team_id, actor_user_id=actor_user_id)
         current_candidate_version = int(candidate["row_version"])
         eval_evidence = (
             await self._eval_gate.evidence_for_activation(db, candidate=candidate, audience=audience)
@@ -4413,6 +4433,19 @@ class AgentRevisionStore:
             ),
         )
 
+    async def _validate_knowledge_write(self, db, definition, *, team_id, actor_user_id) -> None:
+        policy = require_supported_knowledge_access(definition)
+        if policy is None:
+            return
+        if not source_bindings_enabled():
+            raise KnowledgeAccessError("agent_knowledge_access_admission_closed")
+        from bowhead_core.agent_knowledge_policy import require_knowledge_migration
+
+        await require_knowledge_migration(db)
+        if policy.file_ids:
+            if self._knowledge_source_validator is None or not await self._knowledge_source_validator(policy.file_ids, team_id, actor_user_id):
+                raise KnowledgeAccessError("agent_knowledge_source_unavailable")
+
     async def _validate_with_current_skills(
         self,
         db: aiosqlite.Connection,
@@ -4434,6 +4467,7 @@ class AgentRevisionStore:
         the semantic scan does not read them, so the Safety check stored for the
         Owner's definition remains the semantic evidence for the rebased one.
         """
+        await self._validate_knowledge_write(db, definition, team_id=team_id, actor_user_id=owner_user_id)
         arguments = {
             "team_id": team_id,
             "agent_id": agent_id,
@@ -4604,6 +4638,7 @@ def _live_projection_values(
     definition: Mapping[str, Any],
     listing: Mapping[str, Any],
 ) -> _LiveProjection:
+    require_supported_knowledge_access(definition)
     system_prompt = definition.get("system_prompt", "")
     tool_refs = definition.get("tool_refs", [])
     model = definition.get("model")
@@ -4705,7 +4740,11 @@ def _selection_tool_refs(definition: Mapping[str, Any]) -> set[str]:
 def _canonical_document(value: Mapping[str, Any], *, name: str) -> tuple[str, dict[str, Any]]:
     if not isinstance(value, Mapping):
         raise ValueError(f"Agent {name} must be an object")
+    if name == "definition":
+        require_supported_knowledge_access(value)
     copied = dict(value)
+    if name == "definition" and (policy := require_supported_knowledge_access(value)) is not None:
+        copied["knowledge_access"] = policy.canonical_value()
     encoded = _canonical_json(copied)
     if len(encoded.encode("utf-8")) > _MAX_DOCUMENT_BYTES:
         raise ValueError(f"Agent {name} exceeds {_MAX_DOCUMENT_BYTES} bytes")

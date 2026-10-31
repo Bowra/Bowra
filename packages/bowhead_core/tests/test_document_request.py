@@ -1,10 +1,12 @@
 """Grounding is provenance, not proof that a model understood a quoted sentence."""
 
+import json
 from dataclasses import replace
 
 import pytest
 from bowhead_core.chat_turn_source import ChatTurnUserSource, current_attachment_positions
 from bowhead_core.documents.request import (
+    CanvasInputSelection,
     DocumentProposal,
     DocumentRequestError,
     InputRoleProposal,
@@ -41,6 +43,15 @@ def _proposal() -> DocumentProposal:
         ),
         requested_outputs=("source", "pdf"),
     )
+
+
+def test_canvas_selection_keeps_legacy_proposal_bytes_and_accepts_current_visible_scope() -> None:
+    proposal = _proposal()
+    assert "canvas" not in proposal.model_dump(mode="json")
+    assert proposal.model_copy(update={"canvas": CanvasInputSelection()}).model_dump(mode="json")["canvas"] == {"section_ids": None}
+    for section_ids in ([], ["sec_one", "sec_one"]):
+        with pytest.raises(ValidationError):
+            CanvasInputSelection.model_validate_json(json.dumps({"section_ids": section_ids}))
 
 
 def test_bundle_children_share_ui_position_without_changing_template_position() -> None:

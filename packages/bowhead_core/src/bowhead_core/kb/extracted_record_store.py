@@ -855,12 +855,18 @@ class KbExtractedRecordStore:
         *,
         workspace_id: str,
         doc_type_id: str,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> int:
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        clauses = ["workspace_id = ?", "doc_type_id = ?", "soft_deleted_at IS NULL"]
+        params: list[Any] = [workspace_id, doc_type_id]
+        append_source_filter(clauses, params, allowed_file_ids)
         async with (
             aiosqlite.connect(self._db_path) as db,
             db.execute(
-                "SELECT COUNT(*) FROM kb_extracted_records WHERE doc_type_id = ? AND workspace_id = ? AND soft_deleted_at IS NULL",
-                (doc_type_id, workspace_id),
+                "SELECT COUNT(*) FROM kb_extracted_records WHERE " + " AND ".join(clauses),
+                params,
             ) as cur,
         ):
             row = await cur.fetchone()
@@ -1046,6 +1052,7 @@ class KbExtractedRecordStore:
         sort_dir: str = "DESC",
         limit: int = 50,
         cast_numeric: list[str] | None = None,
+        allowed_file_ids: tuple[str, ...] | None = None,
     ) -> list[KbExtractedRecordDTO]:
         """SQL filter + sort by fields_json[field].value via json_extract.
 
@@ -1085,6 +1092,9 @@ class KbExtractedRecordStore:
             "soft_deleted_at IS NULL",
         ]
         params: list[Any] = [workspace_id, doc_type_id]
+        from bowhead_core.kb.source_filter import append_source_filter
+
+        append_source_filter(clauses, params, allowed_file_ids)
 
         for cond in where or []:
             f = cond.get("field", "")

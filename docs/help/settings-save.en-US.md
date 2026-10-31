@@ -12,6 +12,8 @@ Saving only a Space description leaves its saved name unchanged; saving only its
 
 When several pages are open in Canvas, select the page you want to work on. Refresh reopens that selected settings page; save any unsaved text first. Closing a background Agent keeps the visible settings page and your unsent message. Returning from Results restores a page that is still open.
 
+Where a question-mark button appears beside a setting, hover or focus it for a preview, or click/tap to keep the explanation open. It explains the field and its supported type, range or options. Press Escape to close the explanation; an enclosing editor stays open. Reading help does not change or save your input. Existing hints and save/review steps still apply.
+
 ## Two ways settings are saved
 
 - **Switches and single choices take effect immediately**: turning a switch on or off, or picking an option, saves it right away. There is nothing else to press.
@@ -37,7 +39,9 @@ When you have unsaved changes:
 
 ## Suggestions in Chat
 
-The Configuration Agent checks current supported fields, choices and limits when it reads settings. You can also ask it to explain or suggest changes to Space instructions; members may read them, while Space administrators and Team managers can change them in an active Space. Review and confirm before saving. Where Team configuration assistance is enabled, Team owners and administrators can also request agent execution, sandbox duration, HTML size and model-retry changes, or suggestions for existing model connections, runtime parameters and assignments. Review the suggestion before saving. Model suggestions open as a draft on the original model page: use its Review/Apply steps and any required risk or index-rebuild confirmation. Existing unsaved input is preserved; save or discard it before loading the suggestion. Stale suggestions require a new proposal.
+If a Configuration Agent mention cannot be sent with attachments or other references, remove them and send the request again with only Configuration Agent selected. If the deployment does not support mentioning it, remove the Agent reference and ask for the settings change in ordinary chat. An unsent request has not changed settings.
+
+The Configuration Agent checks current supported fields, choices and limits when it reads settings. You can also ask it to explain or suggest changes to Space instructions; members may read them, while Space administrators and Team managers can change them in an active Space. Review and confirm before saving. Team owners and administrators can also request agent execution, sandbox duration, HTML size and model-retry changes, or suggestions for existing model connections, runtime parameters and assignments. Review the suggestion before saving. Model suggestions open as a draft on the original model page: use its Review/Apply steps and any required risk or index-rebuild confirmation. Existing unsaved input is preserved; save or discard it before loading the suggestion. If another administrator saved model settings after the suggestion was prepared, it cannot be loaded or applied. Ask for a new suggestion based on the latest settings.
 
 If Chat says a page opening was requested or a suggestion is ready for review, check the actual page before confirming. A suggestion can remain saved while unsaved input or a closed page prevents review. Save or discard your current edits, open the original page, then review the saved suggestion; this does not apply it automatically.
 
@@ -54,6 +58,8 @@ When Chat offers a supported settings change, review the current and suggested v
 If you manually save an affected Space or personal appearance setting after a suggestion is prepared, confirmation or undo can report that the settings changed. Ask for a new suggestion based on the latest values to preserve your later edits. Choices made directly on the original settings page still use its normal save behavior.
 
 When the general page is selected, Chat suggestions cover its name and description. Name is required and can contain up to 120 characters; description can contain up to 2000. Review and confirm to save. A later Space update may cause a conflict: keep your input, reopen the latest saved values and request a new suggestion. Name and description do not offer automatic undo. The other controls keep their own save behavior.
+
+To ask about week start or data language while the general page is selected, close that Canvas and send a new request to read or open Space preferences. The assistant opens the matching preferences editor. Both groups belong to the same Space settings page, but each conversation selection covers its own fields; opening or closing a view does not save settings.
 
 When the suggestion card shows **Couldn’t apply**, your settings weren’t changed; **Retry** applies the same suggestion again. An applied suggestion collapses into one line with **Undo** at the end when the change can be fully restored. Applied name and description changes show no **Undo**; the card explains that you can edit them back.
 

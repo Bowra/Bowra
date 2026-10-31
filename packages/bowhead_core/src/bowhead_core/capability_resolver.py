@@ -358,7 +358,6 @@ class CapabilityResolver:
                     return base
 
             specs: list[Any] = []
-            turn_budget = [0]
             openapi_entries = [entry for entry in entries if entry.kind == "openapi"]
             if openapi_entries:
                 executor = make_http_executor(
@@ -373,7 +372,6 @@ class CapabilityResolver:
                         openapi_entries,
                         session,
                         audit_store=store,
-                        budget=turn_budget,
                     )
                 )
 
@@ -412,7 +410,6 @@ class CapabilityResolver:
                         source_entries,
                         lazy,
                         audit_store=store,
-                        budget=turn_budget,
                     )
                 )
             for provider, provider_tools in builtin_groups:

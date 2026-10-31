@@ -91,7 +91,9 @@ from bowhead_core.print_theme import (
 # unit text is named once in the column header. Same input no longer yields identical pixels; old cached receipts
 # must not be reused.
 # "34" (2026-10-15): ordinary numeric precision, base-unit Table readings and unrounded source verification remain distinct.
-EXPORT_VISUAL_RENDERER_VERSION = "35"
+# Version 36: explicit date patterns affect native chart and Table exports.
+# Version 37: Table captions and unit disclosures share resolved column display, including export.
+EXPORT_VISUAL_RENDERER_VERSION = "37"
 VISUAL_FIELDS: dict[str, tuple[str, ...]] = {
     "image": ("artifact_id", "caption", "alt"),
     "design": (

@@ -469,6 +469,9 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
   const title = job ? documentCanvasTitle(job, t("title")) : t("title");
   const pages = job?.draft?.preview.pages.length ?? 0;
   const changeCount = job?.draft?.manifest.changes.length ?? 0;
+  const draftSummary = job?.draft ? job.draft.manifest.comparison === "unavailable"
+    ? t("canvas_subtitle_uncompared", { pages })
+    : t("canvas_subtitle", { pages, changes: changeCount }) : undefined;
   const stepIndex = job ? ACTIVE_STEPS.indexOf(job.state) : -1;
   const returnToChat = props.onReturnToChat ? () => {
     if (inScope() && !revoked.current) callbacks.current.onReturnToChat?.(context);
@@ -524,6 +527,11 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
         note={usageNote}
       />
     );
+  } else if (job.state === "cancelled" && job.superseded_by_job_id) {
+    body = <Notice tone="muted">
+      {t("superseded_body")}
+      {returnToChat ? <Button variant="ghost" size="sm" onClick={returnToChat}>{t("canvas_return_to_chat")}</Button> : null}
+    </Notice>;
   } else if (job.state === "cancelled") {
     body = <StateBlock icon={<CircleX size={20} />} title={t("cancelled_title")} body={t("cancelled_body")}
       secondaryActions={returnToChat ? [{ label: t("canvas_return_to_chat"), onClick: returnToChat }] : undefined} />;
@@ -553,7 +561,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
       busy={staging || view.phase === "loading" || view.phase === "confirming"}
       toolbar={(
         <CanvasObjectToolbar
-          status={objectStatus ? <ObjectStatusBadge status={objectStatus} /> : null}
+          status={objectStatus ? <ObjectStatusBadge status={objectStatus} label={job?.superseded_by_job_id ? t("state_superseded") : undefined} /> : null}
           statusInBodyWhenNarrow={job?.state === "review"}
           meta={job && stepIndex >= 0 ? t("working_step", { state: t(documentCanvasStateKey(job)), n: stepIndex + 1 })
             : generatedAt ? t("canvas_generated_at", { time: generatedAt }) : undefined}
@@ -573,7 +581,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
         icon={<FileText size={14} aria-hidden />}
         eyebrow={t("canvas_eyebrow", { format: (job ? documentSourceExtension(job) : null)?.toUpperCase() ?? "PPTX" })}
         title={title}
-        subtitle={job?.draft ? t("canvas_subtitle", { pages, changes: changeCount }) : undefined}
+        subtitle={draftSummary}
       />
       {view.error && view.phase !== "error" ? <Notice tone="error">{t(view.error)}</Notice> : null}
       {view.phase === "error" && job ? <Notice tone="error">{t(view.error ?? "canvas_read_error")}</Notice> : null}
@@ -599,7 +607,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
         >
           <dl className="ui-card-facts">
             <dt>{t("published_content")}</dt>
-            <dd>{t("canvas_subtitle", { pages, changes: changeCount })}</dd>
+            <dd>{draftSummary}</dd>
             {job.usage ? <>
               <dt>{t("published_usage")}</dt>
               <dd>{t("credits_value", { credits: job.usage.settled_credits })}</dd>
@@ -608,7 +616,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
           {usageNote ? <p className="ui-card__note">{usageNote}</p> : null}
         </ChatCard>
       ) : null}
-      {job && (job.state === "review" || job.state === "published") && view.phase !== "unavailable" ? (
+      {job && (job.state === "review" || job.state === "published" || (job.state === "cancelled" && job.superseded_by_job_id)) && view.phase !== "unavailable" ? (
         <DocumentDraftReview
           job={job}
           busy={busy}
@@ -646,7 +654,7 @@ export function documentObjectStatus(phase: DocumentDraftCanvasPhase, job: Docum
   if (job.state === "question") return "needs_input";
   if (job.state === "published") return "published";
   if (job.state === "failed") return "failed";
-  if (job.state === "cancelled") return "cancelled";
+  if (job.state === "cancelled") return job.superseded_by_job_id ? "read_only" : "cancelled";
   return null;
 }
 

@@ -136,6 +136,10 @@ export interface ClarificationCardProps {
   onSkip?: () => void;
   /** Datarc workspace selection: "Remember my choice" checkbox at the footer start. */
   showRemember?: boolean;
+  /** The initial checkbox value; missing values keep the existing default. */
+  rememberDefault?: boolean;
+  /** Native source choices stay within the candidates on the original card. */
+  allowCustomAnswers?: boolean;
   /** Footer hint (e.g. say "switch to XX for queries" at any time to switch). */
   footHint?: string | null;
   /** Answers of a failed submission: the card comes back with the same choice selected. */
@@ -189,6 +193,8 @@ export function ClarificationCard({
   onSubmitMulti,
   onSkip,
   showRemember = false,
+  rememberDefault = true,
+  allowCustomAnswers = true,
   footHint = null,
   restoredAnswers = null,
   error = null,
@@ -197,9 +203,9 @@ export function ClarificationCard({
   documentDraft = false,
 }: ClarificationCardProps) {
   const t = useTranslations("clarification");
-  // Remember choice, checked by default (explicit); unchecked = soft session preference.
-  const [remember, setRemember] = useState(true);
-  const [initial] = useState(() => initialSelection(questions, restoredAnswers));
+  // Unchecked keeps the workspace choice scoped to this session.
+  const [remember, setRemember] = useState(rememberDefault);
+  const [initial] = useState(() => initialSelection(questions, allowCustomAnswers ? restoredAnswers : restoredAnswers?.filter((answer) => answer.source !== "custom")));
   const [sel, setSel] = useState<number[][]>(initial.sel);
   const [customAnswers, setCustomAnswers] = useState<string[]>(initial.custom);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -291,7 +297,7 @@ export function ClarificationCard({
 
   const options = (q: ThetaClarificationQuestion, qi: number) => {
     const custom = customAnswers[qi] ?? "";
-    const customField = (
+    const customField = allowCustomAnswers ? (
       <input
         type="text"
         className="ui-input ui-card-option-input"
@@ -306,7 +312,7 @@ export function ClarificationCard({
           onOptionsKeyDown(event);
         }}
       />
-    );
+    ) : null;
     if (isQuestionSingle(q)) {
       const value = sel[qi]?.[0];
       return (

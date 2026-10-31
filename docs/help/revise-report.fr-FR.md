@@ -2,8 +2,6 @@
 
 Lorsqu’un rapport est déjà sur le canevas, poursuivez dans la même conversation pour demander des changements : Bowra modifie le rapport existant au lieu d’en écrire un nouveau.
 
-Les nouveaux rapports utilisent le nom communautaire Bowra dans leur attribution au produit. Les rapports déjà enregistrés et les textes que vous avez fournis conservent leur contenu d’origine.
-
 Certains déploiements ne modifient pas encore les rapports sur place. Si votre demande complémentaire crée un nouveau rapport et déplace l’ancien dans « N rapports précédents dans cette session », votre déploiement produit un rapport à chaque demande. Dans ce cas, indiquez dans votre demande tout le périmètre et le contenu souhaités.
 
 Exemples :

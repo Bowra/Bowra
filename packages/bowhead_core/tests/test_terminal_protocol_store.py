@@ -973,6 +973,9 @@ async def test_terminal_protocol_reader_rejects_event_payload_digest_mismatch(db
 def test_terminal_protocol_store_exposes_only_approved_writers() -> None:
     public_methods = {name for name in dir(TerminalProtocolStore) if not name.startswith("_") and callable(getattr(TerminalProtocolStore, name))}
     assert public_methods == {
+        "read_context_maintenance_action",
+        "read_recovery_context_completions",
+        "read_recovery_operation_kind",
         "admit_or_steer_v1",
         "authorize_active_v1_control",
         "acquire_recovery_writer_fence",
@@ -3483,7 +3486,8 @@ async def test_web_start_action_lookup_reads_persisted_language_snapshot(db_path
 
 
 @pytest.mark.asyncio
-async def test_web_start_action_lookup_reads_persisted_resolution_snapshot(db_path: str) -> None:
+@pytest.mark.parametrize("source_version", ["legacy", "current"])
+async def test_web_start_action_lookup_reads_persisted_resolution_snapshot(db_path: str, source_version: str) -> None:
     action_id = "act_start_0123456789abcdef0123456789abcdef"
     session_id = "s_0123456789abcdef0123456789abcdef"
     turn_id = "t_0123456789abcdef0123456789abcdef"
@@ -3497,6 +3501,18 @@ async def test_web_start_action_lookup_reads_persisted_resolution_snapshot(db_pa
         "preferred_model": "model_1",
         "preferred_provider": "provider_1",
     }
+    if source_version == "current":
+        from bowhead_core.datarc_selection import DatarcSelectionSnapshot
+
+        resolution["datarc_selection"] = DatarcSelectionSnapshot(
+            state="selected",
+            team_id="team_1",
+            user_id="u_1",
+            connection_id="dc_1",
+            connection_revision="1",
+            datarc_workspace_id="project_1",
+            member_uid="member_1",
+        ).model_dump()
     request = _typed_admission_request(
         request_id=action_id,
         turn_id=turn_id,

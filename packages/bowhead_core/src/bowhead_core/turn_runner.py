@@ -918,7 +918,7 @@ def _compute_turn_agent_type(invocations: list[ToolInvocation]) -> str:
     return spawn_profiles[-1]
 
 
-def _build_artifact_token_minter(orch: Any, user_id: str | None) -> Any | None:
+def _build_artifact_token_minter(orch: Any, user_id: str | None, *, ctx: Any | None = None) -> Any | None:
     """Build a fresh artifact token minter for each sandbox call.
     The signing secret (orch.artifact_fetch_secret, set by the gateway) stays captured
     HERE — never stored on the ctx nor reachable from sandbox/core tool code. tools.py calls
@@ -932,7 +932,10 @@ def _build_artifact_token_minter(orch: Any, user_id: str | None) -> Any | None:
 
     def _mint() -> str:
         try:
-            return mint_artifact_fetch_token(str(secret), str(user_id))
+            scope = None
+            if ctx is not None and ctx.session_id and ctx.turn_id:
+                scope = {"session_id": ctx.session_id, "turn_id": ctx.turn_id, "workspace_id": ctx.workspace_id or ""}
+            return mint_artifact_fetch_token(str(secret), str(user_id), producer_output=scope)
         except Exception:
             return ""
 
@@ -1392,13 +1395,10 @@ async def _resource_disable_prefetch(orch: Any, request: Any) -> Any | None:
 async def _run_limits_prefetch(orch: Any, request: Any) -> Any | None:
     """Resolve the Team's agent run limits once per turn, for every channel.
 
-    None while FEATURE_AGENT_RUN_LIMITS is off (earlier limits apply). Store errors
-    fall back to the defaults inside ``load_team_limits``; they never fail the turn.
+    Store errors fall back to defaults inside ``load_team_limits``; they never fail the turn.
     """
-    from bowhead_core.agent_run_limits import agent_run_limits_enabled, load_team_limits
+    from bowhead_core.agent_run_limits import load_team_limits
 
-    if not agent_run_limits_enabled():
-        return None
     return await load_team_limits(getattr(orch, "team_settings_store", None), getattr(request, "team_id", None))
 
 
@@ -1433,6 +1433,10 @@ def build_tool_exec_ctx(
         datarc_absence_reason=getattr(request, "datarc_absence_reason", "") or "",  # bi-absent-turn R3.1 (sync both mirror sites).
         unconfigured_capability_tools=_r6_unconfigured,  # credential-readiness R6 (sync both mirrors).
         datarc_context_switcher=getattr(request, "datarc_context_switcher", None),
+        datarc_binding=getattr(request, "datarc_binding", None),
+        datarc_source_evidence=getattr(request, "datarc_source_evidence", None),
+        datarc_switch_resolution=getattr(request, "datarc_switch_resolution", None),
+        datarc_helper_switch_resolution=getattr(request, "datarc_helper_switch_resolution", None),
         config_lite_supported=bool(getattr(request, "config_lite_supported", False)),  # Config copilot batch0.5 (sync both mirrors).
         configuration_settings_target=getattr(request, "configuration_settings_target", None),
         coach_canvas_target=getattr(request, "coach_canvas_target", None),
@@ -1458,6 +1462,7 @@ def build_tool_exec_ctx(
         artifact_store=getattr(orch, "artifact_store", None),
         scheduled_store=getattr(orch, "scheduled_store", None),  # scheduled_job_create tool (flag-gated)
         canvas_store=getattr(orch, "canvas_store", None),
+        chart_authoring_projection=getattr(request, "chart_authoring_projection", None),
         session_store=getattr(orch, "session_store", None),
         session_id=getattr(request, "session_id", ""),
         user_text=getattr(request, "text", "") or "",  # template-refresh: verbatim user msg
@@ -1512,6 +1517,8 @@ def build_tool_exec_ctx(
         # user's personal-scope workspaces (datarc ws ≠ Bowhead KB scope).
         kb_files_store=getattr(orch, "kb_files_store", None),
         kb_file_authorizer=getattr(orch, "kb_file_authorizer", None),
+        knowledge_user_request=getattr(request, "knowledge_user_request", False),
+        knowledge_management_access=getattr(orch, "knowledge_management_access", None),
         metrics_log=getattr(orch, "metrics_log", None),  # Sprint ω Phase 5 P0-1
         # Sprint ar2: tenant for embed collection naming + per-ws calibrated thresholds
         tenant=getattr(orch, "datarc_tenant", ""),
@@ -1521,11 +1528,21 @@ def build_tool_exec_ctx(
         if getattr(orch, "ar2_thresholds_by_ws", None)
         else None,
     )
+    from bowhead_core.datarc_selection import bind_datarc_runtime
+
+    bind_datarc_runtime(request, _ctx)
     # cca P3 F-B: per-turn artifact-fetch token minter (closure holds the signing secret;
     # tools.py mints fresh per python_sandbox call). setattr post-construction (like
     # _running_profile) — ctx is a dataclass, no field added.
-    _ctx._mint_artifact_token = _build_artifact_token_minter(orch, getattr(request, "user_id", None))
+    _ctx._mint_artifact_token = _build_artifact_token_minter(orch, getattr(request, "user_id", None), ctx=_ctx)
+    _bind_knowledge_intent_resolver(_ctx)
     return _ctx
+
+
+def _bind_knowledge_intent_resolver(ctx: ToolExecutionContext) -> None:
+    binder = getattr(ctx.knowledge_management_access, "bind_original_request_resolver", None)
+    if callable(binder):
+        ctx.knowledge_intent_resolver = binder(ctx)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1678,6 +1695,8 @@ class TurnRunner:
         if store is None:
             return True  # tests with bare orch mock
         reference_runtime = getattr(self, "_reference_runtime", None)
+        context_publication = getattr(getattr(self, "_summary_bus", None), "__dict__", {}).get("_context_publication")
+        context_args = {"context_publication": context_publication} if context_publication is not None else {}
         if reference_runtime is not None:
             return await reference_runtime.persist_turn_state(
                 store=store,
@@ -1690,6 +1709,7 @@ class TurnRunner:
                 cost_usd=cost_usd,
                 error=error,
                 error_kind=error_kind,
+                **context_args,
             )
         status = (status_value or "").lower().strip()
         worker = getattr(self, "_execution_worker", None)
@@ -1705,6 +1725,7 @@ class TurnRunner:
                     tokens_output=int(tokens_output or 0),
                     cost_usd=float(cost_usd or 0.0),
                     error_kind=error_kind,
+                    **context_args,
                 )
             )
         if status == "clarification_pending":
@@ -1801,7 +1822,20 @@ class TurnRunner:
                 if orch.session_store is not None:
                     reference_runtime = getattr(request, "reference_runtime", None)
                     if reference_runtime is None:
-                        await orch.session_store.require_legacy_chat_execution(turn_id=request.turn_id)
+                        if request.document_clarification_id is not None:
+                            from bowhead_core.document_chat_continuation import DocumentResumeReservation
+
+                            await orch.session_store.require_legacy_chat_execution(
+                                turn_id=request.turn_id,
+                                document_worker=self._execution_worker,
+                                document_resume=DocumentResumeReservation(
+                                    card_id=request.document_clarification_id,
+                                    checkpoint=request.document_checkpoint,
+                                    generation=request.execution_generation,
+                                ),
+                            )
+                        else:
+                            await orch.session_store.require_legacy_chat_execution(turn_id=request.turn_id)
                     else:
                         from bowhead_core.chat_reference_runtime import ReferencePrimaryRuntime
 
@@ -2111,6 +2145,8 @@ class TurnRunner:
                             logger.warning("eta.lifecycle_error_failed turn=%s err=%s", request.turn_id, ee)
                     raise
                 else:
+                    if request.context_maintenance is not None:
+                        return result
                     # Success path — persist HOT state only if hydrated
                     if eta_state is not None:
                         try:
@@ -2280,6 +2316,11 @@ class TurnRunner:
             bus._turn_wall_t0_perf = t_start  # type: ignore[attr-defined]
         self._summary_bus = bus
         self._check_cancel()
+        retain_knowledge_request = getattr(getattr(orch, "session_store", None), "retain_knowledge_user_request", None)
+        if getattr(request, "knowledge_user_request", False) and callable(retain_knowledge_request):
+            await retain_knowledge_request(
+                turn_id=request.turn_id, session_id=request.session_id, user_id=request.user_id, workspace_id=request.workspace_id
+            )
         await _restore_document_revision_target(request, getattr(orch, "session_store", None))
         revision_receipt = await _document_revision_receipt(request, getattr(orch, "session_store", None))
 
@@ -2292,6 +2333,7 @@ class TurnRunner:
         # Existing event gets field, no new event type, so no browser EventSource allowlist
         # risk (unregistered silently drops frame). Old frontend ignores unknown field, backward compatible.
         from bowhead_core.coach_canvas_target import coach_canvas_projection
+        from bowhead_core.context_action import context_action_projection
 
         started_accepted = await bus.emit(
             orch._event(
@@ -2304,6 +2346,7 @@ class TurnRunner:
                     "started_at": datetime.now(UTC).isoformat(),
                     **coach_canvas_projection(getattr(request, "coach_canvas_target", None)),
                     **revision_receipt,
+                    **context_action_projection(request.context_maintenance),
                     "schema_version": "0.9.0",
                 },
             )
@@ -2484,6 +2527,10 @@ class TurnRunner:
         _resource_disable = await _resource_disable_prefetch(orch, request)
         _pre_mark("resource_disable")
         _run_limits = await _run_limits_prefetch(orch, request)
+        from bowhead_core.agent_run_limits import get_runtime_controls
+
+        _runtime_controls = get_runtime_controls()
+        _runtime_budget = _runtime_controls.budget(_run_limits)
         from bowhead_core.execution_limits import load_team_limits as load_execution_limits
 
         _execution_limits = await load_execution_limits(getattr(orch, "team_settings_store", None), getattr(request, "team_id", None))
@@ -2523,6 +2570,10 @@ class TurnRunner:
             datarc_absence_reason=getattr(request, "datarc_absence_reason", "") or "",  # bi-absent-turn R3.1 (sync both mirror sites).
             unconfigured_capability_tools=_r6_unconfigured,  # credential-readiness R6 (sync both mirrors).
             datarc_context_switcher=getattr(request, "datarc_context_switcher", None),
+            datarc_binding=getattr(request, "datarc_binding", None),
+            datarc_source_evidence=getattr(request, "datarc_source_evidence", None),
+            datarc_switch_resolution=getattr(request, "datarc_switch_resolution", None),
+            datarc_helper_switch_resolution=getattr(request, "datarc_helper_switch_resolution", None),
             config_lite_supported=bool(getattr(request, "config_lite_supported", False)),  # Config copilot batch0.5 (sync both mirrors).
             configuration_settings_target=getattr(request, "configuration_settings_target", None),
             coach_canvas_target=getattr(request, "coach_canvas_target", None),
@@ -2540,6 +2591,7 @@ class TurnRunner:
             parent_bus=bus,
             artifact_store=getattr(orch, "artifact_store", None),
             canvas_store=getattr(orch, "canvas_store", None),
+            chart_authoring_projection=getattr(request, "chart_authoring_projection", None),
             # scheduled_job_create tool (flag-gated). This inline Lead-path ctx — NOT the
             # build_tool_execution_context factory — is what the Lead actually runs with; the
             # factory copy alone leaves ctx.scheduled_store=None at runtime (caught by dogfood,
@@ -2597,6 +2649,7 @@ class TurnRunner:
             builtin_subagent_overrides=_builtin_overrides,
             resource_disable_state=_resource_disable,
             agent_run_limits=_run_limits,
+            agent_runtime_budget=_runtime_budget,
             execution_limits=_execution_limits,
             # Discoverability fix (actual LLM dogfood 2026-07-16): _peer_ctx, actual inline Lead ctx,
             # previously lacked skill stores. skill_list/_read/_invoke _list/_resolve read
@@ -2641,6 +2694,8 @@ class TurnRunner:
             # so _kb_search resolves user's personal-scope workspaces.
             kb_files_store=getattr(orch, "kb_files_store", None),
             kb_file_authorizer=getattr(orch, "kb_file_authorizer", None),
+            knowledge_user_request=getattr(request, "knowledge_user_request", False),
+            knowledge_management_access=getattr(orch, "knowledge_management_access", None),
             # Sprint ar2: tenant + per-ws calibrated thresholds
             tenant=getattr(orch, "datarc_tenant", ""),
             ar2_thresholds=getattr(orch, "ar2_thresholds_by_ws", {}).get(
@@ -2649,9 +2704,13 @@ class TurnRunner:
             if getattr(orch, "ar2_thresholds_by_ws", None)
             else None,
         )
+        from bowhead_core.datarc_selection import bind_datarc_runtime
+
+        bind_datarc_runtime(request, _peer_ctx)
         # cca P3 F-B: per-turn artifact-fetch token minter (closure holds the signing
         # secret; tools.py mints fresh per python_sandbox call). Lead-side peer_ctx.
-        _peer_ctx._mint_artifact_token = _build_artifact_token_minter(orch, request.user_id or "")
+        _peer_ctx._mint_artifact_token = _build_artifact_token_minter(orch, request.user_id or "", ctx=_peer_ctx)
+        _bind_knowledge_intent_resolver(_peer_ctx)
         # ctx-types-fix Phase 2 (2026-05-19): single-writer init for all
         # turn-start transient slots. Replaces 5 ad-hoc setattr blocks (Bug 3
         # surface — 0.26.0 prod hang was paradigm_v2 / preferred_* never set
@@ -2702,7 +2761,12 @@ class TurnRunner:
         _peer_ctx._reference_runtime = getattr(request, "reference_runtime", None)
         _peer_ctx.execution_generation = request.execution_generation
         _peer_ctx.execution_owner_id = request.execution_owner_id
+        _peer_ctx.terminal_execution_context = terminal_runtime.execution if terminal_runtime is not None else None
         _peer_ctx.collaboration_store = getattr(request, "collaboration_store", None)
+        if request.context_maintenance is not None:
+            from bowhead_core.context_manual import run_manual_context
+
+            return await run_manual_context(self, request, ctx=_peer_ctx, bus=bus, agent_runner=_eff_subagent_runner)
         if request.plan_execution_id:
             from bowhead_core.chat_reference_plan import prepare_plan_runtime
 
@@ -3021,6 +3085,8 @@ class TurnRunner:
         supply a refusal-only process router, which cannot generate a useful title.
         """
 
+        if request.context_maintenance is not None:
+            return
         orch = self._orch
         try:
             # ① Source gate (independent review P1): _run_inner serves **all** turn producers.

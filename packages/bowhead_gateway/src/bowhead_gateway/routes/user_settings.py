@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
 from bowhead_gateway.agent_coach_after_edit import AGENT_COACH_AFTER_EDIT_VALUES, KEY_AGENT_COACH_AFTER_EDIT
+from bowhead_gateway.configuration_field_guidance import page_field_contract
 from bowhead_gateway.routes.auth import _current_user
 
 if TYPE_CHECKING:
@@ -80,6 +81,7 @@ class SettingsValue(BaseModel):
 
 
 class SettingsAll(BaseModel):
+    field_contract: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     settings: dict[str, str]
 
 
@@ -115,7 +117,9 @@ async def list_settings(
     user: User = Depends(_current_user),
 ) -> SettingsAll:
     settings = await store.list_for_user(user.id)
-    return SettingsAll(settings={key: value for key, value in settings.items() if key not in RESERVED_USER_SETTING_KEYS})
+    return SettingsAll(
+        settings={key: value for key, value in settings.items() if key not in RESERVED_USER_SETTING_KEYS}, **page_field_contract("user_language")
+    )
 
 
 @router.put("/{key}", response_model=SettingsValue, dependencies=[Depends(require_not_readonly)])

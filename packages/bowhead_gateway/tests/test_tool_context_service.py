@@ -178,7 +178,21 @@ async def test_transient_identity_failure_not_negative_cached():
 
     svc2 = ConnectorContextService(user_store=_UStore(), user_memory_store=_UMem())
     assert await svc2.accessible_workspaces(_DarcNone(), "u_2") == ()
-    assert "u_2" in svc2._cache  # Truly no identity → normal negative cache.
+    assert len(svc2._cache) == 1
+
+
+async def test_accessible_cache_isolates_connections_with_overlapping_workspace_ids():
+    first = _FakeDatarc(projects=[{"id": "7", "name": "First connection"}])
+    second = _FakeDatarc(projects=[{"id": "7", "name": "Second connection"}])
+    svc = _svc()
+    assert (await svc.accessible_workspaces(first, "u_1"))[0].name == "First connection"
+    assert (await svc.accessible_workspaces(second, "u_1"))[0].name == "Second connection"
+    await svc.accessible_workspaces(first, "u_1")
+    assert (first.list_calls, second.list_calls) == (1, 1)
+    svc.invalidate_user("u_1")
+    await svc.accessible_workspaces(first, "u_1")
+    await svc.accessible_workspaces(second, "u_1")
+    assert (first.list_calls, second.list_calls) == (2, 2)
 
 
 async def test_identity_store_failures_are_transient_and_not_negative_cached():

@@ -1126,6 +1126,19 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
     suggested_cases: [],
     base: { release_id: "arl_1", working_copy_id: "awc_1", working_copy_row_version: 3 },
   };
+  const manager: Awaited<ReturnType<typeof getAgentEvalManager>> = {
+    kind: "agent_eval_manager", schema_version: 1, agent_id: "osa_1", target: { kind: "live" },
+    suites: [{
+      suite_id: "aes_1", suite_kind: "owner_quality", name: "发布回归", visibility: "owner", state: "active", row_version: 2, platform_managed: false,
+      revision: { suite_revision_id: "aev_1", sequence: 1, case_count: 1, created_at: "2026-09-14T08:00:00Z", cases: [] },
+      evidence: { state: "missing", stale_reason: null, updated_at: null, run: null },
+    }],
+    runs: [], trigger_policy: null, release_gate: { required: true, ready: false, reason: "missing" },
+  };
+  const caseProposal: AgentChangeProposal = {
+    ...proposal, operations: [], atomic_groups: [], base: { ...proposal.base, suite_revision_id: "aev_1" },
+    suggested_cases: [{ id: "one", task: "Check the supplied total", failure_mode: "Invented total", decision_status: "pending", covers_group_ids: [] }],
+  };
 
   beforeEach(() => {
     vi.mocked(getAgentVersionWorkbench).mockResolvedValue({
@@ -1133,15 +1146,7 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
       change_proposals: [proposal],
       next_draft_identity: { base_release_id: "arl_1", id: "awc_1", row_version: 3 },
     });
-    vi.mocked(getAgentEvalManager).mockResolvedValue({
-      kind: "agent_eval_manager", schema_version: 1, agent_id: "osa_1", target: { kind: "live" },
-      suites: [{
-        suite_id: "aes_1", suite_kind: "owner_quality", name: "发布回归", visibility: "owner", state: "active", row_version: 2, platform_managed: false,
-        revision: { suite_revision_id: "aev_1", sequence: 1, case_count: 1, created_at: "2026-09-14T08:00:00Z", cases: [] },
-        evidence: { state: "missing", stale_reason: null, updated_at: null, run: null },
-      }],
-      runs: [], trigger_policy: null, release_gate: { required: true, ready: false, reason: "missing" },
-    });
+    vi.mocked(getAgentEvalManager).mockReset().mockResolvedValue(manager);
   });
 
   afterEach(() => {
@@ -1366,6 +1371,96 @@ describe("AgentVersionWorkbenchPanel · proposals", () => {
     expect(await screen.findByText(/The suite changed/)).toBeTruthy();
     const add = screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
+    expect(acceptAgentProposalSuggestedCases).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("waits for suites without presenting a conflict (initial=%s)", async (initial) => {
+    let resolve!: (value: typeof manager) => void;
+    vi.mocked(getAgentEvalManager).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const suggested = { ...caseProposal, base: initial ? { ...caseProposal.base, suite_revision_id: null, initial_suite_name: "New checks" } : caseProposal.base };
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [suggested] });
+    renderPanel({ view: "proposals" }, "en-US");
+    expect(await screen.findByText("Loading this Agent’s evaluation suites…")).toBeTruthy();
+    expect(screen.queryByText(/The suite changed/)).toBeNull();
+    expect(screen.queryByText(/Create one of your own suites/)).toBeNull();
+    const save = screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Dismiss these suggestions" }).hasAttribute("disabled")).toBe(false);
+    await act(async () => resolve(initial ? { ...manager, suites: [] } : manager));
+    await waitFor(() => expect(save.disabled).toBe(false));
+    expect(screen.queryByText(/The suite changed/)).toBeNull();
+    expect(acceptAgentProposalSuggestedCases).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed suite read without regenerating the proposal or losing edits", async () => {
+    let resolve!: (value: typeof manager) => void;
+    vi.mocked(getAgentEvalManager)
+      .mockRejectedValueOnce(new ApiError(503, "Private upstream detail"))
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [caseProposal] });
+    vi.mocked(acceptAgentProposalSuggestedCases).mockResolvedValue({ decision_id: "acpd_retry", suite_revision_id: "aev_2" });
+    const view = renderPanel({ view: "proposals" }, "en-US");
+    expect((await screen.findAllByText(/The evaluation suites could not be loaded/)).length).toBeGreaterThan(0);
+    expect(view.container.textContent).not.toContain("Private upstream detail");
+    expect(screen.queryByText(/The suite changed/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText("Review or adjust tests"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Case task" }), { target: { value: "Keep my edited question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Loading this Agent’s evaluation suites…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => resolve(manager));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByRole("textbox", { name: "Case task" }) as HTMLInputElement).value).toBe("Keep my edited question");
+    fireEvent.click(screen.getByRole("button", { name: "Add this test" }));
+    await waitFor(() => expect(acceptAgentProposalSuggestedCases).toHaveBeenCalledWith("osa_1", caseProposal, "aev_1", [expect.objectContaining({ suggestedCaseId: "one", task: "Keep my edited question" })]));
+    expect(acceptAgentProposalSuggestedCases).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403, 404])("clears case content when suite access is unavailable (%s)", async (status) => {
+    vi.mocked(getAgentEvalManager).mockRejectedValueOnce(new ApiError(status, "Unavailable"));
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [caseProposal] });
+    const view = renderPanel({ view: "proposals" }, "en-US");
+    expect(await screen.findByText(/This Agent’s evaluation suites are no longer available to you/)).toBeTruthy();
+    expect(view.container.textContent).not.toContain(caseProposal.suggested_cases[0].task);
+    expect(screen.queryByRole("button", { name: "Add this test" })).toBeNull();
+    expect(screen.queryByText(/The suite changed/)).toBeNull();
+    expect(acceptAgentProposalSuggestedCases).not.toHaveBeenCalled();
+  });
+
+  it("keeps independent configuration proposals when suite access is unavailable", async () => {
+    const cases = { ...caseProposal, proposal_id: "acp_cases_unavailable" };
+    vi.mocked(getAgentEvalManager).mockRejectedValueOnce(new ApiError(403, "Unavailable"));
+    vi.mocked(getAgentVersionWorkbench).mockResolvedValue({ ...WORKBENCH, change_proposals: [proposal, cases] });
+    renderPanel({ view: "proposals" }, "en-US");
+    expect(await screen.findByText(/This Agent’s evaluation suites are no longer available to you/)).toBeTruthy();
+    expect(screen.getByText(proposal.rationale!)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save these changes to draft" })).toBeTruthy();
+    expect(screen.queryByText(cases.suggested_cases[0].task)).toBeNull();
+    expect(acceptAgentProposalSuggestedCases).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a late suite read after the target Agent changes", async () => {
+    let resolveOld!: (value: typeof manager) => void;
+    let resolveNew!: (value: typeof manager) => void;
+    const second = { ...caseProposal, agent_id: "osa_2", proposal_id: "acp_second", suggested_cases: [{ ...caseProposal.suggested_cases[0], task: "Second Agent question" }] };
+    vi.mocked(getAgentVersionWorkbench).mockImplementation(async (id) => ({ ...WORKBENCH, change_proposals: [id === "osa_1" ? caseProposal : second] }));
+    vi.mocked(getAgentEvalManager).mockImplementation((id) => new Promise((done) => { if (id === "osa_1") resolveOld = done; else resolveNew = done; }));
+    function SwitchTarget() {
+      const [agentId, setAgentId] = useState("osa_1");
+      return <><button onClick={() => setAgentId("osa_2")}>Switch Agent</button><AgentVersionWorkbenchPanel agentId={agentId} agentName="Analyst" view="proposals" workingCopy={null} onAvailability={vi.fn()} onChanged={vi.fn().mockResolvedValue(undefined)} onError={vi.fn()} /></>;
+    }
+    renderIntl(<SwitchTarget />, { locale: "en-US" });
+    expect(await screen.findByText("Loading this Agent’s evaluation suites…")).toBeTruthy();
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
+    fireEvent.click(screen.getByRole("button", { name: "Switch Agent" }));
+    expect(await screen.findByText("Second Agent question")).toBeTruthy();
+    await waitFor(() => expect(resolveNew).toBeTypeOf("function"));
+    await act(async () => resolveOld(manager));
+    expect(screen.queryByText("Check the supplied total")).toBeNull();
+    expect((screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => resolveNew({ ...manager, agent_id: "osa_2" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add this test" }) as HTMLButtonElement).disabled).toBe(false));
     expect(acceptAgentProposalSuggestedCases).not.toHaveBeenCalled();
   });
 

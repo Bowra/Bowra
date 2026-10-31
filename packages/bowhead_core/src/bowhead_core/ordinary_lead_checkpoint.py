@@ -6,11 +6,13 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from bowhead_router.types import ImageRef, Message, ToolCall
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from bowhead_core.agent_run_limits import UNBOUNDED_STEPS, AgentLoopBudget
 from bowhead_core.chat_references import decode_reference_json
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.documents.routing import DocumentRoutingSnapshot
+from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS, KnowledgeReadState
 from bowhead_core.ordinary_lead_continuation import (
     OrdinaryContinuationUnavailable,
     canonical_json,
@@ -91,7 +93,19 @@ class OrdinaryLeadCheckpoint(BaseModel):
         "ordinary-lead-loop.v9",
         "ordinary-lead-loop.v10",
         "ordinary-lead-loop.v11",
+        "ordinary-lead-loop.v12",
+        "ordinary-lead-loop.v13",
     ] = "ordinary-lead-loop.v1"
+    storage_format: Literal["segmented.v1"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    context_projection_enabled: bool = Field(default=False, exclude_if=lambda value: not value)
+    context_base_generation: str | None = Field(default=None, pattern=r"^mcg_[a-z0-9]+$", exclude_if=lambda value: value is None)
+
+    @property
+    def payload_limit(self) -> int:
+        from bowhead_core.context_segments import MAX_CONTEXT_BYTES
+
+        return MAX_CONTEXT_BYTES if self.storage_format else MAX_CHECKPOINT_BYTES
+
     # Historical provenance only; new captures omit this field.
     document_routing: DocumentRoutingSnapshot | None = Field(default=None, repr=False)
     subagent_id: str = Field(min_length=1, max_length=128)
@@ -99,8 +113,9 @@ class OrdinaryLeadCheckpoint(BaseModel):
     turn_tail: str
     language_tail: str
     attachment_context: str | None
-    max_iterations: int = Field(ge=1, le=101)
-    next_iteration: int = Field(ge=1, le=100)
+    max_iterations: int = Field(ge=1, le=UNBOUNDED_STEPS + 1)
+    next_iteration: int = Field(ge=1, le=UNBOUNDED_STEPS)
+    loop_budget: AgentLoopBudget | None = Field(default=None, exclude_if=lambda value: value is None)
     tool_schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     preferred_provider: str | None
     preferred_model: str | None
@@ -122,8 +137,26 @@ class OrdinaryLeadCheckpoint(BaseModel):
     history_sizes: list[int]
     material_json: str = Field(repr=False)
     collaboration: dict | None = Field(default=None, repr=False)
+    knowledge_read: KnowledgeReadState | None = Field(default=None, repr=False)
+    knowledge_sources: dict[str, str | None] | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_loop_bounds(self) -> OrdinaryLeadCheckpoint:
+        if (self.context_projection_enabled and self.storage_format is None) or (
+            self.context_base_generation is not None and not self.context_projection_enabled
+        ):
+            raise ValueError("Invalid context projection checkpoint")
+        if self.loop_budget is None and (self.max_iterations > 101 or self.next_iteration > 100):
+            raise ValueError("Legacy Lead continuation exceeds its loop bounds")
+        return self
 
     def encode(self) -> bytes:
+        if (self.contract == "ordinary-lead-loop.v13") != (self.knowledge_sources is not None):
+            raise OrdinaryContinuationUnavailable()
+        if self.contract != "ordinary-lead-loop.v13" and (self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}) != (
+            self.knowledge_read is not None
+        ):
+            raise OrdinaryContinuationUnavailable()
         if self.contract not in {
             "ordinary-lead-loop.v5",
             "ordinary-lead-loop.v6",
@@ -132,11 +165,13 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         } and (self.contract == "ordinary-lead-loop.v4") != (self.document_routing is not None):
             raise OrdinaryContinuationUnavailable()
-        if self.contract not in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"} and (self.contract == "ordinary-lead-loop.v9") != (
-            self.collaboration is not None
-        ):
+        if self.contract not in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"} and (
+            self.contract == "ordinary-lead-loop.v9"
+        ) != (self.collaboration is not None):
             raise OrdinaryContinuationUnavailable()
         if self.collaboration is not None:
             retained = self.collaboration
@@ -150,16 +185,16 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 or any(char not in "0123456789abcdef" for char in retained["operation_hash"])
             ):
                 raise OrdinaryContinuationUnavailable()
-        excluded = {key for key in ("document_routing", "collaboration") if getattr(self, key) is None}
+        excluded = {key for key in ("document_routing", "collaboration", "knowledge_read", "knowledge_sources") if getattr(self, key) is None}
         payload = canonical_json(self.model_dump(exclude=excluded)).encode()
-        if len(payload) > MAX_CHECKPOINT_BYTES:
+        if len(payload) > self.payload_limit:
             raise OrdinaryContinuationUnavailable()
         if self.next_iteration >= self.max_iterations:
             raise OrdinaryContinuationUnavailable()
         for encoded in (self.context_json, self.request_json, self.material_json, self.question_arguments_json):
-            if not isinstance(decode_reference_json(encoded, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20), dict):
+            if not isinstance(decode_reference_json(encoded, max_bytes=self.payload_limit, max_depth=20), dict):
                 raise OrdinaryContinuationUnavailable()
-        material = decode_reference_json(self.material_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20)
+        material = decode_reference_json(self.material_json, max_bytes=self.payload_limit, max_depth=20)
         if self.contract in {
             "ordinary-lead-loop.v5",
             "ordinary-lead-loop.v6",
@@ -168,6 +203,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }:
             self.helper_materials()
         elif "helpers" in material:
@@ -183,7 +220,9 @@ class OrdinaryLeadCheckpoint(BaseModel):
 
     @classmethod
     def decode(cls, payload: bytes) -> OrdinaryLeadCheckpoint:
-        value = decode_reference_json(payload, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=24)
+        from bowhead_core.context_segments import MAX_CONTEXT_BYTES
+
+        value = decode_reference_json(payload, max_bytes=MAX_CONTEXT_BYTES, max_depth=24)
         if (
             isinstance(value, dict)
             and value.get("contract")
@@ -196,6 +235,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 "ordinary-lead-loop.v9",
                 "ordinary-lead-loop.v10",
                 "ordinary-lead-loop.v11",
+                "ordinary-lead-loop.v12",
+                "ordinary-lead-loop.v13",
             }
             and "document_routing" in value
         ):
@@ -206,8 +247,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
 
     def messages(self) -> list[Message]:
         """Restore exact call/result pairs ending at the sole unanswered question."""
-        raw = decode_reference_json(self.messages_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20)
-        if not isinstance(raw, list) or not 3 <= len(raw) <= 128:
+        raw = decode_reference_json(self.messages_json, max_bytes=self.payload_limit, max_depth=20)
+        if not isinstance(raw, list) or len(raw) < 3 or (self.storage_format is None and len(raw) > 128):
             raise OrdinaryContinuationUnavailable()
         messages = []
         pending: dict[str, str] = {}
@@ -277,10 +318,10 @@ class OrdinaryLeadCheckpoint(BaseModel):
         return messages
 
     def invocations(self) -> list[ToolInvocation]:
-        value = decode_reference_json(self.invocations_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20)
+        value = decode_reference_json(self.invocations_json, max_bytes=self.payload_limit, max_depth=20)
 
         def restore(items: object, *, depth: int = 0) -> list[ToolInvocation]:
-            if not isinstance(items, list) or depth > 1 or len(items) > 64:
+            if not isinstance(items, list) or depth > 1 or (self.storage_format is None and len(items) > 64):
                 raise OrdinaryContinuationUnavailable()
             result = []
             for item in items:
@@ -307,7 +348,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
         """
         from bowhead_core.language_context import LanguageContext
 
-        data = decode_reference_json(self.language_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=2)
+        data = decode_reference_json(self.language_json, max_bytes=self.payload_limit, max_depth=2)
         if data is None:
             return None
         if not isinstance(data, dict):
@@ -316,7 +357,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
 
     def helper_materials(self) -> list[dict]:
         """Read ordered execution evidence without rewriting legacy envelopes."""
-        material = decode_reference_json(self.material_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20)
+        material = decode_reference_json(self.material_json, max_bytes=self.payload_limit, max_depth=20)
         if not isinstance(material, dict):
             raise OrdinaryContinuationUnavailable()
         if self.contract not in {
@@ -327,6 +368,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }:
             if "helpers" in material:
                 raise OrdinaryContinuationUnavailable()
@@ -335,10 +378,16 @@ class OrdinaryLeadCheckpoint(BaseModel):
         if (
             set(material)
             != {"helpers", "attachments", "canvas"}
-            | ({"input_context"} if self.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"} else set())
+            | (
+                {"input_context"}
+                if self.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}
+                else set()
+            )
             or not isinstance(helpers, list)
             or not (
-                1
+                0
+                if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}
+                else 1
                 if self.contract
                 in {
                     "ordinary-lead-loop.v6",
@@ -347,20 +396,25 @@ class OrdinaryLeadCheckpoint(BaseModel):
                     "ordinary-lead-loop.v9",
                     "ordinary-lead-loop.v10",
                     "ordinary-lead-loop.v11",
+                    "ordinary-lead-loop.v12",
+                    "ordinary-lead-loop.v13",
                 }
                 else 2
             )
             <= len(helpers)
-            <= 64
+            <= (64 if self.storage_format is None else self.payload_limit)
             or any(not isinstance(helper, dict) for helper in helpers)
         ):
             raise OrdinaryContinuationUnavailable()
-        if self.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"}:
+        if self.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}:
             from bowhead_core._ref_allowlist import RefAllowlist
             from bowhead_core.ordinary_lead_input_context import validate_shape
 
-            context = decode_reference_json(self.context_json, max_bytes=MAX_CHECKPOINT_BYTES, max_depth=20)
-            if self.contract != "ordinary-lead-loop.v11" or material["input_context"] is not None:
+            context = decode_reference_json(self.context_json, max_bytes=self.payload_limit, max_depth=20)
+            if (
+                self.contract not in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}
+                or material["input_context"] is not None
+            ):
                 validate_shape(material["input_context"], context)
             if "reference_inventory" not in context:
                 raise OrdinaryContinuationUnavailable()
@@ -370,15 +424,24 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 except ValueError as exc:
                     raise OrdinaryContinuationUnavailable() from exc
         invocations = self.invocations()
-        if sum(1 + len(inv.nested) for inv in invocations) > 64:
+        if self.storage_format is None and sum(1 + len(inv.nested) for inv in invocations) > 64:
             raise OrdinaryContinuationUnavailable()
         messages = current_turn_messages(self.messages(), self.history_sizes)
         calls = [call for message in messages for call in message.tool_calls or []]
         parallel_calls = [call for message in messages if len(message.tool_calls or []) > 1 for call in message.tool_calls]
         if (
             len(calls) != len(invocations) + 1
-            or (self.contract == "ordinary-lead-loop.v11") != bool(parallel_calls)
-            or any(call.name != "subagent_spawn" for call in parallel_calls)
+            or (
+                self.contract not in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}
+                and (self.contract == "ordinary-lead-loop.v11") != bool(parallel_calls)
+            )
+            or any(
+                call.name
+                not in (
+                    {"subagent_spawn"} | (KNOWLEDGE_READ_TOOLS if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13"} else set())
+                )
+                for call in parallel_calls
+            )
         ):
             raise OrdinaryContinuationUnavailable()
         if any(not inv.call_id for inv in invocations) or len({inv.call_id for inv in invocations}) != len(invocations):
@@ -410,6 +473,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }:
             filtered = []
             uncertain_seen = False
@@ -456,6 +521,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "ordinary-lead-loop.v9",
                         "ordinary-lead-loop.v10",
                         "ordinary-lead-loop.v11",
+                        "ordinary-lead-loop.v12",
+                        "ordinary-lead-loop.v13",
                     }
                     else set()
                 ),
@@ -482,6 +549,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "ordinary-lead-loop.v9",
                         "ordinary-lead-loop.v10",
                         "ordinary-lead-loop.v11",
+                        "ordinary-lead-loop.v12",
+                        "ordinary-lead-loop.v13",
                     }
                     and invocation.result.get("ok") is not True
                 )
@@ -496,6 +565,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 "ordinary-lead-loop.v9",
                 "ordinary-lead-loop.v10",
                 "ordinary-lead-loop.v11",
+                "ordinary-lead-loop.v12",
+                "ordinary-lead-loop.v13",
             }:
                 outcome = OrdinaryHelperOutcome.read(helper["outcome"])
                 outcome.require_result(invocation.result.get("ok"))
@@ -505,6 +576,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                     "ordinary-lead-loop.v9",
                     "ordinary-lead-loop.v10",
                     "ordinary-lead-loop.v11",
+                    "ordinary-lead-loop.v12",
+                    "ordinary-lead-loop.v13",
                 } and outcome.reason in {
                     "model_failure",
                     "model_unknown",
@@ -535,7 +608,15 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "rejected",
                         *(
                             {"attachment_read", "read_result"}
-                            if self.contract in {"ordinary-lead-loop.v8", "ordinary-lead-loop.v9", "ordinary-lead-loop.v10", "ordinary-lead-loop.v11"}
+                            if self.contract
+                            in {
+                                "ordinary-lead-loop.v8",
+                                "ordinary-lead-loop.v9",
+                                "ordinary-lead-loop.v10",
+                                "ordinary-lead-loop.v11",
+                                "ordinary-lead-loop.v12",
+                                "ordinary-lead-loop.v13",
+                            }
                             else set()
                         ),
                         *(
@@ -547,6 +628,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                                 "ordinary-lead-loop.v9",
                                 "ordinary-lead-loop.v10",
                                 "ordinary-lead-loop.v11",
+                                "ordinary-lead-loop.v12",
+                                "ordinary-lead-loop.v13",
                             }
                             else set()
                         ),
@@ -605,7 +688,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                     or any(not isinstance(item, dict) or item.get("output") is not False for item in record["artifacts"])
                 ):
                     raise OrdinaryContinuationUnavailable()
-        parallel_keys = {"call:" + call.id for call in parallel_calls}
+        parallel_keys = {"call:" + call.id for call in parallel_calls if call.name == "subagent_spawn"}
         if not parallel_keys <= identities["dispatch_key"] or any(
             helper["dispatch_key"] in parallel_keys and OrdinaryHelperOutcome.read(helper.get("outcome")).reason in {"model_unknown", "tool_unknown"}
             for helper in helpers
@@ -638,6 +721,7 @@ class OrdinaryLeadRunState:
     helper_bindings: list[dict] = field(default_factory=list)
     rejected_returns: dict[tuple[str, str], str] = field(default_factory=dict)
     tool_materials: dict[tuple[str, str], dict] = field(default_factory=dict)
+    knowledge_sources: dict[str, str | None] = field(default_factory=dict)
     pending_skill_reads: dict[tuple[str, str], tuple] = field(default_factory=dict, repr=False)
     blocked_calls: dict[str, str] = field(default_factory=dict)
     final_bounce_count: dict[str, int] = field(default_factory=lambda: {"n": 0})

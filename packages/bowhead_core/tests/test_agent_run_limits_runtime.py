@@ -1,4 +1,4 @@
-"""Agent run limits inside SubagentRunner: steps, no-progress, the shared tool-call budget and time."""
+"""Agent run limits inside SubagentRunner: steps, shared tool-call budgets, time and credit."""
 
 from __future__ import annotations
 
@@ -17,20 +17,24 @@ from bowhead_core import agent_run_limits as rl
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def runtime_policy(monkeypatch):
+    rl.get_runtime_controls.cache_clear()
+    yield
+    rl.get_runtime_controls.cache_clear()
+
+
 class _LoopingRouter:
     """Calls ``read`` with a fresh or repeated argument on every step, then returns."""
 
-    def __init__(self, *, steps_before_return: int, distinct: bool, wrap_up_fails: bool = False) -> None:
+    def __init__(self, *, steps_before_return: int, distinct: bool) -> None:
         self.steps_before_return = steps_before_return
         self.distinct = distinct
-        self.wrap_up_fails = wrap_up_fails
         self.requests: list[LLMRequest] = []
 
     def _next(self) -> LLMResponse:
         step = len(self.requests)
         if self.requests[-1].tool_choice == "none":
-            if self.wrap_up_fails:
-                raise RuntimeError("provider down")
             return LLMResponse(content="Done: read keys 1-4, values verified.\nRemaining: read the other keys.")
         if step > self.steps_before_return:
             payload = {"delivery_surface": "chat", "exec_summary": f"Done after {step} steps."}
@@ -61,9 +65,17 @@ def _registry() -> ToolRegistry:
     return registry
 
 
-async def _run(monkeypatch: pytest.MonkeyPatch, router: _LoopingRouter, limits: rl.AgentRunLimits | None, *, max_iterations: int = 40):
+async def _run(
+    monkeypatch: pytest.MonkeyPatch,
+    router: _LoopingRouter,
+    limits: rl.AgentRunLimits | None,
+    *,
+    max_iterations: int = 40,
+    profile_name: str = "run-limits-test",
+    **run_options,
+):
     profile = SubagentProfile(
-        name="run-limits-test",
+        name=profile_name,
         llm_agent_type="analyst",
         tool_whitelist=("read", "subagent_return"),
         system_prompt="Read and return.",
@@ -88,6 +100,7 @@ async def _run(monkeypatch: pytest.MonkeyPatch, router: _LoopingRouter, limits: 
                 session_id="s_test",
                 datarc=None,  # type: ignore[arg-type]
             ),
+            **run_options,
         )
     finally:
         reset_turn_deadline(deadline_token)
@@ -102,36 +115,6 @@ async def test_unlimited_steps_run_past_the_old_force_bail_and_manifest_limits(m
     assert len(router.requests) == 46  # 45 reads, then the return
 
 
-async def test_team_step_limit_replaces_the_manifest_limit_and_returns_partial_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    router = _LoopingRouter(steps_before_return=45, distinct=True)
-    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=5, tool_call_limit=1000), max_iterations=40)
-    assert not result.ok
-    assert (result.completion, result.stop_reason) == ("partial", "step_limit")
-    assert result.partial_done == "read keys 1-4, values verified."
-    assert result.partial_remaining == "read the other keys."
-    wrap_up = router.requests[-1]
-    assert wrap_up.tool_choice == "none"
-    assert [schema.name for schema in wrap_up.tools] == ["read", "subagent_return"]
-    assert "step limit" in wrap_up.messages[-1].content
-
-
-async def test_a_failed_wrap_up_still_returns_a_partial_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    router = _LoopingRouter(steps_before_return=45, distinct=True, wrap_up_fails=True)
-    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=5, tool_call_limit=1000))
-    assert (result.completion, result.stop_reason) == ("partial", "step_limit")
-    assert result.partial_done is None and result.partial_remaining is None
-
-
-async def test_repeating_the_same_call_stops_for_no_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    router = _LoopingRouter(steps_before_return=100, distinct=False)
-    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=None, tool_call_limit=1000))
-    assert (result.completion, result.stop_reason) == ("partial", "no_progress")
-    nudges = [m for m in router.requests[-1].messages if m.role == "user" and (m.content or "").startswith("[System] Your last")]
-    assert len(nudges) == 1
-    # One productive step, 12 idle ones, then the wrap-up call.
-    assert len(router.requests) == 14
-
-
 async def test_tool_calls_share_one_turn_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     router = _LoopingRouter(steps_before_return=6, distinct=True)
     result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=None, tool_call_limit=3))
@@ -144,13 +127,6 @@ async def test_subagent_return_is_never_refused_by_the_budget(monkeypatch: pytes
     router = _LoopingRouter(steps_before_return=2, distinct=True)
     result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=None, tool_call_limit=2))
     assert result.ok and result.completion == "complete"
-
-
-async def test_without_the_feature_the_earlier_limits_apply(monkeypatch: pytest.MonkeyPatch) -> None:
-    router = _LoopingRouter(steps_before_return=45, distinct=True)
-    result = await _run(monkeypatch, router, None, max_iterations=10)
-    assert not result.ok
-    assert result.error.startswith("subagent exhausted max_iterations=10")
 
 
 @pytest.mark.parametrize("call_limit", [None, 900])
@@ -184,3 +160,68 @@ async def test_running_out_of_credit_stops_with_partial_work(monkeypatch: pytest
         rl.reset_credit_gate(token)
     assert (result.completion, result.stop_reason) == ("partial", "budget")
     assert "available credit" in router.requests[-1].messages[-1].content
+
+
+@pytest.mark.parametrize("limit", [1, 3, 5])
+async def test_exact_decision_ceiling_keeps_last_tool_batch_without_extra_summary(monkeypatch, limit):
+    router = _LoopingRouter(steps_before_return=20, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=limit))
+    assert (result.completion, result.stop_reason) == ("partial", "step_limit")
+    assert len(router.requests) == limit
+    assert len(result.tool_invocations) == limit
+    assert result.model_turn_count == limit
+    assert result.partial_done
+
+
+@pytest.mark.parametrize("limit", [1, 3])
+async def test_natural_completion_on_last_admitted_decision_wins(monkeypatch, limit):
+    router = _LoopingRouter(steps_before_return=limit - 1, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=limit))
+    assert result.ok, result.error
+    assert len(router.requests) == limit
+
+
+async def test_system_ceiling_applies_to_an_unlimited_team(monkeypatch):
+    monkeypatch.setenv("BOWHEAD_AGENT_MAX_STEPS", "2")
+    router = _LoopingRouter(steps_before_return=20, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits())
+    assert result.stop_reason == "step_limit"
+    assert len(router.requests) == 2
+
+
+async def test_forced_tools_do_not_consume_model_steps(monkeypatch):
+    router = _LoopingRouter(steps_before_return=0, distinct=True)
+    result = await _run(
+        monkeypatch,
+        router,
+        rl.AgentRunLimits(step_limit=1),
+        forced_tool_calls=[ToolCall(id="forced", name="read", arguments={"key": "original"})],
+    )
+    assert result.ok, result.error
+    assert len(router.requests) == 1
+    assert [inv.tool_name for inv in result.tool_invocations] == ["read", "subagent_return"]
+
+
+async def test_repeated_calls_are_advisory_with_runtime_controls(monkeypatch):
+    router = _LoopingRouter(steps_before_return=35, distinct=False)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(tool_call_limit=1000), max_iterations=12)
+    assert result.ok, result.error
+    assert len(router.requests) == 36
+
+
+async def test_lead_uses_the_shared_ceiling_beyond_twelve(monkeypatch):
+    router = _LoopingRouter(steps_before_return=30, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=14), max_iterations=12, profile_name="lead")
+    assert result.stop_reason == "step_limit", result.error
+    assert len(router.requests) == 14
+
+
+async def test_empty_last_decision_reports_step_exhaustion(monkeypatch):
+    class EmptyRouter(_LoopingRouter):
+        def _next(self):
+            return LLMResponse(content="")
+
+    router = EmptyRouter(steps_before_return=0, distinct=True)
+    result = await _run(monkeypatch, router, rl.AgentRunLimits(step_limit=1), profile_name="lead")
+    assert result.stop_reason == "step_limit", result.error
+    assert len(router.requests) == 1

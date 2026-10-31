@@ -79,7 +79,7 @@ class DraftBlueprint(BaseModel):
     system_prompt: GeneratedSystemPrompt
     resource_mode: Literal["tools", "provided_text"] = "tools"
     capability_intents: list[CapabilityIntent] = Field(max_length=12)
-    max_iterations_hint: int = Field(ge=1, le=20)
+    max_iterations_hint: int = Field(default=12, ge=1, le=20)
     assumptions: list[str] = Field(max_length=8)
     warnings: list[BlueprintWarning] = Field(max_length=8)
 

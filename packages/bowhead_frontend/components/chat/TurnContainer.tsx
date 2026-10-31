@@ -143,6 +143,7 @@ import { LiteConfirmConnected } from "@/components/config-copilot/lite-confirm-c
 import { stepsToStepViews } from "./step-list/step-view";
 import { AgentTrace } from "./step-list/AgentTrace";
 import { CollaborationTraceProvider } from "./step-list/collaboration-trace-state";
+import { ContextActivityProvider, useContextActivities } from "./step-list/ContextActivity";
 import { StepSummary } from "./step-list/StepSummary";
 import { formatModelRetry, RunningBand, useElapsedText } from "./step-list/RunningBand";
 import type { StepView } from "./step-list/types";
@@ -383,6 +384,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
     runner.user ||
       runner.running ||
       runner.answer ||
+      (runner.operationKind === "context_maintenance" && !runner.archivedTurns?.some((turn) => turn.turnId === runner.turnId)) ||
       (runner.traceSteps && runner.traceSteps.length > 0) ||
       (runner.errorReason && (runner.userAttachments?.length ?? 0) > 0),
   );
@@ -530,6 +532,8 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       clarificationId: cp.clarificationId,
       valueByLabel,
       showRemember: isToolContextSelect && Boolean(cp.rememberOption),
+      rememberDefault: cp.rememberDefault,
+      allowCustomAnswers: cp.kind !== "tool_context_select",
       footHint: isToolContextSelect ? tr("clarification_switch_hint") : null,
       documentDraft: cp.purpose === "document_draft",
     };
@@ -975,17 +979,20 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
     const optimisticValues = payload.chosen_value
       ? [payload.chosen_value]
       : (payload.chosen_values ?? []);
+    const connectorChoice = runner.clarificationPending?.kind === "tool_context_select" && !payload.skip;
+    const displayValues = connectorChoice ? [fallbackText] : optimisticValues;
     setResolving(true);
     setClarificationError(null);
     // dingsiyan #11: optimistic answered state combines tombstone (survives attachStream, prevents replayed
     // clarification_required from reviving cards) + summary row (immediate click feedback).
     markClarificationAnswered(clarificationId, {
-      values: optimisticValues,
+      values: displayValues,
+      ...(connectorChoice ? { canonicalValues: optimisticValues } : {}),
       skipped: Boolean(payload.skip),
     });
     setAnsweredSummary({
       requestId: clarificationId,
-      values: optimisticValues,
+      values: displayValues,
       skipped: Boolean(payload.skip),
     });
     void (async () => {
@@ -1203,6 +1210,8 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       intro={clarification.intro}
       busy={resolving}
       showRemember={clarification.showRemember}
+      rememberDefault={clarification.rememberDefault}
+      allowCustomAnswers={clarification.allowCustomAnswers}
       footHint={clarification.footHint}
       documentDraft={clarification.documentDraft}
       restoredAnswers={
@@ -1597,6 +1606,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       {hasCurrentTurn ? (
         <TurnRunningProvider running={runner.running} bandOwnsLiveStatus={bandMode}>
         <CollaborationTraceProvider turnId={runner.turnId ?? ""}>
+        <ContextActivityProvider turnId={runner.turnId ?? ""}>
         <div
           className={`bh-bot-block rho-agent-block${runner.turnId === "t_rho_historical_1" ? " rho-historical-turn" : ""}`}
           data-archived="false"
@@ -1837,7 +1847,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
             })()
           ) : null}
 
-          <CoachChangeReceipts turnId={runner.turnId} sessionId={runner.sessionId} />
+          <CoachChangeReceipts turnId={runner.turnId} sessionId={runner.sessionId} current />
           <CoachAlignmentCards turnId={runner.turnId} sessionId={runner.sessionId} />
           {runner.turnId
           && (
@@ -1878,7 +1888,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
             />
           ) : null}
 
-          {turnComplete && onContinue ? (
+          {turnComplete && onContinue && runner.operationKind !== "context_maintenance" ? (
             <ContinueAction
               targets={continueTargets(turnStoreState?.peerTerminalById, turnStoreState?.peerNames, turnStoreState?.peerDisplayNames)}
               onContinue={onContinue}
@@ -1892,6 +1902,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           ) : null}
 
         </div>
+        </ContextActivityProvider>
         </CollaborationTraceProvider>
         </TurnRunningProvider>
       ) : null}
@@ -1993,6 +2004,8 @@ interface BeatStreamProps {
     // Batch2 tool_context_select: label→Datarc workspace ID mapping + remember checkbox + footer hint.
     valueByLabel?: Record<string, string> | null;
     showRemember?: boolean;
+    rememberDefault?: boolean;
+    allowCustomAnswers?: boolean;
     footHint?: string | null;
     documentDraft?: boolean;
   } | null;
@@ -2157,6 +2170,7 @@ function TurnBeatFlow({
   ariaLabel,
 }: TurnBeatFlowProps) {
   const kp = keyPrefix;
+  const contextActivities = useContextActivities();
   const out: React.ReactNode[] = [];
   let traceRendered = false;
   let renderedAnswerBeat = false;
@@ -2171,6 +2185,7 @@ function TurnBeatFlow({
     );
   };
   const hasTraceFacts =
+    contextActivities.length > 0 ||
     stepViews.length > 0 ||
     Object.keys(peerNames ?? {}).length > 0 ||
     Object.keys(peerDisplayNames ?? {}).length > 0 ||
@@ -2723,6 +2738,9 @@ function computeNarrativeDedupSegIds(
   const norm = (s: string) => stripInternalMarkers(s)
     .replace(/\*\*/g, "")
     .replace(/\[(?:data|cite|num|ref|figure):[^\]]*\]/g, "")
+    // Final citation cleanup removes bare Artifact labels; compare their streamed form equally.
+    // Keep knowledge membership and operation IDs, which carry the actual receipt identity.
+    .replace(/\s*[(（\[【]?\s*(?:artifact(?:_id)?\s*[=:：]\s*|artifact\s+)?art_[a-f0-9]{8,}\s*[)）\]】]?/gi, "")
     .replace(/\s+/g, "")
     .trim();
   const a = norm(answerText);
@@ -2985,6 +3003,7 @@ function ArchivedTurnView({
     <CitationsProvider citations={archived.citations}>
     <ChatSourcesProvider sources={chatSourcesFromPayload(archived.finalPayload)}>
     <CollaborationTraceProvider turnId={archived.turnId ?? ""}>
+    <ContextActivityProvider turnId={archived.turnId ?? ""}>
     <div
       className="bh-bot-block"
       data-archived="true"
@@ -3120,7 +3139,7 @@ function ArchivedTurnView({
         />
       ) : null}
 
-      <CoachChangeReceipts turnId={archived.turnId} sessionId={sessionId} />
+      <CoachChangeReceipts turnId={archived.turnId} sessionId={sessionId} current={latestAnswer} />
       <CoachAlignmentCards turnId={archived.turnId} sessionId={sessionId} />
       {archived.turnId ? (
         <EffectDisclosureNotice
@@ -3173,6 +3192,7 @@ function ArchivedTurnView({
       ) : null}
 
     </div>
+    </ContextActivityProvider>
     </CollaborationTraceProvider>
     </ChatSourcesProvider>
     </CitationsProvider>
@@ -3445,6 +3465,7 @@ function UserMessage({ text, attachments, id, time, who }: UserMessageProps) {
         <div
           style={{
             maxWidth: "78%",
+            overflowWrap: "anywhere",
             fontFamily: "var(--f-sans)",
             fontSize: "1rem",
             lineHeight: 1.5,

@@ -223,11 +223,9 @@ async def prepare_attachments(
         # Extract through bounded seam: pypdf/python-pptx/openpyxl are synchronous and CPU-bound;
         # extract_attachment_bounded handles ZIP-bomb preflight + to_thread / child-process isolation.
         prep = await extract_attachment_bounded(art, data)
-        # Only the bounded Lead continuation needs this extra full-blob pass.
-        from bowhead_core.chat_reference_attachment_snapshot import MAX_LEAD_ATTACHMENT_FILE_BYTES, supports_lead_attachment_mime
-
-        if art.size <= MAX_LEAD_ATTACHMENT_FILE_BYTES and len(data) <= MAX_LEAD_ATTACHMENT_FILE_BYTES and supports_lead_attachment_mime(art.mime):
-            prep.content_hash = "sha256:" + hashlib.sha256(data).hexdigest()
+        # Retained model views bind extracted content to the bytes already read.
+        # Office metadata-only inputs returned above never claim a body digest.
+        prep.content_hash = "sha256:" + hashlib.sha256(data).hexdigest()
         if local_path:
             prep.local_path = local_path
         return prep

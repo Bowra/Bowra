@@ -16,6 +16,7 @@ from bowhead_router.errors import (
     StreamingInterruptedError,
     StreamingTargetsExhaustedError,
 )
+from bowhead_router.output_budget import ContextCapacityError, RenderedRequestBudget
 
 from bowhead_core import metrics
 from bowhead_core import published_diagnostics as diagnostics
@@ -34,6 +35,8 @@ from bowhead_core import published_diagnostics as diagnostics
         ("lead_internal_error", "internal", True),
         ("document_information_incomplete", "content", False),
         ("document_planning_failed", "runtime", False),
+        ("document_authoring_script_failed", "runtime", False),
+        ("document_candidate_invalid", "content", False),
         ("document_history_unavailable", "configuration", False),
         ("document_request_rejected", "content", False),
         ("document_routing_invalid", "runtime", True),
@@ -134,6 +137,26 @@ def test_chat_llm_failure_publishes_finite_detail_and_screens_provider_prose() -
     assert "secret" not in wire
 
 
+def test_local_capacity_failure_preserves_zero_attempt_diagnostics_and_same_session_recovery() -> None:
+    projection = project_llm_failure(
+        ContextCapacityError(
+            "Private model capacity detail",
+            model="private-model-name",
+            budget=RenderedRequestBudget(20000, "text_estimated", 8192, "configured", 1024),
+        )
+    )
+    assert projection is not None
+    failure = diagnostics.build_chat_llm_failure(projection=projection, turn_id="t_local_capacity")
+
+    assert failure.reason_code == "llm_context_overflow"
+    assert failure.recovery_action == "edit_and_resend"
+    assert failure.diagnostics["diagnostic_code"] == "chat_llm_failed"
+    assert "stream_state=not_started" in failure.diagnostics["safe_detail"]
+    assert "attempts=0" in failure.diagnostics["safe_detail"]
+    assert "private-model-name" not in str(failure.diagnostics)
+    assert "Private model capacity detail" not in str(failure.diagnostics)
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -144,6 +167,7 @@ def test_chat_llm_failure_publishes_finite_detail_and_screens_provider_prose() -
         {"stream_state": "unknown"},
         {"fallback_state": "maybe"},
         {"attempts": 100},
+        {"attempts": 0},
     ],
 )
 def test_chat_llm_failure_publisher_rejects_non_finite_projection(
@@ -915,7 +939,7 @@ def test_every_public_turn_failure_reason_has_exactly_one_recovery_action() -> N
         ("wallclock_exceeded", "edit_and_resend"),
         ("access_context_missing", "copy_diagnostics"),
         ("plan_blocked", "edit_and_resend"),
-        ("llm_context_overflow", "new_session"),
+        ("llm_context_overflow", "edit_and_resend"),
         ("lead_internal_error", "retry"),
     ],
 )
@@ -1017,3 +1041,14 @@ def test_terminal_llm_diagnostics_rescreen_provider_message_without_losing_http_
     assert "private_payload" not in republished
     assert republished["occurrence_id"] == failure.occurrence_id
     assert diagnostics.republish_chat_llm_diagnostics(wire, reason_code="lead_internal_error") is None
+
+
+@pytest.mark.parametrize("reason", ["agent_step_limit", "agent_tool_call_limit", "agent_stalled"])
+def test_runtime_stop_preserves_bounded_usage_in_the_terminal_projection(reason):
+    failure = diagnostics.build_chat_turn_failure(reason_code=reason, turn_id="t_runtime", step_usage={"used": 14, "limit": 14})
+    assert failure.reason_code == reason
+    assert failure.diagnostics["step_usage"] == {"used": 14, "limit": 14}
+    assert failure.diagnostics["retryable"] is False
+    assert diagnostics.chat_recovery_action(reason) == "edit_and_resend"
+    invalid = diagnostics.build_chat_turn_failure(reason_code=reason, turn_id="t_runtime", step_usage={"used": True, "limit": 14})
+    assert "step_usage" not in invalid.diagnostics

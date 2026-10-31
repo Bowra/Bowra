@@ -1,5 +1,7 @@
 "use client";
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -134,14 +136,14 @@ export function ExecutionLimitsSettings() {
       <h2 id="sandbox-limits-title" className="agent-run-limits__title">{t("sandbox_title")}</h2>
       <p className="ui-page-desc">{t("sandbox_intro")}</p>
       <div className="ui-group-card agent-run-limits__rows">
-        {(["sandbox_default_timeout_s", "sandbox_max_timeout_s"] as const).map((key) => <FieldRow key={key} className="agent-run-limits__row" titleId={`execution-${key}-title`} title={t(`${key}_title`)} description={t(`${key}_desc`)} control={control(key)} />)}
+        {(["sandbox_default_timeout_s", "sandbox_max_timeout_s"] as const).map((key) => <FieldRow key={key} className="agent-run-limits__row" titleId={`execution-${key}-title`} title={t(`${key}_title`)} help={<ConfigurationFieldHelp contract={limits.field_contract} field={`team_execution_limits.${key}`} facts={{ minimum: limits.ranges[key].min, maximum: key === "sandbox_default_timeout_s" && Number.isSafeInteger(values.sandbox_max_timeout_s) && values.sandbox_max_timeout_s >= limits.ranges[key].min ? Math.min(limits.ranges[key].max, values.sandbox_max_timeout_s) : limits.ranges[key].max }} label={t(`${key}_title`)} />} description={t(`${key}_desc`)} control={control(key)} />)}
       </div>
       <p className="settings-field__hint">{t("sandbox_boundary", { max: limits.ranges.sandbox_max_timeout_s.max })}</p>
     </section>
     <section aria-labelledby="html-limits-title" className="execution-limits__section">
       <h2 id="html-limits-title" className="agent-run-limits__title">{t("html_title")}</h2>
       <p className="ui-page-desc">{t("html_intro")}</p>
-      <div className="ui-group-card agent-run-limits__rows"><FieldRow className="agent-run-limits__row" titleId="execution-html_max_bytes-title" title={t("html_max_bytes_title")} description={t("html_max_bytes_desc")} control={control("html_max_bytes")} /></div>
+      <div className="ui-group-card agent-run-limits__rows"><FieldRow className="agent-run-limits__row" titleId="execution-html_max_bytes-title" title={t("html_max_bytes_title")} help={<ConfigurationFieldHelp contract={limits.field_contract} field="team_execution_limits.html_max_bytes" label={t("html_max_bytes_title")} />} description={t("html_max_bytes_desc")} control={control("html_max_bytes")} /></div>
     </section>
     <p className="settings-field__hint">{t("effective")}</p>
     <SaveBarSlotContext.Provider value={null}><SaveBar dirty={dirty} saving={busy && dirty} saveDisabled={!validAll || busy} saveLabel={t("save")} onSave={() => void save()} onDiscard={() => { accept(limits); setError(null); }} /></SaveBarSlotContext.Provider>

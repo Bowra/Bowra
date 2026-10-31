@@ -80,12 +80,20 @@ export function AccountDeletionControl({ user }: { user: MeUser }) {
     }
   };
   return (
-    <section aria-label={t("title")}>
-      <h2 className="ui-section-title">{t("title")}</h2>
-      <p className="ui-page-desc">{t("summary")}</p>
-      <Button variant="danger" onClick={() => setOpen(true)}>
-        {t("open")}
-      </Button>
+    <section className="ui-group profile-group" aria-label={t("title")}>
+      <div className="ui-group-head">
+        <h2 className="ui-group-title">{t("title")}</h2>
+      </div>
+      <div className="ui-group-card">
+        <div className="legacy-profile-row ui-group-row">
+          <p className="ui-group-hint">{t("summary")}</p>
+          <div className="legacy-profile-control ui-group-control">
+            <Button size="sm" variant="danger" onClick={() => setOpen(true)}>
+              {t("open")}
+            </Button>
+          </div>
+        </div>
+      </div>
       {open ? (
         <Dialog
           title={t("title")}

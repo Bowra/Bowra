@@ -14,8 +14,7 @@
 3. 覆盖值不可信 —— **每个字段在 resolve 时都自带地板**，写入侧的 422 只是给 admin 的即时反馈：
    model 不在 allowlist → 忽略；description 过消毒 → 不安全回落 manifest 默认；
    skills 过 slug fullmatch → 形状不对的丢弃；prompt_append 重跑注入 lint → 命中整段丢弃；
-   max_iterations 钳到 manifest 默认。**绕过 API 直接写进库的行也伤不到运行时**（followup P2-2
-   补齐了 skills / prompt_append 这两个原本只靠写入侧的字段，此前这句话对它们并不成立）。
+   Legacy iteration metadata is ignored; Team run limits govern execution.
 """
 
 from __future__ import annotations
@@ -98,29 +97,6 @@ def effective_display_name(manifest_name: str, ov: BuiltinSubagentOverride | Non
     return ov.display_name[:MAX_DISPLAY_NAME_CHARS] or manifest_name
 
 
-# Platform ceiling for a Team's per-Turn step limit on a built-in Agent. It matches the
-# system-snapshot validator (`subagent._system_agent_profile_from_snapshot`, 1..100). Teams may
-# lower the manifest default to control cost, or raise it for long tasks (Coach editing a
-# Skill package spends many steps reading before it can write).
-BUILTIN_MAX_ITERATIONS_CEILING = 100
-
-
-def max_iterations_ceiling(manifest_max: int) -> int:
-    """The highest step limit a Team may set for a built-in Agent."""
-    return max(BUILTIN_MAX_ITERATIONS_CEILING, manifest_max)
-
-
-def effective_max_iterations(manifest_max: int, ov: BuiltinSubagentOverride | None) -> int:
-    """The Team's step limit, clamped to ``[1, max_iterations_ceiling]``; the manifest value is the default.
-
-    Built-in defaults range 12–100 while self-created Agents use ``MAX_ITERATIONS_CAP`` (50), so the
-    two never share a ceiling.
-    """
-    if ov is None or ov.max_iterations is None:
-        return manifest_max
-    return max(1, min(int(ov.max_iterations), max_iterations_ceiling(manifest_max)))
-
-
 def effective_primary_capability(
     manifest_primary: str | None,
     ov: BuiltinSubagentOverride | None,
@@ -193,7 +169,7 @@ def apply_to_profile(
     profile: SubagentProfile,
     ov: BuiltinSubagentOverride | None,
 ) -> SubagentProfile:
-    """resolve 侧合成：model / skills / prompt / iterations / display name / primary。
+    """Compose model, skills, prompt, display name and primary responsibility overrides.
 
     ``description`` 和 ``enabled`` 不在这里 —— 它们只作用于 advertise 侧（``enabled`` 由调用方在
     命中前拦截，见 ``_resolve_profile``）。exact primary 目前只进入 M3-13B immutable shadow snapshot，
@@ -210,10 +186,6 @@ def apply_to_profile(
     model = effective_model(profile.llm_agent_type, ov)
     if model != profile.llm_agent_type:
         changed["llm_agent_type"] = model
-
-    max_iterations = effective_max_iterations(profile.max_iterations, ov)
-    if max_iterations != profile.max_iterations:
-        changed["max_iterations"] = max_iterations
 
     display_name = effective_display_name(profile.name, ov)
     if display_name and display_name != profile.display_name:
@@ -310,7 +282,7 @@ def restrict_override_to_manifest(
     if "enabled" not in allowed and not getattr(ov, "enabled", True):
         cleared["enabled"] = True
     for field_name in value_fields:
-        if field_name not in allowed and getattr(ov, field_name, None) is not None:
+        if (field_name == "max_iterations" or field_name not in allowed) and getattr(ov, field_name, None) is not None:
             cleared[field_name] = None
     if is_dataclass(ov) and not isinstance(ov, type):
         return replace(ov, **cleared) if cleared else ov
@@ -328,8 +300,6 @@ __all__ = [
     "apply_to_profile",
     "effective_description",
     "effective_display_name",
-    "effective_max_iterations",
-    "max_iterations_ceiling",
     "effective_primary_capability",
     "effective_model",
     "restrict_override_to_manifest",

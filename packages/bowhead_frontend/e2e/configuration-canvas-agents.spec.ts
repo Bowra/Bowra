@@ -3,7 +3,102 @@ import { mobilePaneTab } from "./_mobile-pane";
 import { canvasWeek, chooseCanvasWeek, expectCanvasWeek } from "./_canvas-week";
 import { mockAuthedApp } from "./_app-mocks";
 
-async function mockDrafts(page: Page) {
+for (const width of [390, 1440]) test(`Coach opens the requested second original receipt at width ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 });
+  await mockDrafts(page);
+  let sends = 0;
+  const held = new Map<string, Promise<void>>();
+  const releases = new Map<string, () => void>();
+  const waiting = new Set<string>();
+  const hold = (id: string) => held.set(id, new Promise<void>((resolve) => releases.set(id, resolve)));
+  const reference = (id: string) => ({ kind: "eval_cases", agent_id: "osa_original", proposal_id: `acp_${id}` });
+  const events = (id: string) => [
+    { event_type: "coach.operation_open", payload: { seq: 1, request_id: id.repeat(32), turn_id: `t_receipt_${id}`, session_id: "s_browser", user_id: "u_smoke", team_id: "team_smoke", workspace_id: "ws_smoke", reference: reference(id) } },
+    { event_type: "done", payload: { seq: 2, turn_id: `t_receipt_${id}`, status: "completed" } },
+  ];
+  await page.route("**/api/v1/chat/send", (route) => {
+    sends += 1;
+    const id = String.fromCharCode(96 + sends);
+    return route.fulfill({ json: { status: "started", turn_id: `t_receipt_${id}`, session_id: "s_browser", execution_generation: 1, stream_url: `/api/v1/chat/stream/t_receipt_${id}` } });
+  });
+  await page.route("**/api/v1/chat/stream/t_receipt_*", async (route) => {
+    const id = route.request().url().match(/t_receipt_([a-d])/)![1];
+    waiting.add(id);
+    await held.get(id);
+    return route.fulfill({ contentType: "text/event-stream", body: events(id).map((item) => `event: ${item.event_type}\ndata: ${JSON.stringify(item.payload)}\n\n`).join("") });
+  });
+  await page.route("**/api/v1/turns/t_receipt_*/events", (route) => route.fulfill({ json: { events: events(route.request().url().match(/t_receipt_([a-d])/)![1]) } }));
+  const reads: string[] = [];
+  await page.route("**/api/v1/agent-coach/operations/read", (route) => {
+    const ref = route.request().postDataJSON().reference;
+    reads.push(ref.proposal_id);
+    return route.fulfill({ json: { ok: true, schema_version: 1, read_status: "available", effects_applied_by_this_read: false, operation_ref: ref,
+      domain_result: { proposal: { status: ref.proposal_id === "acp_a" ? "accepted" : "open", rationale: ref.proposal_id === "acp_a" ? "Original accepted order change" : "Second pending output instruction",
+        suggested_cases: [{ task: ref.proposal_id === "acp_a" ? "Saved first question" : `Saved second question ${"word".repeat(80)}`, decision_status: ref.proposal_id === "acp_a" ? "accepted" : "pending",
+          case_spec: { expected_contract: { points: [{ id: "p_original", text: "The total is 300." }] } },
+          edit: { before: { task: ref.proposal_id === "acp_a" ? "Original first question" : "Original second question" }, changed_fields: ["task"] },
+        }],
+      } } } });
+  });
+  await page.goto("/?session=s_browser");
+  await composerInput(page).fill("Show the first accepted original result");
+  await composerInput(page).press("Enter");
+  if (width < 1024) await mobilePaneTab(page).click();
+  await expect(page.getByTestId("coach-operation-card")).toContainText("Original accepted order change");
+  await expect(page.getByText("Original first question", { exact: true })).toBeHidden();
+  await page.getByText("查看原修改", { exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Original first question", { exact: true })).toBeVisible();
+  await expect(page.getByText("Saved first question", { exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Original first question", { exact: true })).toBeHidden();
+  if (width < 1024) await page.getByRole("tab", { name: "对话", exact: true }).click();
+  await composerInput(page).fill("Show the second pending original result");
+  await composerInput(page).press("Enter");
+  await expect(page.getByTestId("coach-operation-card")).toContainText("Second pending output instruction");
+  await expect(page.getByTestId("coach-operation-card")).not.toContainText("Original accepted order change");
+  if (width >= 1024) await expect(page.getByRole("tab", { name: /评测用例 · 第 2 条/ })).toHaveAttribute("aria-selected", "true");
+  expect(reads).toContain("acp_b");
+  expect(sends).toBe(2);
+  await page.getByText("查看原修改", { exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Original second question", { exact: true })).toBeVisible();
+  await expect(page.getByText("The total is 300.", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  await page.screenshot({ path: test.info().outputPath(`coach-original-receipt-${width}.png`), fullPage: false });
+  if (width >= 1024) {
+    try {
+      hold("c");
+      await composerInput(page).fill("Open a third original result");
+      await composerInput(page).press("Enter");
+      await expect.poll(() => waiting.has("c")).toBe(true);
+      await page.getByRole("tab", { name: "评测用例", exact: true }).click();
+      releases.get("c")!();
+      await expect(page.getByRole("tab", { name: /评测用例 · 第 3 条/ })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "评测用例", exact: true })).toHaveAttribute("aria-selected", "true");
+      hold("d");
+      await composerInput(page).fill("Open a fourth original result");
+      await composerInput(page).press("Enter");
+      await expect.poll(() => waiting.has("d")).toBe(true);
+      await composerInput(page).fill("Open a fourth original result");
+      releases.get("d")!();
+      const fourthTab = page.getByRole("tab", { name: /评测用例 · 第 4 条/ });
+      const more = page.getByRole("button", { name: /^更多 \d+$/ });
+      await expect(fourthTab.or(more)).toBeVisible();
+      if (!(await fourthTab.isVisible())) {
+        await more.click();
+        await expect(page.getByRole("menuitem", { name: /评测用例 · 第 4 条/ })).toBeVisible();
+        await page.keyboard.press("Escape");
+      }
+      await expect(page.getByTestId("coach-operation-card")).toContainText("Original accepted order change");
+      await expect(composerInput(page)).toHaveValue("Open a fourth original result");
+    } finally {
+      for (const release of releases.values()) release();
+    }
+  }
+});
+
+async function mockDrafts(page: Page, management = false) {
   await mockAuthedApp(page);
   await page.route("**/api/v1/chat/sessions/*/reference-queue?*", (route) => route.fulfill({ json: { items: [] } }));
   const definitions: Record<string, Record<string, unknown>> = {
@@ -105,6 +200,7 @@ async function mockDrafts(page: Page) {
           readiness_generation: "test",
         },
         capabilities: {
+          subagent_management_v2: management,
           configuration_canvas: true,
           settings_pages_canvas: true,
           subagent_authoring: {
@@ -249,6 +345,88 @@ async function mockDrafts(page: Page) {
     denyReads: () => { readsDenied = true; },
   };
 }
+
+for (const width of [390, 1440]) test(`a saved case receipt keeps the original review through loading and retry at width ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 });
+  await mockDrafts(page, true);
+  const reference = { kind: "eval_cases", agent_id: "osa_original", proposal_id: "acp_original" };
+  const events = [
+    { event_type: "step_done", payload: { seq: 1, card_id: "t_case_writer", step_id: "tool_saved_case", state: "success", tool_name: "agent_eval_case_propose", call_id: "saved_case", result_inline: null,
+      result_meta: { coach_operations: { schema_version: 1, truncated: false, receipts: [{ call_id: "saved_case", tool_name: "agent_eval_case_propose", operation_ref: reference, reported_ok: true }] } } } },
+    { event_type: "done", payload: { seq: 2, turn_id: "t_case_writer", status: "completed" } },
+  ];
+  await page.route("**/api/v1/chat/send", (route) => route.fulfill({ json: { status: "started", turn_id: "t_case_writer", session_id: "s_browser", execution_generation: 1, stream_url: "/api/v1/chat/stream/t_case_writer" } }));
+  await page.route("**/api/v1/chat/stream/t_case_writer*", (route) => route.fulfill({ contentType: "text/event-stream", body: events.map((item) => `event: ${item.event_type}\ndata: ${JSON.stringify(item.payload)}\n\n`).join("") }));
+  await page.route("**/api/v1/turns/t_case_writer/events", (route) => route.fulfill({ json: { events } }));
+  await page.route("**/api/v1/agent-coach/operations/read", (route) => route.fulfill({ json: { ok: true, schema_version: 1, read_status: "available", effects_applied_by_this_read: false, operation_ref: reference, domain_result: { proposal: { status: "open" } } } }));
+  await page.route("**/api/v1/team-subagents/osa_original?detail=manager", (route) => route.fulfill({ json: { kind: "team_owner_manager_detail", schema_version: 1, id: "osa_original", definition_mode: "revisioned" } }));
+  await page.route("**/api/v1/agents/authoring-catalog", (route) => route.fulfill({ json: { kind: "agent_authoring_catalog", schema_version: 2, fingerprint: `sha256:${"a".repeat(64)}`, behavior_catalog_fingerprint: `sha256:${"a".repeat(64)}`, tools: [], skills: [], primary_capabilities: [], model_policy: { allowed_roles: ["analyst"], effective_role: "analyst", locked: true } } }));
+  await page.route("**/api/v1/team-capabilities", (route) => route.fulfill({ json: [] }));
+  const writes: string[] = [];
+  const definition = { system_prompt: "Use original evidence", max_iterations: 10, tool_refs: [], skill_grants: [], primary_capability: "cap_analysis", model: "analyst" };
+  const live = { release_id: "arl_original", release_sequence: 1, revision_id: "arv_original", definition, listing: { display_name: "Original Agent", description: "Synthetic case review" }, audience: { schema_version: 1, effective_mode: "private", user_ids: [], group_ids: [] } };
+  let suiteReads = 0;
+  let suitePhase: "loading" | "failed" | "ready" = "loading";
+  let releaseSuite!: () => void;
+  const pendingSuite = new Promise<void>((resolve) => { releaseSuite = resolve; });
+  await page.route("**/api/v1/agents/osa_original/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() !== "GET") writes.push(path);
+    if (path.endsWith("/working-copy")) return route.fulfill({ json: { kind: "agent_working_copy_detail", schema_version: 1, agent_id: "osa_original", aggregate_row_version: 1, aggregate: { name: "original", status: "enabled", lifecycle_state: "active" }, live, working_copy: null, pending_candidate: null, actions: { edit: true, publish: false } } });
+    if (path.endsWith("/version-workbench")) return route.fulfill({ json: { schema_version: 1, private_release: true, live_identity: { release_id: live.release_id, release_sequence: 1, revision_id: live.revision_id }, candidate_identity: null, next_draft_identity: null, active_plan_identity: null, active_snapshot_identity: null, active_override_identity: null, active_execution_summary: null, control_row_version: null, current_eval_policy_revision_id: null, display_state: "live", readiness: "missing", reason_codes: [], primary_action: { kind: "none", enabled: false }, secondary_actions: [], change_proposals: [{ kind: "agent_change_proposal", schema_version: 1, proposal_id: reference.proposal_id, agent_id: reference.agent_id, status: "open", row_version: 1, source_type: "coach", source_ref: "original-case-request", rationale: "Review the original saved case suggestion", created_at: "2026-10-28T00:00:00Z", base: { suite_revision_id: "aev_original" }, operations: [], atomic_groups: [], suggested_cases: [{ id: "one", task: "Explain the supplied total", failure_mode: "Invented total", covers_group_ids: [], decision_status: "pending", case_spec: { case_key: "total", fixture_ref: {}, expected_contract: { points: [{ id: "p_one", kind: "judgment", text: "Uses the supplied evidence" }] }, scorer_config: {}, effect_policy: { mode: "no_effects" }, valid_until: null } }] }] } });
+    if (path.endsWith("/releases")) return route.fulfill({ json: { kind: "agent_release_history", schema_version: 1, agent_id: "osa_original", items: [] } });
+    if (path.endsWith("/eval-suites")) {
+      suiteReads += 1;
+      if (suitePhase === "loading") await pendingSuite;
+      if (suitePhase !== "ready") {
+        return route.fulfill({ status: 503, json: { detail: { code: "temporary_failure" } } });
+      }
+      return route.fulfill({ json: { kind: "agent_eval_manager", schema_version: 1, agent_id: "osa_original", suites: [{ suite_id: "aes_original", suite_kind: "owner_quality", state: "active", name: "Original checks", revision: { suite_revision_id: "aev_original", cases: [] } }], runs: [] } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "unavailable" } });
+  });
+  await page.goto("/?session=s_browser");
+  await composerInput(page).fill("Save one original case suggestion");
+  await composerInput(page).press("Enter");
+  await expect(page.getByText("用例建议待审阅", { exact: true })).toBeVisible();
+  // Review the settled receipt; an in-flight receipt can be replaced when the Turn finishes.
+  await expect(page.getByRole("button", { name: "编辑后发送", exact: true })).toHaveCount(2);
+  await page.screenshot({ path: test.info().outputPath(`coach-case-chat-${width}.png`), fullPage: false });
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/v1/agent-coach/operations/read") && response.request().method() === "POST" && response.ok()),
+    page.getByRole("button", { name: "审阅建议", exact: true }).click(),
+  ]);
+  // Next's development server compiles this route on its first navigation.
+  await expect(page).toHaveURL(/\/agents\/manage\/created\/?\?agent_id=osa_original&section=config#agent-pending-changes$/, { timeout: 15_000 });
+  await expect(page.getByText("Review the original saved case suggestion", { exact: true })).toBeVisible();
+  await expect(page.getByText("Explain the supplied total", { exact: true }).first()).toBeVisible();
+  if (width < 1024) await expect.poll(() => page.locator("#agent-pending-changes").evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(60);
+  const save = page.getByRole("button", { name: /^加入这\s*1\s*条用例$/ });
+  await expect(page.getByText("正在读取这个智能体的评测组…", { exact: true })).toBeVisible();
+  await expect(page.getByText(/评测组已变更/)).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  expect(suiteReads).toBeGreaterThan(0);
+  await page.screenshot({ path: test.info().outputPath(`coach-case-loading-${width}.png`), fullPage: false });
+  await page.getByText("查看或调整用例", { exact: true }).click();
+  const question = page.getByRole("textbox", { name: "用例任务", exact: true });
+  await question.fill("Keep my original review edit");
+  suitePhase = "failed";
+  releaseSuite();
+  await expect(page.locator(".am-ci-ist-text").filter({ hasText: "暂时无法读取评测组" })).toBeVisible();
+  await expect(page.getByText(/评测组已变更/)).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  await save.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath(`coach-case-read-error-${width}.png`), fullPage: false });
+  suitePhase = "ready";
+  await page.locator("#agent-pending-changes").getByRole("button", { name: "重试", exact: true }).click();
+  await expect(save).toBeEnabled();
+  await expect(question).toHaveValue("Keep my original review edit");
+  await expect(page.getByText("加入评测组: Original checks", { exact: false })).toBeVisible();
+  await expect(page.getByText(/评测组已变更/)).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath(`coach-case-review-${width}.png`), fullPage: false });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  expect(writes).toEqual([]);
+});
 
 // Canvas object fields (D9: the identifier lives under the collapsed “高级” section).
 const displayName = (page: Page) => page.getByRole("textbox", { name: "名称", exact: true });

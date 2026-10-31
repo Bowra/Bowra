@@ -169,7 +169,6 @@ async def test_duplicate_settlement_requires_the_same_response_usage_and_outcome
             code="changed-outcome" if changed == "outcome" else None,
         )
     assert rows(case)[0] == original
-    assert obs.failed
 
 
 async def test_receipts_are_immutable_and_turn_deletion_erases_them(case):
@@ -287,3 +286,50 @@ async def test_known_and_missing_usage_do_not_create_duplicate_statistics(case):
     assert projection["entries"][1]["usage"] is None
     assert len(partial) == 1 and partial[0].tokens_total == 2
     assert recorder.stats["buffered"] == 0
+
+
+async def test_failed_receipt_does_not_poison_independent_calls_or_replay_the_request(case, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from bowhead_router.invocation import InvocationOutcomeUnknownError
+
+    from bowhead_core import physical_usage
+
+    original = physical_usage.open_shared_ctx
+    fail_settlement = True
+
+    @asynccontextmanager
+    async def connection(path):
+        nonlocal fail_settlement
+        async with original(path) as db:
+            execute = db.execute
+
+            def checked(sql, parameters=()):
+                nonlocal fail_settlement
+                if fail_settlement and sql.startswith("UPDATE llm_usage_events SET receipt_state"):
+                    fail_settlement = False
+                    raise sqlite3.OperationalError("database is locked")
+                return execute(sql, parameters)
+
+            db.execute = checked
+            try:
+                yield db
+            finally:
+                db.execute = execute
+
+    monkeypatch.setattr(physical_usage, "open_shared_ctx", connection)
+    adapter = adapter_for("openai")
+    obs = observer(case)
+    try:
+        with context(case), physical_observation_scope(obs), respx.mock() as mock:
+            route = mock.post(url__regex=r"https://api\.example\.com/.*").mock(return_value=success("openai", "invoke"))
+            with pytest.raises(InvocationOutcomeUnknownError):
+                await call(router_for(adapter), request(), "invoke")
+            assert route.call_count == 1
+            await call(router_for(adapter), request(), "invoke")
+            assert route.call_count == 2
+    finally:
+        await adapter.close()
+    saved = rows(case)
+    assert [row["receipt_state"] for row in saved] == ["unknown", "completed"]
+    assert saved[0]["outcome_code"] == "durable_settlement_failed"

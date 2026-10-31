@@ -1392,11 +1392,6 @@
   --ui-badge-ring: none;
 }
 /* Automatic KB inclusion: accent border (previously dashed) */
-:root:root :where(.cbadge.kb.auto) {
-  --ui-badge-bg: transparent;
-  --ui-badge-fg: var(--c-accent);
-  --ui-badge-ring: inset 0 0 0 0.5px var(--c-accent);
-}
 /* Tone · success */
 :root:root
   :where(

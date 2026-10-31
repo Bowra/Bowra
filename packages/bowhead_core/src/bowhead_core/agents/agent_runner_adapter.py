@@ -322,6 +322,9 @@ def manifest_to_profile(
     from bowhead_core.system_plugins import resolve_system_plugins
 
     resolved_tools, resolved_grants = resolve_system_plugins(manifest.plugins, manifest.tools.allow, manifest.skill_grants)
+    from bowhead_core.resource_disable import system_plugin_provenance
+
+    provenance = system_plugin_provenance(manifest.plugins, resolved_tools, manifest.skill_grants)
     tool_whitelist, runtime_prelude, skill_invoke_allowlist = _materialize_authoring_pseudo_tools(tuple(resolved_tools))
     primary_capability_ref = None
     manifest_primary_capability = getattr(manifest, "primary_capability", None)
@@ -370,6 +373,7 @@ def manifest_to_profile(
         skill_invoke_allowlist=skill_invoke_allowlist,
         skill_runtime_scope=scope,
         skill_runtime_grants=grants,
+        resource_provenance=provenance,
         primary_capability_ref=primary_capability_ref,
         legacy_image_deliverable_authority=(primary_capability_ref == "cap_visualize@1" and "image_generate" in tool_whitelist),
         # Declared in the manifest, never derived from the routing name.

@@ -44,6 +44,8 @@ Some older Datarc versions don't report key permissions. For such instances, Bow
 
 Depending on the key's permissions, Bowra provides **List workspaces**, **Inspect data schema**, and **Query data**. These are capabilities within one connection and don't need to be configured one by one in an Agent.
 
+When a workspace name matches several choices, select one of the listed workspaces to continue the same question, including work delegated to an analyst. This workspace card uses listed choices; ordinary question cards can still accept your own text. Clear **Remember as default** to keep the choice within the current Chat. If a choice cannot be accepted, the card stays open with an explanation; choose an available option and continue. If access has changed, choose another option or ask your Team administrator to check the connection and permissions. Skipping the card does not confirm a workspace switch.
+
 ## Power BI
 
 Choose **＋ Add built-in third-party tool → Power BI**, name the connection, and enter the Microsoft Entra Tenant ID, Client ID, and client secret. You can provide a workspace ID and semantic model ID, or leave them blank to select an accessible model automatically. Bowra verifies query access before saving. The secret is stored encrypted and is never shown again. A team can add several connections, such as separate finance and sales models.

@@ -1448,7 +1448,7 @@
    stacking context. Card nodes never move (moving to body reloads iframe); closing restores them.
    Desktop `.v2-app-root` position:fixed cannot be removed: it is z 0 in root stacking context, so body-mounted
    overlays (menus, Toasts, dialogs) remain above fullscreen. */
-:root[data-rc-embed-fullscreen] :has(.rc-embed--expanded) {
+:root[data-rc-embed-fullscreen] :has(.rc-embed--expanded, .artifact-viewer--fullscreen) {
   isolation: auto !important;
   z-index: auto !important;
   transform: none !important;
@@ -1464,6 +1464,7 @@
   clip-path: none !important;
   mask: none !important;
   contain: none !important;
+  container-type: normal !important;
   content-visibility: visible !important;
   will-change: auto !important;
 }
@@ -1855,3 +1856,11 @@
     .v2-chart-canvas-wrap.is-page-height { max-height: none; overflow-y: hidden; }
   }
 }
+
+.artifact-viewer.artifact-viewer--fullscreen {
+  position: fixed; inset: 0; z-index: 240; width: auto; height: auto;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--c-surface); border-radius: 0;
+}
+.artifact-viewer--fullscreen > .safe-html-preview { flex: 1; min-height: 0; }
+.artifact-viewer--fullscreen .safe-html-preview-frame { flex: 1; min-height: 0; }

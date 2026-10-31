@@ -425,77 +425,6 @@ describe("Chat upload context", () => {
     } finally { vi.mocked(uploadFile).mockReset(); }
   });
 
-  it("polls exact bundle members without client-clock or list-page assumptions", async () => {
-    const child = { file_id: "kbf_child", artifact_id: "art_child", filename: "child.txt", size_bytes: 5, parse_status: "queued" };
-    bundleUploadMock.mockResolvedValueOnce({
-      uploaded: [child], skipped: [{ filename: "skipped.bin" }], total_entries: 2,
-      bundle_filename: "archive.zip", bundle_artifact_id: "art_root", bundle_mime: "application/zip", bundle_size: 456,
-    });
-    const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
-    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    await waitFor(() => expect(input.disabled).toBe(false));
-    let polls = 0;
-    const fetchMock = vi.fn(async (url: string) => {
-      if (!String(url).includes("/api/v1/kb/files?")) return new Response("{}");
-      const query = new URL(url, "http://test").searchParams;
-      polls++;
-      return new Response(JSON.stringify({ files: query.getAll("file_ids").includes(child.file_id)
-        ? [{ ...child, parse_status: polls === 1 ? "parsing" : "done" }]
-        : [], total: 1 }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      fireEvent.change(input, { target: { files: [new File(["zip"], "archive.zip", { type: "application/zip" })] } });
-      fireEvent.click(await screen.findByRole("button", { name: "show_bundle_children" }));
-      await waitFor(() => expect(polls).toBe(1), { timeout: 4000 });
-      expect(screen.getByText("skipped.bin")).toBeTruthy();
-      await waitFor(() => expect(screen.getByLabelText("发送").hasAttribute("disabled")).toBe(false), { timeout: 4000 });
-      const query = new URL(String(fetchMock.mock.calls.find(([url]) => String(url).includes("/api/v1/kb/files?"))![0]), "http://test").searchParams;
-      expect(query.getAll("file_ids")).toEqual([child.file_id]);
-      expect(query.has("since")).toBe(false);
-    } finally { view.unmount(); vi.unstubAllGlobals(); }
-  }, 10000);
-
-  it("ends a stalled bundle progress poll with a removable error", async () => {
-    bundleUploadMock.mockResolvedValueOnce({
-      uploaded: [{ file_id: "kbf_stalled", artifact_id: "art_stalled", filename: "child.txt", size_bytes: 5, parse_status: "queued" }],
-      skipped: [], total_entries: 1, bundle_filename: "stalled.zip", bundle_artifact_id: "art_stalled_root", bundle_mime: "application/zip", bundle_size: 456,
-    });
-    const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
-    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    await waitFor(() => expect(input.disabled).toBe(false));
-    const timeout = globalThis.setTimeout;
-    const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation(((...args: Parameters<typeof setTimeout>) => {
-      const [callback, ms, ...rest] = args;
-      return timeout(callback, ms === 3000 ? 0 : ms, ...rest);
-    }) as typeof setTimeout);
-    let polls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (String(url).includes("/api/v1/kb/files?")) polls++;
-      return new Response(JSON.stringify({ files: [] }));
-    }));
-    try {
-      fireEvent.change(input, { target: { files: [new File(["zip"], "stalled.zip", { type: "application/zip" })] } });
-      await waitFor(() => expect(polls).toBe(200), { timeout: 5000 });
-      await waitFor(() => expect(view.container.querySelector(".v2-chip--error, .v2-chip--warning")).not.toBeNull());
-      fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
-      expect(screen.queryByText("stalled.zip")).toBeNull();
-    } finally { view.unmount(); timer.mockRestore(); vi.unstubAllGlobals(); }
-  }, 10000);
-
-  it("rejects an oversized bundle before it can poison draft persistence", async () => {
-    bundleUploadMock.mockResolvedValueOnce({
-      uploaded: Array.from({ length: 101 }, (_, i) => ({ file_id: `kbf_${i}`, artifact_id: `art_${i}`, filename: `${i}.txt`, size_bytes: 1, parse_status: "done" })),
-      skipped: [], total_entries: 101, bundle_filename: "large.zip", bundle_artifact_id: "art_oversized", bundle_mime: "application/zip", bundle_size: 456,
-    });
-    const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
-    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    await waitFor(() => expect(input.disabled).toBe(false));
-    fireEvent.change(input, { target: { files: [new File(["zip"], "large.zip", { type: "application/zip" })] } });
-    await waitFor(() => expect(view.container.querySelector(".v2-chip--error")).not.toBeNull());
-    expect(recoveryMocks.write.mock.calls.every(([, draft]) => !draft.attachments.some((ref: AttachmentRef) => ref.fileId === "art_oversized"))).toBe(true);
-  });
-
   it("keeps completed bundles editable when their combined file count exceeds Send admission", async () => {
     const refs = [0, 1].map((bundle) => ({ fileId: `art_root_${bundle}`, filename: `${bundle}.zip`, size: 1, mime: "application/zip",
       bundleArtifactIds: Array.from({ length: 60 }, (_, i) => `art_${bundle}_${i}`) }));
@@ -523,25 +452,20 @@ describe("Chat upload context", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(["", "application/x-zip-compressed"])("sends the persisted bundle metadata for browser MIME %s", async (mime) => {
-    bundleUploadMock.mockResolvedValueOnce({
-      uploaded: [{ file_id: "kbf_child", artifact_id: "art_child", filename: "child.txt", size_bytes: 5, parse_status: "done" }],
-      skipped: [], total_entries: 1, bundle_filename: "archive.zip", bundle_artifact_id: "art_root", bundle_mime: "application/zip", bundle_size: 456,
-    });
+  it.each(["", "application/zip", "application/x-zip-compressed"])("stores a chat ZIP as one file for browser MIME %s", async (mime) => {
+    vi.mocked(uploadFile).mockResolvedValueOnce({ file_id: "art_zip", filename: "archive.zip", mime: "application/zip", size: 3, url: "/api/v1/files/art_zip" });
     const onSend = vi.fn();
     const view = render(<V2Composer onSend={onSend} draftPersistenceScope={DRAFT_SCOPE} />);
     const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
     await waitFor(() => expect(input.disabled).toBe(false));
     const file = new File(["zip"], "archive.zip", { type: mime });
     fireEvent.change(input, { target: { files: [file] } });
-    await waitFor(() => expect(bundleUploadMock).toHaveBeenCalledWith(file, expect.objectContaining({
-      scope_id: DRAFT_SCOPE.userId,
-      spaceHeaders: { "X-Space-Id": DRAFT_SCOPE.workspaceId, "X-Workspace-Id": DRAFT_SCOPE.workspaceId, "X-Team-Id": DRAFT_SCOPE.teamId },
-    })));
-    await waitFor(() => expect(screen.getByLabelText("发送").hasAttribute("disabled")).toBe(false));
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledWith(file, expect.objectContaining({ spaceHeaders: { "X-Space-Id": DRAFT_SCOPE.workspaceId, "X-Workspace-Id": DRAFT_SCOPE.workspaceId, "X-Team-Id": DRAFT_SCOPE.teamId } })));
+    await screen.findByText("archive_file_only");
     fireEvent.click(screen.getByLabelText("发送"));
     await waitFor(() => expect(onSend).toHaveBeenCalled());
-    expect(onSend.mock.calls[0][1]).toEqual([expect.objectContaining({ fileId: "art_root", filename: "archive.zip", mime: "application/zip", size: 456, bundleArtifactIds: ["art_child"] })]);
+    expect(onSend.mock.calls[0][1]).toEqual([expect.objectContaining({ fileId: "art_zip", filename: "archive.zip", size: 3 })]);
+    expect(onSend.mock.calls[0][1][0].bundleArtifactIds).toBeUndefined();
   });
 
   it("waits for a resolved draft scope before accepting a file", async () => {
@@ -1972,17 +1896,10 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       let settle!: () => void;
       const completion = new Promise<void>((resolve) => { settle = resolve; });
       const filename = kind === "bundle" ? "pending.zip" : "pending.txt";
-      if (kind !== "bundle") vi.mocked(uploadFile).mockImplementationOnce(async () => {
+      vi.mocked(uploadFile).mockImplementationOnce(async () => {
         await completion;
         if (kind === "failure") throw new Error("Upload failed");
         return { file_id: "art_completed", filename, size: 4, mime: "text/plain", url: "/api/v1/files/art_completed" };
-      });
-      else bundleUploadMock.mockImplementationOnce(async () => {
-        await completion;
-        return {
-          uploaded: [{ file_id: "kbf_child", artifact_id: "art_child", filename: "child.txt", size_bytes: 4, parse_status: "done" }],
-          skipped: [], total_entries: 1, bundle_filename: filename, bundle_artifact_id: "art_completed", bundle_mime: "application/zip", bundle_size: 4,
-        };
       });
       recoveryMocks.read.mockResolvedValueOnce(null).mockResolvedValue({
         message: "Remote intent", attachments: [], revision: "remote_revision", updatedAt: "2026-10-04T00:00:00Z",
@@ -2012,7 +1929,7 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       fireEvent.click(screen.getByLabelText("发送"));
       await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
       expect(onSend.mock.calls[0][1]).toEqual([expect.objectContaining({
-        fileId: "art_completed", filename, ...(kind === "bundle" ? { bundleArtifactIds: ["art_child"] } : {}),
+        fileId: "art_completed", filename,
       })]);
     });
 

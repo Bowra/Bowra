@@ -52,6 +52,10 @@ ASK = json.dumps({"action": "ask", "reason": "comparison", "slots": ["s0"], "que
 
 @pytest.fixture
 async def native(ctx, monkeypatch, tmp_path):
+    return await make_native(ctx, monkeypatch, tmp_path)
+
+
+async def make_native(ctx, monkeypatch, tmp_path, *, scope=SCOPE, turn_id="t_doc", session_id="s_doc", owner_id="turn-document-worker", claim=True):
     root_key = Fernet.generate_key().decode()
     monkeypatch.setenv("FEATURE_DOCUMENT_CHAT_CONTINUATION", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", root_key)
@@ -60,12 +64,12 @@ async def native(ctx, monkeypatch, tmp_path):
     Path(ctx.artifact.path).write_bytes(content)
     async with open_shared_ctx(ctx.path) as db:
         await db.execute("UPDATE artifacts SET size=? WHERE id=?", (len(content), ctx.artifact.id))
-        await db.execute("UPDATE teams SET team_credit_balance=100 WHERE id=?", (SCOPE.team_id,))
-        await db.execute("UPDATE users SET credit_balance=100 WHERE id=?", (SCOPE.user_id,))
+        await db.execute("UPDATE teams SET team_credit_balance=100 WHERE id=?", (scope.team_id,))
+        await db.execute("UPDATE users SET credit_balance=100 WHERE id=?", (scope.user_id,))
         await db.commit()
     users = UserStore(ctx.path)
     await users.update_team_llm_config(
-        SCOPE.team_id,
+        scope.team_id,
         {
             "schema_version": 2,
             "providers": {
@@ -108,6 +112,9 @@ async def native(ctx, monkeypatch, tmp_path):
 
     def respond(request):
         if request.url.host == "executor":
+            executor_transport = getattr(result, "executor_transport", None)
+            if executor_transport is not None:
+                return executor_transport(request)
             assert request.url.path == "/document-runs/capabilities"
             return httpx2.Response(200, json={"profile": PROFILE, "image_id": IMAGE, "planner_profiles": result.planner_profiles})
         assert request.url.path == "/v1/chat/completions"
@@ -118,7 +125,14 @@ async def native(ctx, monkeypatch, tmp_path):
         return httpx2.Response(
             200,
             json={
-                "choices": [{"message": {"role": "assistant", "content": answer}, "finish_reason": getattr(result, "finish_reason", "stop")}],
+                "choices": [
+                    {
+                        "message": answer if isinstance(answer, dict) else {"role": "assistant", "content": answer},
+                        "finish_reason": "tool_calls"
+                        if isinstance(answer, dict) and answer.get("tool_calls")
+                        else getattr(result, "finish_reason", "stop"),
+                    }
+                ],
                 "usage": {"prompt_tokens": 600, "completion_tokens": 100},
             },
         )
@@ -126,23 +140,25 @@ async def native(ctx, monkeypatch, tmp_path):
     original_client = httpx2.AsyncClient
     monkeypatch.setattr(httpx2, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": httpx2.MockTransport(respond)}))
     tool_ctx = ToolExecutionContext(
-        **SCOPE.model_dump(),
-        session_id="s_doc",
-        turn_id="t_doc",
+        **scope.model_dump(),
+        session_id=session_id,
+        turn_id=turn_id,
         role="lead",
         member_uid="",
         datarc=None,
         language_context=LanguageContext(output_language="fr-FR"),
         clarification_store=ClarificationStore(ctx.path),
         execution_generation=1,
-        execution_owner_id="turn-document-worker",
+        execution_owner_id=owner_id,
     )
-    assert (
-        await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_doc", owner_id=tool_ctx.execution_owner_id, lease_seconds=600) == "claimed"
-    )
+    if claim:
+        assert (
+            await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id=turn_id, owner_id=tool_ctx.execution_owner_id, lease_seconds=600)
+            == "claimed"
+        )
 
     async def binding():
-        value = await runtime(ctx)
+        value = await runtime(ctx, turn_id=turn_id, scope=scope)
         return value.binding, True
 
     tool_ctx.document_admission_binding = binding
@@ -157,7 +173,9 @@ async def native(ctx, monkeypatch, tmp_path):
 
 def observe(ctx, native):
     return physical_observation_scope(
-        PhysicalUsageObserver(str(ctx.path), cipher=ReferenceCipher(native.root_key), turn_id="t_doc", generation=native.context.execution_generation)
+        PhysicalUsageObserver(
+            str(ctx.path), cipher=ReferenceCipher(native.root_key), turn_id=native.context.turn_id, generation=native.context.execution_generation
+        )
     )
 
 
@@ -183,11 +201,13 @@ async def test_unsupported_worker_refuses_new_native_admission_before_job_or_mod
                 assert (await cursor.fetchone())[0] == 0
 
 
-async def claim_resume(ctx, native, outcome, answer="Quarter two"):
+async def claim_resume(ctx, native, outcome, answer="Quarter two", *, already_paused=False, dispatch_settled=False):
     worker = DocumentTurnOwner(
-        **SCOPE.model_dump(),
-        session_id="s_doc",
-        turn_id="t_doc",
+        team_id=native.context.team_id,
+        user_id=native.context.user_id,
+        workspace_id=native.context.workspace_id,
+        session_id=native.context.session_id,
+        turn_id=native.context.turn_id,
         generation=native.context.execution_generation,
         owner_id=native.context.execution_owner_id,
     )
@@ -196,7 +216,13 @@ async def claim_resume(ctx, native, outcome, answer="Quarter two"):
         db.execute("SELECT runtime_snapshot_json FROM document_turn_dispatches WHERE job_id=?", (outcome.job_id,)) as cursor,
     ):
         snapshot = DocumentRuntimeSnapshot.model_validate_json((await cursor.fetchone())[0])
-    store, card = await pause(ctx, SimpleNamespace(worker=worker, job_id=outcome.job_id, ref=outcome.checkpoint, snapshot=snapshot))
+    if already_paused:
+        store = native.context.clarification_store
+        card = (await store.get_pending_for_turn(worker.turn_id))[0]
+        if not dispatch_settled:
+            assert await ctx.sessions.mark_chat_spawn_dispatch_terminal(turn_id=worker.turn_id, owner_id=worker.owner_id)
+    else:
+        store, card = await pause(ctx, SimpleNamespace(worker=worker, job_id=outcome.job_id, ref=outcome.checkpoint, snapshot=snapshot))
     assert (
         await store.resolve_once(
             card.request_id,
@@ -204,15 +230,17 @@ async def claim_resume(ctx, native, outcome, answer="Quarter two"):
             answers=[{"question": QUESTION, "source": "custom", "answer": answer, "skipped": False, "option_index": None}],
         )
     )[1]
-    generation = await ctx.sessions.advance_turn_execution_generation(turn_id="t_doc", document_clarification_id=card.request_id)
+    generation = await ctx.sessions.advance_turn_execution_generation(turn_id=native.context.turn_id, document_clarification_id=card.request_id)
     assert generation == worker.generation + 1
     native.context.execution_generation, native.context.execution_owner_id = generation, "resumed-document-worker"
     assert (
-        await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_doc", owner_id=native.context.execution_owner_id, lease_seconds=600)
+        await ctx.sessions.claim_chat_spawn_dispatch_for_worker(
+            turn_id=native.context.turn_id, owner_id=native.context.execution_owner_id, lease_seconds=600
+        )
         == "claimed"
     )
     await TurnLogStore(str(ctx.path)).record(
-        turn_id="t_doc", event_type="turn.resumed", payload={"turn_id": "t_doc", "execution_generation": generation}
+        turn_id=native.context.turn_id, event_type="turn.resumed", payload={"turn_id": native.context.turn_id, "execution_generation": generation}
     )
     worker = worker.model_copy(update={"generation": generation, "owner_id": native.context.execution_owner_id})
     async with open_shared_ctx(ctx.path) as db:

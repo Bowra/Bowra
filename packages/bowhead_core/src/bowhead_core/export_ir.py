@@ -1329,7 +1329,7 @@ def _normalize_columns(value: Any, rows: list[dict[str, Any]]) -> list[dict[str,
                 "value_type": value_type,
                 "format": number_format if isinstance(number_format, str) else None,
                 **(
-                    {name: column[name] for name in ("unit", "currency_code", "display", "percent_scale") if name in column}
+                    {name: column[name] for name in ("unit", "currency_code", "display", "percent_scale", "date_pattern") if name in column}
                     if isinstance(column, dict)
                     else {}
                 ),

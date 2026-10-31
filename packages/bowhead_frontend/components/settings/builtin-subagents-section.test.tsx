@@ -277,7 +277,6 @@ describe("BuiltinSubagentCards", () => {
           model: "narrative",
           skills: ["sop"],
           prompt_append: null,
-          max_iterations: null,
         },
       }),
     ]);
@@ -289,7 +288,6 @@ describe("BuiltinSubagentCards", () => {
       display_name: null,
       description: "团队描述",
       model: "narrative",
-      max_iterations: null,
       primary_capability: null,
       prompt_append: null,
       skills: ["sop"],
@@ -309,7 +307,6 @@ describe("BuiltinSubagentCards", () => {
           model: null,
           skills: null,
           prompt_append: null,
-          max_iterations: null,
         },
       }),
     ]);
@@ -347,61 +344,12 @@ describe("BuiltinSubagentCards", () => {
           model: "narrative",
           skills: null,
           prompt_append: null,
-          max_iterations: null,
         },
       }),
     ]);
     await configure();
     expect(await screen.findByLabelText("路由描述")).toHaveValue("团队描述");
     expect(screen.getByLabelText("模型档位")).toHaveValue("narrative");
-  });
-
-  it("lets the step limit go above the default up to the platform ceiling", async () => {
-    renderCards([item({ defaults: { model: "analyst", description: "d", max_iterations: 30, max_iterations_ceiling: 100 } })]);
-    await configure();
-    const input = await screen.findByLabelText("步数上限");
-    expect(input).toHaveAttribute("max", "100");
-    expect(input).toHaveAttribute("placeholder", "30");
-    expect(screen.getByText(/默认 30 步，可设为 1 到 100/)).toBeInTheDocument();
-
-    fireEvent.change(input, { target: { value: "80" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(putMock).toHaveBeenCalled());
-    expect(putMock.mock.calls[0][1]).toMatchObject({ max_iterations: 80 });
-  });
-
-  it("keeps the default as the ceiling when an older server sends no ceiling", async () => {
-    renderCards([item({ defaults: { model: "analyst", description: "d", max_iterations: 40 } })]);
-    await configure();
-    expect(await screen.findByLabelText("步数上限")).toHaveAttribute("max", "40");
-  });
-
-  it("shows an inline error and focuses the iteration field before submitting an out-of-range value", async () => {
-    renderCards([item()]);
-    await configure();
-    const input = await screen.findByLabelText("步数上限");
-    fireEvent.change(input, { target: { value: "101" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(putMock).not.toHaveBeenCalled();
-    expect(screen.getByText("步数上限必须是 1 到 100 之间的整数。")).toBeInTheDocument();
-    expect(input).toHaveFocus();
-    expect(input).toHaveAttribute("aria-invalid", "true");
-  });
-
-  it("maps the backend iteration limit error back to the field", async () => {
-    putMock.mockRejectedValueOnce(Object.assign(new Error("max_iterations invalid"), {
-      code: "builtin_max_iterations_invalid",
-    }));
-    renderCards([item()]);
-    await configure();
-    const input = await screen.findByLabelText("步数上限");
-
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(await screen.findByText("步数上限必须是 1 到 100 之间的整数。")).toBeInTheDocument();
-    expect(input).toHaveFocus();
   });
 
   it("exposes exactly the whitelisted fields and nothing else", async () => {
@@ -414,7 +362,7 @@ describe("BuiltinSubagentCards", () => {
     const labelled = Array.from(document.querySelectorAll("[data-settings-dialog-portal] label"))
       .map((el) => el.textContent?.trim() ?? "")
       .filter((text) => text.length > 0 && !text.includes("pptx")); // Exclude skill checkboxes.
-    expect(new Set(labelled)).toEqual(new Set(["显示名称", "路由描述", "模型档位", "主要职责", "步数上限", "自动阅读的技能", "追加团队口径"]));
+    expect(new Set(labelled)).toEqual(new Set(["显示名称", "路由描述", "模型档位", "主要职责", "自动阅读的技能", "追加团队口径"]));
     expect(screen.getByRole("option", { name: "跟随系统默认（制作演示文稿）" })).toBeInTheDocument();
     expect(screen.queryByText(/cap_presentation/)).not.toBeInTheDocument();
   });
@@ -443,7 +391,6 @@ describe("BuiltinSubagentCards", () => {
       display_name: "教练",
       description: null,
       model: null,
-      max_iterations: null,
       primary_capability: null,
       prompt_append: null,
       skills: null,
@@ -474,7 +421,6 @@ describe("BuiltinSubagentCards", () => {
           model: null,
           skills: null,
           prompt_append: null,
-          max_iterations: null,
           primary_capability: "cap_visualize",
         },
         overridden_fields: ["primary_capability"],
@@ -506,7 +452,6 @@ describe("BuiltinSubagentCards", () => {
         model: null,
         skills: null,
         prompt_append: null,
-        max_iterations: null,
       },
     });
     const latest = item({
@@ -519,7 +464,6 @@ describe("BuiltinSubagentCards", () => {
         model: "narrative",
         skills: null,
         prompt_append: null,
-        max_iterations: null,
       },
     });
     putMock

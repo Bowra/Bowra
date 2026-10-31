@@ -9,6 +9,9 @@ import zhMessages from "../messages/zh-CN.json";
 
 const TURN_REASON_CODES = [
   "access_context_missing",
+  "agent_step_limit",
+  "agent_tool_call_limit",
+  "agent_stalled",
   "canvas_compose_failed",
   "canvas_compose_timeout",
   "canvas_internal_error",
@@ -19,6 +22,8 @@ const TURN_REASON_CODES = [
   "cost_cap_exceeded",
   "document_information_incomplete",
   "document_planning_failed",
+  "document_authoring_script_failed",
+  "document_candidate_invalid",
   "document_history_unavailable",
   "document_request_rejected",
   "document_routing_invalid",

@@ -25,10 +25,17 @@ SETTINGS_KEY = "execution_limits"
 
 @dataclass(frozen=True)
 class ExecutionLimits:
-    sandbox_default_timeout_s: int = field(metadata={"description": "Default sandbox execution duration in seconds; cannot exceed the Team maximum."})
-    sandbox_max_timeout_s: int = field(metadata={"description": "Maximum sandbox execution duration in seconds, bounded by the deployment ceiling."})
+    sandbox_default_timeout_s: int = field(
+        metadata={"unit": "seconds", "description": "Default sandbox execution duration in seconds; cannot exceed the Team maximum."}
+    )
+    sandbox_max_timeout_s: int = field(
+        metadata={"unit": "seconds", "description": "Maximum sandbox execution duration in seconds, bounded by the deployment ceiling."}
+    )
     html_max_bytes: int = field(
-        metadata={"description": "Maximum bytes in a delivered HTML artifact, shared by server delivery and browser preview."}
+        metadata={
+            "unit": "bytes",
+            "description": "Maximum bytes in a delivered HTML artifact, shared by server delivery and browser preview. Includes embedded images and data; larger or structurally complex reports use more browser memory and processing time.",
+        }
     )
 
     def to_json(self) -> str:

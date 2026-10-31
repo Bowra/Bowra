@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.datarc_selection import DatarcPersistenceReceipt, DatarcPreferenceScope
 from bowhead_core.memory_privacy import (
     MemoryIdempotencyConflictError,
     ensure_memory_write_allowed,
@@ -626,6 +627,7 @@ class UserMemoryStore:
         #: the UI displays unclassified. §6.1's fail-safe covers a missing model value on the write path,
         #: not inventing one for existing rows.
         memory_type: str | None = None,
+        connection: aiosqlite.Connection | None = None,
     ) -> MemoryEntry:
         from datetime import datetime
         from uuid import uuid4
@@ -645,9 +647,10 @@ class UserMemoryStore:
         if memory_policy_version is not None and memory_policy_version < 0:
             raise ValueError("memory_policy_version must be non-negative")
 
-        async with open_shared_ctx(self._db_path) as db:
+        async with nullcontext(connection) if connection is not None else open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("BEGIN IMMEDIATE")
+            if connection is None:
+                await db.execute("BEGIN IMMEDIATE")
             try:
                 await ensure_memory_write_allowed(
                     db,
@@ -755,9 +758,11 @@ class UserMemoryStore:
                     (user_id, kind, key),
                 ) as cur:
                     row = await cur.fetchone()
-                await db.commit()
+                if connection is None:
+                    await db.commit()
             except BaseException:
-                await db.rollback()
+                if connection is None:
+                    await db.rollback()
                 raise
         assert row is not None
         return _row_to_entry(row)
@@ -2254,6 +2259,117 @@ class UserMemoryStore:
     # session(session soft preference, do not remember) | switch(in-chat switch) | last_used(writeback after BI success).
     # Note: list_for_user has no kind filter, so this kind appears in the memory UI alongside
     # datarc_binding (existing shape). UI exclusion is follow-up work, not a storage-layer responsibility.
+
+    async def get_datarc_workspace(self, user_id: str, scope: DatarcPreferenceScope, *, session_id: str | None = None) -> dict | None:
+        """Read only the exact caller/connection/session preference address."""
+        async with (
+            open_shared_ctx(self._db_path) as db,
+            db.execute(
+                "SELECT value FROM memory_entries WHERE subject_type='user' AND subject_id=? "
+                "AND kind='tool_context' AND key=? AND deleted_at IS NULL",
+                (user_id, scope.key(session_id)),
+            ) as cursor,
+        ):
+            if await is_memory_read_hidden(db, user_id=user_id):
+                return None
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            value = json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(value, dict) or value.get("schema_version") != 2 or type(value.get("schema_version")) is not int:
+            return None
+        if (value.get("team_id"), value.get("connection_id")) != (scope.team_id, scope.connection_id):
+            return None
+        if session_id and value.get("session_id") != session_id:
+            return None
+        if not value.get("id") or value.get("source") not in {"session", "explicit", "auto"}:
+            return None
+        return value
+
+    async def _clear_datarc_workspace_in_connection(
+        self, db: aiosqlite.Connection, user_id: str, scope: DatarcPreferenceScope, session_id: str | None
+    ) -> None:
+        await ensure_memory_write_allowed(db, user_id=user_id)
+        now = _now()
+        await db.execute(
+            "UPDATE memory_entries SET deleted_at=?, updated_at=?, version=version+1, "
+            "last_modified_actor_type='system', last_modified_at=? WHERE subject_type='user' "
+            "AND subject_id=? AND kind='tool_context' AND key=? AND deleted_at IS NULL",
+            (now, now, now, user_id, scope.key(session_id)),
+        )
+
+    async def clear_datarc_workspace(self, user_id: str, scope: DatarcPreferenceScope, *, session_id: str | None = None) -> None:
+        async with open_shared_ctx(self._db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                await self._clear_datarc_workspace_in_connection(db, user_id, scope, session_id)
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
+
+    async def commit_datarc_workspace(
+        self,
+        user_id: str,
+        scope: DatarcPreferenceScope,
+        *,
+        context_id: str,
+        context_name: str = "",
+        remember: bool,
+        session_id: str | None,
+        source: str | None = None,
+    ) -> DatarcPersistenceReceipt:
+        """Commit one selection, including default/overlay changes in one transaction."""
+        from bowhead_core.datarc_selection import (
+            DatarcCommitUnknown,
+            require_datarc_context_migration,
+        )
+
+        destination = "default" if remember else "session"
+        if not remember and not session_id:
+            return DatarcPersistenceReceipt("skipped", destination, "missing_session")
+        if not user_id or not context_id:
+            raise ValueError("Missing Datarc preference identity")
+        value = {
+            "schema_version": 2,
+            "team_id": scope.team_id,
+            "connection_id": scope.connection_id,
+            "id": context_id,
+            "name": context_name,
+            "source": source or ("explicit" if remember else "session"),
+            "updated_at": _now(),
+            **({"session_id": session_id} if not remember else {}),
+        }
+        committing = False
+        async with open_shared_ctx(self._db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                await require_datarc_context_migration(db)
+                await self.upsert(
+                    user_id=user_id,
+                    kind="tool_context",
+                    key=scope.key(None if remember else session_id),
+                    value=value,
+                    source="tool_runtime",
+                    memory_role=MemoryRole.OPERATIONAL,
+                    value_schema=_value_schema_for(value),
+                    memory_policy_version=CURRENT_MEMORY_POLICY_VERSION,
+                    connection=db,
+                )
+                if remember and session_id:
+                    await self._clear_datarc_workspace_in_connection(db, user_id, scope, session_id)
+                committing = True
+                await db.commit()
+            except BaseException as error:
+                with suppress(Exception):
+                    await db.rollback()
+                if committing and isinstance(error, Exception):
+                    raise DatarcCommitUnknown() from error
+                raise
+        return DatarcPersistenceReceipt("saved", destination)
 
     @staticmethod
     def _tool_context_key(tool: str, slot: str, *, session_scoped: bool) -> str:

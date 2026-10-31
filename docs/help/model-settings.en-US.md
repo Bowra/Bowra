@@ -10,7 +10,7 @@ For each model in the catalog, set its **Input**, **Cached input**, and **Output
 
 If a connection is only for image generation or search, you can leave its model catalog empty and save the endpoint and credentials first. Configure its service model under **External capabilities** afterward.
 
-**Context window (tokens)** is the most an Agent can read at once. It is optional. For models in Bowra's reviewed catalog the field is prefilled and marked **From the model catalog**; for other models it shows **Default 131,072**. The mark disappears once you type a different value. Keep the default if you're unsure; if you know the exact value, enter it from the provider's documentation. Members can `@` an Agent whether or not you change it.
+**Context window (tokens)** is the model’s total context capacity, including instructions, conversation, Tool input and room for its reply. Enter an exact value when your service documents one. Otherwise leave the field empty to inherit the connection value, reviewed model catalog value or system default shown on the page. A displayed suggestion is not automatically saved as your own override. Changing this declaration cannot enlarge the provider’s actual limit.
 
 Changing the address, credentials, model ID, or capability parameters can invalidate earlier verification. Before removing a model or connection that is still used, replace it in production assignments or external capabilities.
 
@@ -21,6 +21,16 @@ For compatible Chat Completions services hosted on your own infrastructure or a 
 The visible **Request allowance** shows automatic, fixed, capped or omitted values, with separate rows when capabilities differ. Set a request limit in **Request parameters** below; capacity and request policy serve different purposes. An omitted field leaves the server limit unknown. Explicit fixed settings remain fixed and must fit the model's capacity and context.
 
 If a response reaches its output limit, Bowra asks the model for a smaller complete action up to twice, using earlier successful results. It does not execute an incomplete Tool batch or repeat earlier successful writes. The running status shows the correction. If correction still cannot finish, successful earlier results remain available and the failure explains how to request a shorter report or check output settings. Existing time and step limits still apply.
+
+## Automatic context compaction
+
+In a model’s editor, **Auto-compact** is on by default. When an ordinary Agent conversation needs room, Bowra summarizes older context and retains recent original content. Each Agent follows the model it uses. The conversation shows a quiet “Organizing context…” status while this happens; you can continue reading without dismissing a dialog.
+
+Leave the advanced token values on **Automatic** unless you have a specific requirement. The trigger controls when to begin, and recent-content tokens express how much original content to retain. Bowra adjusts these targets to fit the model’s capacity and required input; increasing them cannot bypass a provider limit. Clear a numeric field to restore Automatic, or use the reset action to restore all compaction defaults.
+
+Turning Auto-compact off keeps the saved numbers and any summaries already created. When a request needs more room, Bowra leaves older completed context out of that request without generating a summary. The same fallback is available when Auto-compact is on but a summary is unusable. Saved conversation history stays intact, but the model may no longer remember those older details. The current request and latest Tool results stay available. If the required input alone is too large, compact manually, choose a larger suitable model, or reduce the question and material before resending in the same conversation. Summarization uses model calls and shares the task’s existing time and usage limits. Specialized document generation and other dedicated recovery flows retain their own rules.
+
+When the conversation is idle, use **⋯ → Compact context** to organize it manually without changing Auto-compact. See [conversation actions](conversation-workbench-actions.en-US.md#compact-a-long-conversation).
 
 ## Configure request parameters
 
@@ -60,4 +70,12 @@ Choose a saved connection, enter the service model and request method, then sele
 
 **Save** on a connection validates and stores the change, then returns to the model settings list. If a review dialog appears, resolve any validation issue or accept the stated risk before applying. Other sections use **Review and apply**. Reopen the relevant section to confirm the displayed values. Model choice in a conversation is limited to the options made available by the team.
 
-For a new template-based PowerPoint request, planning uses the model selected when you sent that request, or the team's main model if you did not choose one. Changing the picker afterward does not change that draft's model, including when you answer a question to continue it. Older requests retain their original model assignment. Unrelated lightweight tasks still use the team's lightweight assignment; downloading or confirming a draft does not call a model.
+## Connect through Bowra
+
+If your administrator enables the service, **Use Bowra service** appears beside **Add connection**, including when the team has no connections. Only team owners and administrators can use it. Open this application through an HTTPS website domain on port 443; Bowra cannot return authorization to HTTP, localhost or an IP address.
+
+Choose **Use Bowra service**, sign in to Bowra and approve access there. When you return, the model service address, credential and model names are imported into an OpenAI-compatible draft. The configuration is not effective yet. Review the connection and its intended Chat/Tool capabilities; the names returned by Bowra do not prove those capabilities. Use the existing verification actions when needed. For a team without a main model, a single returned model is preselected; with multiple models, choose the main model. Existing main-model assignments stay unchanged. Choose **Review and apply** and complete any required confirmation to make the configuration effective.
+
+New Bowra imports automatically append `/v1` to the service address when it is missing, preserving any existing path and avoiding a duplicate `/v1`. Saved connections are not changed automatically. If an existing Bowra connection is missing `/v1`, edit its service address, add `/v1` at the end, then review and apply the change.
+
+If Bowra has no models, no connection is imported. Cancelling authorization leaves existing settings unchanged. Every approved authorization creates a new key in Bowra, even if the exchange fails or you discard the draft. If the result is uncertain, or you abandon an imported draft, find the individual key in Bowra **API Keys** by application name and creation time and disable or delete it if necessary before reconnecting. Do not repeatedly authorize to refresh the model list. Removing a connection here deletes the local credential copy; it does not revoke the Bowra key.

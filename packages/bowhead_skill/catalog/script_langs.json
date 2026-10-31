@@ -22,7 +22,9 @@
     {"cmd": "rg", "pkg": "ripgrep"},
     {"cmd": "bc", "pkg": "bc"},
     {"cmd": "soffice", "pkg": "libreoffice-impress"},
-    {"cmd": "pdftoppm", "pkg": "poppler-utils"}
+    {"cmd": "pdftoppm", "pkg": "poppler-utils"},
+    {"cmd": "xelatex", "pkg": "texlive-xetex"},
+    {"cmd": "kpsewhich", "pkg": "texlive-binaries"}
   ],
   "guaranteed_node_packages": [
     {"name": "pptxgenjs", "version": "4.0.1"},

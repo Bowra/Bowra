@@ -99,6 +99,8 @@ async def test_new_turn_retains_history_without_replaying_previous_helpers(http_
         assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"
         assert len(lead_calls) == 6 and len(helper_calls) == 3
         assert len([row for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id and row["dispatch_key"].startswith("call:")]) == 2
+        head = next(row for row in rows(case, "model_context_conversation_heads") if row["session_id"] == first.json()["session_id"])
+        assert head["published_turn_id"] == turn_id
 
 
 @pytest.mark.parametrize(
@@ -126,7 +128,6 @@ async def test_new_turn_retains_history_without_replaying_previous_helpers(http_
         "system",
         "system_only",
         "system_failed",
-        "system_iteration_limit",
         "provider_error",
         "single_system",
         "system_commit_disabled",
@@ -148,20 +149,14 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
     case = http_start
     parallel = boundary.startswith("parallel_")
     boundary = boundary.removeprefix("parallel_")
-    if boundary == "system_iteration_limit":
-        # A per-profile step limit stops the helper only with agent run limits off; with
-        # them on, the Team step limit applies and a stop returns partial work instead.
-        monkeypatch.setenv("FEATURE_AGENT_RUN_LIMITS", "0")
     from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
     from bowhead_core.agents.registry import AgentRegistry
 
     monkeypatch.setitem(PROFILES, "kb-analyst", manifest_to_profile(AgentRegistry.bootstrap().get("kb-analyst")))
     helper_count = 1 if boundary.startswith("single_") else 2
     question_round = helper_count + 1 - int(parallel)
-    failed_first = boundary in {"failed_first", "single_failed", "system_failed", "system_iteration_limit", "provider_error"}
-    system_first = boundary in {"system_only", "system_failed", "system_iteration_limit", "single_system", "system_disabled", "system_changed_race"}
-    if boundary == "system_iteration_limit":
-        monkeypatch.setitem(PROFILES, "compute", replace(PROFILES["compute"], max_iterations=1))
+    failed_first = boundary in {"failed_first", "single_failed", "system_failed", "provider_error"}
+    system_first = boundary in {"system_only", "system_failed", "single_system", "system_disabled", "system_changed_race"}
     case.client.headers["Content-Type"] = "application/json"
     scope = case.fixture.scope
     enable_lead_writer(case, monkeypatch)
@@ -358,15 +353,13 @@ async def test_original_card_retains_all_helpers_and_refuses_unproven_prefixes(h
             async with open_shared_ctx(case.path) as db:
                 await db.execute("BEGIN")
                 checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card["request_id"]))
-            assert checkpoint.contract == ("ordinary-lead-loop.v11" if parallel else "ordinary-lead-loop.v9")
+            assert checkpoint.loop_budget is not None
             assert len(checkpoint.helper_materials()) == helper_count
             if failed_first:
                 failed_index = (
                     next(i for i, helper in enumerate(checkpoint.helper_materials()) if helper["outcome"]["status"] == "failed") if parallel else 0
                 )
-                assert checkpoint.helper_materials()[failed_index]["outcome"]["reason"] == (
-                    "iteration_limit" if boundary == "system_iteration_limit" else "empty_answer"
-                )
+                assert checkpoint.helper_materials()[failed_index]["outcome"]["reason"] == "empty_answer"
                 assert checkpoint.invocations()[failed_index].result["ok"] is False
         if boundary == "system_disabled":
             original_compute = PROFILES["compute"]

@@ -1,111 +1,166 @@
 "use client";
 
-/**
- * Question-mark help popover (component spec "Help Popover Spec", decision 21): long explanations open from a
- * question mark in a small non-modal popover that works on touch; Tooltips keep only names and shortcuts.
- *
- * - Trigger: a button with a 15px CircleHelp icon, 24×24 hit area (44×44 on coarse pointers), named
- *   "About {field}", with aria-expanded / aria-controls.
- * - Surface: the menu material (`--ui-material-bg`, `--shadow-overlay`, radius 12), width min(320px, 100vw − 32px),
- *   anchored 8px below the trigger and shifted into the viewport when it would overflow.
- * - Opens and closes on press (Enter / Space too); Esc, a press outside or the trigger again close it and return
- *   focus to the trigger. Only one is open at a time.
- */
-
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { autoUpdate, flip, FloatingPortal, offset, shift, size, useFloating } from "@floating-ui/react";
 import { CircleHelp } from "lucide-react";
+import { rootStackingLayer } from "@/lib/layer";
 
 const OPEN_EVENT = "bowhead:help-popover-open";
-const VIEWPORT_GUTTER = 16;
+type State = "closed" | "preview" | "pinned";
 
-export function HelpPopover({ label, title, children, className }: {
-  /** Accessible name of the trigger, for example "About held out". */
+/** Read-only, nonmodal help. Existing consumers remain press-only unless preview is requested. */
+export function HelpPopover({
+  label,
+  title,
+  children,
+  className,
+  preview = false,
+}: {
   label: string;
-  /** Optional heading; it also names the popover. */
   title?: string;
   children: ReactNode;
   className?: string;
+  preview?: boolean;
 }) {
   const id = useId();
-  const popoverId = `${id}-help`;
-  const titleId = `${id}-title`;
-  const [open, setOpen] = useState(false);
-  const [shift, setShift] = useState(0);
-  const rootRef = useRef<HTMLSpanElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-
-  const close = useCallback((returnFocus: boolean) => {
-    setOpen(false);
-    if (returnFocus) triggerRef.current?.focus();
+  const [state, setState] = useState<State>("closed");
+  const open = state !== "closed";
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const surface = useRef<HTMLDivElement | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressFocus = useRef(false);
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement: "bottom-start",
+    strategy: "fixed",
+    whileElementsMounted: autoUpdate,
+    middleware: [
+      offset(8),
+      flip({ padding: 16 }),
+      shift({ padding: 16 }),
+      size({
+        padding: 16,
+        apply({ availableHeight, elements }) {
+          elements.floating.style.maxHeight = `${Math.max(0, availableHeight)}px`;
+        },
+      }),
+    ],
+  });
+  const cancel = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
   }, []);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    // Only one help popover is open at a time.
-    window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: popoverId }));
-    const onOther = (event: Event) => {
-      if ((event as CustomEvent<string>).detail !== popoverId) setOpen(false);
-    };
-    const onPointer = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        close(true);
+  const close = useCallback(
+    (restore: boolean) => {
+      cancel();
+      setState("closed");
+      if (restore) {
+        suppressFocus.current = true;
+        trigger.current?.focus();
       }
+    },
+    [cancel],
+  );
+  useEffect(() => cancel, [cancel]);
+  useEffect(() => {
+    if (!open) return;
+    window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: id }));
+    const other = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== id) close(false);
     };
-    window.addEventListener(OPEN_EVENT, onOther);
-    document.addEventListener("pointerdown", onPointer);
-    document.addEventListener("keydown", onKey);
+    const outside = (event: PointerEvent) => {
+      if (!trigger.current?.contains(event.target as Node) && !surface.current?.contains(event.target as Node)) close(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Capture before the containing sheet/dialog so Escape dismisses this top layer only.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const focused = document.activeElement;
+      close(state === "pinned" || !preview || focused === trigger.current || Boolean(surface.current?.contains(focused)));
+    };
+    window.addEventListener(OPEN_EVENT, other);
+    document.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", key, true);
     return () => {
-      window.removeEventListener(OPEN_EVENT, onOther);
-      document.removeEventListener("pointerdown", onPointer);
-      document.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_EVENT, other);
+      document.removeEventListener("pointerdown", outside);
+      window.removeEventListener("keydown", key, true);
     };
-  }, [close, open, popoverId]);
-
-  // Keep the popover inside the viewport, 16px from either edge.
-  useLayoutEffect(() => {
-    if (!open || !popoverRef.current) {
-      setShift(0);
-      return;
-    }
-    const rect = popoverRef.current.getBoundingClientRect();
-    const width = typeof window === "undefined" ? 0 : window.innerWidth;
-    if (rect.right > width - VIEWPORT_GUTTER) setShift(width - VIEWPORT_GUTTER - rect.right);
-    else if (rect.left < VIEWPORT_GUTTER) setShift(VIEWPORT_GUTTER - rect.left);
-  }, [open]);
-
+  }, [open, close, id, preview, state]);
+  const enter = () => {
+    cancel();
+    if (preview && state === "closed" && window.matchMedia("(hover: hover) and (pointer: fine)").matches)
+      timer.current = setTimeout(() => setState("preview"), 300);
+  };
+  const leave = () => {
+    cancel();
+    if (state === "preview") timer.current = setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused !== trigger.current && !surface.current?.contains(focused)) close(false);
+    }, 150);
+  };
   return (
-    <span ref={rootRef} className={`ui-help-popover${className ? ` ${className}` : ""}`}>
+    <span className={`ui-help-popover${className ? ` ${className}` : ""}`}>
       <button
-        ref={triggerRef}
+        ref={(node) => {
+          trigger.current = node;
+          refs.setReference(node);
+        }}
         type="button"
         className="ui-help-popover__trigger"
         aria-label={label}
         aria-expanded={open}
-        aria-controls={open ? popoverId : undefined}
+        aria-controls={open ? id : undefined}
         data-open={open || undefined}
-        onClick={() => (open ? close(false) : setOpen(true))}
+        onPointerEnter={enter}
+        onPointerLeave={leave}
+        onFocus={() => {
+          if (suppressFocus.current) {
+            suppressFocus.current = false;
+            return;
+          }
+          if (preview) {
+            cancel();
+            setState((s) => (s === "pinned" ? s : "preview"));
+          }
+        }}
+        onBlur={(event) => {
+          suppressFocus.current = false;
+          if (!surface.current?.contains(event.relatedTarget)) close(false);
+        }}
+        onClick={() => {
+          cancel();
+          if (state === "pinned") close(false);
+          else setState("pinned");
+        }}
       >
         <CircleHelp size={15} strokeWidth={1.5} aria-hidden />
       </button>
       {open ? (
-        <div
-          ref={popoverRef}
-          id={popoverId}
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby={title ? titleId : undefined}
-          aria-label={title ? undefined : label}
-          className="ui-help-popover__surface"
-          style={shift ? { transform: `translateX(${shift}px)` } : undefined}
-        >
-          {title ? <strong id={titleId} className="ui-help-popover__title">{title}</strong> : null}
-          <div className="ui-help-popover__body">{children}</div>
-        </div>
+        <FloatingPortal>
+          <div
+            ref={(node) => {
+              surface.current = node;
+              refs.setFloating(node);
+            }}
+            id={id}
+            role="dialog"
+            tabIndex={-1}
+            aria-modal="false"
+            aria-label={title || label}
+            className="ui-help-popover__surface"
+            style={{ ...floatingStyles, zIndex: Math.max(40, rootStackingLayer(trigger.current) + 1), overflowY: "auto" }}
+            onPointerEnter={cancel}
+            onPointerLeave={leave}
+            onBlur={(event) => {
+              if (!surface.current?.contains(event.relatedTarget) && event.relatedTarget !== trigger.current) close(false);
+            }}
+          >
+            {title ? <strong className="ui-help-popover__title">{title}</strong> : null}
+            <div className="ui-help-popover__body">{children}</div>
+          </div>
+        </FloatingPortal>
       ) : null}
     </span>
   );

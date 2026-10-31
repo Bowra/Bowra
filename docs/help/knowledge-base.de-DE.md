@@ -40,7 +40,7 @@ In **Bibliothek → Dateien** zeigt die Spalte **Wissensdatenbank**, welchen Sta
 
 Beim Hinzufügen zur Wissensdatenbank wird die Datei nicht verschoben oder kopiert. Sie bleibt unter „Dateien“.
 
-Dateien, die Sie unter „Dateien“ hochladen und die als langfristiges Referenzmaterial erkannt werden (zum Beispiel Preislisten oder Richtlinien), werden automatisch Ihrer persönlichen Wissensdatenbank hinzugefügt und verarbeitet, damit die KI sie bei passenden Fragen heranziehen kann. Hat Ihr Team die Wissensdatenbank nicht aktiviert oder kein Wissensdatenbank-Modell eingerichtet, bleibt die Datei nur unter „Dateien“. Um eine automatische Aufnahme rückgängig zu machen, wählen Sie **Aus Wissensdatenbank entfernen**. Die Datei selbst bleibt unverändert.
+Das Hochladen unter Dateien oder Anhängen im Chat speichert nur die Datei. Eine Einstufung als langfristiges Material fügt sie nicht zur Wissensdatenbank hinzu. Wählen Sie **Zur Wissensdatenbank hinzufügen**, laden Sie sie auf der Wissensseite hoch oder bitten Sie den Agent ausdrücklich um das Hinzufügen einer bestimmten Datei mit gewünschter Sichtbarkeit. Der Agent prüft Ihre ursprüngliche Anfrage und aktuellen Berechtigungen; unklare Ziele müssen geklärt werden. Erst nach der Verarbeitung ist die Datei durchsuchbar. ZIP-Anhänge im Chat bleiben eine einzelne Datei und werden nicht entpackt oder indexiert. Importieren Sie enthaltene Dokumente über die Wissensseite. Das Entfernen aus der Wissensdatenbank behält die Originaldatei. Eine alte Anfrage fügt sie nach dem Entfernen nicht erneut hinzu; eine neue ausdrückliche Anfrage kann dies tun.
 
 ## Dateistatus
 

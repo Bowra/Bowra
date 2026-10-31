@@ -78,7 +78,6 @@ class TeamSubagentEditDTO(BaseModel):
     description: str = Field(min_length=1, max_length=200)
     system_prompt: str = Field(min_length=1, max_length=15000)
     tool_refs: list[str]
-    max_iterations: int = Field(ge=1, le=50)
     skills: list[str]
     output_schema: dict[str, Any] | None
 
@@ -192,7 +191,6 @@ async def _subagent_target_read(ctx: FormContext) -> dict[str, Any]:
             "description": listing.get("description") or item.description,
             "system_prompt": definition.get("system_prompt") or item.system_prompt,
             "tool_refs": refs,
-            "max_iterations": definition.get("max_iterations") or item.max_iterations,
             "skills": [
                 grant["skill_ref"]["name"]
                 for grant in grants
@@ -207,7 +205,6 @@ async def _subagent_target_read(ctx: FormContext) -> dict[str, Any]:
         "description": item.description,
         "system_prompt": item.system_prompt,
         "tool_refs": item.tool_refs,
-        "max_iterations": item.max_iterations,
         "skills": item.skills,
         "output_schema": item.output_schema,
     }

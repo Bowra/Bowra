@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
 import yaml
+from bowhead_skill.bundle_files import is_python_cache_path
 from bowhead_skill.loader import split_skill_markdown
 from bowhead_skill.readonly_entry import MAX_CONTRACT_BYTES, MAX_ENTRY_BYTES, MAX_FILE_BYTES, ReadOnlyEntry, skill_reference_read_entry
 
@@ -52,7 +53,7 @@ def _signature(info: os.stat_result) -> tuple[int, ...]:
     return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
-def _capture(root: Path) -> dict[str, bytes]:
+def _capture(root: Path, *, builtin: bool = False) -> dict[str, bytes]:
     """Read through directory descriptors; never follow an in-package symlink.
 
     Paths above the server-resolved root remain the caller's trust boundary.
@@ -72,10 +73,12 @@ def _capture(root: Path) -> dict[str, bytes]:
         before = os.fstat(fd)
         with os.scandir(fd) as entries:
             for entry in entries:
+                parts = (*prefix, entry.name)
+                if builtin and is_python_cache_path(PurePosixPath(*parts)):
+                    continue
                 count += 1
                 if count > _MAX_ENTRIES:
                     _fail("reference_skill_material_too_large")
-                parts = (*prefix, entry.name)
                 relative = PurePosixPath(*parts).as_posix()
                 if len(relative.encode("utf-8")) > 1024 or "\\" in relative or any(ord(char) < 32 for char in relative):
                     _fail()
@@ -162,7 +165,12 @@ def prepare_skill_read(root: Path, *, resource: SkillResourceRef, expected_name:
             resource.source_kind == "builtin" and resource.id != f"builtin:{expected_name}"
         ):
             _fail()
-        return prepare_skill_read_files(_capture(root), resource=resource, expected_name=expected_name, require_declaration=require_declaration)
+        return prepare_skill_read_files(
+            _capture(root, builtin=resource.source_kind == "builtin"),
+            resource=resource,
+            expected_name=expected_name,
+            require_declaration=require_declaration,
+        )
     except SkillReadMaterialError:
         raise
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError, yaml.YAMLError):

@@ -20,6 +20,60 @@ from cryptography.fernet import Fernet
 from bowhead_core import CanvasStore, SessionStore
 
 
+@pytest.mark.asyncio
+async def test_presenting_an_old_file_requires_snapshot_refresh_without_new_bytes(tmp_path):
+    sessions, canvases, artifacts, session, _, _ = await _stores(tmp_path)
+    await sessions.ensure_session(session_id="session_previous", workspace_id=session.workspace_id, user_id=session.user_id)
+    original = await artifacts.put_bytes(
+        content=b"original",
+        filename="retained.tex",
+        mime="text/plain",
+        source="python_sandbox",
+        created_by=session.user_id,
+        session_id="session_previous",
+        kind="deliverable",
+    )
+    async with aiosqlite.connect(artifacts.db_path) as db:
+        await db.execute("UPDATE artifacts SET created_at='2020-01-01' WHERE id=?", (original.id,))
+        await db.execute(
+            "INSERT INTO turns(id,session_id,seq,user_text,started_at) VALUES('turn_reuse',?,1,'Reuse the file','2026-10-28')", (session.id,)
+        )
+        await db.commit()
+    kwargs = {
+        "session": session,
+        "team_id": "team_results",
+        "scale_nav": True,
+        "session_store": sessions,
+        "canvas_store": canvases,
+        "artifact_store": artifacts,
+        "cursor_codec": _codec(),
+    }
+    first = await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="explorer"))
+    metadata = {
+        "artifact_presentation": {"contract": "artifact-presentation.v1", "origin": "explicit_tool", "items": [{"artifact_id": original.id}]},
+        "artifact_presentation_receipt": {
+            "call_key": "b" * 64,
+            "turn_id": "turn_reuse",
+            "session_id": session.id,
+            "user_id": session.user_id,
+            "workspace_id": session.workspace_id,
+        },
+    }
+    await TurnLogStore(artifacts.db_path).record(turn_id="turn_reuse", event_type="tool_result", payload={"result_meta": metadata})
+    changes = await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="changes", snapshot_token=first.snapshot_token))
+    assert changes.new_results.projection_changed is True
+    assert changes.new_results.count == 0
+    with pytest.raises(ResultsQueryError, match="results_snapshot_stale"):
+        await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="explorer", snapshot_token=first.snapshot_token))
+    refreshed = await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="explorer"))
+    assert [item.key for item in refreshed.items].count(f"artifact:{original.id}") == 1
+    metadata["artifact_presentation"]["contract"] = "artifact-presentation.v99"
+    metadata["artifact_presentation_receipt"]["call_key"] = "c" * 64
+    await TurnLogStore(artifacts.db_path).record(turn_id="turn_reuse", event_type="tool_result", payload={"result_meta": metadata})
+    with pytest.raises(ResultsQueryError, match="results_artifact_contract_unsupported"):
+        await query_owner_results(**kwargs, request_body=ResultsQueryRequestV1(surface="explorer"))
+
+
 async def _stores(tmp_path: Path):  # type: ignore[no-untyped-def]
     db_path = str(tmp_path / "bowhead.db")
     session_store = SessionStore(db_path)

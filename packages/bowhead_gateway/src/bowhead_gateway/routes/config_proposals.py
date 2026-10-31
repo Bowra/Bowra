@@ -26,7 +26,7 @@ from bowhead_core.config_draft_store import (
     ConfigDraft,
     ConfigDraftStore,
 )
-from bowhead_core.configuration_contracts import TEAM_FORMS, domain_enabled
+from bowhead_core.configuration_contracts import TEAM_FORMS
 from bowhead_core.user_store import User, UserStore
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -124,8 +124,6 @@ async def _require_apply_permission(
         # Orphan after deployment rollback / unregistered form -> honest 409; FE stays retryable.
         raise _error(409, "form_unavailable")
     if draft.form_id in TEAM_FORMS:
-        if not domain_enabled(draft.form_id):
-            raise _error(409, "form_unavailable")
         if not await user_store.user_has_active_team_membership(user.id, user.team_id) or await user_store.get_team_role(
             user.id, user.team_id
         ) not in {"owner", "team_admin"}:

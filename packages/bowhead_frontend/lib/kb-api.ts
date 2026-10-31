@@ -398,6 +398,7 @@ async function uploadKbSmall(
   } & KbUploadOptions,
 ): Promise<KbFileDTO> {
   const fd = new FormData();
+  fd.append("knowledge_intent", "add_to_knowledge");
   fd.append("file", file);
   fd.append("scope", opts.scope);
   fd.append("scope_id", opts.scope_id);
@@ -431,6 +432,7 @@ export async function uploadLargeKbFile(
       signal: opts.signal,
       headers: { "Content-Type": "application/json", ...opts.spaceHeaders },
       body: JSON.stringify({
+        knowledge_intent: "add_to_knowledge",
         filename: file.name,
         mime: file.type || "application/octet-stream",
         size_bytes: file.size,
@@ -541,6 +543,7 @@ async function uploadKbBundleSmall(
   opts: { scope: KbScope; scope_id: string; use_llm: boolean } & KbUploadOptions,
 ): Promise<KbBundleUploadResponse> {
   const fd = new FormData();
+  fd.append("knowledge_intent", "add_to_knowledge");
   fd.append("file", file);
   fd.append("scope", opts.scope);
   fd.append("scope_id", opts.scope_id);
@@ -567,6 +570,7 @@ export async function uploadLargeKbBundle(
       signal: opts.signal,
       headers: { "Content-Type": "application/json", ...opts.spaceHeaders },
       body: JSON.stringify({
+        knowledge_intent: "add_to_knowledge",
         filename: file.name,
         mime: file.type || "application/zip",
         size_bytes: file.size,

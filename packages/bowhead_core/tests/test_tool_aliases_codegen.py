@@ -83,12 +83,12 @@ def test_tool_names_module_has_constants() -> None:
     assert "bi_query" in tool_names.ALL_TOOL_NAMES
 
 
-def test_private_document_admission_keeps_its_lead_only_internal_binding() -> None:
+def test_document_tools_advertise_their_actual_runtime_roles() -> None:
     from bowhead_core.agents._generated.role_bindings import _PARADIGM_V2_ROLE_MAP
     from bowhead_core.agents._generated.tool_kinds import TOOL_KINDS
 
-    assert _PARADIGM_V2_ROLE_MAP["template_document_submit"] == frozenset({"lead"})
-    assert TOOL_KINDS["template_document_submit"] == "part"
+    assert _PARADIGM_V2_ROLE_MAP["template_document_submit"] == frozenset({"lead", "analyst"})
+    assert TOOL_KINDS["template_document_submit"] == "tool"
     assert _PARADIGM_V2_ROLE_MAP["render_deck"] == frozenset({"analyst"})
 
 
@@ -281,15 +281,17 @@ def test_python_tool_display_uses_native_copy_and_english_fallback(suffix, displ
 
 # The user-visible built-in Tools of PRD §2.2; every other manifest entry is a system part.
 USER_VISIBLE = {
+    "present_artifacts",
     "bi_schema", "bi_query", "bi_concept_resolve", "tool_list_workspaces",
-    "write_report", "read_report", "add_chart", "remove_chart", "add_image", "canvas_add_insight",
+    "write_report", "read_report", "add_chart", "read_chart", "edit_chart", "remove_chart", "add_image", "canvas_add_insight",
     "canvas_add_spec_block", "canvas_add_html_artifact", "canvas_add_external_iframe",
     "canvas_create_design", "canvas_update_design_text", "canvas_flatten_design",
-    "kb_search", "kb_query_records", "kb_get_record", "kb_list_tables", "attachment_read",
+    "kb_search", "kb_query_records", "kb_get_record", "kb_list_tables", "kb_add_file", "kb_remove_file", "kb_operation_status", "attachment_read",
     "web_search", "web_fetch", "web_extract", "web_map", "web_crawl", "web_deep_research",
     "python_sandbox", "image_generate",
     "google_doc_write", "google_sheet_write", "google_slides_write", "send_email",
     "skill_save_generated", "get_current_user",
+    "template_document_submit",
 }  # fmt: skip
 
 
@@ -299,7 +301,7 @@ def test_user_visible_tools_match_the_product_list() -> None:
 
     assert set(TOOL_KINDS) == ALL_TOOL_NAMES
     assert USER_VISIBLE_TOOLS == USER_VISIBLE
-    assert len(USER_VISIBLE_TOOLS) == 35
+    assert len(USER_VISIBLE_TOOLS) == 42
     assert set(TOOL_RISKS) >= USER_VISIBLE_TOOLS
     parts = ALL_TOOL_NAMES - USER_VISIBLE_TOOLS
     assert {"subagent_spawn", "subagent_return", "skill_read", "skill_invoke", "skill_list", "python_exec", "tool_switch_context"} <= parts
@@ -315,7 +317,7 @@ def test_high_risk_tools_are_classified() -> None:
         "google_slides_write",
         "send_email",
     }
-    assert {name for name, risk in TOOL_RISKS.items() if risk == "destructive"} == {"remove_chart"}
+    assert {name for name, risk in TOOL_RISKS.items() if risk == "destructive"} == {"remove_chart", "kb_remove_file"}
 
 
 @pytest.mark.parametrize(

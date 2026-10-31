@@ -231,6 +231,9 @@ class _MemberResolver:
 
 
 class _ConnectionStore:
+    async def resolve_active_binding(self, team_id: str):
+        return SimpleNamespace(id="conn_sched", base_url="https://datarc.example"), "auth_sched", "revision_one"
+
     async def list_connections(self, team_id: str):
         return [SimpleNamespace(id="conn_sched", base_url="https://datarc.example")]
 

@@ -9,6 +9,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 from bowhead_core.chart_style_registry_generated import CHART_STYLE_PRESENTATION_POLICY
@@ -87,6 +88,30 @@ def _role_ordered_dimensions(dimensions: list[dict[str, Any]]) -> list[dict[str,
     return [x, color, *(column for column in dimensions if column is not x and column is not color)]
 
 
+def _duplicate_date_dimension(rows: list[dict[str, Any]], x_column: dict[str, Any], group_column: dict[str, Any]) -> bool:
+    """Match the frontend's narrowly proven duplicate day dimension."""
+    if x_column.get("type") != "date" or group_column.get("type") != "categorical" or group_column.get("role") == "color":
+        return False
+
+    def day(value: Any) -> str | None:
+        if not isinstance(value, str) or not re.fullmatch(r"(?:\d{8}|\d{4}-\d{2}-\d{2})", value):
+            return None
+        raw = value.replace("-", "")
+        try:
+            parsed = date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+        except ValueError:
+            return None
+        return raw if parsed.year >= 100 else None
+
+    seen: set[str] = set()
+    for row in rows:
+        x_day = day(row.get(x_column["key"]))
+        if x_day is None or x_day != day(row.get(group_column["key"])) or x_day in seen:
+            return False
+        seen.add(x_day)
+    return len(seen) >= 2
+
+
 def _pivot_long_spec(spec: dict[str, Any]) -> dict[str, Any] | None:
     policy = CHART_STYLE_PRESENTATION_POLICY["normalization"]
     if spec.get("kind") not in policy["pivotableKinds"]:
@@ -103,6 +128,8 @@ def _pivot_long_spec(spec: dict[str, Any]) -> dict[str, Any] | None:
         else next((column for column in dimensions if column.get("type") == "date"), dimensions[0])
     )
     group_column = next(column for column in dimensions if column.get("key") != x_column.get("key"))
+    if spec.get("kind") in {"line", "area_stacked"} and _duplicate_date_dimension(rows, x_column, group_column):
+        return None
     x_values = list(dict.fromkeys(_string_cell(row.get(x_column["key"])) for row in rows))
     group_values = list(dict.fromkeys(_string_cell(row.get(group_column["key"])) for row in rows))
     if len(x_values) < 2:

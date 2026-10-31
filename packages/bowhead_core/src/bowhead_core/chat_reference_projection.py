@@ -529,6 +529,11 @@ async def _continuation_associations(db, *, turn_id: str, invocations: Collectio
                     workspace_id=row["original_workspace_id"],
                     session_id=row["original_session_id"],
                 )
+                from bowhead_core.chat_reference_question_origin import ReferenceQuestionOrigin
+
+                origin = dict(row).get("question_origin")
+                if isinstance(origin, ReferenceQuestionOrigin):
+                    history = [card for card in history if card["request_id"] in origin.card_ids]
                 candidates = [{**dict(row), **dict(card)} for card in history]
                 contexts = history_contexts(history)
             for candidate in candidates:
@@ -547,6 +552,9 @@ async def _continuation_associations(db, *, turn_id: str, invocations: Collectio
                 generation = attempt["generation"] if attempt is not None else None
             elif row["status"] == "resolved" and contexts:
                 lower, upper = resume_generation_bounds(contexts, index)
+                origin = dict(row).get("question_origin")
+                if upper is None and origin is not None:
+                    upper = origin.generation
                 async with db.execute(
                     "SELECT MAX(json_extract(payload_json,'$.execution_generation')) FROM turn_events "
                     "WHERE turn_id=? AND event_type='turn.resumed' AND json_valid(payload_json) "

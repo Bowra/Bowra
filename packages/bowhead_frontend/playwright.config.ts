@@ -19,6 +19,9 @@ const E2E_PROFILE = process.env.BOWHEAD_E2E_PROFILE ?? "gate";
 
 /** E2e specs requiring Chromium and WebKit (focus/layers/keyboard/history/deep-link navigation). */
 const CROSS_BROWSER_SPECS = [
+  "**/chat-web-links.spec.ts",
+  "**/artifact-presentation.spec.ts",
+  "**/configuration-field-guidance.spec.ts",
   "**/canvas-rewrite-lifecycle.spec.ts",
   "**/configuration-model-review.spec.ts",
   "**/release-notes-navigation.spec.ts",
@@ -57,9 +60,11 @@ const CROSS_BROWSER_SPECS = [
   "**/agent-audit-recovery.spec.ts",
   "**/configuration-canvas-agents.spec.ts",
   "**/document-canvas-root.spec.ts",
+  "**/document-draft-canvas.spec.ts",
   "**/settings-pages-canvas.spec.ts",
   "**/canvas-cc/configuration-settings.spec.ts",
   "**/canvas-cc/results-reading-layout.spec.ts",
+  "**/canvas-cc/html-interactive.spec.ts",
 ];
 
 const LEGACY_E2E_SPECS = [
@@ -75,6 +80,7 @@ const LIVE_E2E_SPECS = [
 ];
 
 const SSE_E2E_SPECS = [
+  "**/chat-web-links.spec.ts",
   "**/model-failure-replay.spec.ts",
   "**/office-context-replay.spec.ts",
   "**/steer-live-sse.spec.ts",

@@ -31,10 +31,19 @@ class DocumentModelHook:
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             execution = await _fence(db, self.scope, self.job_id, self.owner)
-            if execution["state"] != "planning" or type(self.attempt_no) is not int or self.attempt_no not in (1, 2) or self.call_no not in (1, 2):
+            if (
+                execution["state"] != "planning"
+                or type(self.attempt_no) is not int
+                or self.attempt_no not in (1, 2)
+                or type(self.call_no) is not int
+                or self.call_no < 1
+            ):
                 raise InvocationOutcomeUnknownError("document_execution_fenced")
-            async with db.execute("SELECT model_selection_json FROM document_dispatches WHERE job_id=?", (self.job_id,)) as cursor:
+            async with db.execute("SELECT model_selection_json,profile FROM document_dispatches WHERE job_id=?", (self.job_id,)) as cursor:
                 dispatch = await cursor.fetchone()
+            authoring = dispatch is not None and dispatch[1] == "pptx-script-worker-v1"
+            if not authoring and self.call_no not in (1, 2):
+                raise InvocationOutcomeUnknownError("document_execution_fenced")
             if dispatch is not None and dispatch[0] is not None:
                 selected = DocumentModelSelection.model_validate_json(dispatch[0])
                 if (spec.provider, spec.model) != (selected.provider, selected.model):
@@ -47,7 +56,7 @@ class DocumentModelHook:
                 turn_owned = await cursor.fetchone() is not None
             if (attempt is None and (turn_owned or self.attempt_no != 1)) or (attempt is not None and attempt["owner_id"] != self.owner):
                 raise InvocationOutcomeUnknownError("document_execution_fenced")
-            if self.call_no == 2 and execution["error_code"] not in REPAIRABLE_ERRORS:
+            if not authoring and self.call_no == 2 and execution["error_code"] not in REPAIRABLE_ERRORS:
                 raise InvocationOutcomeUnknownError("document_model_repair_forbidden")
             async with db.execute("SELECT 1 FROM document_usage_receipts WHERE job_id=? AND settled_at IS NULL", (self.job_id,)) as cursor:
                 if await cursor.fetchone():

@@ -34,7 +34,7 @@ async def read_pause(db: aiosqlite.Connection, turn_id: str):
             "JOIN chat_reference_resolutions r ON r.turn_id=t.id AND r.resolution_seq=1 "
             "JOIN chat_reference_resolutions a ON a.turn_id=t.id AND a.resolution_seq=2 AND a.execution_id=e.id "
             "JOIN chat_reference_evidence v ON v.turn_id=t.id AND v.execution_id=e.id AND v.kind='delegate_started' "
-            "AND v.resolution_seq=2 AND v.created_generation=1 "
+            "AND v.resolution_seq=2 AND v.created_generation=a.created_generation "
             "WHERE c.turn_id=? AND p.retention_state='available' AND retention.available AND retention.deadline>julianday('now') "
             "AND CASE WHEN json_valid(c.resume_context_json) THEN "
             "json_extract(c.resume_context_json,'$.reference_continuation.contract') END=?",
@@ -42,10 +42,18 @@ async def read_pause(db: aiosqlite.Connection, turn_id: str):
         )
     finally:
         db.row_factory = original_factory
-    return rows[0] if len(rows) == 1 else None
+    if len(rows) != 1:
+        return None
+    from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+    row = dict(rows[0])
+    row["question_origin"] = await read_question_origin_in_tx(db, turn_id=turn_id, postdispatch_card_id=row["request_id"])
+    return row
 
 
 def _context(row) -> dict:
+    from bowhead_core.chat_reference_question_origin import ReferenceQuestionOrigin
+
     try:
         context = json.loads(row["resume_context_json"])
         plan = json.loads(row["plan_json"])
@@ -53,6 +61,11 @@ def _context(row) -> dict:
         raise ValueError("reference_continuation_changed") from exc
     marker = context.get(CONTEXT_KEY) if isinstance(context, dict) else None
     sealed = context.get("reference_read_question") if isinstance(context, dict) else None
+    origin = dict(row).get("question_origin")
+    valid_origin = row["delegation_generation"] == 1 or (
+        isinstance(origin, ReferenceQuestionOrigin)
+        and (origin.turn_id, origin.execution_id, origin.generation) == (row["turn_id"], row["primary_execution_id"], row["delegation_generation"])
+    )
     expected_marker = {
         "contract": CONTRACT,
         "execution_id": row["primary_execution_id"],
@@ -69,7 +82,7 @@ def _context(row) -> dict:
         or marker != expected_marker
         or not isinstance(plan, dict)
         or plan.get("orchestration_contract") != "lead-delegation.v1"
-        or row["delegation_generation"] != 1
+        or not valid_origin
         or row["primary_status"] not in ("running", "completed", "failed")
         or row["session_id"] != row["original_session_id"]
         or row["user_id"] != row["original_user_id"]
@@ -120,6 +133,20 @@ def answer(row) -> str:
     return encoded
 
 
+async def all_answers(db: aiosqlite.Connection, row) -> str:
+    """Retain each original canonical answer without changing historical single cards."""
+    from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+    current = answer(row)
+    origin = await read_question_origin_in_tx(db, turn_id=row["turn_id"], postdispatch_card_id=row["request_id"])
+    if not origin.answers:
+        return current
+    encoded = json.dumps([*(item["answer"] for item in origin.answers), json.loads(current)], ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode()) > 65536:
+        raise ValueError("reference_continuation_changed")
+    return encoded
+
+
 async def open_read_question(db: aiosqlite.Connection, row, *, scope, cipher):
     """Validate the original sealed read history before claiming or consuming it."""
     from bowhead_core.reference_mcp_runtime import require_saved_mcp_reads
@@ -149,7 +176,10 @@ async def open_read_question(db: aiosqlite.Connection, row, *, scope, cipher):
 
 
 async def pause_ready(db: aiosqlite.Connection, *, turn_id: str, clarification_id: str | None = None) -> bool:
-    row = await read_pause(db, turn_id)
+    try:
+        row = await read_pause(db, turn_id)
+    except ValueError:
+        return False
     if row is None or row["primary_status"] != "running" or row["status"] not in ("pending", "resolved"):
         return False
     if clarification_id is not None and (row["request_id"] != clarification_id or row["status"] != "resolved"):
@@ -164,14 +194,16 @@ async def pause_ready(db: aiosqlite.Connection, *, turn_id: str, clarification_i
         return False
     if await _row(db, "SELECT 1 FROM chat_reference_lead_postdispatch_attempts WHERE turn_id=?", (turn_id,)):
         return False
-    return not await _row(db, "SELECT 1 FROM chat_reference_model_invocations WHERE turn_id=? AND created_generation>1", (turn_id,))
+    return not await _row(
+        db,
+        "SELECT 1 FROM chat_reference_model_invocations WHERE turn_id=? AND created_generation>?",
+        (turn_id, row["delegation_generation"]),
+    )
 
 
 async def require_resume(db: aiosqlite.Connection, *, turn_id: str, generation: int):
-    if generation != 2:
-        raise ValueError("reference_continuation_unavailable")
     row = await read_pause(db, turn_id)
-    if row is None or row["status"] != "resolved":
+    if row is None or row["status"] != "resolved" or generation <= row["delegation_generation"]:
         raise ValueError("reference_continuation_unavailable")
     answer(row)
     output = await _row(

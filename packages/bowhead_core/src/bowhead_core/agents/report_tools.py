@@ -176,6 +176,8 @@ def write_report_enabled() -> bool:
 
 def register_report_tools(registry: Any) -> None:
     """Register read_report + write_report. Called (flag-gated) at startup."""
+    from bowhead_core.chart.edit_guard import coordinate_chart_handler
+
     registry.register(
         ToolSpec(
             schema=_read_report_schema(),
@@ -183,7 +185,7 @@ def register_report_tools(registry: Any) -> None:
             effect_spec=TOOL_EFFECT_READ_ONLY,
         )
     )
-    registry.register(ToolSpec(schema=_write_report_schema(), handler=_write_report))
+    registry.register(ToolSpec(schema=_write_report_schema(), handler=coordinate_chart_handler(_write_report)))
 
 
 def _resolve_writer_id(ctx: Any) -> str:
@@ -838,6 +840,11 @@ async def _reconcile_chapters(
 
 async def _write_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     reject_unclassified_direct_mutation("report.write_report")
+    from bowhead_core.chart.edit_guard import blocked, denial
+
+    protected = await blocked(ctx)
+    if protected:
+        return {"ok": False, **denial(history_unavailable="chart_guard_history_unavailable" in protected)}
     # The owned Plan publishes this decision before dispatch. Direct report
     # authorship must obey it just as eager and final composition already do.
     # This guard is specific to report prose; requested charts/files retain

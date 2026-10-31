@@ -201,6 +201,7 @@ def test_bundle_presign_happy_creates_marker(client: TestClient, app: FastAPI) -
     r = client.post(
         "/api/v1/kb/presign/bundle",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "mei-dd.zip",
             "mime": "application/zip",
             "size_bytes": 5_000_000,
@@ -237,6 +238,7 @@ def test_bundle_presign_rejects_non_zip_415(client: TestClient) -> None:
     r = client.post(
         "/api/v1/kb/presign/bundle",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.pdf",
             "mime": "application/pdf",
             "size_bytes": 1000,
@@ -251,6 +253,7 @@ def test_bundle_presign_rejects_oversize_413(client: TestClient) -> None:
     r = client.post(
         "/api/v1/kb/presign/bundle",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "huge.zip",
             "mime": "application/zip",
             "size_bytes": 600 * 1024 * 1024,  # > _BUNDLE_MAX_SIZE 500MB
@@ -265,6 +268,7 @@ def test_bundle_presign_403_on_scope_spoof(client: TestClient) -> None:
     r = client.post(
         "/api/v1/kb/presign/bundle",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.zip",
             "mime": "application/zip",
             "size_bytes": 1000,
@@ -280,6 +284,7 @@ def test_bundle_presign_accepts_xzipcompressed_variant(client: TestClient) -> No
     r = client.post(
         "/api/v1/kb/presign/bundle",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "win.zip",
             "mime": "application/x-zip-compressed",
             "size_bytes": 1000,
@@ -344,6 +349,7 @@ def test_bundle_presign_persists_artifact_workspace_attribution(
 
 def _do_bundle_presign(client: TestClient, **overrides) -> dict:
     payload = {
+        "knowledge_intent": "add_to_knowledge",
         "filename": "mei-dd.zip",
         "mime": "application/zip",
         "size_bytes": 5_000_000,
@@ -459,7 +465,7 @@ _BUNDLE_METRIC_CASES = [
 ]
 _BUNDLE_METRIC_IDS = ["team", "space", "personal_without_space_header", "personal_with_space_header"]
 
-_BUNDLE_PRESIGN_BODY = {"filename": "mei-dd.zip", "mime": "application/zip", "size_bytes": 5_000_000}
+_BUNDLE_PRESIGN_BODY = {"knowledge_intent": "add_to_knowledge", "filename": "mei-dd.zip", "mime": "application/zip", "size_bytes": 5_000_000}
 
 
 def _stage_zip(app: FastAPI, pres: dict, zip_body: bytes) -> None:
@@ -539,7 +545,10 @@ def test_bundle_presign_rejected_requests_are_not_counted(
 
     personal = {"scope": "personal", "scope_id": "u_alice"}
     with client:
-        not_zip = client.post("/api/v1/kb/presign/bundle", json={**_BUNDLE_PRESIGN_BODY, "filename": "x.pdf", "mime": "application/pdf", **personal})
+        not_zip = client.post(
+            "/api/v1/kb/presign/bundle",
+            json={**_BUNDLE_PRESIGN_BODY, "knowledge_intent": "add_to_knowledge", "filename": "x.pdf", "mime": "application/pdf", **personal},
+        )
         assert not_zip.status_code == 415, not_zip.text
         oversize = client.post("/api/v1/kb/presign/bundle", json={**_BUNDLE_PRESIGN_BODY, "size_bytes": 600 * 1024 * 1024, **personal})
         assert oversize.status_code == 413, oversize.text
@@ -984,7 +993,14 @@ def test_local_presign_negotiates_only_within_multipart_limit(client, app, size,
     response = client.post(
         "/api/v1/kb/presign/bundle",
         headers={"X-Workspace-Id": "ws_42"},
-        json={"filename": "source.zip", "mime": "application/zip", "size_bytes": size, "scope": "personal", "scope_id": "u_alice"},
+        json={
+            "knowledge_intent": "add_to_knowledge",
+            "filename": "source.zip",
+            "mime": "application/zip",
+            "size_bytes": size,
+            "scope": "personal",
+            "scope_id": "u_alice",
+        },
     )
     assert response.status_code == expected, response.text
     assert response.json()["detail"]["error"]["code"] == ("file_multipart_required" if expected == 409 else "kb_bundle_too_large")

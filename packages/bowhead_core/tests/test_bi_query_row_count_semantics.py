@@ -74,7 +74,8 @@ async def test_truncated_result_reports_full_row_count_and_rows_shown() -> None:
     assert out["total_rows"] == 38
     assert out["_rows_truncated"] is True
     assert out["_rows_full_count"] == 38
-    assert "38" in out["_preflight_hint"] and "30" in out["_preflight_hint"]
+    assert "`rows_shown` is the displayed count" in out["_preflight_hint"]
+    assert "`row_count` counts all returned rows" in out["_preflight_hint"]
     assert store.calls[0]["row_count"] == 38, "artifact 与结果的全量行数必须同源"
 
 

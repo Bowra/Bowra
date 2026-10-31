@@ -31,6 +31,8 @@ export interface DocumentJob {
   request_text: string;
   can_confirm: boolean;
   can_revise?: boolean;
+  /** Exact same-scope revision successor; the original stored state remains cancelled. */
+  superseded_by_job_id?: string;
   /** "Draft N": revisions in this job's lineage plus one (recovery continuations keep N). Older servers omit it. */
   draft_version?: number;
   draft_digest?: string | null;
@@ -44,9 +46,14 @@ export interface DocumentJob {
     settlement_pending?: boolean;
   };
   draft?: {
+    /** Script-authored drafts need every page reviewed; observed text changes are not exhaustive. */
+    requires_full_review?: boolean;
     output_stem?: string;
     files: Record<string, { artifact_id: string; sha256: string }>;
     manifest: {
+      schema_version?: number;
+      comparison?: "observed_object_facts" | "unavailable";
+      limitations?: string[];
       changes: Change[];
       retained_unsupported_text: {
         slide: number;
@@ -106,6 +113,7 @@ export function documentCanvasDisambiguator(job: DocumentJob): string {
 
 /** Lifecycle is authoritative even when a repaired task retains an earlier error. */
 export function documentCanvasStateKey(job: DocumentJob): string {
+  if (job.state === "cancelled" && job.superseded_by_job_id) return "state_superseded";
   return job.state === "failed" && job.error_code === "document_information_incomplete"
     ? "state_incomplete"
     : `state_${job.state}`;

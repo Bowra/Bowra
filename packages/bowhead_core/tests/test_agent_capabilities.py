@@ -131,10 +131,11 @@ def test_capabilities_derived_from_real_manifests(agent: str, expected: set[str]
     assert PROD_CAPS[agent] == frozenset(expected)
 
 
-def test_kb_prefix_covers_the_whole_family() -> None:
-    """判据是 `kb_` 前缀而不是逐个列名 —— 将来加 kb_* 工具不必回来改这里。"""
-    assert derive_capabilities(["kb_whatever_new_tool"]) == frozenset({READS_UPLOADS})
-    assert derive_capabilities(["bi_schema"]) == frozenset()  # bi_schema does not imply BI querying.
+def test_reading_requires_retrieval_tools_and_management_grants_no_reading() -> None:
+    assert derive_capabilities(["kb_search"]) == frozenset({READS_UPLOADS})
+    assert derive_capabilities(["kb_list_tables", "kb_query_records", "kb_get_record"]) == frozenset({READS_UPLOADS})
+    assert derive_capabilities(["kb_add_file", "kb_remove_file", "kb_operation_status"]) == frozenset()
+    assert derive_capabilities(["kb_whatever_new_tool"]) == frozenset()
 
 
 def test_power_bi_query_tools_share_the_data_query_capability() -> None:

@@ -33,10 +33,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# §9 per-turn team-tool call cap (abuse guard, D2). Generous — the P1 datarc slice is
-# read/GET + low-volume; a turn never legitimately calls team tools 50×.
-_DEFAULT_CALL_BUDGET = 50
-
 
 class ToolCallClient(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any: ...
@@ -129,27 +125,14 @@ def _make_team_handler(
     operation_id: str,
     advertised_name: str,
     client: ToolCallClient,
-    budget: list[int],
-    call_budget: int,
     audit_store: Any | None,
 ) -> Any:
     """Closure dispatching one team tool through the turn's ClientSession + mapping the
     result to Bowhead-native form. Captures the owning team_id for the §3.5 dispatch-time
-    team-bind, a per-TURN shared call counter (``budget`` — every handler in this turn's
-    view shares it, so the cap spans Lead + subagents even across F6 ctx copies), and the
-    audit store (§9.6 exec log)."""
+    team-bind and the audit store (§9.6 exec log). Shared Turn limits are enforced
+    by the Agent Tool execution boundary."""
 
     async def handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
-        # §9 per-turn call cap (abuse guard, D2): one shared counter across this turn's
-        # Lead + subagents — closure-captured, so a subagent's copy.copy(ctx) can't reset it.
-        # With agent run limits on, the Team's per-turn tool-call limit (counted for every
-        # tool in SubagentRunner._execute_tool) replaces this Team-tool-specific cap.
-        from bowhead_core.agent_run_limits import get_tool_call_budget
-
-        if get_tool_call_budget() is None:
-            budget[0] += 1
-            if budget[0] > call_budget:
-                return {"ok": False, "error_kind": "rate_limited", "error": "team tool call budget exceeded for this turn"}
         # §3.5: the per-turn view already isolates by team; re-assert the calling ctx
         # belongs to the owning team (fail-closed on falsy / mismatched team_id).
         if not getattr(ctx, "team_id", "") or ctx.team_id != team_id:
@@ -243,8 +226,6 @@ def build_team_specs(
     client: ToolCallClient,
     *,
     audit_store: Any | None = None,
-    call_budget: int = _DEFAULT_CALL_BUDGET,
-    budget: list[int] | None = None,
 ) -> list[ToolSpec]:
     """Wrap each team operation as a ToolSpec dispatching through ``client`` (§3.2).
 
@@ -254,16 +235,9 @@ def build_team_specs(
     verb-aware (writes flagged for a future Approval Loop, §10 — execution-time
     write-confirm is out of this sprint; P1 datarc slice is read/GET only).
 
-    Metering (§9/§9.6, D2): a per-TURN shared call cap (``call_budget``, default 50 —
-    one counter shared by every handler in this view so it spans Lead + subagents) and,
-    when ``audit_store`` is given, an exec-audit row per call via ``log_tool_call``
-    (no decrypted secret / no raw args). Per-call CREDIT is deferred (D2 — reuse the
-    existing post-turn token deduct).
+    Tool calls count once in the shared Turn budget before this handler runs.
+    An optional audit store records each remote call without secrets or raw arguments.
     """
-    # WP2 (review P2): a shared per-TURN counter must span the WHOLE view — with multiple sources
-    # (OpenAPI + N MCP) build_team_specs is called N+1 times, so the caller threads ONE budget list
-    # through every call. Falling back to a fresh [0] preserves the single-call behaviour.
-    budget = budget if budget is not None else [0]
     specs: list[ToolSpec] = []
     for entry in entries:
         # advertised_name is the stable teammcp.<src>.<op> identity (LLM schema + whitelist +
@@ -286,8 +260,6 @@ def build_team_specs(
                     entry.op.operation_id if entry.op is not None else entry.dispatch_name,
                     entry.advertised_name,
                     client,
-                    budget,
-                    call_budget,
                     audit_store,
                 ),
                 needs_approval=entry.destructive,

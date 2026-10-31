@@ -69,6 +69,27 @@ def test_start_uses_fixed_isolation_and_duplicate_replays_after_restart(executor
     assert sum(args[0] == "create" for args in calls) == 1
 
 
+@pytest.mark.parametrize("native_contract", [None, "unqualified", "pptx-native-objects-v1"])
+@pytest.mark.parametrize("text_contract", [None, "unqualified", "pptx-text-boxes-v1"])
+@pytest.mark.parametrize("font_contract", [None, "unqualified", "pptx-chart-fonts-v1"])
+def test_additive_helper_advertisement_comes_from_exact_image_labels(executor, monkeypatch, native_contract, text_contract, font_contract):
+    module, runs, _, _, _ = executor
+    labels = {
+        "bowhead.document.profile": module.PROFILE,
+        "bowhead.document.authoring": module.AUTHORING_PROFILE,
+        "bowhead.document.authoring.contract": module.AUTHORING_CONTRACT,
+        "bowhead.document.authoring.native-objects": native_contract,
+        "bowhead.document.authoring.text-boxes": text_contract,
+        "bowhead.document.authoring.chart-fonts": font_contract,
+    }
+    monkeypatch.setattr(module, "_docker", lambda *args: json.dumps([{"Id": IMAGE_ID, "Config": {"Labels": labels}}]))
+    result = runs.readiness(module.AUTHORING_PROFILE)
+    assert result["image_id"] == IMAGE_ID
+    assert result.get("native_objects_contract") == (native_contract if native_contract == "pptx-native-objects-v1" else None)
+    assert result.get("text_boxes_contract") == (text_contract if text_contract == "pptx-text-boxes-v1" else None)
+    assert result.get("chart_fonts_contract") == (font_contract if font_contract == "pptx-chart-fonts-v1" else None)
+
+
 @pytest.mark.parametrize(
     "label,expected",
     [
@@ -199,3 +220,51 @@ def test_terminal_removal_recovers_after_lost_response(executor, monkeypatch):
     assert runs.get(RUN_ID)["removal_pending"] is True
     monkeypatch.setattr(module, "_docker", original)
     assert not runs.get(RUN_ID).get("removal_pending")
+
+
+def test_authoring_profile_requires_its_actual_image_capability(executor):
+    module, runs, payload, calls, _ = executor
+    with pytest.raises(RuntimeError, match="document_worker_profile_unavailable"):
+        runs.start({**payload, "profile": module.AUTHORING_PROFILE})
+    assert not any(args[0] == "create" for args in calls)
+
+
+def test_authoring_dispatch_uses_fixed_entry_and_original_replay_identity(executor, tmp_path, monkeypatch):
+    module, runs, payload, calls, state = executor
+    original = module._docker
+
+    def supported(*args):
+        value = original(*args)
+        if args[:2] == ("image", "inspect"):
+            data = json.loads(value)
+            data[0]["Config"]["Labels"]["bowhead.document.authoring"] = module.AUTHORING_PROFILE
+            data[0]["Config"]["Labels"]["bowhead.document.authoring.contract"] = module.AUTHORING_CONTRACT
+            return json.dumps(data)
+        return value
+
+    monkeypatch.setattr(module, "_docker", supported)
+    raw = json.dumps({"profile": module.AUTHORING_PROFILE, "operation": "execute"}).encode()
+    (tmp_path / ("document-" + RUN_ID) / "input" / "control.json").write_bytes(raw)
+    payload.update(control_sha256=hashlib.sha256(raw).hexdigest(), profile=module.AUTHORING_PROFILE)
+    first = runs.start(payload)
+    create = next(args for args in calls if args[0] == "create")
+    assert create[create.index("--workdir") + 1] == "/output"
+    assert "/opt/bowhead/bowhead_core/documents/authoring_entry.py" in create
+    assert any(arg.endswith("dst=/input,readonly") for arg in create)
+    assert runs.start(payload) == first
+    with pytest.raises(ValueError, match="document_run_conflict"):
+        runs.start({key: value for key, value in payload.items() if key != "profile"})
+    assert sum(args[0] == "create" for args in calls) == 1
+    state.update(Status="exited", ExitCode=1)
+    monkeypatch.setattr(module, "_diagnostics", lambda container: "ValueError: invalid operation")
+    failed = runs.get(RUN_ID)
+    assert failed["status"] == "failed" and failed["diagnostics"] == "ValueError: invalid operation"
+    assert module.DocumentRuns(tmp_path).get(RUN_ID) == failed
+
+
+@pytest.mark.parametrize("profile", [None, {}, [], "arbitrary-code-worker"])
+def test_unknown_authoring_profile_never_reaches_docker(executor, profile):
+    _, runs, payload, calls, _ = executor
+    with pytest.raises(ValueError, match="profile_unsupported"):
+        runs.start({**payload, "profile": profile})
+    assert calls == []

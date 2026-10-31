@@ -513,6 +513,7 @@ class _FakeClarStore:
 
     async def put(self, **kw: Any) -> Any:
         self.puts.append(kw)
+        self.resume_ctx["req_preflight_1"] = kw.get("resume_context") or {}
         return SimpleNamespace(request_id="req_preflight_1")
 
     async def set_resume_context(self, rid: str, ctx: dict) -> bool:

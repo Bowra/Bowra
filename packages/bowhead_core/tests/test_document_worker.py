@@ -178,6 +178,58 @@ def test_pdf_geometry_rejects_unsupported_text_transforms(case, transform):
         _text_boxes(output.getvalue())
 
 
+@pytest.mark.parametrize("transform", ["group_rotation", "group_flip", "shape_rotation", "vertical"])
+def test_pdf_geometry_preserves_text_positions_with_transformed_decoration(case, transform):
+    from bowhead_core.documents.render import _text_boxes
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+    from pptx.util import Inches
+
+    deck = Presentation(io.BytesIO(case[0]))
+    group = deck.slides[0].shapes.add_group_shape()
+    nested = group.shapes.add_group_shape()
+    decoration = nested.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, Inches(1), Inches(1), Inches(1), Inches(1))
+    decoration.text = " \t "
+    if transform == "group_rotation":
+        group.rotation = 270
+    elif transform == "group_flip":
+        group._element.grpSpPr.xfrm.set("flipH", "1")
+    elif transform == "shape_rotation":
+        decoration.rotation = 270
+    else:
+        decoration.text_frame._txBody.bodyPr.set("vert", "vert")
+    output = io.BytesIO()
+    deck.save(output)
+
+    assert _text_boxes(output.getvalue()) == _text_boxes(case[0])
+
+
+@pytest.mark.parametrize("transform", ["rotation", "flip"])
+def test_pdf_geometry_checks_new_text_inside_transformed_groups(case, transform):
+    from bowhead_core.documents.render import _text_boxes
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+    from pptx.util import Inches
+
+    deck = Presentation(io.BytesIO(case[0]))
+    group = deck.slides[0].shapes.add_group_shape()
+    nested = group.shapes.add_group_shape()
+    shape = nested.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, Inches(1), Inches(1), Inches(1), Inches(1))
+    if transform == "rotation":
+        group.rotation = 270
+    else:
+        group._element.grpSpPr.xfrm.set("flipV", "1")
+    empty = io.BytesIO()
+    deck.save(empty)
+    assert _text_boxes(empty.getvalue()) == _text_boxes(case[0])
+
+    shape.text = "Visible note"
+    filled = io.BytesIO()
+    deck.save(filled)
+    with pytest.raises(OfficePackageError, match="document_layout_unsupported"):
+        _text_boxes(filled.getvalue())
+
+
 async def test_executor_reconciles_lost_dispatch_without_repeating_post(tmp_path, monkeypatch):
     import httpx2
     from bowhead_core.documents.executor import PROFILE, DocumentExecutor, WorkerInput

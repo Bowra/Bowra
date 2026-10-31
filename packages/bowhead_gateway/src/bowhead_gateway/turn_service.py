@@ -2116,7 +2116,7 @@ async def _restore_bounded_question_inputs(orchestrator: Any, turn_req: Any) -> 
     import json
 
     from bowhead_core._db import open_shared_ctx
-    from bowhead_core.clarification_rounds import CONTEXT_KEY, history_contexts, question_hashes, read_history
+    from bowhead_core.clarification_rounds import history_contexts, read_history, validate_answer_questions
     from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
     from bowhead_gateway.routes.clarifications import ClarificationAnswerDTO, _is_skip_value, _render_legacy_values_for_resume
@@ -2150,11 +2150,10 @@ async def _restore_bounded_question_inputs(orchestrator: Any, turn_req: Any) -> 
             if not isinstance(raw_answers, list) or any(not isinstance(answer, dict) for answer in raw_answers):
                 raise ValueError("clarification_answer_changed")
             answers = [ClarificationAnswerDTO.model_validate(answer, strict=True).model_dump(exclude_none=True) for answer in raw_answers]
-            if answers and (
-                answers != [{key: value for key, value in answer.items() if value is not None} for answer in raw_answers]
-                or question_hashes(answers, None) != context[CONTEXT_KEY]["question_hashes"]
-            ):
+            if answers != [{key: value for key, value in answer.items() if value is not None} for answer in raw_answers]:
                 raise ValueError("clarification_answer_changed")
+            if answers:
+                validate_answer_questions(answers, context)
             skipped = _is_skip_value(row["chosen_value"])
             values = json.loads(row["chosen_values_json"] or "[]") or ([row["chosen_value"]] if row["chosen_value"] else [])
             if not isinstance(values, list) or any(not isinstance(value, str) for value in values) or not (answers or skipped or values):
@@ -2206,7 +2205,7 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
     async with open_shared_ctx(orchestrator.session_store.db_path) as db:
         await db.execute("BEGIN")
         record = await require_ordinary_pause_in_tx(db, card_id=turn_req.ordinary_clarification_id, answered=True)
-        checkpoint, context = ordinary_resume_request_material(record.card)
+        checkpoint, context = ordinary_resume_request_material(record.card, db_path=orchestrator.session_store.db_path)
         if (turn_req.team_id, turn_req.user_id, turn_req.workspace_id, turn_req.session_id, turn_req.turn_id) != (
             record.snapshot.team_id,
             record.snapshot.user_id,
@@ -2246,6 +2245,8 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
             "ordinary-lead-loop.v9",
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
         }
         else None
     )
@@ -2510,7 +2511,9 @@ async def spawn_resume_turn(
 def build_resume_turn_request(
     req: Any,
     *,
+    source_db_path: str | None = None,
     datarc_client: Any = None,
+    datarc_binding: Any = None,
     datarc_unavailable: bool = False,
     vector_client: Any = None,
     team_router: Any = None,
@@ -2579,7 +2582,7 @@ def build_resume_turn_request(
         from bowhead_core.ordinary_lead_continuation import ordinary_resume_request_material
 
         try:
-            ordinary_checkpoint, rc = ordinary_resume_request_material(req)
+            ordinary_checkpoint, rc = ordinary_resume_request_material(req, db_path=source_db_path)
         except ValueError:
             return None
         user_text = decoded.user_text
@@ -2596,6 +2599,8 @@ def build_resume_turn_request(
         coach_canvas_target=unrestored_coach_canvas_target(rc),
         workspace_id=rc.get("workspace_id") or getattr(req, "workspace_id", ""),
         active_datarc_project=rc.get("active_datarc_project") or rc.get("datarc_workspace_id"),
+        datarc_binding=datarc_binding,
+        datarc_source_evidence=rc.get("datarc_selection"),
         datarc_client=datarc_client,
         datarc_unavailable=datarc_unavailable,
         vector_client=vector_client,

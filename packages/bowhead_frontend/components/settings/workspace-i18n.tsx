@@ -1,9 +1,12 @@
 "use client";
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
+import type { FieldContract } from "@/lib/configuration-field-guidance";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { getWorkspaceSettings, setWorkspaceSetting, type WorkspaceSettings } from "@/lib/api";
+import { getWorkspaceSettingsView, setWorkspaceSetting, type WorkspaceSettings } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
@@ -50,6 +53,7 @@ export function SettingsWorkspaceI18n(props: WorkspaceI18nPageProps) {
  */
 function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAgentInterfaceChange, onAccessDenied, hosted = false }: WorkspaceI18nPageProps) {
   const t = useTranslations("settings.workspace_i18n");
+  const [contract, setContract] = useState<FieldContract>();
   const [settings, setSettings] = useState<WorkspaceSettings>({});
   const [savedSettings, setSavedSettings] = useState<WorkspaceSettings>({});
   const [loading, setLoading] = useState(true);
@@ -73,6 +77,7 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
     setAccessDenied(true);
     setHydrated(false);
     setSettings({});
+    setContract(undefined);
     setSavedSettings({});
     localEdits.current.clear();
     onAccessDenied?.();
@@ -88,13 +93,15 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
     const ticket = ++readTicket.current;
     const originalGeneration = generation.current;
     try {
-      const values = await getWorkspaceSettings(workspaceId);
+      const view = await getWorkspaceSettingsView(workspaceId);
+      const values = view.settings;
       if (!mounted.current || ticket !== readTicket.current) return;
       if (pending.current > 0 || generation.current !== originalGeneration) {
         refreshNeeded.current = true;
         if (pending.current === 0) void refreshSaved();
         return;
       }
+      setContract(view.field_contract);
       setSavedSettings(values);
       setSettings({ ...values, ...Object.fromEntries([...localEdits.current].map(([key, edit]) => [key, edit.value])) });
       setHydrated(true);
@@ -112,6 +119,7 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
     mounted.current = true;
     accessLost.current = false;
     setSettings({});
+    setContract(undefined);
     setLoading(true);
     setErr(null);
     void refreshSaved();
@@ -219,7 +227,7 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
           <LoadingSkeletonFallback label={t("loading")} />
         ) : (
           <div>
-            <WorkspaceI18nFields settings={settings} variant="segmented" fields={HOSTED_FIELDS} onChange={(key, value) => void update(key, value)} />
+            <WorkspaceI18nFields contract={contract} settings={settings} variant="segmented" fields={HOSTED_FIELDS} onChange={(key, value) => void update(key, value)} />
             {savedFlag ? <div role="status" aria-live="polite" className="ui-ws-i18n-saved">{savedFlag}</div> : null}
           </div>
         )}
@@ -248,7 +256,7 @@ function WorkspaceI18nPage({ workspaceId, workspaceName, onLifecycleChange, onAg
         <LoadingSkeletonFallback label={t("loading")} />
       ) : (
         <div className="legacy-ws-i18n-card ui-group-card ui-ws-i18n-card">
-          <WorkspaceI18nFields settings={settings} onChange={(key, value) => void update(key, value)} />
+          <WorkspaceI18nFields contract={contract} settings={settings} onChange={(key, value) => void update(key, value)} />
 
           {savedFlag ? (
             <div role="status" aria-live="polite" className="legacy-ws-i18n-saved ui-ws-i18n-saved">
@@ -267,6 +275,7 @@ const HOSTED_FIELDS: readonly WorkspaceI18nField[] = ["week_start_day", "default
 
 /** Controlled domain fields: hydration never calls a save callback. */
 export function WorkspaceI18nFields({
+  contract,
   settings,
   onChange,
   fields = ALL_FIELDS,
@@ -274,6 +283,7 @@ export function WorkspaceI18nFields({
   variant = "select",
 }: {
   settings: WorkspaceSettings;
+  contract?: FieldContract;
   onChange: (key: WorkspaceI18nField, value: string) => void;
   fields?: readonly WorkspaceI18nField[];
   readOnly?: boolean;
@@ -286,7 +296,7 @@ export function WorkspaceI18nFields({
     return (
       <>
         {fields.map((field) => field === "week_start_day" ? (
-          <FieldRow key={field} title={t("hosted_week_label")} control={(
+          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("hosted_week_label")} />} title={t("hosted_week_label")} control={(
             <SegmentedControl aria-label={t("hosted_week_label")} busy={readOnly} value={settings.week_start_day ?? "monday"}
               onValueChange={(value) => onChange("week_start_day", value)}>
               <Segment value="monday">{t("week_monday_short")}</Segment>
@@ -294,7 +304,7 @@ export function WorkspaceI18nFields({
             </SegmentedControl>
           )} />
         ) : field === "default_data_language" ? (
-          <FieldRow key={field} title={t("hosted_data_lang_label")} control={(
+          <FieldRow key={field} help={<ConfigurationFieldHelp contract={contract} field={`workspace_i18n.${field}`} label={t("hosted_data_lang_label")} />} title={t("hosted_data_lang_label")} control={(
             <SegmentedControl aria-label={t("hosted_data_lang_label")} busy={readOnly} value={settings.default_data_language ?? "zh-CN"}
               onValueChange={(value) => onChange("default_data_language", value)}>
               <Segment value="zh-CN">{t("lang_zh")}</Segment>
@@ -322,7 +332,7 @@ export function WorkspaceI18nFields({
       ) : null}
 
       {fields.includes("default_data_language") ? (
-        <Field label={t("field_data_lang_label")} hint={t("field_data_lang_hint")}>
+        <Field help={<ConfigurationFieldHelp contract={contract} field="workspace_i18n.default_data_language" label={t("field_data_lang_label")} />} label={t("field_data_lang_label")} hint={t("field_data_lang_hint")}>
           <select
             aria-label={t("field_data_lang_label")}
             disabled={readOnly}
@@ -354,7 +364,7 @@ export function WorkspaceI18nFields({
       ) : null}
 
       {fields.includes("week_start_day") ? (
-        <Field label={t("field_week_label")} hint={t("field_week_hint")}>
+        <Field help={<ConfigurationFieldHelp contract={contract} field="workspace_i18n.week_start_day" label={t("field_week_label")} />} label={t("field_week_label")} hint={t("field_week_hint")}>
           <select
             aria-label={t("field_week_label")}
             disabled={readOnly}
@@ -375,10 +385,10 @@ function LoadingSkeletonFallback({ label }: { label: string }) {
   return <LoadingSkeleton variant="form" rows={4} label={label} />;
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({ label, hint, children, help }: { help?: React.ReactNode; label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="legacy-ws-i18n-field ui-group-row ui-ws-i18n-row">
-      <label className="legacy-ws-i18n-label ui-group-label">{label}</label>
+      <span className="configuration-field-label"><label className="legacy-ws-i18n-label ui-group-label">{label}</label>{help}</span>
       {children}
       {hint ? <div className="legacy-ws-i18n-hint ui-group-hint">{hint}</div> : null}
     </div>

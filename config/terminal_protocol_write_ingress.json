@@ -1055,6 +1055,10 @@
       "owner": "terminal-protocol-reviewers",
       "reason": "Local live-only auxiliary projection; it cannot create a durable v1 root receipt and adapts legacy fail-stop into an ordinary caller-visible omission error"
     },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/events.py|<module>.emit_required_tool_result|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Forwards only tool_result events through the supplied bus and fail-stops on a rejected receipt; it cannot close the root Turn. The former direct _execute_tool forwarding site now uses this helper."
+    },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/events.py|<module>.emit_out_of_band|unresolved": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=2): 2 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
@@ -1076,23 +1080,19 @@
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
     },
-    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/report_writer_loop.py|<module>._seed_draft_slot|unresolved": {
-      "owner": "terminal-protocol-reviewers",
-      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned. report-streaming 批A: 该 emit 由 compose_report 内联抽进 _seed_draft_slot（单写手/多写手两路共用同一份槽位预建）——**位置搬家，不是新增 ingress**，语义与登记理由一字未改"
-    },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/sources_resolver.py|<module>._upsert_turn_sources_locked|unresolved": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"
     },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._execute_tool|unresolved": {
       "owner": "terminal-protocol-reviewers",
-      "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=6): 6 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
-      "occurrences": 6
+      "reason": "Reviewed event forwarding edge; five remaining emit sites forward the existing event family. The required tool-result receipt now goes through emit_required_tool_result; none closes the root Turn.",
+      "occurrences": 5
     },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._legacy_run|unresolved": {
       "owner": "terminal-protocol-reviewers",
-      "reason": "Reviewed peer-scoped agent_spawned/peer.iter forwarding (7 sites), including collaboration finish refusal; ff08b1fcc removed the document inspection rejection emit. Every site retains the original parent Turn and subagent identity; none closes the root Turn.",
-      "occurrences": 7
+      "reason": "Reviewed eight peer-scoped agent_spawned, peer.iter, llm.retry_scheduled and llm.call_timing events. Each retains the parent Turn and subagent identity; none closes the root Turn.",
+      "occurrences": 8
     },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._legacy_run._limit_wrap_up|unresolved": {
       "owner": "terminal-protocol-reviewers",

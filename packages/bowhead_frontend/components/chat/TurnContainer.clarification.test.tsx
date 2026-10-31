@@ -21,7 +21,9 @@ import { ApiError, readApiError } from "@/lib/api-client";
 import type { TurnRunnerState } from "@/lib/types";
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => Object.assign((key: string) => key, { rich: (key: string) => key }),
+  useTranslations: () => Object.assign((key: string) => key, {
+    rich: (key: string, values?: { answer?: string }) => values?.answer === "Retail" ? `${key}: ${values.answer}` : key,
+  }),
 }));
 
 const resolveMock = vi.fn();
@@ -226,13 +228,37 @@ describe("TurnContainer clarification orchestration", () => {
   });
 
   it("keeps connector selection as a canonical scalar with its remember preference", async () => {
-    resolveMock.mockResolvedValue({ action: "turn_resume" });
+    resolveMock.mockResolvedValue({ action: "turn_resume", stream_url: "/stream", execution_generation: 1 });
     render(<TurnContainer runner={runner({ turnId: "t_connector", clarificationPending: {
       clarificationId: "c_connector", kind: "tool_context_select", candidates: [], fallbackText: "Which workspace?",
       options: [{ label: "Retail", value: "project_retail" }], rememberOption: true,
     } })} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
     await choose("Retail");
     await waitFor(() => expect(resolveMock).toHaveBeenCalledWith("c_connector", { chosen_value: "project_retail", remember: true }));
+    expect(screen.getByTestId("clarification-answered")).toHaveTextContent("Retail");
+    expect(screen.getByTestId("clarification-answered")).not.toHaveTextContent("project_retail");
+  });
+
+  it("keeps a rehydrated legacy native card candidate-only while ordinary questions retain text answers", () => {
+    const { unmount } = render(<TurnContainer runner={runner({ turnId: "t_old_native", clarificationPending: {
+      clarificationId: "c_old_native", kind: "tool_context_select", options: [], candidates: ["Retail", "Orders"], fallbackText: "Which workspace?",
+    } })} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    unmount();
+    render(<TurnContainer runner={runner({ turnId: "t_ordinary_text", clarificationPending: PENDING })} />);
+    expect(screen.getByRole("textbox")).toBeTruthy();
+  });
+
+  it("submits a temporary connector selection without remembering it", async () => {
+    resolveMock.mockResolvedValue({ action: "turn_resume", stream_url: "/stream", execution_generation: 1 });
+    render(<TurnContainer runner={runner({ turnId: "t_temporary", clarificationPending: {
+      clarificationId: "c_temporary", kind: "tool_context_select", candidates: [], fallbackText: "Which workspace?",
+      options: [{ label: "Retail", value: "project_retail" }], rememberOption: true, rememberDefault: false,
+    } })} />);
+    await choose("Retail");
+    await waitFor(() => expect(resolveMock).toHaveBeenCalledWith("c_temporary", { chosen_value: "project_retail", remember: false }));
   });
 
   it("attaches a settled document clarification without creating another turn", async () => {

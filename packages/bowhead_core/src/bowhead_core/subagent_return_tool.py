@@ -121,19 +121,22 @@ PI_B_BAIL_KIND = "ν1_ref_unresolvable"
 
 
 def _ledger_error_text(result: Any) -> str:
-    """report-consistency-gate v3 — 给 LLM 看的、可执行的台账对账错误清单。"""
-    lines = ["数字台账对账失败(reconcile_failed)：报告里要引用的数字必须先登记进 ground_facts、能溯源到工具输出或由 formula 重算得到。"]
+    """Describe reconciliation failures with corrections that do not require a particular Tool."""
+    lines = [
+        "Numeric ledger reconciliation failed (reconcile_failed): register claimed numbers in ground_facts using verified Tool outputs or a verifiable formula."
+    ]
     for rf in (getattr(result, "rejected_facts", None) or [])[:6]:
         lines.append(
-            f"  ✗ ground_fact「{rf.get('label') or rf.get('key')}」value={rf.get('value')} "
-            f"formula={rf.get('formula', '')!r} 未过校验({rf.get('reason')})——重算公式或更正声明值。"
+            f"  Rejected ground_fact {rf.get('label') or rf.get('key')!r}: value={rf.get('value')} "
+            f"formula={rf.get('formula', '')!r}, reason={rf.get('reason')}. Recompute the formula or correct the declared value."
         )
     for u in (getattr(result, "unauthorized", None) or [])[:6]:
         lines.append(
-            f"  ✗ {u['field']} 里的「{u.get('raw') or u.get('value')}」不在台账——"
-            "改成台账里的值，或先用 python_sandbox 算出来、登记进 ground_facts 再写。"
+            f"  Unverified number {u.get('raw') or u.get('value')!r} in {u['field']}: "
+            "use a verified ledger value, or register a verifiable formula in ground_facts. "
+            "If more evidence or computation is needed, use available Tools; otherwise omit the unsupported claim and state the gap."
         )
-    lines.append("修正后重新 subagent_return。")
+    lines.append("After correcting the payload, call subagent_return again.")
     return "\n".join(lines)
 
 
@@ -1651,7 +1654,7 @@ def _make_handler() -> Any:
         # composer.  This eager path runs inside subagent_return, before Lead's
         # end-of-turn aggregate filter, so filtering only in Lead still causes a
         # mid-turn Canvas flash.
-        if is_short_answer_payload(payload):
+        if is_short_answer_payload(payload) or isinstance(payload.get("error"), dict) and payload["error"].get("kind") == "needs_user_input":
             _eager_on = False
 
         _cs = getattr(ctx, "canvas_store", None)

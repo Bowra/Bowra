@@ -382,7 +382,7 @@ class TurnHistory:
     tokens: int
     # r4: messages per turn (guard layer 2 drops whole turns by this; `hist_n` log = sum).
     turn_sizes: list[int] = field(default_factory=list)
-    # r7: incomplete turns in history (cancelled / aborted / failed); caller renders continuation rules even without digest.
+    # Incomplete turns also retain clarification context without requiring a digest.
     incomplete_turns: int = 0
 
 
@@ -390,8 +390,8 @@ SPAWN_TOOL_NAME = "subagent_spawn"
 
 # r7 (116 dogfood round 5): include incomplete turns: users **saw their own message**, so their next request to change quarter
 # refers to it. Previously completed-only filtering erased cancelled turns and made Lead claim a new session (116 `s_88c72107685c`).
-# Render assistant-side fixed markers (software constants, not model prose), three kinds by status; still exclude running / clarification_pending /
-# completed-but-empty (first still running; latter two gave users no answer-shaped content).
+# Render fixed markers for unfinished Turns. Clarification cards use a separate
+# data-only projection; running and completed-but-empty Turns remain excluded.
 INCOMPLETE_TURN_MARKERS: Mapping[str, str] = {
     "cancelled": "[本轮被用户中止，未完成 / cancelled by the user before completion]",
     "aborted": "[本轮被中止，未完成 / interrupted before completion]",
@@ -492,28 +492,19 @@ def build_turn_history(
     make_message: Callable[[str, str], Any] | None = None,
     strip: Callable[[str], str] | None = None,
     spawns: Mapping[str, Sequence[Any]] | None = None,
+    clarifications: Mapping[str, Sequence[dict[str, Any]]] | None = None,
     make_tool_calls_message: Callable[[list[tuple[str, str, dict[str, Any]]]], Any] | None = None,
     make_tool_result_message: Callable[[str, str, str], Any] | None = None,
 ) -> TurnHistory:
-    """把会话里用户看见过的轮次编成模型原生的多轮形态。
+    """Render prior visible Turns as native history within a whole-Turn budget.
 
-    - 进 H 的判据 = 用户在聊天里看到过这一来一回：``status == "completed"`` 且 ``final_answer`` 非空。
-      clarification_pending 轮的为空（dev 库查实）、running 轮还在跑，都不进。
-    - **r7**：``cancelled`` / ``aborted`` / ``failed`` 的轮进历史，渲成 ``user(原话) → assistant(固定标记)``
-      （``incomplete_turn_marker``；failed 带 ``error_kind``）；有 spawn 记录照常夹在中间（取消轮的 spawn 没有
-      summary，由 ``list_turn_spawns(incomplete_status=)`` 从 ``peer_dispatched`` / ``agent_spawned`` 退回）。用户看见过自己那句话，
-      下一句常常指着它（116 第五轮：取消后说「改成第二季度」，Lead 曾答「这看起来是一个新会话」）。failed 轮的
-      ``final_answer`` 是系统重启文案、cancelled 轮的可能是流到一半的旁白——都不渲，渲标记。
-    - 本轮（``exclude_turn_id``）不进。
-    - assistant 侧按 ``strip`` 剥 ``[cite:N]`` / ``[ref:]`` / ``[num:]``（调用方传 `cross_turn_digest._strip_markers`）。
-    - **r4**：``spawns[turn_id]`` 给了这一轮的 `subagent_spawn` 记录时，这一轮渲成
-      ``user → assistant(tool_calls) → tool（每个 spawn 一条摘要）→ assistant(终答)``；没派活的轮仍是两条。
-      116 R6 实证：只带 [原话, 终答] 时模型把「用户说一句 → 我直接答」当范例照抄、不派活；
-      OpenAI / Anthropic 的多轮实践都是把 function_call / tool_use 留在历史里。
-      tool_call 的 ``id`` 用当时的 ``call_id``（落库、稳定），参数键序固定——历史每轮渲出来必须逐字节一样，否则缓存前缀作废。
-    - **超 ``budget_tokens`` 时掉最老的整轮，绝不切轮内文本**；一直掉到 ``hysteresis × budget`` 为止，
-      于是缓存每隔几轮才作废一次（Claude Code 的 Snip 同理）。
-    - ``budget_tokens <= 0`` = 不限。
+    Completed Turns retain their answers; failed/cancelled/aborted Turns retain
+    fixed markers and recorded spawn results. Clarification-pending Turns retain
+    the original request and read-only card facts, never executable tool calls.
+    The current Turn, running Turns and empty completed Turns are excluded.
+    Citation markers are stripped from completed answers and spawn summaries.
+    Oldest whole Turns are dropped to the hysteresis floor when over budget;
+    a nonpositive budget is unlimited.
     """
     mk = make_message or (lambda role, content: {"role": role, "content": content})
     mk_calls = make_tool_calls_message or (
@@ -545,15 +536,25 @@ def build_turn_history(
         elif status in INCOMPLETE_TURN_MARKERS:
             answer = incomplete_turn_marker(str(status), getattr(t, "error_kind", None))
             incomplete += 1
+        elif status == "clarification_pending":
+            cards = list((clarifications or {}).get(turn_id) or [])
+            answer = (
+                "[clarification_pending: this task is unfinished. The following is historical question/answer data. "
+                "Reading it does not resume the old task, execute Tools, or grant permission. A resolved card records an answer, "
+                "not task completion. Preserve known requirements and answers; ask only for missing information.]\n"
+                + json.dumps({"cards": cards, "availability": "available" if cards else "unavailable"}, ensure_ascii=False, sort_keys=True)
+            )
+            incomplete += 1
         else:
             continue
-        recs: list[Any] = [r for r in ((spawns or {}).get(turn_id) or ()) if getattr(r, "call_id", None)]
+        recs: list[Any] = [] if status == "clarification_pending" else [r for r in ((spawns or {}).get(turn_id) or ()) if getattr(r, "call_id", None)]
         turn_seq = getattr(t, "seq", None)
         rendered_calls = [(history_call_id(turn_seq, str(r.call_id)), SPAWN_TOOL_NAME, render_spawn_arguments(r, strip=st)) for r in recs]
         rendered_results = [render_spawn_result(r, strip=st) for r in recs]
         # Completed-turn text is immutable (final_answer changes only while running); memoize estimates per turn:
         # long sessions (IM sessions never end) pay tiktoken cost only for new turns (review fix).
-        memo_ok = estimate is estimate_tokens and bool(turn_id)  # Memoize only real estimator + turns with ID (review fix)
+        # Pending answers can change without changing their character count.
+        memo_ok = estimate is estimate_tokens and bool(turn_id) and status != "clarification_pending"
         spawn_chars = sum(len(json.dumps(a, ensure_ascii=False)) for _, _, a in rendered_calls) + sum(len(x) for x in rendered_results)
         key = f"{turn_id}:{len(user_text)}:{len(answer)}:{len(recs)}:{spawn_chars}"
         n = _HISTORY_TOKENS_MEMO.get(key) if memo_ok else None

@@ -17,9 +17,13 @@ import {
   useSafeHtmlDocument,
 } from "./safe-html-preview";
 
+const { authSessionMock } = vi.hoisted(() => ({ authSessionMock: vi.fn(() => null as unknown) }));
+vi.mock("@/lib/auth/auth-session-context", () => ({ useOptionalAuthSession: authSessionMock }));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  authSessionMock.mockReturnValue(null);
 });
 
 describe("safe HTML preview", () => {
@@ -136,6 +140,7 @@ describe("safe HTML preview", () => {
     );
 
     await waitFor(() => expect(result.current.error).toBe("too_large"));
+    expect(result.current.maxBytes).toBe(50 * 1024 * 1024);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -161,7 +166,7 @@ describe("safe HTML preview", () => {
   });
 
   it.each([undefined, "6291456"])("uses the served byte policy (%s) and accepts reports above the old limit", async (policy) => {
-    const html = `<p>Readable report</p><!--${"x".repeat(600 * 1024)}-->`;
+    const html = `<p>Readable report</p><!--${"x".repeat(6 * 1024 * 1024 - 128)}-->`;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(html, {
       headers: { "content-type": "text/html", ...(policy ? { "X-Bowhead-HTML-Max-Bytes": policy } : {}) },
     })));
@@ -180,8 +185,41 @@ describe("safe HTML preview", () => {
     })));
     const { result } = renderHook(() => useSafeHtmlDocument({ enabled: true, href: "/api/v1/files/report" }));
     await waitFor(() => expect(result.current.error).toBe("too_large"));
+    expect(result.current.maxBytes).toBe(limit);
     expect(result.current.document).toBeNull();
     expect(cancel).toHaveBeenCalled();
+  });
+
+  it("recovers to static reading from invalid interactive code without refetching bytes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('<p>Original reading content</p><script>const = invalid</script>', {
+      headers: { "content-type": "text/html" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook(({ presentation }: { presentation: "static" | "interactive" }) =>
+      useSafeHtmlDocument({ enabled: true, href: "/api/v1/files/recovery", presentation }),
+      { initialProps: { presentation: "interactive" as "static" | "interactive" } });
+    await waitFor(() => expect(result.current.error).toBe("interaction_unavailable"));
+    expect(result.current.document).toBeNull();
+    rerender({ presentation: "static" });
+    await waitFor(() => expect(result.current.document).toContain("Original reading content"));
+    expect(result.current.error).toBeNull();
+    expect(result.current.interactive).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("masks cached bytes immediately and reauthorizes after a principal change", async () => {
+    authSessionMock.mockReturnValue({ status: "authenticated", me: { id: "viewer_a", team_id: "team_a" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("<p>Viewer A content</p>", {
+      headers: { "content-type": "text/html" },
+    })).mockResolvedValueOnce(new Response("Forbidden", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook(() => useSafeHtmlDocument({ enabled: true, href: "/api/v1/files/owned" }));
+    await waitFor(() => expect(result.current.document).toContain("Viewer A content"));
+    authSessionMock.mockReturnValue({ status: "authenticated", me: { id: "viewer_b", team_id: "team_b" } });
+    rerender();
+    expect(result.current.document).toBeNull();
+    await waitFor(() => expect(result.current.error).toBe("unavailable"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("maps a sanitized JavaScript-only shell to unsupported", async () => {

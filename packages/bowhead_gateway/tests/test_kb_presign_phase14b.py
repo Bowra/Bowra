@@ -157,6 +157,7 @@ def test_kb_presign_happy_returns_envelope(client: TestClient, app: FastAPI) -> 
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "report.pdf",
             "mime": "application/pdf",
             "size_bytes": 500_000,
@@ -195,6 +196,7 @@ def test_kb_presign_rejects_oversize_413(client: TestClient) -> None:
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "huge.pdf",
             "mime": "application/pdf",
             "size_bytes": 3 * 1024**3,
@@ -209,6 +211,7 @@ def test_kb_presign_rejects_unsupported_mime_415(client: TestClient) -> None:
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.exe",
             "mime": "application/x-msdownload",
             "size_bytes": 100,
@@ -223,6 +226,7 @@ def test_kb_presign_rejects_text_file_with_unsupported_extension(client: TestCli
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "notes.bin",
             "mime": "text/plain",
             "size_bytes": 100,
@@ -239,6 +243,7 @@ def test_kb_presign_403_on_scope_spoof(client: TestClient, stub_current_user) ->
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.pdf",
             "mime": "application/pdf",
             "size_bytes": 100,
@@ -257,6 +262,7 @@ def test_kb_presign_403_on_doc_type_cross_ws_leak(client: TestClient, app: FastA
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.pdf",
             "mime": "application/pdf",
             "size_bytes": 100,
@@ -288,6 +294,7 @@ def test_kb_presign_429_pending_cap(client: TestClient, app: FastAPI) -> None:
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "x.pdf",
             "mime": "application/pdf",
             "size_bytes": 100,
@@ -348,6 +355,7 @@ def test_kb_presign_persists_artifact_workspace_attribution(
     r = client.post(
         "/api/v1/kb/presign",
         json={
+            "knowledge_intent": "add_to_knowledge",
             "filename": "report.pdf",
             "mime": "application/pdf",
             "size_bytes": 1000,
@@ -389,7 +397,7 @@ def test_kb_presign_persists_artifact_workspace_attribution(
 
 _METRICS_FLAG = "FEATURE_ARTIFACT_ATTRIBUTION_METRICS"
 
-_PRESIGN_BODY = {"filename": "report.pdf", "mime": "application/pdf", "size_bytes": 1000}
+_PRESIGN_BODY = {"knowledge_intent": "add_to_knowledge", "filename": "report.pdf", "mime": "application/pdf", "size_bytes": 1000}
 
 
 @pytest.mark.integration
@@ -477,7 +485,10 @@ def test_kb_presign_single_rejected_requests_are_not_counted(
     with client:
         oversize = client.post("/api/v1/kb/presign", json={**_PRESIGN_BODY, "size_bytes": 3 * 1024**3, **personal})
         assert oversize.status_code == 413, oversize.text
-        unsupported = client.post("/api/v1/kb/presign", json={**_PRESIGN_BODY, "filename": "x.exe", "mime": "application/x-msdownload", **personal})
+        unsupported = client.post(
+            "/api/v1/kb/presign",
+            json={**_PRESIGN_BODY, "knowledge_intent": "add_to_knowledge", "filename": "x.exe", "mime": "application/x-msdownload", **personal},
+        )
         assert unsupported.status_code == 415, unsupported.text
         spoofed = client.post("/api/v1/kb/presign", json={**_PRESIGN_BODY, "scope": "personal", "scope_id": "u_bob"})
         assert spoofed.status_code == 403, spoofed.text
@@ -521,6 +532,7 @@ def test_kb_presign_single_failure_after_the_decision_is_not_counted(
 
 def _do_kb_presign(client: TestClient, **overrides) -> dict:
     payload = {
+        "knowledge_intent": "add_to_knowledge",
         "filename": "report.pdf",
         "mime": "application/pdf",
         "size_bytes": 500_000,
@@ -646,7 +658,14 @@ def test_local_presign_negotiates_only_within_multipart_limit(client, app, size,
     response = client.post(
         "/api/v1/kb/presign",
         headers={"X-Workspace-Id": "ws_42"},
-        json={"filename": "source.pdf", "mime": "application/pdf", "size_bytes": size, "scope": "personal", "scope_id": "u_alice"},
+        json={
+            "knowledge_intent": "add_to_knowledge",
+            "filename": "source.pdf",
+            "mime": "application/pdf",
+            "size_bytes": size,
+            "scope": "personal",
+            "scope_id": "u_alice",
+        },
     )
     assert response.status_code == expected, response.text
     assert response.json()["detail"]["error"]["code"] == ("file_multipart_required" if expected == 409 else "kb_file_too_large")

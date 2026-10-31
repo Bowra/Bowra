@@ -463,6 +463,22 @@ async def test_submission_correction_preserves_domain_receipts(settings, extra):
     assert len(settings[2].proposals) == 1 and not settings[1]
 
 
+async def test_oversized_submission_identifies_length_and_retains_pending_proposal(settings):
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    read = await call(child, "configuration_read", form_id="workspace_i18n")
+    proposed = await call(child, "configuration_propose", form_id="workspace_i18n", patch={"week_start_day": "sunday"})
+    rejected = await call(child, TOOL_SUBMIT, message="x" * 2001)
+    assert rejected["error"] == "invalid_configuration_submission"
+    assert rejected["reason"] == "message_too_long"
+    assert rejected["actual_chars"] == 2001 and rejected["max_chars"] == 2000
+    assert "shorten" in rejected["message"].lower()
+    assert configuration_agent_result(child)["error"] == "configuration_submission_missing"
+    finished = await call(child, TOOL_SUBMIT, message="The suggestion is ready for your review; settings have not changed.")
+    assert finished["ok"] and finished["__terminal"]
+    assert configuration_agent_result(child)["receipts"] == [read, proposed]
+    assert len(settings[2].proposals) == 1 and not settings[1]
+
+
 async def test_incomplete_submission_retains_read_and_open_without_manufacturing_completion(settings):
     child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
     read = await call(child, "configuration_read", form_id="workspace_i18n")
@@ -530,6 +546,59 @@ async def test_selected_target_is_fixed_and_persisted(settings):
     await call(child, "configuration_read", form_id="workspace_i18n")
     await call(child, "configuration_propose", form_id="workspace_i18n", patch={"week_start_day": "sunday"})
     assert settings[2].proposals[0]["settings_target"] == target.projection()
+
+
+@pytest.mark.parametrize("selected,requested", [("workspace_metadata", "workspace_i18n"), ("workspace_i18n", "workspace_metadata")])
+@pytest.mark.parametrize(
+    "operation", ["spawn", "configuration_read", "configuration_open", "configuration_propose", "configuration_apply", "configuration_result"]
+)
+async def test_shared_page_form_mismatch_explains_recovery_without_retargeting(settings, monkeypatch, selected, requested, operation):
+    from bowhead_core.configuration_settings_target import AdmittedWorkspaceSettingsTarget, WorkspaceSettingsSendTarget
+
+    lead = context()
+
+    async def recheck():
+        pytest.fail("A mismatched selection must stop before domain access")
+
+    target = WorkspaceSettingsSendTarget(
+        form_id=selected,
+        user_id=lead.user_id,
+        team_id=lead.team_id,
+        workspace_id=lead.workspace_id,
+        edit_generation=0,
+        saved_ready=True,
+        pending_writes=0,
+        unconfirmed_fields=[],
+    )
+    admitted = AdmittedWorkspaceSettingsTarget(target, recheck)
+    lead.configuration_settings_target = admitted
+
+    async def deny_access(*args):
+        pytest.fail("A mismatched selection must stop before resolving access")
+
+    monkeypatch.setattr(f"{__name__}.access", deny_access)
+    if operation == "spawn":
+        child, error = await prepare_configuration_agent(lead, form_id=requested)
+        assert child is None
+        assert error["error"] == "configuration_target_mismatch"
+    else:
+        child, _ = await prepare_configuration_agent(lead)
+        error = await call(child, operation, read_skill=False, form_id=requested)
+        assert error["error"] == "configuration_form_not_admitted"
+        assert child.configuration_settings_target is admitted
+        assert configuration_agent_result(child)["receipts"][-1]["message"] == error["message"]
+    assert error["selected_form_id"] == selected
+    assert error["requested_form_id"] == requested
+    assert error["selected_page"] == error["requested_page"] == "/space/settings/general/"
+    assert "Close that Canvas, then send a new request" in error["message"]
+    assert lead.configuration_settings_target is admitted
+    assert not settings[1] and not settings[2].proposals
+
+
+async def test_form_binding_without_canvas_does_not_invent_canvas_recovery(settings):
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    error = await call(child, "configuration_read", read_skill=False, form_id="workspace_metadata")
+    assert error == {"ok": False, "error": "configuration_form_not_admitted"}
 
 
 async def test_disabled_settings_plugin_makes_its_form_unavailable(settings):
@@ -960,6 +1029,19 @@ async def test_lead_collects_actual_failed_operation_receipts(settings):
     assert not settings[2].proposals
 
 
+def test_spawn_form_guidance_tracks_domain_catalog(monkeypatch):
+    from bowhead_core.configuration_contracts import DOMAINS
+
+    monkeypatch.setitem(DOMAINS, "team_run_limits", replace(DOMAINS["team_run_limits"], description="Updated Team loop control guidance."))
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    selector = registry.get("subagent_spawn").schema.input_schema["properties"]["configuration_form_id"]
+
+    assert set(selector["enum"]) == set(DOMAINS)
+    for form_id, domain in DOMAINS.items():
+        assert f"{form_id}: {domain.description}" in selector["description"]
+
+
 @pytest.mark.parametrize("form_id,fields", [("workspace_i18n", "default_data_language, week_start_day"), ("workspace_metadata", "description, name")])
 def test_selected_page_routes_to_its_actual_admitted_form(settings, form_id, fields):
     from bowhead_core.configuration_settings_target import AdmittedWorkspaceSettingsTarget, WorkspaceSettingsSendTarget, active_settings_target_prompt
@@ -1059,7 +1141,7 @@ async def test_lead_advertisement_names_the_specialist_only_from_the_turn_roster
     assert (AGENT_NAME in seen[0]["config_propose"]) is specialist_in_roster
 
 
-async def test_configuration_empty_closeout_respects_original_iteration_budget(settings, monkeypatch):
+async def test_configuration_empty_closeout_respects_the_runtime_decision_budget(settings, monkeypatch):
     from bowhead_core.tool_registry import ToolRegistry, ToolSpec
     from test_peer_empty_closeout import ScriptedRouter
 
@@ -1084,6 +1166,9 @@ async def test_configuration_empty_closeout_respects_original_iteration_budget(s
         ]
     )
     child, _ = await prepare_configuration_agent(context())
+    from bowhead_core.agent_run_limits import AgentRunLimits, AgentRuntimeControls
+
+    child.agent_runtime_budget = AgentRuntimeControls(system_step_limit=2).budget(AgentRunLimits())
     result = await SubagentRunner(router=router, tool_registry=registry).run(
         profile_name=AGENT_NAME,
         task="Read preferences",
@@ -1092,5 +1177,5 @@ async def test_configuration_empty_closeout_respects_original_iteration_budget(s
         parent_ctx=child,
     )
     assert len(router.requests) == 2 and not result.ok
-    assert result.error == "configuration_submission_missing"
+    assert result.stop_reason == "step_limit"
     assert not settings[1] and not settings[2].proposals

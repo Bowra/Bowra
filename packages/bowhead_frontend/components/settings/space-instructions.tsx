@@ -1,5 +1,7 @@
 "use client";
 
+
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
@@ -549,9 +551,9 @@ function EditorField({ editor, id }: { editor: Editor; id: string }) {
   const errorId = `${id}-error`;
   return (
     <div className={styles.editor}>
-      <label className={styles.editorHead} htmlFor={id}>
+      <span className="configuration-field-label"><label className={styles.editorHead} htmlFor={id}>
         {t("content_label")}
-      </label>
+      </label><ConfigurationFieldHelp contract={saved.field_contract} field="space_instructions.content" label={t("content_label")} /></span>
       <textarea
         id={id}
         className={styles.textarea}

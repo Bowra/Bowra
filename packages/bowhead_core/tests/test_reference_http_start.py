@@ -2161,7 +2161,8 @@ async def test_shared_bounded_questions_resume_through_native_http(http_start, m
         name = None
         arguments = {}
         if prose_first and number == 1:
-            assert "prose alone does not pause the task" in json.dumps(body)
+            correction = "prose alone does not pause the task" if reference else "Use the native tool-call interface"
+            assert correction in json.dumps(body)
         if 1 <= number <= 2:
             name = "clarification_ask"
             arguments = {

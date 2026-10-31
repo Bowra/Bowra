@@ -679,12 +679,16 @@ async def create_job(
 
     try:
         _umem = getattr(request.app.state, "user_memory_store", None)
+        from bowhead_core.datarc_selection import DatarcPreferenceScope
+
+        from bowhead_gateway.datarc_context import resolve_team_datarc_binding
+
+        source_space = await request.app.state.user_store.get_workspace(body.workspace_id)
+        source_team = source_space.get("team_id") if source_space else None
+        binding = await resolve_team_datarc_binding(request, source_team)
         _chosen = (
-            await _umem.get_tool_context(
-                _user_id(request),
-                "datarc",
-            )
-            if _umem is not None
+            await _umem.get_datarc_workspace(_user_id(request), DatarcPreferenceScope(binding.team_id, binding.connection_id))
+            if _umem is not None and binding is not None
             else None
         )
         _snapshot_ws = str((_chosen or {}).get("id") or "") or None

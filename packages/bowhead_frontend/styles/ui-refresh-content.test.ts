@@ -124,7 +124,7 @@ describe("content type scale (P2 Icons & Type Spec)", () => {
       "line-height": "var(--lh-content-body)",
       "text-autospace": "normal",
     });
-    expect(rule(`.canvas-report-article ${PROSE} :is(p, ol, ul, blockquote)`)).toEqual({ "max-width": "var(--content-measure)" });
+    expect(rule(`.canvas-report-article ${PROSE} :is(p, ol, ul, blockquote)`)).toEqual({ "max-width": "var(--report-content-measure, calc(var(--content-measure) * 1.5))" });
     expect(rule(".canvas-report-article p.rc-fig-caption:not(.v2-report-deck)")).toMatchObject({
       color: "var(--c-ink-3)",
       "font-size": "var(--fs-content-caption)",

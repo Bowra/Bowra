@@ -43,7 +43,7 @@ CLAIM_KINDS = ("file", "report", "memory")
 
 # Completion verbs: all extracted from actual production answers (discovery §2.3).
 _DONE_VERB = re.compile(
-    r"已生成|已导出|已经导出|已成功导出|生成完毕|导出好了|已就绪|已完成"
+    r"已生成|已导出|已经导出|已成功导出|生成完毕|导出好了"
     r"|可直接下载|可下载|下载链接|已为你(生成|导出)|已保存为"
 )
 _NEW_FILE_VERB = re.compile(r"已生成|已导出|已经导出|已成功导出|生成完毕|导出好了|已为你(?:生成|导出)|已保存为", re.I)
@@ -163,6 +163,23 @@ def _claim_blocks(text: str) -> list[str]:
     return blocks
 
 
+# Completing ingestion of existing bytes does not claim a newly delivered file.
+_FILE_PROCESSING_DONE = re.compile(
+    r"(?:处理|解析|索引|入库|操作)(?:[、与和及](?:处理|解析|索引))*[均都]?(?:已经|已)(?:完成|就绪)"
+    r"|(?:已经|已)完成(?:处理|解析|索引|入库)"
+)
+# Generic completion must belong to the file itself, not an operation/status
+# elsewhere in the sentence. Explicit creation/export/download still co-occurs.
+_FILE_READY_CLAIM = re.compile(
+    rf"(?:{_KIND_NOUN['file'].pattern}|{'|'.join(noun.pattern for noun in _FMT_NOUN.values())})[\s*`]*(?:均|都)?已(?:完成|就绪)",
+    re.I,
+)
+_NEGATED_FILE_CLAUSE = re.compile(
+    r"(?:没有|并未|尚未|未能|未)\s*(?:成功)?(?:生成|导出|制作|提供)"
+    r"[^，,。！？!?；;\n]*?(?=[，,。！？!?；;\n]|但|不过|然而|$)"
+)
+
+
 def _file_claim_segments(text: str | None) -> tuple[str, ...]:
     if not text:
         return ()
@@ -171,7 +188,8 @@ def _file_claim_segments(text: str | None) -> tuple[str, ...]:
         hit = False
         for raw in _CLAIM_SEGMENT_SPLIT.split(block):
             segment = raw.strip()
-            if not segment or not _DONE_VERB.search(segment):
+            positive = _NEGATED_FILE_CLAUSE.sub("", _FILE_PROCESSING_DONE.sub("", segment))
+            if not segment or not (_DONE_VERB.search(positive) or _FILE_READY_CLAIM.search(positive)):
                 continue
             if _KIND_NOUN["file"].search(segment) or any(noun.search(segment) for noun in _FMT_NOUN.values()):
                 segments.append(segment)

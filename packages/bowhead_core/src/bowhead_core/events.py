@@ -32,6 +32,7 @@ EventType = Literal[
     "turn_started",
     "agent_spawned",
     "agent.collaboration",  # Content-free committed exchange; details use the authorized reader.
+    "agent.context",  # Content-free model context maintenance for its exact Agent/lane.
     "tool_call",
     "tool_result",
     "partial_answer",
@@ -315,6 +316,9 @@ class OrchestratorEvent:
         repr=False,
         compare=False,
     )
+    # Internal producer hint for a fact committed by its owning transaction
+    # before the original bus has delivered it. Store identity checks still apply.
+    deliver_existing_durable: bool = field(default=False, repr=False, compare=False)
 
     def to_sse(self) -> dict[str, str]:
         import json
@@ -553,6 +557,28 @@ class TerminalDurabilityAbort(BaseException):
     lease-based recovery, while cancellation and process-control exceptions
     keep their native semantics.
     """
+
+
+async def emit_required_tool_result(bus: Any, event: OrchestratorEvent) -> None:
+    """Fence further execution unless the native result writer accepts its receipt.
+
+    The caller selects ``persist_before_delivery`` for receipts whose existence
+    is a business fact. Admitted chat buses already enforce that barrier for
+    every event. This check also covers a concurrent close and legacy sinks
+    that return False instead of raising; neither permits a successful step or
+    another model/tool invocation.
+    """
+    if event.event_type != "tool_result":
+        raise ValueError("required tool result emitter accepts only tool_result")
+    try:
+        accepted = await bus.emit(event)
+        if accepted is not True:
+            raise RuntimeError("tool result event was not accepted")
+    except Exception as exc:
+        latch = getattr(bus, "latch_fatal_error", None)
+        if callable(latch):
+            latch(exc)
+        raise TerminalDurabilityAbort("tool result receipt persistence is unknown") from exc
 
 
 class TurnEventBus:
@@ -898,8 +924,8 @@ class TurnEventBus:
                 if self._persist_before_live:
                     self.raise_if_failed()
                 return False
+            self._seq_counter = max(self._seq_counter, event.seq)
             if event.suppress_live_delivery:
-                self._seq_counter = max(self._seq_counter, event.seq)
                 return True
             await _publish_live()
             return True

@@ -35,14 +35,7 @@ def test_note_names_every_word() -> None:
     assert "「华东地」" in note and "「客单」" in note
 
 
-def test_note_states_both_outcomes_without_claiming_unfiltered() -> None:
-    """措辞不许断言「没按它筛」——2026-09-20 116 dogfood 逮到反例。
-
-    「省 包含 江西」：`江西` 不在字典里 ⇒ 进了 `unknown_words`，而引擎自报的执行口径里
-    **带着**「省包含江西」（`$like` 按字面走）。旧措辞在这一档是假陈述。
-    真正「没筛」只由 `unfiltered_fact_note` 按结构化口径的 `filters` 键判定。
-    """
+def test_note_identifies_parser_output_without_deciding_query_semantics() -> None:
     note = unknown_words_note(["江西"])
-    assert "未过滤" in note, "「整段被忽略」这一档要说到"
-    assert "匹配不到" in note, "「按字面进了查询却匹配不到」这一档要说到"
-    assert "没有按它筛选" not in note, "不许无条件断言没筛过"
+    assert "parser reported unrecognized words: 「江西」" in note
+    assert "does not establish whether those words were ignored or used as literal conditions" in note

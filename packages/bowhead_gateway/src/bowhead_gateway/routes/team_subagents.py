@@ -738,7 +738,7 @@ def _validate_common(
     description: str,
     system_prompt: str,
     tool_refs: list[str],
-    max_iterations: int,
+    max_iterations: int = 10,
     allow_empty_tools: bool = False,
 ) -> None:
     try:
@@ -767,7 +767,6 @@ class CreateBody(BaseModel):
     description: str = ""
     system_prompt: str = ""
     tool_refs: list[str] = Field(default_factory=list)
-    max_iterations: int = 10
     skills: list[str] = Field(default_factory=list)
     visibility: str = "creator_only"
     model: str | None = None  # S4 — llm_agent_type (allowlisted); None = analyst
@@ -781,7 +780,6 @@ class ConfigurationPatchBody(BaseModel):
     description: str | None = None
     system_prompt: str | None = None
     tool_refs: list[str] | None = None
-    max_iterations: int | None = None
     skills: list[str] | None = None
     model: str | None = None  # S4
     output_schema: dict[str, Any] | None = None  # S4 §5
@@ -814,13 +812,11 @@ class AudienceBody(BaseModel):
 def _team_override_fields(base: dict[str, Any]) -> tuple[str, ...]:
     """Fields a Team may change on a built-in Agent.
 
-    With agent run limits on, the Team-wide step limit replaces per-Agent step limits, so
+    The Team-wide step limit replaces per-Agent step limits, so
     ``max_iterations`` is neither offered nor accepted per Agent.
     """
-    from bowhead_core.agent_run_limits import agent_run_limits_enabled
-
     fields = tuple(base.get("team_overrides", ()))
-    return tuple(f for f in fields if f != "max_iterations") if agent_run_limits_enabled() else fields
+    return tuple(f for f in fields if f != "max_iterations")
 
 
 @router.post("", dependencies=[Depends(require_not_readonly)])
@@ -840,7 +836,6 @@ async def create_subagent(
         description=body.description,
         system_prompt=body.system_prompt,
         tool_refs=body.tool_refs,
-        max_iterations=body.max_iterations,
         allow_empty_tools=resolve_subagent_authoring_capabilities(user.team_id).text_only,
     )
     _validate_model(body.model)
@@ -860,7 +855,6 @@ async def create_subagent(
         description=body.description,
         system_prompt=body.system_prompt,
         tool_refs=body.tool_refs,
-        max_iterations=body.max_iterations,
         skills=body.skills,
         model=body.model,
         output_schema=body.output_schema,
@@ -1350,10 +1344,8 @@ def _builtin_public(base: dict[str, Any], ov: Any | None) -> dict[str, Any]:
         DISABLE_WARNINGS,
         effective_description,
         effective_display_name,
-        effective_max_iterations,
         effective_model,
         effective_primary_capability,
-        max_iterations_ceiling,
         restrict_override_to_manifest,
     )
 
@@ -1369,7 +1361,7 @@ def _builtin_public(base: dict[str, Any], ov: Any | None) -> dict[str, Any]:
         "model": effective_model(str(base["model"]), ov),
         "description": desc,
         "display_name": effective_display_name(name, ov),
-        "max_iterations": effective_max_iterations(int(base["max_iterations"]), ov),
+        "max_iterations": int(base["max_iterations"]),
         "primary_capability": effective_primary_capability(
             base.get("primary_capability"),
             ov,
@@ -1382,7 +1374,6 @@ def _builtin_public(base: dict[str, Any], ov: Any | None) -> dict[str, Any]:
             "model": str(base["model"]),
             "description": str(base["description"]),
             "max_iterations": int(base["max_iterations"]),
-            "max_iterations_ceiling": max_iterations_ceiling(int(base["max_iterations"])),
             "primary_capability": base.get("primary_capability"),
         },
         "overridden_fields": list(getattr(ov, "overridden_fields", []) or []),
@@ -1496,8 +1487,8 @@ class BuiltinOverrideBody(BaseModel):
     model: str | None = None
     skills: list[str] | None = None
     prompt_append: str | None = None
-    max_iterations: int | None = None
     primary_capability: str | None = None
+    max_iterations: None = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
 
 
 def _validate_builtin_override(
@@ -1545,16 +1536,6 @@ def _validate_builtin_override(
         )
     if body.prompt_append is not None and len(body.prompt_append) > MAX_PROMPT_APPEND_CHARS:
         _reject("builtin_prompt_append_too_long", f"prompt_append too long (>{MAX_PROMPT_APPEND_CHARS})", "prompt_append")
-    if body.max_iterations is not None:
-        from bowhead_core.builtin_subagent_override import max_iterations_ceiling
-
-        ceiling = max_iterations_ceiling(int(base["max_iterations"]))
-        if not (1 <= body.max_iterations <= ceiling):
-            _reject(
-                "builtin_max_iterations_invalid",
-                f"max_iterations must be a whole number from 1 to {ceiling}",
-                "max_iterations",
-            )
     if body.skills is not None:
         _validate_skills(body.skills)
     if body.primary_capability is not None:
@@ -1686,8 +1667,8 @@ async def put_builtin_override(
                 model=body.model,
                 skills=body.skills,
                 prompt_append=body.prompt_append,
-                max_iterations=body.max_iterations,
                 primary_capability=body.primary_capability,
+                max_iterations=getattr(current, "max_iterations", None),
             ),
             expected_version=(current_version or None),
             actor_user_id=user.id,
@@ -1876,7 +1857,7 @@ async def _mutate_subagent(
             description=body.description if body.description is not None else existing.description,
             system_prompt=body.system_prompt if body.system_prompt is not None else existing.system_prompt,
             tool_refs=body.tool_refs if body.tool_refs is not None else existing.tool_refs,
-            max_iterations=body.max_iterations if body.max_iterations is not None else existing.max_iterations,
+            max_iterations=existing.max_iterations,
             # Closing the rollout must not strand an existing text-only definition.
             allow_empty_tools=not existing.tool_refs or resolve_subagent_authoring_capabilities(user.team_id).text_only,
         )
@@ -1911,7 +1892,6 @@ async def _mutate_subagent(
             description=body.description,
             system_prompt=body.system_prompt,
             tool_refs=body.tool_refs,
-            max_iterations=body.max_iterations,
             skills=body.skills,
             status=status,
             model=body.model,

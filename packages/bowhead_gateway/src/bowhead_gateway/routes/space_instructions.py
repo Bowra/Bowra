@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
+from bowhead_gateway.configuration_field_guidance import page_field_contract
 from bowhead_gateway.routes.auth import _current_user
 from bowhead_gateway.routes.auth import _store as _user_store_dep
 from bowhead_gateway.routes.feedback_candidates import _source_spaces
@@ -54,6 +55,7 @@ class SpaceInstructionsVersionDTO(BaseModel):
 
 
 class SpaceInstructionsDTO(BaseModel):
+    field_contract: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     workspace_id: str
     #: 0 when the Space has never had instructions.
     version: int
@@ -134,10 +136,17 @@ async def _current_dto(
     administrators = await _administrator_names(user_store, workspace_id)
     if current is None:
         return SpaceInstructionsDTO(
-            workspace_id=workspace_id, version=0, content="", can_edit=can_edit, archived=archived, administrators=administrators
+            **page_field_contract("space_instructions"),
+            workspace_id=workspace_id,
+            version=0,
+            content="",
+            can_edit=can_edit,
+            archived=archived,
+            administrators=administrators,
         )
     names = await user_store.get_users_by_ids([current.created_by])
     return SpaceInstructionsDTO(
+        **page_field_contract("space_instructions"),
         workspace_id=workspace_id,
         version=current.version,
         content=current.content,

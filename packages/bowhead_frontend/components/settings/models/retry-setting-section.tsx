@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { ConfigurationFieldHelp, useConfigurationFieldSchema } from "@/components/settings/configuration-field-help";
 import { Field, fieldDescribedBy } from "@/components/ui/field";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -35,6 +36,10 @@ export function RetrySettingSection({
   userFacingError: (cause: unknown) => string;
 }) {
   const t = useTranslations("settings.models.retry");
+  const schema = useConfigurationFieldSchema("team_model_retry.max_retries");
+  const minimum = schema?.minimum ?? MIN_LLM_MAX_RETRIES;
+  const maximum = schema?.maximum ?? MAX_LLM_MAX_RETRIES;
+  const sourceDefault = typeof schema?.default === "number" ? schema.default : DEFAULT_LLM_MAX_RETRIES;
   const id = useId();
   const inputId = `${id}-max-retries`;
   const [draft, setDraft] = useState(String(value));
@@ -47,9 +52,9 @@ export function RetrySettingSection({
     setDraft(String(value));
   }, [value]);
 
-  const parsed = parseRetryDraft(draft);
+  const parsed = parseRetryDraft(draft, minimum, maximum);
   const rangeError = parsed === null
-    ? t("error_range", { min: MIN_LLM_MAX_RETRIES, max: MAX_LLM_MAX_RETRIES })
+    ? t("error_range", { min: minimum, max: maximum })
     : null;
   const shownError = rangeError ?? error;
   const dirty = parsed !== null && parsed !== value;
@@ -64,7 +69,7 @@ export function RetrySettingSection({
       onSaved(response);
       setSaved(true);
     } catch (cause) {
-      setError(retryErrorMessage(cause, t, userFacingError));
+      setError(retryErrorMessage(cause, t, userFacingError, { min: minimum, max: maximum }));
     } finally {
       setSaving(false);
     }
@@ -79,8 +84,9 @@ export function RetrySettingSection({
       </div>
       <Field
         id={inputId}
+        help={<ConfigurationFieldHelp field="team_model_retry.max_retries" label={t("label")} />}
         label={t("label")}
-        hint={t("hint", { default: DEFAULT_LLM_MAX_RETRIES, min: MIN_LLM_MAX_RETRIES, max: MAX_LLM_MAX_RETRIES })}
+        hint={t("hint", { default: sourceDefault, min: minimum, max: maximum })}
         error={shownError}
       >
         <span className="model-retry-control">
@@ -89,8 +95,8 @@ export function RetrySettingSection({
             className="inp mono"
             type="number"
             inputMode="numeric"
-            min={MIN_LLM_MAX_RETRIES}
-            max={MAX_LLM_MAX_RETRIES}
+            min={minimum}
+            max={maximum}
             step={1}
             name="llm_max_retries"
             value={draft}
@@ -119,11 +125,11 @@ export function RetrySettingSection({
 }
 
 /** Integer in the allowed range, or null. */
-export function parseRetryDraft(raw: string): number | null {
+export function parseRetryDraft(raw: string, minimum = MIN_LLM_MAX_RETRIES, maximum = MAX_LLM_MAX_RETRIES): number | null {
   const text = raw.trim();
   if (!/^\d+$/.test(text)) return null;
   const value = Number(text);
-  return value >= MIN_LLM_MAX_RETRIES && value <= MAX_LLM_MAX_RETRIES ? value : null;
+  return value >= minimum && value <= maximum ? value : null;
 }
 
 type RetryT = ReturnType<typeof useTranslations<"settings.models.retry">>;
@@ -133,11 +139,12 @@ export function retryErrorMessage(
   cause: unknown,
   t: RetryT,
   userFacingError: (cause: unknown) => string,
+  bounds = { min: MIN_LLM_MAX_RETRIES, max: MAX_LLM_MAX_RETRIES },
 ): string {
   if (cause instanceof ApiError) {
     if (cause.code === "config_version_conflict") return t("error_stale");
     if (cause.code === "invalid_llm_retry" || cause.status === 422) {
-      return t("error_range", { min: MIN_LLM_MAX_RETRIES, max: MAX_LLM_MAX_RETRIES });
+      return t("error_range", bounds);
     }
     if (cause.code === "llm_config_not_configured") return t("error_not_configured");
   }

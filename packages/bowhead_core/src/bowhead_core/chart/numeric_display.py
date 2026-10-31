@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, Literal, TypedDict
 
 from babel.core import get_global
@@ -27,6 +28,24 @@ def numeric_display(value: Any) -> NumericDisplay | None:
     if type(places) is not int or not 0 <= places <= 12 or mode not in ("max", "fixed"):
         return None
     return {"decimal_places": places, "decimal_mode": mode}
+
+
+def numeric_format_kinds(column: Mapping[str, Any]) -> list[str]:
+    """Expose precision edits without guessing a source unit or ratio shape."""
+    if column.get("type") != "numeric":
+        return []
+    kinds = ["number"]
+    percent = column.get("percent_scale") in ("fraction", "points") or column.get("unit") == "%"
+    currency_code = currency_identity(column.get("currency_code"))
+    unit_code = currency_identity(column.get("unit"))
+    currency = bool(currency_code or unit_code or column.get("format") == "currency")
+    if (percent and currency) or (currency_code and unit_code and currency_code != unit_code):
+        return kinds
+    if percent and column.get("format") not in ("currency", "datetime"):
+        kinds.append("percent")
+    if currency:
+        kinds.append("currency")
+    return kinds
 
 
 def apply_column_display(columns: list[Any], requested: Any) -> list[dict[str, str]]:

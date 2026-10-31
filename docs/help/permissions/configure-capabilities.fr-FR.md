@@ -34,6 +34,8 @@ Si la configuration a changé entre-temps, la page recharge la dernière et réa
 
 ## Définir les limites d’exécution
 
+La création et la configuration des Agents utilisent ces limites d’équipe, sans nombre d’étapes distinct par Agent.
+
 Les propriétaires et administrateurs de l’équipe définissent les limites de tous les agents de l’équipe, intégrés et personnalisés, dans **Paramètres de l’équipe › Agents › Limites d’exécution** :
 
 - **Durée maximale d’un tour** : durée maximale d’un tour de conversation. La valeur par défaut est de 30 minutes ; vous pouvez choisir de 10 minutes à 10 heures. Les agents s’arrêtent 5 minutes avant pour laisser le temps d’écrire la réponse.
@@ -52,7 +54,7 @@ Lorsqu’une limite est atteinte, l’agent s’arrête et indique ce qui est te
 Dans **Paramètres de l’équipe › Agents › Limites d’exécution**, les propriétaires et administrateurs peuvent aussi régler :
 
 - **Calculs dans le bac à sable** : durée par défaut (initialement 120 secondes) et durée maximale (initialement 600 secondes). La valeur par défaut ne peut pas dépasser le maximum. Seul le responsable du déploiement peut augmenter le plafond affiché.
-- **Rapports HTML** : taille maximale de chaque fichier HTML intégré, images et données incluses. La valeur initiale est 5 MiB, le maximum 50 MiB. Ce réglage limite le fichier, pas les tokens produits par le modèle.
+- **Rapports HTML** : taille maximale de chaque fichier HTML intégré, images et données incluses. La valeur initiale est 25 MiB, le maximum 50 MiB. Les fichiers volumineux et les tableaux complexes nécessitent plus de mémoire et de temps de traitement dans le navigateur. Les valeurs d’équipe enregistrées et les valeurs du déploiement restent applicables. Augmentez ce champ et enregistrez-le si une ancienne limite bloque l’aperçu. Ce réglage limite le fichier, pas les tokens produits par le modèle.
 
 La page affiche les valeurs du déploiement et les plages autorisées. Après modification, choisissez **Enregistrer les limites du bac à sable et du HTML**. Pour rétablir l’héritage, choisissez **Utiliser les valeurs du déploiement**, vérifiez les valeurs proposées, puis enregistrez. L’exécution des tâches et le bac à sable/HTML s’enregistrent séparément. En cas de modification simultanée, vos saisies sont conservées ; abandonnez-les et rechargez les réglages avant une nouvelle modification.
 

@@ -39,7 +39,7 @@ describe("AgentTrace Results navigation", () => {
                 filename: "sandbox-stdout.txt",
                 dataRole: "stdout",
               },
-              { artifactId: "art_calc", filename: "calc.md" },
+              { artifactId: "art_calc", filename: "calc.md", title: "Calculation", description: "Retained original" },
               { artifactId: "art_without_filename" },
             ],
           },
@@ -59,8 +59,9 @@ describe("AgentTrace Results navigation", () => {
     });
 
     fireEvent.click(screen.getByRole("button", {
-      name: "在成果中打开 calc.md",
+      name: "在成果中打开 Calculation · calc.md",
     }));
+    expect(screen.getByTitle("Retained original")).toBeInTheDocument();
     expect(mocks.focus).toHaveBeenLastCalledWith("art_calc", {
       entryPoint: "chat",
     });

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 import aiosqlite
@@ -56,6 +56,7 @@ from bowhead_gateway.routes.kb import (
     _get_files_store,
     _kb_error,
     _make_scope_context_checked,
+    _require_ingestion_admission,
     _require_kb_scope_grant,
     _require_workspace_context,
     _resolve_kb_mime,
@@ -77,6 +78,7 @@ router = APIRouter()
 
 
 class KbPresignRequest(BaseModel):
+    knowledge_intent: Literal["add_to_knowledge"]
     filename: str = Field(min_length=1, max_length=512)
     mime: str = Field(min_length=1, max_length=128)
     # Hand-rolled 413 in handler (matches Phase 1.4a P1-2 fix).
@@ -169,6 +171,7 @@ async def kb_presign_single(
     if not _supports_kb_document_name(body.filename) or body.mime not in _ALLOWED_MIMES:
         raise _kb_error(415, "kb_file_type_unsupported")
 
+    _require_ingestion_admission()
     ctx = await _make_scope_context_checked(user, request)
     # ACL at presign — tech-design §5.1b
     if body.scope in ("space", "workspace"):
@@ -267,7 +270,11 @@ async def kb_presign_single(
     # kb_files row separate — files_store has its own DB.
     # Phase 1.4b review P0 #3: create row with initial_parse_status atomically
     # so a crash between INSERT + UPDATE can't leave the row stuck in 'pending'.
-    kbf_id = await files_store.create(
+    from bowhead_core.kb.ingestion import KnowledgeAction
+
+    kbf_id, _, _ = await files_store.create_admitted(
+        action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+        source_fingerprint=aid,
         artifact_id=aid,
         filename=safe_name,
         mime_type=body.mime,
@@ -531,6 +538,7 @@ _BUNDLE_MAX_COMPRESSION_RATIO = 100
 
 
 class KbBundlePresignRequest(BaseModel):
+    knowledge_intent: Literal["add_to_knowledge"]
     filename: str = Field(min_length=1, max_length=512)
     mime: str = Field(min_length=1, max_length=128)
     size_bytes: int = Field(ge=1)
@@ -576,6 +584,7 @@ async def kb_presign_bundle(
     if body.size_bytes > _BUNDLE_MAX_SIZE:
         raise _kb_error(413, "kb_bundle_too_large")
 
+    _require_ingestion_admission()
     ctx = await _make_scope_context_checked(user, request)
     if body.scope in ("space", "workspace"):
         _require_workspace_context(ctx)  # Batch 1/c4.
@@ -664,7 +673,11 @@ async def kb_presign_bundle(
             raise
 
     # Bundle marker kb_files row — carries scope/scope_id for confirm ACL check
-    kbf_id = await files_store.create(
+    from bowhead_core.kb.ingestion import KnowledgeAction
+
+    kbf_id, _, _ = await files_store.create_admitted(
+        action=KnowledgeAction(f"presign:{aid}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+        source_fingerprint=aid,
         artifact_id=aid,
         filename=safe_name,
         mime_type=body.mime,
@@ -734,6 +747,8 @@ async def kb_presign_bundle_confirm(
 
     # 1. Lookup bundle marker row + ACL recheck
     marker = await files_store.get(file_id)
+    if marker is not None and marker.parse_status != "done" and not marker.ingestion_action_id:
+        raise _kb_error(409, "knowledge_bundle_action_required", hint="Upload the bundle again from the Knowledge page to explicitly add its files.")
     if marker is None or marker.soft_deleted_at:
         raise _kb_error(404, "kb_file_not_found")
     if marker.uploaded_by != user.id:
@@ -1013,7 +1028,18 @@ async def kb_presign_bundle_confirm(
                         await db.commit()
                     # Phase 1.4c review P0-2: children INSERT with
                     # parse_status='queued' per tech-design §5.3c step 5.
-                    child_id = await files_store.create(
+                    from bowhead_core.kb.ingestion import KnowledgeAction
+
+                    current_ctx = await _make_scope_context_checked(
+                        user, request, workspace_id=marker.workspace_id if marker.scope != "team" else None
+                    )
+                    if not KbPermission.can_write_to_scope(marker.scope, marker.scope_id, current_ctx, current_ctx.role):
+                        raise _kb_error(403, "kb_scope_access_denied")
+                    await _require_kb_scope_grant(request, current_ctx, scope=marker.scope, scope_id=marker.scope_id, permission="write")
+                    child_id, _, _ = await files_store.create_admitted(
+                        parent_file_id=file_id,
+                        action=KnowledgeAction(f"bundle:{artifact_id}:{art.id}", "kb_ui", user.id, ctx.team_id, ctx.workspace_id),
+                        source_fingerprint=art.id,
                         artifact_id=art.id,
                         filename=display_name,
                         mime_type=detected_mime,

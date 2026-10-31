@@ -18,6 +18,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from bowhead_router.agent_tiers import PRIMARY_TIER_AGENTS
@@ -42,6 +43,7 @@ from bowhead_router.usage import record_usage
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from bowhead_router.context_policy import TargetContextBudget
     from bowhead_router.registry import ProviderRegistry
 
 
@@ -291,6 +293,82 @@ class Router:
 
         return catalog_context_window(binding.primary[1]) or DEFAULT_CONTEXT_WINDOW
 
+    def supports_context_maintenance(self, agent_type: str, profile: str | None = None, user_pref: UserModelPref | None = None) -> bool:
+        """Whether the admitted primary exposes the shared final-body compiler.
+
+        Mock and custom-template adapters retain their existing input contract;
+        importing the shared Router does not admit a new summarization surface.
+        """
+        provider, _ = self.resolve(agent_type, profile, user_pref=user_pref).primary
+        return callable(getattr(self._registry.get(provider), "_build_body", None))
+
+    async def request_context_budget(
+        self,
+        agent_type: str,
+        req: LLMRequest,
+        profile: str | None = None,
+        user_pref: UserModelPref | None = None,
+        *,
+        target: tuple[str, str] | None = None,
+        stream: bool = True,
+        reject_over_capacity: bool = True,
+    ) -> TargetContextBudget:
+        """Compile one configured target without dispatch, usage or caller mutation.
+
+        Input authority and the adapter's final rendering are the same as send.
+        A smaller fallback is measured only when the owner selects that target.
+        This is not a physical invocation ticket or permission to send later.
+        """
+        from bowhead_router.context_policy import TargetContextBudget, fallback_context_policy, model_context_policy
+        from bowhead_router.output_budget import ContextCapacityError, output_reservation
+        from bowhead_router.runtime_parameters import family_for
+
+        binding = self.resolve(agent_type, profile, user_pref=user_pref)
+        selected = target or binding.primary
+        if selected not in (binding.primary, *binding.fallback):
+            raise LLMInputAdmissionError("llm_context_target_not_configured")
+        provider_name, model = selected
+        adapter = self._registry.get(provider_name)
+        builder = getattr(adapter, "_build_body", None)
+        if not callable(builder):
+            raise LLMInputAdmissionError("llm_context_accounting_adapter_unavailable")
+        definition = self._registry.definition_for(provider_name)
+        policy = model_context_policy(definition, model)
+        if selected != binding.primary:
+            primary_provider, primary_model = binding.primary
+            policy = fallback_context_policy(model_context_policy(self._registry.definition_for(primary_provider), primary_model), policy)
+        prepared = _clone_with_model(replace(_inject_runtime_context(req), invocation_agent_type=agent_type), model, binding)
+        prepared.configuration_version = self.configuration_version
+        prepared.output_reservation = output_reservation(
+            definition,
+            model,
+            prepared.max_output_tokens,
+            capability="tool" if prepared.tools else "vision" if any(message.images for message in prepared.messages) else "chat",
+            family=family_for(definition, model),
+            thinking_budget=prepared.thinking_budget_tokens if prepared.extended_thinking else 0,
+        )
+        window = self._context_windows.get(selected)
+        if selected != binding.primary and _skip_undeclared_admission_fallback(prepared, target_index=2, context_window=window):
+            raise LLMInputAdmissionError("llm_context_fallback_window_unavailable")
+        await admit_request_input(
+            prepared,
+            provider=provider_name,
+            model=model,
+            context_window=window,
+            adapter_supported=getattr(adapter, "supports_input_admission", False) is True,
+        )
+        try:
+            builder(prepared, stream=stream)
+        except ContextCapacityError as exc:
+            exc.provider = provider_name
+            exc.configuration_version = self.configuration_version
+            if reject_over_capacity:
+                raise
+            return TargetContextBudget(provider_name, model, self.configuration_version, policy, exc.budget)
+        if prepared.context_budget is None:
+            raise LLMInputAdmissionError("llm_context_accounting_adapter_unavailable")
+        return TargetContextBudget(provider_name, model, self.configuration_version, policy, prepared.context_budget)
+
     def _resolve_key(self, agent_type: str, profile: str | None) -> tuple[str, str | None]:
         if (agent_type, profile) in self._bindings:
             return (agent_type, profile)
@@ -356,6 +434,8 @@ class Router:
         profile: str | None = None,
         user_pref: UserModelPref | None = None,
         retry_policy: RetryPolicy | None = None,
+        *,
+        target: tuple[str, str] | None = None,
     ) -> LLMResponse:
         """按 binding 调用；failure 时按 fallback 链重试。
 
@@ -363,6 +443,8 @@ class Router:
         """
         binding = self.resolve(agent_type, profile, user_pref=user_pref)
         targets = [binding.primary, *binding.fallback]
+        if target is not None and target not in targets:
+            raise LLMInputAdmissionError("llm_context_target_not_configured")
         failures: list[LLMTargetFailure] = []
         policy = retry_policy or RetryPolicy(max_attempts_per_target=self.max_retries + 1)
         last_error: Exception | None = None
@@ -382,6 +464,8 @@ class Router:
         req = replace(_inject_runtime_context(req), invocation_agent_type=agent_type)
 
         for target_index, (provider_name, model) in enumerate(targets, start=1):
+            if target is not None and target != (provider_name, model):
+                continue
             if _skip_undeclared_admission_fallback(req, target_index=target_index, context_window=self._context_windows.get((provider_name, model))):
                 _get_logger().warning(
                     "router.input_admission_fallback_skipped agent=%s provider=%s model=%s mode=invoke reason=context_window_missing",
@@ -482,7 +566,12 @@ class Router:
                         model,
                     )
                 return resp
-            except (InvocationOutcomeUnknownError, LLMInputAdmissionError):
+            except (InvocationOutcomeUnknownError, LLMInputAdmissionError) as exc:
+                from bowhead_router.output_budget import ContextCapacityError
+
+                if isinstance(exc, ContextCapacityError):
+                    exc.provider = provider_name
+                    exc.configuration_version = self.configuration_version
                 raise
             except Exception as exc:
                 last_error = exc
@@ -511,6 +600,9 @@ class Router:
         user_pref: UserModelPref | None = None,
         retry_policy: RetryPolicy | None = None,
         idle_timeout_s: float | None = None,
+        progress_idle: bool = False,
+        *,
+        target: tuple[str, str] | None = None,
     ) -> AsyncIterator[LLMChunk]:
         """流式调用. 见 invoke() 注释 user_pref 语义.
 
@@ -519,12 +611,16 @@ class Router:
         """
         binding = self.resolve(agent_type, profile, user_pref=user_pref)
         targets = [binding.primary, *binding.fallback]
+        if target is not None and target not in targets:
+            raise LLMInputAdmissionError("llm_context_target_not_configured")
         req = replace(_inject_runtime_context(req), invocation_agent_type=agent_type)
         failures: list[LLMTargetFailure] = []
         policy = retry_policy or RetryPolicy(max_attempts_per_target=self.max_retries + 1)
         last_error: Exception | None = None
 
         for target_index, (provider_name, model) in enumerate(targets, start=1):
+            if target is not None and target != (provider_name, model):
+                continue
             if _skip_undeclared_admission_fallback(req, target_index=target_index, context_window=self._context_windows.get((provider_name, model))):
                 _get_logger().warning(
                     "router.input_admission_fallback_skipped agent=%s provider=%s model=%s mode=stream reason=context_window_missing",
@@ -595,6 +691,7 @@ class Router:
                 try:
                     try:
                         iterator = adapter.stream(req_for_attempt).__aiter__()
+                        progress_at = monotonic()
                         while True:
                             try:
                                 if idle_timeout_s is None:
@@ -602,10 +699,12 @@ class Router:
                                 else:
                                     chunk = await asyncio.wait_for(
                                         iterator.__anext__(),
-                                        timeout=idle_timeout_s,
+                                        timeout=max(0.0, idle_timeout_s - (monotonic() - progress_at)) if progress_idle else idle_timeout_s,
                                     )
                             except StopAsyncIteration:
                                 break
+                            if chunk.delta or chunk.thinking_delta or chunk.tool_call_delta or chunk.tool_call_partial:
+                                progress_at = monotonic()
                             content, reasoning = inline_reasoning.feed(chunk.delta)
                             if chunk.finish_reason is not None:
                                 tail, tail_reasoning = inline_reasoning.finish()
@@ -654,7 +753,12 @@ class Router:
                                 owner_team_id=self.owner_team_id,
                                 physical_recorded=req_for_attempt.physical_receipt_recorded,
                             )
-                except (InvocationOutcomeUnknownError, LLMInputAdmissionError):
+                except (InvocationOutcomeUnknownError, LLMInputAdmissionError) as exc:
+                    from bowhead_router.output_budget import ContextCapacityError
+
+                    if isinstance(exc, ContextCapacityError):
+                        exc.provider = provider_name
+                        exc.configuration_version = self.configuration_version
                     raise
                 except Exception as e:
                     if isinstance(e, TimeoutError) and (physical_invocation_required() or physical_observation_active()):
@@ -803,4 +907,5 @@ def _clone_with_model(req: LLMRequest, model: str, binding: AgentBinding) -> LLM
         invocation_agent_type=req.invocation_agent_type,
         invocation_execution_id=req.invocation_execution_id,
         invocation_subagent_id=req.invocation_subagent_id,
+        summary_only=req.summary_only,
     )

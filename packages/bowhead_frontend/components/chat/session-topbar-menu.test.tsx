@@ -19,6 +19,17 @@ afterEach(() => {
 });
 
 describe("SessionTopbarMenu", () => {
+  it("keeps context maintenance in the shared menu and explains its busy state", () => {
+    const compact = vi.fn();
+    renderIntl(<SessionTopbarMenu sessionId="s_1" onCompactContext={compact} compactDisabledReason="请先完成当前任务。" />);
+    fireEvent.click(screen.getByRole("button", { name: "更多会话操作" }));
+    const item = screen.getByRole("menuitem", { name: "整理上下文" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.getAttribute("title")).toBe("请先完成当前任务。");
+    fireEvent.click(item);
+    expect(compact).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
   it("keeps the session and turn ids first", () => {
     expect(sessionDiagnosticText("s_1", "t_2")).toBe("s_1 · t_2");
     expect(sessionDiagnosticText("s_1", null)).toBe("s_1");

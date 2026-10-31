@@ -1,6 +1,8 @@
 # Use the knowledge base
 
-After you add material to the knowledge base, Bowra searches it for relevant content when you ask questions in a chat. Files you only want to store, without being searched in chats, belong in **Library → Files**; you can add any of those to the knowledge base later.
+After you add material to the knowledge base, the assistant can search it for relevant evidence when answering a chat question. You can ask it to search a particular document or topic. Files you only want to store, without being searched in chats, belong in **Library → Files**; you can add any of those to the knowledge base later.
+
+When answering from your knowledge, the assistant can use accessible source names, available section headings and short opening excerpts to find relevant material. It searches when your task needs supporting evidence; a source preview does not mean the entire document has been reviewed.
 
 ## Page layout
 
@@ -20,6 +22,8 @@ Pick a visibility scope when you upload:
 - **Personal**: only you can see and search it.
 - **Space**: members of the current space can search it. After you switch spaces, you see that space's material.
 - **Team**: everyone in the team can search it. Only team administrators can upload to the team scope.
+
+Being an administrator of one Space does not grant Team-wide upload permission. Ask a Team administrator to add Team knowledge.
 
 ## Upload files
 
@@ -43,7 +47,7 @@ Adding a file to the knowledge base doesn't move or copy it. It stays in Files.
 
 The **Add to knowledge base** window checks for an active Team embedding model before you confirm. If it is missing, follow the same configuration guidance as in the upload window above; the file remains in Files.
 
-Files you upload to Files that are recognized as long-term reference material (such as price lists or policies) are added to your personal knowledge base automatically and start processing, so AI can consult them when relevant. If your team hasn't enabled the knowledge base or set up a knowledge base model, the file is only kept in Files. To undo an automatic addition, click **Remove from knowledge base**. The file itself is not affected.
+Uploading to Files or attaching a file in chat only stores the file; classification as long-term material does not add it to knowledge. Choose **Add to knowledge base**, upload from the Knowledge page, or explicitly ask the Agent to add an exact file and specify its visibility. The Agent checks your original request and current permissions; ambiguous requests need clarification. Processing must finish before the file is searchable. Chat ZIP attachments stay as one archive and are not unpacked or indexed; use the Knowledge page to import documents inside a ZIP. **Remove from knowledge base** keeps the original file. An old addition request cannot add it again after removal; a new explicit addition can.
 
 ## File status
 
@@ -157,6 +161,8 @@ Extraction is queued within a daily quota, so it can take a while when there are
 When an answer or report uses documents from the knowledge base, the related sentence carries a citation number. Open it to check the source text.
 
 ### In a chat
+
+Where direct knowledge reading is available, the assistant handling your task can look up documents and continue its other work. You can still choose a research Agent explicitly. If repeated searches find no new evidence, the assistant stops searching and explains the gap; this does not mean the knowledge base is empty.
 
 When a chat answer uses knowledge base content, the related sentence gets a citation marker with a small document icon. Its number continues the same sequence as data citations.
 

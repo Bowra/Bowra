@@ -13,6 +13,7 @@ from bowhead_router.types import ToolSchema
 
 from bowhead_bi_bridge import DatarcClient
 from bowhead_core.builtin_datarc_scope import supported_datarc_operations
+from bowhead_core.datarc_selection import DatarcConnectionBinding
 from bowhead_core.tool_registry import TeamToolExecutionBinding, ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_core.types import ToolAnnotations
 
@@ -159,20 +160,21 @@ def build_builtin_datarc_specs(*, team_id: str, tools: list[Any], store: Any, ba
                             error_kind = selection_error
                             return {"ok": False, "error_kind": selection_error, "workspaces": _safe_workspaces(workspaces)}
                         bound_ctx = copy.copy(ctx)
+                        bound_ctx.datarc_run_state = None
+                        bound_ctx.datarc_execution_scope = None
+                        bound_ctx.datarc_binding = DatarcConnectionBinding(team_id, live_tool.id, str(live_tool.connection_revision), client)
                         bound_ctx.datarc = client
+                        bound_ctx.vector_client = None
                         bound_ctx.active_datarc_project = workspace["id"]
                         bound_ctx.active_datarc_workspace_name = workspace["name"]
                         bound_ctx.accessible_datarc_workspaces = tuple(_safe_workspaces(workspaces))
-                        if _operation == "datarc_query":
-                            member = await client.fetch_workspace_member(workspace["id"], user.email)
-                            member_uid = str((member or {}).get("uid") or "")
-                            if not member_uid:
-                                error_kind = "datarc_workspace_membership_not_found"
-                                return {"ok": False, "error_kind": error_kind, "workspace": workspace}
-                            bound_ctx.member_uid = member_uid
-                            delegate_args = {"queries": [str(args.get("question") or "").strip()]}
-                        else:
-                            delegate_args = {}
+                        member = await client.fetch_workspace_member(workspace["id"], user.email)
+                        member_uid = str((member or {}).get("uid") or "")
+                        if not member_uid:
+                            error_kind = "datarc_workspace_membership_not_found"
+                            return {"ok": False, "error_kind": error_kind, "workspace": workspace}
+                        bound_ctx.member_uid = member_uid
+                        delegate_args = {"queries": [str(args.get("question") or "").strip()]} if _operation == "datarc_query" else {}
                         result = await delegates[_operation].handler(delegate_args, bound_ctx)
                         status = "ok"
                         return {

@@ -1,5 +1,6 @@
 "use client";
 
+import { parseFieldContract, type FieldContract } from "./configuration-field-guidance";
 import { apiFetch, readApiError } from "./api-client";
 import { readCanonicalEtag } from "./entity-tag";
 import {
@@ -90,6 +91,7 @@ export interface PersonalAppearanceRegistries {
 }
 
 export interface PersonalAppearanceResource {
+  field_contract?: FieldContract;
   schemaVersion: 3;
   materialized: boolean;
   rowVersion: number;
@@ -158,6 +160,7 @@ export function parsePersonalAppearanceResource(
   exactKeys(
     raw,
     [
+      ...(raw.field_contract === undefined ? [] : ["field_contract"]),
       "schemaVersion",
       "materialized",
       "rowVersion",
@@ -188,6 +191,7 @@ export function parsePersonalAppearanceResource(
     sources[field] = source;
   }
   return {
+    field_contract: parseFieldContract(raw.field_contract),
     schemaVersion: 3,
     materialized: raw.materialized,
     rowVersion: raw.rowVersion,

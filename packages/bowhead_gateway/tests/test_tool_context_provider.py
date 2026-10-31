@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from bowhead_core.datarc_selection import DatarcConnectionBinding, DatarcPreferenceScope, DatarcSelection
 from bowhead_gateway.connector_context_provider import (
     DefaultContextLadder,
     ResolvedConnectorContext,
@@ -221,7 +222,7 @@ async def test_read_only_datarc_turn_context_skips_unconsumed_runtime_dependenci
     calls: list[str] = []
 
     async def _datarc(*_args, **_kwargs):
-        return datarc_client
+        return DatarcConnectionBinding("team_1", "dc_test", "revision_one", datarc_client, lambda projects: _embed())
 
     async def _embed(*_args, **_kwargs):
         calls.append("embed")
@@ -231,7 +232,7 @@ async def test_read_only_datarc_turn_context_skips_unconsumed_runtime_dependenci
         calls.append("no_connection")
         return True
 
-    monkeypatch.setattr(datarc_context, "resolve_team_datarc_client", _datarc)
+    monkeypatch.setattr(datarc_context, "resolve_team_datarc_binding", _datarc)
     monkeypatch.setattr(datarc_context, "resolve_team_embed_client", _embed)
     monkeypatch.setattr(_turn_runtime, "_team_has_no_connection", _no_connection)
 
@@ -260,7 +261,7 @@ async def test_read_only_datarc_turn_context_skips_unconsumed_runtime_dependenci
 
     monkeypatch.setattr(
         datarc_context,
-        "resolve_team_datarc_client",
+        "resolve_team_datarc_binding",
         _no_datarc,
     )
     calls.clear()
@@ -284,7 +285,7 @@ async def test_read_only_datarc_turn_context_propagates_configured_connection_fa
 
     monkeypatch.setattr(
         datarc_context,
-        "resolve_team_datarc_client",
+        "resolve_team_datarc_binding",
         _unavailable,
     )
 
@@ -339,8 +340,8 @@ async def test_turn_context_preserves_actor_scope_and_artifact_snapshot(
             project_memory_store=historical_space_memory,
         ),
     )
-    resolve_client = AsyncMock(return_value=client)
-    monkeypatch.setattr(datarc_context, "resolve_team_datarc_client", resolve_client)
+    resolve_client = AsyncMock(return_value=DatarcConnectionBinding("team_actor", "dc_test", "revision_one", client))
+    monkeypatch.setattr(datarc_context, "resolve_team_datarc_binding", resolve_client)
 
     context = await datarc_context.resolve_datarc_turn_context(
         app,
@@ -373,15 +374,28 @@ async def test_guide_questions_follow_the_users_saved_data_context(
     from bowhead_gateway.routes import datarc
 
     client = SimpleNamespace(list_guide_questions=AsyncMock(return_value=["What changed this month?"]))
-    memory = SimpleNamespace(get_tool_context=AsyncMock(return_value={"id": selected_project} if selected_project else None))
+    memory = SimpleNamespace(get_datarc_workspace=AsyncMock(return_value={"id": selected_project} if selected_project else None))
     store = SimpleNamespace(list_workspaces_for_user=AsyncMock(return_value=[{"datarc_workspace_id": "another_users_data"}]))
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(user_memory_store=memory)))
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                user_memory_store=memory, tool_context_service=SimpleNamespace(accessible_workspaces=AsyncMock(return_value=[_Ref("7", "Data")]))
+            )
+        )
+    )
     user = SimpleNamespace(id="u_actor", team_id="team_actor")
-    monkeypatch.setattr(datarc, "_datarc", AsyncMock(return_value=client))
+    from bowhead_gateway import access_context, datarc_context
+
+    monkeypatch.setattr(access_context, "build_access_context", AsyncMock(return_value=SimpleNamespace(team_id="team_actor")))
+    monkeypatch.setattr(
+        datarc_context,
+        "resolve_team_datarc_binding",
+        AsyncMock(return_value=DatarcConnectionBinding("team_actor", "dc_test", "revision_one", client)),
+    )
 
     response = await datarc.guide_questions(request, workspace_id="ws_shared", user=user, store=store)
 
-    memory.get_tool_context.assert_awaited_once_with("u_actor", "datarc")
+    memory.get_datarc_workspace.assert_awaited_once_with("u_actor", DatarcPreferenceScope("team_actor", "dc_test"))
     assert response.workspace_id == "ws_shared"
     assert response.items == (["What changed this month?"] if selected_project else [])
     if selected_project:
@@ -408,7 +422,10 @@ class _FakeUserStore:
 
 class _FakeConnStore:
     async def list_connections(self, team_id: str) -> list[Any]:
-        return [SimpleNamespace(id="conn_1", base_url="https://datarc.example")]
+        return [SimpleNamespace(id="conn_1", updated_at="revision_one", base_url="https://datarc.example")]
+
+    async def resolve_active_binding(self, team_id):
+        return (SimpleNamespace(id="conn_1", updated_at="revision_one", base_url="https://datarc.example"), "auth_1", "revision_one")
 
     async def get_connection_auth(self, conn_id: str, team_id: str) -> str:
         return "auth_1"
@@ -423,9 +440,13 @@ class _FakeMemberResolver:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, Any]] = []
 
-    async def resolve(self, identity: str, datarc_workspace_id: str, *, datarc: Any = None) -> str:
+    async def resolve(self, identity: str, datarc_workspace_id: str, *, datarc: Any = None, refresh: bool = False) -> str:
         self.calls.append((identity, datarc_workspace_id, datarc))
         return "m_resolved"
+
+
+async def _accessible(*args, **kwargs):
+    return REFS3, ""
 
 
 def _fake_request(umem: _FakeUmem | None, *, member_resolver: Any = None) -> Any:
@@ -435,20 +456,25 @@ def _fake_request(umem: _FakeUmem | None, *, member_resolver: Any = None) -> Any
         datarc_client_factory=_FakeDatarcFactory(),
         member_resolver=member_resolver or _FakeMemberResolver(),
         user_memory_store=umem,
+        tool_context_service=SimpleNamespace(accessible_workspaces_ex=_accessible),
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
 
 @pytest.fixture(autouse=True)
 def _verified_caller(monkeypatch: pytest.MonkeyPatch) -> None:
-    """switcher 的 member 解析要求认证用户的已验证 email；假 Request 过不了 _current_user，
-    直接替掉这一层——本文件的 SUT 是 switcher 的提交语义，不是认证。"""
-    from bowhead_gateway.routes import chat as chat_routes
+    """These service tests control access; HTTP tests exercise actual authorization."""
+    from unittest.mock import AsyncMock
 
-    async def _email(_request: Any) -> str:
-        return "u@a.com"
+    from bowhead_gateway import datarc_switch
 
-    monkeypatch.setattr(chat_routes, "_caller_verified_email", _email)
+    monkeypatch.setattr(datarc_switch, "build_access_context", AsyncMock(return_value=SimpleNamespace(team_id="team_1")))
+
+
+async def _invoke_switch(switch, identifier, name, *, remember=False):
+    selection = DatarcSelection(switch.binding, "u1", "1", "Source A", "old_member", _DATARC_CLIENT)
+    prepared = await switch.prepare_selection(identifier, name, current=selection)
+    return prepared.member_uid, await switch.save_preference(prepared, remember=remember)
 
 
 async def test_switcher_default_writes_session_pref():
@@ -460,14 +486,16 @@ async def test_switcher_default_writes_session_pref():
         _fake_request(umem, member_resolver=resolver),
         "u1",
         "s_a",
+        workspace_id="ws_test",
+        binding=DatarcConnectionBinding("team_1", "conn_1", "revision_one", _DATARC_CLIENT),
         ws_enforce=False,
         log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
     )
-    member, persisted = await switch("234", "北极九章DEMO")
+    member, persisted = await _invoke_switch(switch, "234", "北极九章DEMO")
     assert member == "m_resolved"
     # Must resolve through the team-connection client, never a deployment singleton.
     assert resolver.calls == [("u@a.com", "234", _DATARC_CLIENT)]
-    assert persisted is True
+    assert persisted.status == "saved"
     assert umem.set_calls == [{"tool": "datarc", "id": "234", "name": "北极九章DEMO", "source": "session", "session_id": "s_a"}]
     assert umem.clear_calls == []
 
@@ -478,10 +506,16 @@ async def test_switcher_remember_writes_explicit_and_clears_overlay():
     umem = _FakeUmem()
     umem.session = {"id": "1", "name": "商超零售场景", "source": "session", "session_id": "s_a"}
     switch = _make_datarc_context_switcher(
-        _fake_request(umem), "u1", "s_a", ws_enforce=False, log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
+        _fake_request(umem),
+        "u1",
+        "s_a",
+        workspace_id="ws_test",
+        binding=DatarcConnectionBinding("team_1", "conn_1", "revision_one", _DATARC_CLIENT),
+        ws_enforce=False,
+        log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
     )
-    _member, persisted = await switch("234", "北极九章DEMO", remember=True)
-    assert persisted is True
+    _member, persisted = await _invoke_switch(switch, "234", "北极九章DEMO", remember=True)
+    assert persisted.status == "saved"
     assert umem.set_calls == [{"tool": "datarc", "id": "234", "name": "北极九章DEMO", "source": "explicit", "session_id": None}]
     # BUG1 decision 1: remembering clears current session overlay, otherwise it overrides the newly remembered default.
     assert umem.clear_calls == [{"tool": "datarc", "session_scoped": True}]
@@ -493,10 +527,16 @@ async def test_switcher_no_store_reports_not_persisted():
     from bowhead_gateway.routes.chat import _make_datarc_context_switcher
 
     switch = _make_datarc_context_switcher(
-        _fake_request(None), "u1", "s_a", ws_enforce=False, log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
+        _fake_request(None),
+        "u1",
+        "s_a",
+        workspace_id="ws_test",
+        binding=DatarcConnectionBinding("team_1", "conn_1", "revision_one", _DATARC_CLIENT),
+        ws_enforce=False,
+        log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
     )
-    _member, persisted = await switch("234", "北极九章DEMO", remember=True)
-    assert persisted is False
+    _member, persisted = await _invoke_switch(switch, "234", "北极九章DEMO", remember=True)
+    assert persisted.status in {"skipped", "failed"}
 
 
 async def test_switcher_store_error_reports_not_persisted_not_raises():
@@ -504,11 +544,17 @@ async def test_switcher_store_error_reports_not_persisted_not_raises():
     from bowhead_gateway.routes.chat import _make_datarc_context_switcher
 
     class _BoomUmem(_FakeUmem):
-        async def set_tool_context(self, *a: Any, **k: Any) -> None:
+        async def commit_datarc_workspace(self, *a: Any, **k: Any) -> None:
             raise RuntimeError("sqlite locked")
 
     switch = _make_datarc_context_switcher(
-        _fake_request(_BoomUmem()), "u1", "s_a", ws_enforce=False, log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
+        _fake_request(_BoomUmem()),
+        "u1",
+        "s_a",
+        workspace_id="ws_test",
+        binding=DatarcConnectionBinding("team_1", "conn_1", "revision_one", _DATARC_CLIENT),
+        ws_enforce=False,
+        log=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
     )
-    _member, persisted = await switch("234", "北极九章DEMO", remember=True)
-    assert persisted is False
+    _member, persisted = await _invoke_switch(switch, "234", "北极九章DEMO", remember=True)
+    assert persisted.status in {"skipped", "failed"}

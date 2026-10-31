@@ -36,7 +36,7 @@ def test_unfiltered_fact_survives_the_cap() -> None:
     r = _over_budget(_parse={"unknown_words": ["华东地"]}, query_explain={"models": ["门店表"], "measures": ["营业额"]})
     out, _ = cap_result("bi_query", r)
     hint = out["_preflight_hint"]
-    assert "没有任何业务过滤条件" in hint and "「华东地」" in hint
+    assert "contains no `filters` field" in hint and "「华东地」" in hint
     assert "其他说明" not in hint
 
 
@@ -45,7 +45,7 @@ def test_filtered_result_keeps_no_unfiltered_claim_after_the_cap() -> None:
     """正对照：真筛了的结果，裁剪层也不许凭空补一句「没筛过」。"""
     r = _over_budget(_parse={"unknown_words": ["华东地"]}, query_explain={"models": ["门店表"], "filters": ["上海"]})
     out, _ = cap_result("bi_query", r)
-    assert "没有任何业务过滤条件" not in out["_preflight_hint"]
+    assert "contains no `filters` field" not in out["_preflight_hint"]
 
 
 @pytest.mark.unit

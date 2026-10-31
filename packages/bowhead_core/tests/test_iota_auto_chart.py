@@ -231,6 +231,30 @@ def test_collect_emits_for_unconsumed_uncharted_csv() -> None:
     assert candidates[0]["hint"] == "auto"
 
 
+@pytest.mark.parametrize("skill_name", ["python_sandbox", "table_export", None])
+def test_collect_respects_skill_identity(skill_name: str | None) -> None:
+    invocation = _sandbox_inv_with_csv("art_skill")
+    invocation.tool_name = "skill_invoke"
+    invocation.arguments = {"name": skill_name, "input": {}}
+
+    candidates = collect_auto_chart_candidates([invocation])
+
+    assert [candidate["data_artifact_id"] for candidate in candidates] == (["art_skill"] if skill_name == "python_sandbox" else [])
+
+
+@pytest.mark.parametrize("tool_name", ["python_exec", "python_sandbox", "skill_invoke"])
+def test_collect_skips_consumed_artifact_for_each_sandbox_entry(tool_name: str) -> None:
+    arguments = {"inputs": {"rows": {"artifact_id": "art_intermediate"}}}
+    if tool_name == "skill_invoke":
+        arguments = {"name": "python_sandbox", "input": arguments}
+    invocations = [
+        _sandbox_inv_with_csv("art_intermediate"),
+        _make_inv(tool_name, arguments=arguments, result={"outputs": []}),
+    ]
+
+    assert collect_auto_chart_candidates(invocations) == []
+
+
 def test_collect_skips_consumed_artifact() -> None:
     """If a downstream sandbox call inputs this artifact, skip auto-chart."""
     art = "art_consumed"

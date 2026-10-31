@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from bowhead_skill.bundle_files import MAX_TEXT_BYTES, BundleFileError, bundle_file_path
+from bowhead_skill.bundle_files import MAX_TEXT_BYTES, BundleFileError, bundle_file_path, is_python_cache_path
 from bowhead_skill.script_langs import (
     all_entry_extensions,
     entry_extensions,
@@ -155,6 +155,22 @@ def bundle_sha256(skill_dir: Path) -> str:
         h.update(p.relative_to(root).as_posix().encode("utf-8"))
         h.update(b"\0")
         h.update(p.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def builtin_bundle_sha256(skill_dir: Path) -> str:
+    """Hash builtin source bytes consistently with packaged cache exclusions.
+
+    This explicit builtin entry does not change the historical Team/User CAS
+    algorithm or reinterpret any already frozen package envelope.
+    """
+    h = hashlib.sha256()
+    root = Path(skill_dir)
+    for path in sorted(p for p in root.rglob("*") if p.is_file() and not is_python_cache_path(p.relative_to(root))):
+        h.update(path.relative_to(root).as_posix().encode("utf-8"))
+        h.update(b"\0")
+        h.update(path.read_bytes())
         h.update(b"\0")
     return h.hexdigest()
 

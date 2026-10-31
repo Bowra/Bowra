@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useTranslations } from "next-intl";
 
 export interface ExternalCapabilityConfig {
@@ -32,6 +33,7 @@ export function ExternalCapabilityEditor({
 }) {
   const t = useTranslations("settings.models");
   const config = value || { models: {}, active: {} };
+  const fieldPrefix = `team_model_config.${kind === "image" ? "media" : "search"}.models.*`;
   const capability = kind === "image" ? "image_gen" : "web_search";
   const protocols =
     kind === "image"
@@ -55,9 +57,9 @@ export function ExternalCapabilityEditor({
       {Object.entries(config.models).map(([name, model]) => (
         <div className="external-capability-model" key={name}>
           <div className="fld">
-            <label htmlFor={`external-provider-${name}`}>
+            <span className="configuration-field-label"><label htmlFor={`external-provider-${name}`}>
               {t("sections.external_connection")}
-            </label>
+            </label><ConfigurationFieldHelp field={`${fieldPrefix}.provider`} label={t("sections.external_connection")} /></span>
             <select
               className="inp"
               id={`external-provider-${name}`}
@@ -76,9 +78,9 @@ export function ExternalCapabilityEditor({
             </select>
           </div>
           <div className="fld">
-            <label htmlFor={`external-model-${name}`}>
+            <span className="configuration-field-label"><label htmlFor={`external-model-${name}`}>
               {t("sections.external_model_id")}
-            </label>
+            </label><ConfigurationFieldHelp field={`${fieldPrefix}.real_id`} label={t("sections.external_model_id")} /></span>
             <input
               className="inp mono"
               id={`external-model-${name}`}
@@ -90,9 +92,9 @@ export function ExternalCapabilityEditor({
             />
           </div>
           <div className="fld">
-            <label htmlFor={`external-protocol-${name}`}>
+            <span className="configuration-field-label"><label htmlFor={`external-protocol-${name}`}>
               {t("sections.external_protocol")}
-            </label>
+            </label><ConfigurationFieldHelp field={`${fieldPrefix}.protocol`} label={t("sections.external_protocol")} /></span>
             <select
               className="inp"
               id={`external-protocol-${name}`}

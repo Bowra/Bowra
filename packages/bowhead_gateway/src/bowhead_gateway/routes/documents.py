@@ -17,18 +17,9 @@ router = APIRouter(dependencies=[Depends(_current_user)])
 async def published_file_identity(request: Request, art, user_id: str):
     """Generic file routes cannot bypass parent-source or document-owner ACL."""
     service = _service(request)
-    async with (
-        open_shared_ctx(service.delivery.path) as db,
-        db.execute(
-            """SELECT f.job_id,f.name FROM document_draft_files f JOIN document_executions e ON e.job_id=f.job_id
-        JOIN document_jobs j ON j.id=f.job_id JOIN document_draft_files parent ON parent.job_id=f.job_id AND parent.name='candidate.pptx'
-        JOIN artifacts source ON source.id=parent.artifact_id
-        WHERE f.artifact_id=? AND j.requested_by=? AND e.state='published' AND source.deleted_at IS NULL AND source.status='ready'
-        AND NOT EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=source.id)""",
-            (art.id, user_id),
-        ) as cursor,
-    ):
-        row = await cursor.fetchone()
+    from bowhead_core.documents.file_access import published_file_identity as resolve_published_file
+
+    row = await resolve_published_file(service.delivery.path, artifact_id=art.id, user_id=user_id)
     if row is None:
         raise HTTPException(404, detail={"error": {"code": "document_not_found"}})
     scope = await _scope(request, job_id=row[0])
@@ -74,7 +65,8 @@ async def _scope(request: Request, *, session_id: str | None = None, job_id: str
 
 
 def _error(exc: DocumentRequestError):
-    return HTTPException(404 if exc.code == "document_not_found" else 409, detail={"error": {"code": exc.code}})
+    inaccessible = {"document_not_found", "document_canvas_unavailable", "document_canvas_source_unavailable", "document_canvas_input_unavailable"}
+    return HTTPException(404 if exc.code in inaccessible else 409, detail={"error": {"code": exc.code}})
 
 
 @router.get("/sessions/{session_id}/documents")
@@ -84,8 +76,17 @@ async def list_documents(session_id: str, request: Request, response: Response, 
     service = _service(request)
     try:
         jobs = await service.jobs.list_for_session(scope=scope, session_id=session_id, after_id=after_id, limit=100)
+        visible = []
+        for job in jobs:
+            try:
+                await service.authorize_canvas(scope, job.id)
+            except DocumentRequestError as exc:
+                if exc.code in {"document_canvas_unavailable", "document_canvas_source_unavailable", "document_canvas_input_unavailable"}:
+                    continue
+                raise
+            visible.append(await service.delivery.get(scope=scope, job_id=job.id))
         return {
-            "jobs": [await service.delivery.get(scope=scope, job_id=job.id) for job in jobs],
+            "jobs": visible,
             "next_cursor": jobs[-1].id if len(jobs) == 100 else None,
         }
     except DocumentRequestError as exc:
@@ -97,7 +98,9 @@ async def get_document(session_id: str, job_id: str, request: Request, response:
     response.headers["Cache-Control"] = "no-store, private"
     scope = await _scope(request, session_id=session_id, job_id=job_id)
     try:
-        return await _service(request).delivery.get(scope=scope, job_id=job_id)
+        service = _service(request)
+        await service.authorize_canvas(scope, job_id)
+        return await service.delivery.get(scope=scope, job_id=job_id)
     except DocumentRequestError as exc:
         raise _error(exc) from None
 
@@ -108,6 +111,7 @@ async def confirm_document(job_id: str, body: ConfirmDraft, request: Request):
     try:
         service = _service(request)
         await service.authorize_publication(scope)
+        await service.authorize_canvas(scope, job_id)
         return await service.delivery.confirm(scope=scope, job_id=job_id, command_id=body.command_id, draft_digest=body.draft_digest)
     except DocumentRequestError as exc:
         raise _error(exc) from None
@@ -118,6 +122,7 @@ async def cancel_document(job_id: str, body: CancelDraft, request: Request):
     scope = await _scope(request, job_id=job_id)
     service = _service(request)
     try:
+        await service.authorize_canvas(scope, job_id)
         current = await service.delivery.get(scope=scope, job_id=job_id)
         if current["state"] == "published":
             raise DocumentRequestError("document_already_published")
@@ -135,7 +140,10 @@ async def document_file(job_id: str, name: str, request: Request):
     if not preview and name not in {"candidate.pptx", "candidate.pdf"}:
         raise HTTPException(404, detail={"error": {"code": "document_not_found"}})
     try:
-        content, mime = await _service(request).delivery.read_file(scope=scope, job_id=job_id, name=name, preview=preview)
+        service = _service(request)
+        await service.authorize_canvas(scope, job_id)
+        content, mime = await service.delivery.read_file(scope=scope, job_id=job_id, name=name, preview=preview)
+        await service.authorize_canvas(scope, job_id)
     except DocumentRequestError as exc:
         raise _error(exc) from None
     headers = {"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff"}

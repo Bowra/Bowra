@@ -52,20 +52,22 @@ class MemberUidResolver:
             self._locks[key] = lock
         return lock
 
-    async def resolve(self, identity: str, datarc_workspace_id: str, *, datarc: DatarcClient | None = None) -> str:
+    async def resolve(self, identity: str, datarc_workspace_id: str, *, datarc: DatarcClient | None = None, refresh: bool = False) -> str:
         """返 memberUid；未命中抛 :class:`MemberNotFoundError`；其他下游错原样抛."""
         client = datarc or self._datarc
         if client is None:
             raise RuntimeError("team Datarc client is not available")
         key = (id(client), identity, str(datarc_workspace_id))
         hit = self._cache.get(key)
-        if hit is not None:
+        if hit is not None and not refresh:
             return hit
         async with self._lock_for(key):
             # Double-check: the first concurrent lock holder already filled it.
             hit = self._cache.get(key)
-            if hit is not None:
+            if hit is not None and not refresh:
                 return hit
+            if refresh:
+                self._cache.pop(key, None)
             data = await client.fetch_workspace_member(
                 datarc_workspace_id=str(datarc_workspace_id),
                 username=identity,

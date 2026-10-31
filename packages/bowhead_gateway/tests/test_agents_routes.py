@@ -2545,6 +2545,32 @@ async def test_owner_editor_audience_read_save_roundtrip(app_client, mode: str, 
 
 
 @pytest.mark.asyncio
+async def test_working_copy_rejects_closed_knowledge_admission_with_safe_next_step(app_client, monkeypatch) -> None:
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_SOURCE_BINDINGS", "0")
+    client, db_path = app_client
+    _enable_revisioned_agent(db_path, audience_mode="private")
+    detail = (await client.get("/api/v1/agents/osa_1/working-copy")).json()
+    live = detail["live"]
+    response = await client.patch(
+        "/api/v1/agents/osa_1/working-copy",
+        json={
+            "definition": {**live["definition"], "knowledge_access": {"schema_version": 1, "mode": "selected_files", "file_ids": ["kbf_hidden"]}},
+            "listing": live["listing"],
+            "audience": live["audience"],
+            "expected_row_version": None,
+        },
+    )
+    assert response.status_code == 422, response.text
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "agent_knowledge_access_admission_closed"
+    assert error["details"]["field"] == "knowledge_access"
+    assert "Retain the restriction" in error["details"]["next_step"]
+    assert "kbf_hidden" not in response.text
+    reread = await client.get("/api/v1/agents/osa_1/working-copy")
+    assert reread.json()["working_copy"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "snapshot",
     [
@@ -3655,3 +3681,49 @@ async def test_eval_manager_lists_owner_cases_saved_under_the_old_defaults(app_c
     platform = [suite for suite in body["suites"] if suite["suite_kind"] == "platform_contract" and suite["revision"]]
     # The platform suite keeps its stricter settings on purpose; it is never offered an update.
     assert all(suite["revision"]["cases_on_old_defaults"] == [] for suite in platform)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_source_catalog_and_original_writer_use_current_actor_access(app_client, monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setenv("FEATURE_KNOWLEDGE_SOURCE_BINDINGS", "1")
+    client, db_path = app_client
+    _enable_revisioned_agent(db_path, audience_mode="private")
+    files = {
+        "kbf_visible": SimpleNamespace(
+            file_id="kbf_visible", filename="Visible notes", scope="personal", scope_id="user_1", team_id="team_1", soft_deleted_at=None
+        ),
+        "kbf_hidden": SimpleNamespace(
+            file_id="kbf_hidden", filename="Private salary", scope="personal", scope_id="user_other", team_id="team_1", soft_deleted_at=None
+        ),
+    }
+    client._transport.app.state.kb_files_store = SimpleNamespace(
+        get=AsyncMock(side_effect=lambda identity: files.get(identity)), list_active_for_team_all_scopes=AsyncMock(return_value=list(files.values()))
+    )
+    response = await client.get("/api/v1/agents/osa_1/knowledge-sources", params=[("selected", "kbf_visible"), ("selected", "kbf_hidden")])
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == ["kbf_visible"]
+    assert [item["id"] for item in response.json()["selected_items"]] == ["kbf_visible"]
+    assert "Private salary" not in response.text
+    assert "kbf_hidden" not in response.text
+    live = (await client.get("/api/v1/agents/osa_1/working-copy")).json()["live"]
+
+    async def save(identity):
+        return await client.patch(
+            "/api/v1/agents/osa_1/working-copy",
+            json={
+                "definition": {**live["definition"], "knowledge_access": {"schema_version": 1, "mode": "selected_files", "file_ids": [identity]}},
+                "listing": live["listing"],
+                "audience": live["audience"],
+                "expected_row_version": None,
+            },
+        )
+
+    rejected = await save("kbf_hidden")
+    assert rejected.status_code == 422, rejected.text
+    assert "kbf_hidden" not in rejected.text
+    saved = await save("kbf_visible")
+    assert saved.status_code == 200, saved.text
+    reopened = (await client.get("/api/v1/agents/osa_1/working-copy")).json()
+    assert reopened["working_copy"]["definition"]["knowledge_access"]["file_ids"] == ["kbf_visible"]

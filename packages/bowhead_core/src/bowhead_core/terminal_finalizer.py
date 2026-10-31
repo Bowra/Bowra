@@ -10,6 +10,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import anyio
 
@@ -24,6 +25,9 @@ from bowhead_core.terminal_protocol import (
     TerminalFlushResult,
 )
 from bowhead_core.terminal_protocol_store import TerminalProtocolFaultPoint, TerminalProtocolStore
+
+if TYPE_CHECKING:
+    from bowhead_core.context_publication import StagedTerminalContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +65,7 @@ class FinalizeRequest:
     close_producer_admission: ProducerAdmissionCloser | None = None
     producer_barrier: ProducerBarrier | None = None
     producer_barrier_timeout_seconds: float = 5.0
+    context_publication: StagedTerminalContext | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.execution, ExecutionGenerationContext):
@@ -178,6 +183,7 @@ class TerminalFinalizer:
                 selected_variant_key=request.selected_variant_key,
                 authz_snapshot_digest=request.authz_snapshot_digest,
                 writer_admission_epoch=request.writer_admission_epoch,
+                **({"context_publication": request.context_publication} if request.context_publication is not None else {}),
             )
         except asyncio.CancelledError:
             # Cancellation can arrive after SQLite committed but before the

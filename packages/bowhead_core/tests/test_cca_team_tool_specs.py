@@ -287,25 +287,6 @@ async def test_handler_invalid_args_surfaces_via_iserror_bridge() -> None:
 # ─────────────────────────────────────────────────────────────
 # §9 / §9.6 metering — per-turn call cap + exec audit (cca LOAD POINT step 5, D2)
 # ─────────────────────────────────────────────────────────────
-@pytest.mark.asyncio
-async def test_per_turn_call_cap_rate_limits() -> None:
-    """§9/D2: a per-TURN shared counter caps team-tool calls (Lead + subagents share it).
-    Over budget → isError rate_limited WITHOUT dispatching upstream."""
-    calls = {"n": 0}
-
-    def handler(req: httpx2.Request) -> httpx2.Response:
-        calls["n"] += 1
-        return httpx2.Response(200, json={"value": 1})
-
-    server = _server(handler)
-    async with connect_team_mcp(server) as client:
-        spec = next(s for s in build_team_specs(_ORG, _entries(), client, call_budget=2) if s.schema.name == op_tool_name(_SRC, "getMetric"))
-        r1 = await spec.handler({"mid": "a", "tenant": "t"}, _ctx(_ORG))
-        r2 = await spec.handler({"mid": "b", "tenant": "t"}, _ctx(_ORG))
-        r3 = await spec.handler({"mid": "c", "tenant": "t"}, _ctx(_ORG))
-    assert r1["ok"] is True and r2["ok"] is True
-    assert r3 == {"ok": False, "error_kind": "rate_limited", "error": "team tool call budget exceeded for this turn"}
-    assert calls["n"] == 2  # the capped call never dispatched upstream
 
 
 class _FakeAudit:

@@ -47,6 +47,8 @@ CHAT_SEND_ROUTE_CODES = frozenset(
         "unsupported_entry",
         "coach_mention_unsupported",
         "coach_mention_unavailable",
+        "configuration_mention_unsupported",
+        "configuration_mention_unavailable",
         "resource_unavailable",
         "plan_execution_claim_lost",
         "attachment_bundle_mismatch",

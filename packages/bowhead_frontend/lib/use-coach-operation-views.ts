@@ -36,7 +36,7 @@ export function useCoachOperationViews(scope: string | null) {
   const open = useCallback(
     (pointer: CoachOperationOpen, select: boolean) => {
       if (!scopeRef.current || current.current.seen.has(pointer.requestId))
-        return;
+        return false;
       const previous = current.current;
       const key = JSON.stringify([
         "coach_operation",
@@ -57,6 +57,7 @@ export function useCoachOperationViews(scope: string | null) {
           ? [...previous.history.filter((item) => item !== key), key]
           : previous.history,
       });
+      return select;
     },
     [commit],
   );

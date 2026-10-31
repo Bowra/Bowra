@@ -422,6 +422,11 @@ export default function FilesPage() {
               forbidden: "kb.kb_forbidden",
               kb_embedding_not_configured: "kb.kb_embedding_not_configured",
               promotion_failed: "kb.kb_failed",
+              knowledge_ingestion_admission_closed: "kb.kb_write_closed",
+              knowledge_destination_mismatch: "kb.kb_destination_mismatch",
+              knowledge_operation_removed: "kb.kb_action_removed",
+              knowledge_operation_intent_conflict: "kb.kb_write_conflict",
+              knowledge_membership_conflict: "kb.kb_write_conflict",
             }[msg] ?? "kb.kb_failed";
             pushToast(t(messageKey));
           }
@@ -698,7 +703,6 @@ export default function FilesPage() {
                   <div className="cellcat">
                     <CategoryBadge
                       cls={assetClassOf(f)}
-                      auto={f.in_kb && f.retention_hint === "long_term"}
                       onRemove={f.in_kb ? () => askRemoveFromKb(f) : undefined}
                     />
                   </div>

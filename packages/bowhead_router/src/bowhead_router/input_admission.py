@@ -16,6 +16,33 @@ class LLMInputAdmissionError(ValueError):
     """Finite local rejection; contains no input, credentials or provider error."""
 
 
+class SummaryTransportUnsupported(LLMInputAdmissionError):
+    """Summary isolation cannot be represented; ordinary admission is independent."""
+
+
+def validate_summary_transport(body: dict[str, Any], *, family: str) -> None:
+    """Allow cached local schemas only when the final wire request forbids tools.
+
+    This runs after model overrides. Provider-executed tools and unknown
+    transports cannot acquire capabilities through a summary operation.
+    """
+    if family not in {"openai", "openai_responses", "anthropic"} or any(key in body for key in ("mcp_servers", "tool_resources")):
+        raise SummaryTransportUnsupported("llm_summary_transport_unsupported")
+    tools = body.get("tools", [])
+    if not isinstance(tools, list):
+        raise SummaryTransportUnsupported("llm_summary_tools_invalid")
+    for tool in tools:
+        local_tool = isinstance(tool, dict) and (
+            tool.get("type") is None and "input_schema" in tool if family == "anthropic" else tool.get("type") == "function"
+        )
+        if not local_tool:
+            raise SummaryTransportUnsupported("llm_summary_provider_tools_forbidden")
+    choice = body.get("tool_choice")
+    disabled = isinstance(choice, dict) and choice.get("type") == "none" if family == "anthropic" else choice == "none"
+    if tools and not disabled:
+        raise SummaryTransportUnsupported("llm_summary_tool_dispatch_forbidden")
+
+
 class LLMInputAdmission(Protocol):
     async def validate(self, request: LLMRequest, *, provider: str, model: str, context_window: int | None) -> None: ...
 
@@ -41,6 +68,8 @@ async def admit_request_input(request: LLMRequest, *, provider: str, model: str,
 
 def admit_outbound_input(request: LLMRequest, body: dict[str, Any], *, family: str) -> None:
     """Adapters call after final overrides, including each self-heal rebuild."""
+    if request.summary_only:
+        validate_summary_transport(body, family=family)
     if request.input_admission is None:
         return
     try:

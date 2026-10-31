@@ -1,0 +1,21 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_table_units",
+  "payload": {
+    "spec": {
+      "kind": "table",
+      "title": "Revenue（万元）",
+      "subtitle": "单位：万元；虚构验收数据",
+      "row_count": 3,
+      "columns": [
+        { "key": "region", "header": "Region", "type": "categorical" },
+        { "key": "revenue", "header": "Revenue", "type": "numeric", "unit": "万元" }
+      ],
+      "rows": [
+        { "region": "West", "revenue": 120.5 },
+        { "region": "East", "revenue": 87.25 },
+        { "region": "North", "revenue": 0 }
+      ]
+    }
+  }
+}

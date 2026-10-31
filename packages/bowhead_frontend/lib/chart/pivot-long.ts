@@ -44,6 +44,7 @@
 import type { ChartColumn, ChartSpec } from "./types";
 import { CHART_STYLE_PRESENTATION_POLICY } from "./chart-style-registry";
 import { roleOrderedDims } from "./stack-dims";
+import { formatDatePattern } from "./format";
 
 /** Pivotable chart kinds: one x-axis + multiple series of same measure. */
 export const PIVOTABLE_KINDS: ReadonlySet<ChartSpec["kind"]> = new Set(
@@ -80,6 +81,22 @@ const MIN_FILL_RATIO = CHART_STYLE_PRESENTATION_POLICY.normalization.minimumLong
 /** These kinds choose x-axis **by column order**, without date priority — `buildBar` `orderedX`. */
 const X_BY_COLUMN_ORDER: ReadonlySet<ChartSpec["kind"]> = new Set(["bar", "hbar", "stacked_bar"]);
 
+/** Only suppress an implicit split when both columns prove the same distinct calendar dates. */
+function duplicateDateDimension(rows: readonly Row[], xCol: ChartColumn, seriesCol: ChartColumn): boolean {
+  if (xCol.type !== "date" || seriesCol.type !== "categorical" || seriesCol.role === "color") return false;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const x = row[xCol.key], group = row[seriesCol.key];
+    if (typeof x !== "string" || typeof group !== "string"
+      || !/^(?:\d{8}|\d{4}-\d{2}-\d{2})$/.test(x)
+      || !/^(?:\d{8}|\d{4}-\d{2}-\d{2})$/.test(group)) return false;
+    const day = formatDatePattern(x, "yyyyMMdd");
+    if (!day || day !== formatDatePattern(group, "yyyyMMdd") || seen.has(day)) return false;
+    seen.add(day);
+  }
+  return seen.size >= 2;
+}
+
 function detectLong(spec: ChartSpec): { xCol: ChartColumn; seriesCol: ChartColumn } | null {
   const cols = spec.columns ?? [];
   const rows = spec.rows ?? [];
@@ -99,6 +116,8 @@ function detectLong(spec: ChartSpec): { xCol: ChartColumn; seriesCol: ChartColum
     ? dims[0]!
     : (dims.find((c) => c.type === "date") ?? dims[0]!);
   const seriesCol = dims.find((c) => c.key !== xCol.key)!;
+
+  if ((spec.kind === "line" || spec.kind === "area_stacked") && duplicateDateDimension(rows, xCol, seriesCol)) return null;
 
   const xVals = new Set<string>();
   const sVals = new Set<string>();

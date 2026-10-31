@@ -6,7 +6,7 @@ import {
   useFloating,
   useInteractions,
 } from "@floating-ui/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -20,11 +20,16 @@ import {
   X,
 } from "@/components/icons";
 import { cycleTabWithin, focusFirstWithin } from "@/components/ui/dialog";
+import type { HtmlPreviewIssue } from "@/lib/html-preview-contract";
+import { formatByteSize } from "@/lib/format";
 import { useArtifactHref } from "@/lib/canvas-pm-adapter/canvas-context";
 import { projectEmbeddedDataProvenance } from "@/lib/embedded-data-provenance";
 import type { ReportSection } from "@/lib/types";
 import { useMediaQuery } from "@/lib/use-media-query";
 
+import { HtmlPreviewModeControl, useHtmlPreviewMode } from "../html-preview-mode";
+import { useFullscreenMarker } from "../in-place-full-view";
+export { EMBED_FULLSCREEN_ATTR } from "../in-place-full-view";
 import { SafeHtmlFrame, useSafeHtmlDocument } from "../safe-html-preview";
 import {
   TriangleAlert as LucideTriangleAlert,
@@ -32,10 +37,10 @@ import {
 import { LucideGlyph } from "@/components/icon-refresh";
 
 /**
- * Render model-produced Report HTML as a static, network-free document.
+ * Render model-produced HTML with the negotiated offline preview capability.
  *
  * `data` and `sources` remain generation-input provenance. They are never
- * injected into the iframe, and artifact JavaScript is never executed.
+ * injected into the iframe or exposed to artifact JavaScript.
  */
 
 type HtmlArtifact = Extract<ReportSection, { kind: "html_artifact" }>;
@@ -46,39 +51,24 @@ function WarnGlyph({ size = 9 }: { size?: number }) {
   );
 }
 
-/**
- * Mark <html> when fullscreen is open. Card becomes fixed in place (moving to body reloads iframe);
- * styles temporarily remove ancestor stacking contexts (.v2-ws-right-body / .canvas-report-shell
- * isolation etc.; see styles/report-canvas.css and design section "图层") so fullscreen covers sidebar/topbar.
- */
-export const EMBED_FULLSCREEN_ATTR = "data-rc-embed-fullscreen";
-let fullscreenCount = 0;
-
-function useFullscreenMarker(active: boolean) {
-  useLayoutEffect(() => {
-    if (!active) return;
-    const root = document.documentElement;
-    fullscreenCount += 1;
-    root.setAttribute(EMBED_FULLSCREEN_ATTR, "");
-    return () => {
-      fullscreenCount = Math.max(0, fullscreenCount - 1);
-      if (fullscreenCount === 0) root.removeAttribute(EMBED_FULLSCREEN_ATTR);
-    };
-  }, [active]);
-}
-
 export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
   const t = useTranslations("html_artifact");
+  const viewerT = useTranslations("artifact_viewer");
+  const htmlMode = useHtmlPreviewMode();
+  const [issue, setIssue] = useState<HtmlPreviewIssue | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const isMobile = useMediaQuery("(max-width: 640px)");
   const provenance = projectEmbeddedDataProvenance(data);
   const rawHref = useArtifactHref(data.artifact_id);
   const safeHtml = useSafeHtmlDocument({
+    presentation: htmlMode.mode,
     enabled: true,
     href: rawHref,
     reloadToken,
   });
+
+  useEffect(() => setIssue(null), [safeHtml.document]);
 
   // Fullscreen is an in-place modal: style the same card node without a new parent (which would remount/reload iframe).
   // Match DialogShell: Esc closes, focus enters, Tab stays inside, background inert, closing returns to expand button.
@@ -136,7 +126,7 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
         <span className="rc-embed-title">{data.title}</span>
         <span className="rc-badge ai">
           <Spark size={10} />
-          {t("safe_preview_badge")}
+          {htmlMode.mode === "interactive" ? viewerT("html_interactive") : t("safe_preview_badge")}
         </span>
         {provenance.status === "computed_unchecked" ? (
           <span className="rc-badge amber">
@@ -190,7 +180,11 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
         ) : null}
       </div>
 
-      {isMobile && !expanded ? (
+      {htmlMode.available ? <div className="safe-html-preview-status">
+        <HtmlPreviewModeControl value={htmlMode.mode} onChange={htmlMode.select} />
+      </div> : null}
+
+      {isMobile && !expanded && htmlMode.mode === "static" ? (
         <div className="rc-embed-mobile-cta">
           <p>{t("mobile_safe_hint")}</p>
           <button type="button" className="rc-pill-btn accept" onClick={() => setExpanded(true)}>
@@ -199,7 +193,7 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
           </button>
         </div>
       ) : safeHtml.error ? (
-        <div className="rc-embed-error">{t(`safe_${safeHtml.error}`)}</div>
+        <div className="rc-embed-error">{viewerT(`safe_html_${safeHtml.error}`, { limit: formatByteSize(safeHtml.maxBytes ?? 0) })}</div>
       ) : safeHtml.loading || safeHtml.document === null ? (
         <div className="rc-embed-loading" style={{ height: expanded ? undefined : bodyHeight }}>
           {t("loading")}
@@ -207,14 +201,18 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
       ) : (
         <SafeHtmlFrame
           document={safeHtml.document}
+          interactive={safeHtml.interactive}
+          onIssue={setIssue}
+          onEscape={() => setExpanded(false)}
           title={data.title}
           className="rc-embed-frame"
           height={bodyHeight}
         />
       )}
 
+      {issue ? <div role="status" className="safe-html-preview-hint">{viewerT(`html_issue_${issue}`)}</div> : null}
       <div className="rc-embed-foot">
-        <span>{t("footer_safe_static")}</span>
+        <span>{htmlMode.mode === "interactive" ? viewerT("html_offline") : t("footer_safe_static")}</span>
         <span className="rc-embed-foot-right">
           {provenance.status === "injected"
             ? provenance.hasSources

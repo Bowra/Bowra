@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from dataclasses import replace
@@ -79,6 +80,20 @@ async def test_explicit_child_encodings_do_not_require_redundant_root_hint() -> 
         composition(three)
 
 
+async def test_registered_composed_chart_does_not_deadlock_on_nested_preparation():
+    from bowhead_core.canvas_tools import register_canvas_tools
+    from bowhead_core.tool_registry import ToolRegistry
+
+    args = _args()
+    art = _FakeArtifact(id=args["data_artifact_id"], filename="monthly.csv", path="monthly.csv")
+    store = _RichArtifactStore([art], {art.path: b"month,revenue,cost\n2026-01,120,80\n2026-02,160,90\n"})
+    ctx = _StubCtx(artifact_store=store, canvas_store=_CapturingCanvasStore())
+    registry = ToolRegistry()
+    register_canvas_tools(registry)
+    result = await asyncio.wait_for(registry.get("add_chart").handler(args, ctx), timeout=2)
+    assert "error" not in result
+
+
 @pytest.mark.unit
 def test_nested_model_json_is_decoded_only_once_and_layout_is_checked() -> None:
     args = _args()
@@ -124,6 +139,67 @@ def test_row_arithmetic_preserves_input_and_declares_fractional_percent() -> Non
     assert missing == {"change": 2}
     assert "change" not in rows[0]
     assert columns[-1].percent_scale == "fraction"
+
+
+@pytest.mark.parametrize(
+    ("input_unit", "target_unit", "input_value", "expected"),
+    [
+        ("亿元", "元", 0.0009, 90000),
+        ("亿元", "万元", 0.0009, 9),
+        ("万元", "元", -0.25, -2500),
+        ("USD million", "USD", 1.25, 1250000),
+        ("EUR", "EUR thousand", 90000, 90),
+        ("EUR Mio.", "EUR", 1.5, 1500000),
+        ("USD 1e9", "USD", 1, 1000000000),
+        ("RMB", "万元", 90000, 9),
+    ],
+)
+def test_explicit_currency_magnitude_conversion_preserves_original(input_unit, target_unit, input_value, expected):
+    rows = [{"amount": input_value}, {"amount": None}]
+    columns = [ChartColumn("amount", "Amount", "numeric", unit=input_unit)]
+    result, _, metadata, missing = derive_columns(
+        [{"key": "converted", "header": "Converted", "convert_from": "amount", "unit": target_unit}], rows, columns
+    )
+    assert result[0]["converted"] == expected
+    assert result[0]["amount"] == input_value and result[1]["converted"] is None
+    assert missing == {"converted": 1}
+    assert metadata[0]["conversion"]["input_unit"] == input_unit
+
+
+@pytest.mark.parametrize(
+    ("input_unit", "target_unit"), [("USD", "EUR"), ("$", "USD"), ("", "元"), ("%", "元"), ("EUR billion", "EUR"), ("EUR trillion", "EUR")]
+)
+def test_currency_conversion_does_not_guess_currency_or_exchange_rates(input_unit, target_unit):
+    with pytest.raises(ValueError, match="same currency"):
+        derive_columns(
+            [{"key": "converted", "header": "Converted", "convert_from": "amount", "unit": target_unit}],
+            [{"amount": 1}],
+            [ChartColumn("amount", "Amount", "numeric", unit=input_unit)],
+        )
+
+
+async def test_chart_conversion_requires_declared_source_unit():
+    art = _FakeArtifact(id="art_aaaaaaaaaaaa", filename="data.csv", path="data.csv")
+    store = _RichArtifactStore([art], {art.path: b"month,amount\n2026-01,0.0009\n"})
+    context = _StubCtx(artifact_store=store, canvas_store=_CapturingCanvasStore())
+    args = {
+        "data_artifact_id": art.id,
+        "title": "Converted",
+        "force_kind": "table",
+        "derived_columns": [{"key": "converted", "header": "Converted", "convert_from": "amount", "unit": "元"}],
+    }
+    assert "explicitly declared" in (await _add_chart(args, context))["error"]
+
+    async def put(**kwargs):
+        return SimpleNamespace(id="art_bbbbbbbbbbbb")
+
+    store.put_bytes = put
+    result = await _add_chart({**args, "column_units": {"amount": "亿元"}}, context)
+    assert "error" not in result, result
+    assert context.canvas_store.appended_payload["spec"]["rows"][0]["converted"] == 90000
+    from bowhead_core.source_access_projection import unregistered_source_like_paths
+
+    assert not unregistered_source_like_paths("chart", context.canvas_store.appended_payload)
 
 
 @pytest.mark.unit

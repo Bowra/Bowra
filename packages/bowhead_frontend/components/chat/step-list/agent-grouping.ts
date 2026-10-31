@@ -44,6 +44,7 @@ export interface PeerBlock {
   failureReason: string | null;
   /** Agent run limit that stopped a partially completed peer. */
   stopReason: string | null;
+  stepUsage?: { used: number; limit: number };
   /** Why a Continue could not pick up the saved work, so the peer started fresh. */
   resumeRefused: string | null;
   /** Authenticated finite facts for progressive disclosure and support copy. */
@@ -207,6 +208,7 @@ export function buildAgentGrouping(
       null;
     b.failureReason = terminal?.failureReason ?? null;
     b.stopReason = terminal?.status === "partial" ? (terminal.stopReason ?? "") : null;
+    b.stepUsage = terminal?.status === "partial" ? terminal.stepUsage : undefined;
     b.resumeRefused = terminal?.resumeRefused ?? null;
     b.failureDiagnostics = terminal?.failureDiagnostics ?? null;
     return b;

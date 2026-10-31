@@ -54,7 +54,7 @@ prompt_modules:
     version: 1
     lifecycle: active
     path: canvas-report-protocol-v1.md
-    sha256: sha256:a5b858fd525ebbc92a9f1d55e29c7135c776ce4fe6187ce6ef9a0f4dd15c9f48
+    sha256: sha256:80d64fec0433fb0bfe3513031473d1e3ba0b2635ce36fe5c59d7920092698ab9
     priority: 100
     conflicts_with: []
     # Adapter protocol already written in M3-A (read before editing / minimal patches / real IDs only). It attaches to

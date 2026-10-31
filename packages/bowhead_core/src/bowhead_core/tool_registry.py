@@ -12,24 +12,35 @@ Handler 是 async callable，签名：
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
 import difflib
 import logging
 import os
 import random as _random
-import re
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from bowhead_core.coach_operation_history import CoachOperationHistory
+    from bowhead_core.context_dependencies import ContextSourceObservations
+    from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
+    from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
+    from bowhead_core.terminal_protocol import ExecutionGenerationContext
 
 from bowhead_router.types import ToolSchema
 from bowhead_skill.runtime_scope import ExactSkillRuntimeScope, reference_skill_active
 from bowhead_skill.sandbox_call_shape import sandbox_inputs_hint
 
 from bowhead_bi_bridge import BIAsyncTaskTimeout, BIConnectionError, DatarcClient, DatarcError
+from bowhead_core.datarc_selection import (
+    DatarcConnectionBinding,
+    DatarcExecutionScope,
+    DatarcRunState,
+    accepted_datarc_selection,
+    switch_datarc_selection,
+)
 from bowhead_core.document_revision_target import DocumentRevisionTarget
-from bowhead_core.model_clock import model_today
 from bowhead_core.resource_access import (
     resource_grant_targets_for_tool as _shared_resource_grant_targets_for_tool,
 )
@@ -343,25 +354,25 @@ def _semantic_prefix(text: str) -> str:
 # Stores in same _TURN_QUERY_CACHE namespace under prefix "@sem:" to avoid collision.
 
 
-def _semantic_cache_put(turn_id: str, prefix: str, hint: dict[str, Any]) -> None:
+def _semantic_cache_put(turn_id: str, prefix: str, hint: dict[str, Any], *, source_scope: str = "") -> None:
     """Store semantic hint (call_id, artifact_id, original_query) by prefix key."""
     if not prefix or len(prefix) < 8:
         return
-    sem_key = f"@sem:{prefix}"
+    sem_key = f"@sem:{source_scope}:{prefix}" if source_scope else f"@sem:{prefix}"
     if turn_id not in _TURN_QUERY_CACHE:
         _TURN_QUERY_CACHE[turn_id] = {}
         _TURN_QUERY_CACHE_LRU.append(turn_id)
     _TURN_QUERY_CACHE[turn_id].setdefault(sem_key, hint)
 
 
-def _semantic_cache_lookup(turn_id: str, prefix: str) -> dict[str, Any] | None:
+def _semantic_cache_lookup(turn_id: str, prefix: str, *, source_scope: str = "") -> dict[str, Any] | None:
     """Look up prior call's hint by semantic prefix. None if first-time."""
     if not prefix or len(prefix) < 8:
         return None
     bucket = _TURN_QUERY_CACHE.get(turn_id)
     if not bucket:
         return None
-    return bucket.get(f"@sem:{prefix}")
+    return bucket.get(f"@sem:{source_scope}:{prefix}" if source_scope else f"@sem:{prefix}")
 
 
 def _bi_cache_key(
@@ -372,6 +383,7 @@ def _bi_cache_key(
     inline_max_rows: Any = None,
     mode: Any = None,
     datarc_workspace: Any = None,
+    source_scope: str = "",
 ) -> str:
     """λ-F1: cache key — normalized text + ALL path-affecting args.
 
@@ -389,7 +401,8 @@ def _bi_cache_key(
     imr = "" if inline_max_rows is None else str(inline_max_rows)
     md = "" if mode is None else str(mode)
     dws = "" if datarc_workspace is None else str(datarc_workspace)
-    return f"{norm}|f{'1' if fast else '0'}|l{lim}|c{cols}|i{imr}|m{md}|w{dws}"
+    key = f"{norm}|f{'1' if fast else '0'}|l{lim}|c{cols}|i{imr}|m{md}|w{dws}"
+    return f"{key}|s{source_scope}" if source_scope else key
 
 
 #: Number of repeated same-query calls in one turn before explicitly saying another fetch is unchanged.
@@ -457,349 +470,6 @@ def _bi_cache_put(turn_id: str, key: str, value: Any) -> None:
         _m.observe("bowhead_bi_query_cache_size_total", total, labels={}, help="λ-F1: total cached entries across all live turns.")
     except Exception:  # noqa: S110
         pass
-
-
-# ── Datarc time-period drift detection (started 2026-08-25; notation expanded after adversarial review on 2026-08-26) ──
-#
-# Datarc can replace requested periods without errors and with normal result shapes, in two forms:
-#
-#   ② Year fallback: 2026年11月 营业额 actually queries 2025-11-01~30, byte-identical to 2025年11月 results.
-#      Detectable: replaced periods name CSVs as explicit ranges (2025-11-01_至_30营业额.csv),
-#      while unchanged periods echo user notation (2025年11月营业额.csv); the filename shape itself is a red flag.
-#   ① Truncated interval: 2026年1-12月 … 每月 returns only January–August (months with data).
-#      Filenames cannot detect this (echoed unchanged); count returned month coverage instead.
-#
-# ★★ Why neither criterion falsely flags: tested 518 actual 116 production (origin_query, filename) pairs
-#    plus 51 live probes on 2026-08-26, zero false positives. Without changed periods, persisted names roughly strip query
-#    whitespace and 各, then add a hash, preserving date phrases. _extract_period therefore makes the same mistake
-#    on request and filename sides ⇒ want == got ⇒ silent. Essentially a date-string-shape differencer,
-#    speaking only when datarc actually rewrites dates, precisely the drift signal.
-#    ⇒ Expand notation symmetrically using the same _extract_period on both sides. Request-only special cases immediately
-#      break symmetry, turning zero false positives into daily false alarms. Before editing, run test_bi_period_drift.py's
-#      live golden-pair cases.
-#
-# ⚠ Two explicitly uncovered cases (not proof of passing):
-#   - Year only (2026年 / 2026 revenue): scalar returns have no signal. Monthly grouping could theoretically count,
-#     but 2026年 usually means YTD; warning of missing September–December asserts an interval the user never requested,
-#     so deliberately omit it. Coverage requires upstream actual execution intervals.
-#   - Relative periods / fiscal years (今年 / 近30天 / 2026财年): cannot parse absolute year/month ⇒ fail open.
-#
-# Anchor on text (original query sent to datarc), not _parse from parallel _cut_safe,
-# observed intermittently empty. More importantly, in eight drift cases on 2026-08-26, cut dateRange_* all reported
-# requested rather than executed periods (2026年11月 → dateRange_2026110120261130, actually executing
-# 2025-11), structurally the wrong signal source rather than occasionally empty.
-# Fail open throughout: if either side cannot parse year/month, omit warnings; prefer missed detection over false alarms.
-
-_CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4}
-_EN_MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-
-# Persisted format when datarc rewrites: 2025-11-01_至_30 / 2025-09-01_至_12-31 / 2026-08-11_至_2026-08-17.
-# ⚠ Recognize MM in ending MM-DD. Previously "12" in _至_12-31 was interpreted as day, silently
-# losing the ending month (2025-09-01_至_12-31 parsed only September), making same-year rewrite warnings report incorrect months.
-_ISO_SEP = r"(?:[_\s]*(?:至|到|~|～)[_\s]*|[_\s]+to[_\s]+|_to_)"
-_PERIOD_ISO_RE = re.compile(
-    r"(20\d{2})-(\d{1,2})-\d{1,2}" + _ISO_SEP + r"(?:(?:(20\d{2})-)?(\d{1,2})-)?\d{1,2}",
-)
-
-# Chinese: year / year-month / month range / quarter / half-year. Ranges cover 1-8月, 1月-8月, 1月至2026年8月,
-# and 6月到12月. Observed in the 116 production corpus on 2026-08-26: 52% of monthly-range queries used the last three;
-# the old version recognized only the first, silencing truncation detection precisely where needed.
-_PERIOD_CN_RE = re.compile(
-    r"(?P<y>20\d{2})\s*年\s*"
-    r"(?:"
-    r"(?P<lo>\d{1,2})\s*月?\s*[-–—~～至到]\s*(?:(?P<y2>20\d{2})\s*年\s*)?(?P<hi>\d{1,2})\s*月"
-    r"|(?P<mo>\d{1,2})\s*月"
-    r"|前\s*(?P<pq>[1-4一二三四])\s*季度"
-    r"|(?:第\s*)?(?P<q>[1-4一二三四])\s*季度"
-    r"|[Qq](?P<q2>[1-4])"
-    r"|(?P<half>上|下)半年"
-    r")?",
-)
-
-# Recognize English month names as well as localized and ISO periods so drift
-# checks cover every supported query-language form.
-_EN_MON = (
-    r"(?:january|february|march|april|june|july|august|september|october|november|december"
-    r"|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?![a-z])"
-)
-_PERIOD_EN_RE = re.compile(
-    r"(?<![a-z0-9])(?:"
-    r"(?P<y1>20\d{2})[\s_,./-]{0,3}(?P<a_lo>" + _EN_MON + r")(?:[\s_]*[-–—~][\s_]*(?P<a_hi>" + _EN_MON + r"))?"
-    r"|(?P<b_lo>" + _EN_MON + r")(?:[\s_]*[-–—~][\s_]*(?P<b_hi>" + _EN_MON + r"))?[\s_,./-]{0,3}(?P<y2e>20\d{2})"
-    r")(?!\d)",
-    re.IGNORECASE,
-)
-# ⚠ No immediately following CJK: 2026财年 often crosses calendar years (Apr–Mar); interpreting it as calendar 2026 falsely
-# warns of year changes when datarc truthfully returns 2025-04-01_至_2026-03-31. Fail open is safer.
-_PERIOD_EN_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?![\d\u4e00-\u9fff])")
-
-# Only names containing these markers can be time-grouping columns (每月 / 每季度 / month).
-# Filter columns first, then extract per row; previously every key in every row was substring-checked,
-# synchronously blocking the event loop for a measured 0.86s over 400k×20 columns in the 116 container.
-_PERIOD_COL_HINT_RE = re.compile(r"月|季|month|quarter", re.IGNORECASE)
-
-
-def _months_of_quarter(q: int) -> tuple[int, ...]:
-    return tuple(range(q * 3 - 2, q * 3 + 1))
-
-
-def _period_from_iso(s: str) -> tuple[int, tuple[int, ...]] | None:
-    """ISO 区间 —— datarc **改写掉时间段时自己写的**落盘格式。"""
-    m = _PERIOD_ISO_RE.search(s)
-    if not m:
-        return None
-    y0, m0, y1, m1 = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
-    if not 1 <= m0 <= 12:
-        return (y0, ())
-    if y1 and int(y1) != y0:
-        return (y0, ())  # Cross-year range: this function represents only one year; degrade to year-level.
-    hi = int(m1) if m1 else m0
-    if not 1 <= hi <= 12 or hi < m0:
-        return (y0, ())
-    return (y0, tuple(range(m0, hi + 1)))
-
-
-def _period_from_cn(s: str) -> tuple[int, tuple[int, ...]] | None:
-    m = _PERIOD_CN_RE.search(s)
-    if not m:
-        return None
-    year = int(m.group("y"))
-    # ⚠ Recognized year but invalid month (2026年13月 / 1-13月) ⇒ degrade to year-level, not None,
-    # which loses the year too. On 2026-08-26, 2026年13月 营业额 actually fell back to 2025-12.
-    if m.group("lo") and m.group("hi"):
-        if m.group("y2") and int(m.group("y2")) != year:
-            return (year, ())  # Cross-year range: degrade to year-level.
-        lo, hi = int(m.group("lo")), int(m.group("hi"))
-        if not (1 <= lo <= 12 and 1 <= hi <= 12) or hi < lo:
-            return (year, ())
-        return (year, tuple(range(lo, hi + 1)))
-    if m.group("mo"):
-        mo = int(m.group("mo"))
-        return (year, (mo,) if 1 <= mo <= 12 else ())
-    if m.group("pq"):  # `前三季度`
-        n = _CN_DIGITS.get(m.group("pq")) or int(m.group("pq"))
-        return (year, tuple(range(1, n * 3 + 1)))
-    if m.group("q") or m.group("q2"):  # `第一季度` / `1季度` / `Q1`
-        raw = m.group("q") or m.group("q2")
-        q = _CN_DIGITS.get(raw) or int(raw)
-        return (year, _months_of_quarter(q))
-    if m.group("half"):
-        return (year, tuple(range(1, 7)) if m.group("half") == "上" else tuple(range(7, 13)))
-    return (year, ())  # Year only
-
-
-def _period_from_en(s: str) -> tuple[int, tuple[int, ...]] | None:
-    ym = _PERIOD_EN_RE.search(s)
-    bare = _PERIOD_EN_YEAR_RE.search(s)
-    if ym is not None and (bare is None or ym.start() <= bare.start()):
-        year = int(ym.group("y1") or ym.group("y2e"))
-        lo_tok = ym.group("a_lo") or ym.group("b_lo")
-        hi_tok = ym.group("a_hi") or ym.group("b_hi")
-        lo = _EN_MONTHS[lo_tok[:3].lower()]
-        if hi_tok is None:
-            return (year, (lo,))
-        hi = _EN_MONTHS[hi_tok[:3].lower()]
-        return (year, tuple(range(lo, hi + 1)) if hi >= lo else ())
-    if bare is not None:
-        return (int(bare.group(1)), ())
-    return None
-
-
-def _extract_period_tagged(s: str) -> tuple[int, tuple[int, ...], str] | None:
-    """Extract a period with its ISO, Chinese, or English source tag.
-
-    Preserve ISO > Chinese > English precedence. Monthly drift checks use ISO dates
-    from rewritten queries without changing existing localized parsing.
-    """
-    if not s:
-        return None
-    for src, finder in (("iso", _period_from_iso), ("cn", _period_from_cn), ("en", _period_from_en)):
-        hit = finder(s)
-        if hit is not None:
-            return (hit[0], hit[1], src)
-    return None
-
-
-def _extract_period(s: str) -> tuple[int, tuple[int, ...]] | None:
-    """从一段文本里抠出 (年, 月份元组)。月份为空 = 只认出年份，没点到具体月。
-
-    认三族写法，**请求原文和 datarc 落盘文件名走的是同一个函数**（对称性见模块顶部）：
-      - 中文：`2026年` / `2026年11月` / `2026年1-8月` / `2026年1月至2026年8月`
-              / `2026年Q1` / `2026年第一季度` / `2026年上半年` / `2026年前三季度`
-      - ISO（datarc 改写后自己写的）：`2025-11-01_至_30` / `2025-09-01_至_12-31`
-      - 英文：`November 2026` / `2026 Jan-Jul` / `Jan-Dec 2026` / `revenue for 2026`
-    认不出返回 None（调用方 fail-open）。
-    """
-    hit = _extract_period_tagged(s)
-    return (hit[0], hit[1]) if hit else None
-
-
-def _unfinished_period_note(query_text: str) -> str | None:
-    """③ 未完结当期检测：请求区间含**今天所在的那个月** → 警告。
-
-    与 `_month_coverage_note` 不是一回事：那条管「请求 12 个月只回了 3 个季度」——**月份缺失**；
-    这条管「9 个月一个不少，但最后那个月只过了 10 天」——**月内不完整**。前者按月份集合比对，
-    天然看不见后者。
-
-    取证（09-10 116 dogfood，`s_ff7b38fe79ca`）：问「今年各品类表现」，取 1-9 月而当天是 9 月 10 号。
-    产品把半个月的 9 月与完整月份直接比，写出「9月环比骤降 60%-76%、季节性收缩显著」，做成 KPI 卡，
-    并据此给了**采购建议**。09-19 复跑同场景量出量级：含半个月 9 月时全年同比 -29.7%「系统性下滑」，
-    排除后 +0.08% —— 半个月把一个基本持平的年份显示成崩塌，差约 30pp。
-
-    ⚠ 判据只用**我们自己发出去的问句** + 模型时钟的今天（model_clock），不解析 datarc 回的
-    `message_json.date_filters`：那些值是随成员账户语言变的展示串，datarc 明写
-    「不应依赖数组元素内部的文本格式进行查询」。等它给出机器可读的起止日，换掉这里的输入源即可，
-    判定逻辑不动。
-
-    fail-open：问句里没点出年月（`_extract_period` 返 None）就不报——宁可少报，不猜。
-    """
-    want = _extract_period(query_text or "")
-    if want is None:
-        return None
-    year, months = want
-    today = model_today()
-    if year != today.year:
-        return None  # Past years are completed; future years are outside this criterion.
-    # Recognized year without month (YTD notations like 2026年 / 今年) ⇒ interval extends through today, necessarily including this month.
-    if months and today.month not in months:
-        return None
-    return (
-        f"⚠ 请求区间含**尚未结束**的 {year}年{today.month}月（今天 {today.isoformat()}）："
-        f"该月只有部分天数的数据。与完整月份做环比/同比会系统性偏低，"
-        f"把它当成「下滑」是取数口径的产物、不是业务现象。"
-        f"做月度趋势/环比时请排除 {today.month} 月，或在结论里明确标注它是不完整月份。"
-    )
-
-
-def _period_drift_note(query_text: str, csv_filename: str | None) -> str | None:
-    """② 跨年/换段检测：请求原文 vs datarc 实际落盘文件名。不一致 → 警告文案。
-
-    ⚠ 文案里**不要回显文件名**：`model_view._BACKEND_ONLY_KEYS` 专门把
-    `_debug_csv_filename` 从模型面摘掉（artifact-addressing 2×2 实测：同一个槽位多一个
-    "看起来也像路径的串"，正确率 100% → 85.9%）。经这条 hint 把同一个串送回去等于绕过
-    那道摘除，而年份/月份本身已经把话说清楚了，文件名对模型没有用。
-    """
-    want = _extract_period(query_text or "")
-    got = _extract_period_tagged(csv_filename or "")
-    if want is None or got is None:
-        return None  # fail-open
-    wy, wm = want
-    gy, gm, gsrc = got
-    if (wy, wm) == (gy, gm):
-        return None
-    if wy != gy:
-        return (
-            f"🚨 datarc 实际查询的是 **{gy} 年**，而你要的是 {wy} 年。这是**换了一年的数据**，不是你要的口径——不要直接使用；如实说明该时间段无数据。"
-        )
-    # Compare months only when filename is an explicit ISO range, the sole form where datarc actually changed dates.
-    # Truthful echoes parse the same text twice; differences can only arise from parser asymmetry
-    # (observed: datarc joins words, leaving no word boundary before jan in …jan-dec_2026).
-    # That is purely false detection; _month_coverage_note counts actual returned rows for more accurate monthly truncation.
-    if gsrc == "iso" and wm and gm and set(wm) != set(gm):
-        return f"⚠ datarc 实际查询的月份是 {sorted(set(gm))}，而你要的是 {sorted(set(wm))}。请按实际区间叙述，或说明缺失月份。"
-    return None
-
-
-def _month_coverage_note(query_text: str, rows: list[Any]) -> str | None:
-    """① 区间截断检测：按月（或按季）分组时，返回的月份少于请求区间 → 警告。
-
-    只在结果里真有时间分组列时生效（`每月` / `每季度`）；否则 fail-open。
-
-    ⚠ 按季分组时一个季度算作它的三个月：好处是「整季缺失」抓得到（实测
-    `2026年1-12月 … 每季度` 只返 Q1/Q2/Q3），代价是**季内缺月看不见**
-    （Q3 实际只有 7、8 两个月的数，这里仍会把 9 月算成已覆盖）。
-    比旧版「`每季度` 这列压根不看」严格更好，但别当成月级完整性证明。
-
-    性能：`rows` 是**全量**（116 上单条查询实测最大 92 MB CSV）。所以先从首行 keys 里筛出
-    候选列、再逐行只取那几列，并且 `seen` 一凑齐就早停 —— 旧版逐行扫每个 key，
-    400k×20 列在 116 容器上实测 0.86 s，而这段是**同步跑在事件循环上**的。
-    """
-    want = _extract_period(query_text or "")
-    if want is None or len(want[1]) <= 1:
-        return None  # No interval (or one month only) ⇒ cannot compare.
-    year, months = want
-    first = next((r for r in rows or [] if isinstance(r, dict)), None)
-    if first is None:
-        return None
-    period_cols = [k for k in first if _PERIOD_COL_HINT_RE.search(str(k))]
-    if not period_cols:
-        return None
-    want_set = set(months)
-    seen: set[int] = set()
-    # One column may contain millions of rows but only a dozen month labels; memoize values so regexes run only those few times.
-    # Cap at 512 against pathological columns (unique values per row do not form time-grouping columns).
-    memo: dict[str, tuple[int, tuple[int, ...]] | None] = {}
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        grew = False
-        for k in period_cols:
-            v = r.get(k)
-            if not isinstance(v, str):
-                continue
-            if v in memo:
-                got = memo[v]
-            else:
-                got = _extract_period(v)
-                if len(memo) < 512:
-                    memo[v] = got
-            if got and got[0] == year and not seen.issuperset(got[1]):
-                seen.update(got[1])
-                grew = True
-        if grew and seen >= want_set:
-            return None  # Stop early once coverage is complete; further scanning cannot change the conclusion.
-    if not seen:
-        return None
-    missing = sorted(want_set - seen)
-    return (
-        f"⚠ 你要的是 {year}年{months[0]}-{months[-1]}月，但只返回了 {len(seen)} 个月"
-        f"（缺 {missing}）。datarc 会按**有数据的月份**静默截断——"
-        "不要把它当成完整区间做汇总或达成率计算。"
-    )
-
-
-#: Target/quota measure terms: a match denotes a planned value for the entire period, not actual-to-date.
-#: Deliberately narrow: 指标 also generically means metric in Chinese, but requires a queried period, no time columns in results,
-#: and an unfinished window before warning. Combined false-positive cost is one extra advisory.
-_TARGET_MEASURE_RE = re.compile(r"指标|目标|target|budget|quota", re.IGNORECASE)
-
-
-def _uncomparable_target_note(
-    query_text: str,
-    cols: list[Any],
-    today: dt.date | None = None,
-) -> str | None:
-    """Flag target windows that cannot be compared with actual-to-date data.
-
-    Without a time column, a future or year-only target window may be incomparable.
-    This complements requested/executed drift and returned-month coverage checks.
-    Use the query, result names, and clock; leave unrecognized periods, missing
-    targets, and results with time columns to their existing handling.
-    """
-    if not _TARGET_MEASURE_RE.search(query_text or ""):
-        return None
-    # A time-grouping result column lets the model trim to completed months; outside this criterion.
-    if any(_PERIOD_COL_HINT_RE.search(str(c)) for c in cols or ()):
-        return None
-    want = _extract_period(query_text or "")
-    if want is None:
-        return None  # fail-open
-    year, months = want
-    end_month = max(months) if months else 12  # Year only ⇒ entire year.
-    now = today or model_today()
-    if (year, end_month) < (now.year, now.month):
-        return None  # Window closes before the last completed month ⇒ comparable.
-    ly, lm = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
-    # Keep advice to the same question: one month for a monthly request, a range only for a range request.
-    suggestion = f"{ly}年{lm}月" if len(months) == 1 else f"{ly}年1-{lm}月"
-    return (
-        f"⚠ 这条取的是**目标/指标类**度量，窗口覆盖到 {year}年{end_month}月，"
-        f"而今天是 {now.year}年{now.month}月{now.day}日 —— 这一段还没走完，"
-        "而实际发生数只到今天。**这一列不能直接和实际值相减**（算出来的缺口会被整段"
-        "目标撑大，各分项加起来会超过总数）。\n"
-        f"要算达成率/缺口，二选一：① 把窗口改成上一个完整月（{suggestion}）；"
-        "② 改成带 `每月` 的查询，自己裁到完整月再汇总。"
-    )
 
 
 def _column_units(ctx: Any, cols: list[Any]) -> dict[str, str]:
@@ -1289,8 +959,25 @@ class ToolExecutionContext:
     # Server-owned worker fence for shared pause admission.
     execution_generation: int = 1
     execution_owner_id: str | None = field(default=None, repr=False)
+    terminal_execution_context: ExecutionGenerationContext | None = field(default=None, repr=False)
+    context_source_observations: ContextSourceObservations | None = field(default=None, repr=False)
     # Shared with per-call copies; private retained-loop material grants no Tool access.
     ordinary_lead_state: Any = field(default=None, repr=False)
+    datarc_switch_resolution: DatarcSwitchResolution | None = field(default=None, repr=False)
+    datarc_helper_switch_resolution: DatarcHelperSwitchResolution | None = field(default=None, repr=False)
+    # Admission policy only; this never grants Tools or source access.
+    knowledge_user_request: bool = False
+    knowledge_management_access: Any = None
+    # Bound at the original Turn boundary; copied Agents cannot supply authority.
+    knowledge_intent_resolver: Any = field(default=None, repr=False)
+    knowledge_direct_use: bool = False
+    knowledge_scope: Any = None
+    knowledge_read_prepared: bool = False
+    knowledge_source_generations: dict[str, Any] = field(default_factory=dict)
+    knowledge_pending_citations: list[tuple[Any, str, str]] = field(default_factory=list)
+    knowledge_readable_file_ids: tuple[str, ...] | None = None
+    knowledge_source_uses: dict[str, Any] = field(default_factory=dict)
+    knowledge_source_ancestors: tuple[dict[str, Any], ...] = ()
     ordinary_call_identity: tuple[str, str] | None = field(default=None, repr=False)
     # Server-owned collaboration adapter and exact retained Tool identity.
     # A copied context does not admit a participant or grant source access.
@@ -1339,8 +1026,9 @@ class ToolExecutionContext:
     # Capability Center disabling (tech design §8.3): team/user disable settings read once at turn start.
     # None = no disable state injected; no run-time removal.
     resource_disable_state: Any | None = None
-    # Team agent run limits for this turn (FEATURE_AGENT_RUN_LIMITS); None when the feature is off.
+    # Team run-limit snapshot; None only outside an admitted turn.
     agent_run_limits: Any | None = None
+    agent_runtime_budget: Any | None = None
     # Server-resolved Team sandbox/HTML policy shared by the active turn.
     execution_limits: Any | None = None
     # Skill catalog index (bowhead_skill.SkillCatalog): refresh() after skill_save_generated saves
@@ -1358,8 +1046,10 @@ class ToolExecutionContext:
     reference_helper_skill_scope: Any | None = field(default=None, repr=False)
     reference_mcp_read_receipts: list[dict[str, str]] | None = field(default=None, repr=False)
 
-    # Bound by the active Lead runner; never supplied by tool arguments.
+    # Bound by the active exact Agent runner; never supplied by tool arguments.
     document_admission_binding: Any | None = field(default=None, repr=False)
+    document_caller_execution_id: str | None = field(default=None, repr=False)
+    document_admission_guard: Any | None = field(default=None, repr=False)
     document_turn_state: Any | None = field(default=None, repr=False)
     # Server-admitted new-presentation inputs; shared by per-call copies only.
     deck_render_binding: Any | None = field(default=None, repr=False)
@@ -1374,11 +1064,17 @@ class ToolExecutionContext:
     # CanvasStore + session_id: add_chart writes sections; when None, the handler
     # returns an error indicating gateway has not integrated it.
     canvas_store: Any | None = None
+    chart_authoring_projection: Any | None = field(default=None, repr=False)
     # ScheduledJobStore: used by the scheduled_job_create tool (flag-gated). None = gateway has not integrated it.
     scheduled_store: Any | None = None
     # SessionStore: subagent previous-work memo (peer_prior_run) reads the previous spawn with the same session/profile; None = memo absent.
     session_store: Any | None = None
     session_id: str = ""
+    # Set only by the actual user-entry runner dispatch; helper runs clear it.
+    artifact_presentation_entry: bool = False
+    artifact_presentation_call: tuple[str, str] | None = field(default=None, repr=False)
+    # Historical pointers only; domain readers still enforce current authority.
+    coach_operation_history: CoachOperationHistory | None = field(default=None, repr=False)
     # Terminal approval provider fence. Write-capable handlers must forward
     # this key to providers that support idempotency; None is legacy/read-only.
     effect_idempotency_key: str | None = None
@@ -1558,8 +1254,14 @@ class ToolExecutionContext:
     # + identity + session-level preference writes + audit (no new gateway dependency in core). None = this channel
     # does not support switching (scheduled/IM, etc.); handler rejects it structurally.
     datarc_context_switcher: Any | None = field(default=None, repr=False, compare=False)
+    datarc_binding: DatarcConnectionBinding | None = field(default=None, repr=False, compare=False)
+    datarc_run_state: DatarcRunState | None = field(default=None, repr=False, compare=False)
+    datarc_execution_scope: DatarcExecutionScope | None = field(default=None, repr=False, compare=False)
+    datarc_batch_refusal: dict | None = field(default=None, repr=False, compare=False)
+    datarc_source_evidence: dict | None = field(default=None, repr=False, compare=False)
     # Batch 2/c6: same-turn idempotency for ambiguous-switch clarification (prevent injection-driven card spam, review P2).
     _switch_clar_emitted: bool = field(default=False, repr=False, compare=False)
+    _switch_streak_box: dict[str, int] = field(default_factory=lambda: {"n": 0}, repr=False, compare=False)
     # ξ B2: **mutable container** for skill_read per-turn cache (read/written by the skill_bridge wrapper).
     #
     # ★★ Must be a dataclass field **present at construction**, not lazy setattr in the wrapper:
@@ -1601,6 +1303,19 @@ class ToolExecutionContext:
             session_id=self.session_id,
         )
 
+    def __post_init__(self) -> None:
+        if self.datarc_source_evidence is not None:
+            from bowhead_core.datarc_selection import validate_datarc_source_evidence
+
+            validate_datarc_source_evidence(
+                self.datarc_source_evidence,
+                binding=self.datarc_binding,
+                team_id=self.team_id or "",
+                user_id=self.user_id,
+                datarc_workspace_id=self.active_datarc_project,
+                member_uid=self.member_uid,
+            )
+
     def resolve_datarc_project(self) -> str:
         """workspace-datarc-decouple (R1.2 + S1): the datarc project id for THIS turn's BI
         calls. Prefers the runtime-selected/seeded ``active_datarc_project``. Single chokepoint
@@ -1614,6 +1329,8 @@ class ToolExecutionContext:
         pre-canonical escape hatch (a legacy NUMERIC workspace_id == its own datarc workspace)
         was retired after the 2026-07-07 prod scan (116) found zero non-``ws_*`` workspace ids
         in any table; a non-canonical id reaching here is a caller bug and is logged."""
+        if self.datarc_run_state is not None:
+            return accepted_datarc_selection(self).datarc_workspace_id or ""
         if self.active_datarc_project:
             return self.active_datarc_project
         if self.workspace_id and not self.workspace_id.startswith("ws_"):
@@ -2161,8 +1878,10 @@ class ToolRegistry:
         Sprint omicron Phase C2: filter on visible_to_llm field — hidden tools
         (deprecated aliases) excluded even if in whitelist.
         """
+        from bowhead_core.kb.management_tools import available
+
         names = whitelist or list(self._specs)
-        return [self._specs[n].schema for n in names if n in self._specs and self._specs[n].visible_to_llm]
+        return [self._specs[n].schema for n in names if n in self._specs and self._specs[n].visible_to_llm and available(n)]
 
     async def admit(
         self,
@@ -2382,7 +2101,11 @@ class ToolRegistry:
         t0 = time.perf_counter()
         handler_completed = False
         try:
+            from bowhead_core.knowledge_source_runtime import finish_source_read, prepare_source_read
+
+            handler_ctx = await prepare_source_read(handler_ctx, name)
             result = await spec.handler(arguments, handler_ctx)
+            result = await finish_source_read(handler_ctx, name, result)
             handler_completed = True
             durable_classified = tool_attempt is not None and isinstance(
                 result,
@@ -2512,17 +2235,23 @@ def build_default_registry() -> ToolRegistry:
     from bowhead_core.attachment_read import register_attachment_read
 
     register_attachment_read(reg)
+    from bowhead_core.kb.management_tools import register_management_tools
+
+    register_management_tools(reg)
+    from bowhead_core.artifact_presentation import register_artifact_presentation
+
+    register_artifact_presentation(reg)
 
     # Identity fields (workspace_id / member_uid) always come from ctx, never the LLM;
     # even if LLM args contain them, ignore them to avoid hallucinated arguments causing 400s
     def _ws(ctx: ToolExecutionContext) -> str:
-        # workspace-datarc-decouple (R1.2): resolve via the single chokepoint — the
-        # turn's active/seeded datarc project, else fall back to workspace_id (==
-        # pre-decouple behavior). Still never from LLM args (ignored on args route).
+        from bowhead_core.datarc_selection import ensure_datarc_run
+
+        ensure_datarc_run(ctx)
         return ctx.resolve_datarc_project()
 
     def _member(ctx: ToolExecutionContext) -> str:
-        return ctx.member_uid
+        return accepted_datarc_selection(ctx).member_uid if ctx.datarc_run_state is not None else ctx.member_uid
 
     # ─── bi_list_measures ────────────────────────────────────
     async def _list_measures(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
@@ -2847,27 +2576,6 @@ def build_default_registry() -> ToolRegistry:
         cols = list(result.columns)
         preflight_notes: list[str] = []
 
-        # datarc period drift: it silently replaces the requested period without error (see evidence in
-        # `_period_drift_note` at module top). Both criteria fail open: no report if year/month cannot be recognized.
-        # ⚠ Must check here: `_debug_csv_filename` (the only field carrying the **actual executed period**)
-        # reaches only the backend; `model_view` strips it from the model view and the batch wrapper whitelist does not forward it.
-        for _drift in (
-            _period_drift_note(text, result.csv_filename),
-            _month_coverage_note(text, all_rows),
-            _unfinished_period_note(text),
-            _uncomparable_target_note(text, cols),
-        ):
-            if _drift:
-                preflight_notes.append(_drift)
-
-        # datarc does not truncate "前 N"; tell the LLM it was handled locally
-        low = text.lower()
-        has_topn = any(s in text for s in ("前10", "前20", "前5", "前3", "前50", "前100")) or any(
-            s in low for s in ("top10", "top 10", "top5", "top 5", "top20")
-        )
-        if has_topn and limit is None and len(all_rows) > 10:
-            preflight_notes.append(f"datarc 对 'top N / 前 N' 不截断，已返全量 {len(all_rows)} 行；如需 top N 自行排序切片或传 limit 参数")
-
         # Full data = rows after dropping repeated datarc headers; artifact persistence, row_count and model-visible rows share this source.
         full_rows = _drop_repeated_csv_header_rows(list(all_rows), list(result.columns))
         rows = list(full_rows)
@@ -2900,6 +2608,7 @@ def build_default_registry() -> ToolRegistry:
         truncated_for_llm = len(rows_for_llm) < full_count
 
         out: dict[str, Any] = {
+            "query_text": text,
             "columns": cols,
             "rows": rows_for_llm,
             "row_count": full_count,
@@ -2967,49 +2676,22 @@ def build_default_registry() -> ToolRegistry:
             preflight_notes.append("⚠ 本次数据不完整：" + "；".join(_partial_parts) + "。结论里要说明这一点，或把问题拆成多条 query 分别取。")
             out["_partial_data"] = True
         if truncated_for_llm:
-            from bowhead_core.tool_result_budget import rows_truncation_note
-
-            preflight_notes.append(rows_truncation_note(len(rows_for_llm), full_count))
+            preflight_notes.append(
+                "Only a preview of the returned rows is shown. `rows_shown` is the displayed count; "
+                "`row_count` counts all returned rows, not source-wide completeness. "
+                "Use the artifact to read the remaining returned rows when available."
+            )
             out["_rows_truncated"] = True
             out["_rows_inline_count"] = len(rows_for_llm)
             out["_rows_full_count"] = full_count
 
-        # ⭐ M157 run-2 lesson: multidimensional + multi-filter NL queries sometimes fail to parse in datarc NL2SQL,
-        # returning empty without error while consuming 60–130s network + DB time. Pattern:
-        #   - columns lists ≥5 dimensions
-        #   - text contains multiple filter words (... 且 ... / 中 / 为 X)
-        #   - total_rows == 0, download_ms > 60_000
-        # On a match, hint the LLM to fetch separately with single filters + join locally, rather than stack complex NL.
-        _MULTI_FILTER_MARKERS = ("且", " 中 ", " 为 ", " in ", " IN ")
-        n_dim_cols = len(keep_cols) if keep_cols else len(cols)
-        download_ms = int(getattr(result, "download_ms", 0) or 0)
-        n_filter_markers = sum(text.count(m) for m in _MULTI_FILTER_MARKERS)
-        if result.total_rows == 0 and len(rows) == 0 and n_dim_cols >= 5 and n_filter_markers >= 2 and download_ms > 60_000:
-            try:
-                from bowhead_core import metrics as _m
-
-                _m.inc(
-                    "bowhead_bi_fetch_multidim_empty_total",
-                    help="fetch_rows 多 dim+多 filter 但返 0 行 + 慢 (NL2SQL 疑似解析失败).",
-                )
-            except Exception:  # noqa: S110
-                pass
-            preflight_notes.append(
-                f"⚠ multi-dim+multi-filter 返 0 行 (cols={n_dim_cols}, "
-                f"filter_markers={n_filter_markers}, ms={download_ms}). "
-                "datarc NL2SQL 对复合 filter 解析不稳. **建议**: 拆成单 filter "
-                "多次 fetch + python_sandbox 本地 join, 不要继续堆复杂 NL."
-            )
-
-        # Empty fast path: datarc succeeds but returns 0 rows. Say so plainly; the agent decides what to do next.
-        # No in-tool term judgment: a word that may not match the data's naming is the agent's call to check
-        # with bi_concept_resolve (2026-10-17 user decision: tools do not call the model).
         if result.total_rows == 0 and len(rows) == 0:
             out["_no_data"] = True
             out["_no_data_hint"] = (
-                "datarc 查询成功但返回 0 行 —— 该维度/指标/时间范围确实没有匹配数据。"
-                "不要重发同样的 query;换方法(换时间段、去掉某个 filter、或直接报告无数据)。"
-                "如果怀疑是某个词和数据里的叫法对不上(看 `_parse`),可以用 bi_concept_resolve 核对。"
+                "Datarc returned 0 rows for this query. This response alone does not establish "
+                "whether the requested source data exists. Review the parser output and the "
+                "engine-reported query before deciding whether to rephrase or report an empty result. "
+                "Use bi_concept_resolve if a term needs clarification."
             )
 
         _pv = args.get("_stripped_product_vocab")
@@ -3135,6 +2817,7 @@ def build_default_registry() -> ToolRegistry:
             args.get("columns"),
             inline_max_rows=args.get("inline_max_rows"),
             mode=args.get("mode"),
+            source_scope=accepted_datarc_selection(ctx).source_key(team_id=ctx.team_id or ""),
             datarc_workspace=_ws(ctx),  # Batch 2/c6: after switching, do not use the old context's cache
         )
         cached = _bi_cache_get(ctx.turn_id, cache_key)
@@ -3166,6 +2849,7 @@ def build_default_registry() -> ToolRegistry:
             args.get("columns"),
             inline_max_rows=args.get("inline_max_rows"),
             mode=args.get("mode"),
+            source_scope=accepted_datarc_selection(ctx).source_key(team_id=ctx.team_id or ""),
             datarc_workspace=_ws(ctx),
         )
 
@@ -3173,7 +2857,8 @@ def build_default_registry() -> ToolRegistry:
         # Read BEFORE fetch; the actual fetch still runs (no block). Hint
         # attached to result so peer's next decision is informed.
         _sem_prefix = _semantic_prefix(text)
-        _sem_hint = _semantic_cache_lookup(ctx.turn_id, _sem_prefix)
+        _sem_scope = accepted_datarc_selection(ctx).source_key(team_id=ctx.team_id or "")
+        _sem_hint = _semantic_cache_lookup(ctx.turn_id, _sem_prefix, source_scope=_sem_scope)
 
         # bi-hitl-cleanup P13 (2026-05-21): cut transparency — run datarc /cut/
         # in parallel with fetch so peer sees how datarc parsed the NL text
@@ -3285,10 +2970,7 @@ def build_default_registry() -> ToolRegistry:
             # Step 2: deterministic naming, without relying on the model to inspect `_parse`. Skip failed retrievals: without data there is no filtering claim.
             if unknown_words and not _bi_result_is_error(result):
                 _notes = [unknown_words_note(unknown_words)]
-                # G §2.5: cross-check structured query specification for stronger evidence: datarc reports **no business filters at all**,
-                # allowing the fact that it did not filter by these words, rather than an inference. This decision belongs to tools, not prompts (user said
-                # it is a tool function); inspect only **key presence** (keys do not vary with account language), never parse values;
-                # state facts without conclusions. Text-only instances (current 116) retain the sentence above without asserting this fact.
+                # Report key presence without interpreting localized text or unknown-word semantics.
                 if engine_applied_no_filter(result.get("query_explain")):
                     _notes.append(unfiltered_fact_note(unknown_words))
                 _unknown_note = "\n".join(_notes)
@@ -3329,10 +3011,10 @@ def build_default_registry() -> ToolRegistry:
                     result["_cache_hint"] = {
                         "prior_artifact_id": _sem_hint.get("artifact_id"),
                         "prior_query": _sem_hint.get("query")[:120] if _sem_hint.get("query") else "",
+                        "match_kind": "same_source_text_prefix",
                         "suggestion": (
-                            "同 turn 已查过相同时间+地区+指标 prefix 数据. "
-                            "如果只是 Top-N / 维度分组 / 排序差异, "
-                            "考虑用 python_sandbox 处理 prior_artifact_id 而非 refetch BI."
+                            "A prior query shares this text prefix and accepted data source. "
+                            "Check both complete queries and their returned facts before deciding whether its artifact supports this task."
                         ),
                     }
                     try:
@@ -3354,6 +3036,7 @@ def build_default_registry() -> ToolRegistry:
                             "artifact_id": _aid,
                             "query": text,
                         },
+                        source_scope=_sem_scope,
                     )
             except Exception:  # noqa: S110
                 pass
@@ -3458,8 +3141,9 @@ def build_default_registry() -> ToolRegistry:
                     wrapped["_rows_truncated"] = True
         # Actual query specification reported by datarc: each batch subquery has its own; without forwarding it, batching returns the model
         # to guessing what it queried from row data. Not whitelisted = discarded (existing wrapper semantics).
-        if sub.get("query_explain"):
-            wrapped["query_explain"] = sub["query_explain"]
+        for key in ("query_explain", "query_explain_text", "columns", "_partial_data", "_rows_limited_by_query", "_withheld_fallback_measures"):
+            if key in sub:
+                wrapped[key] = sub[key]
         # Fast-path specific: surface metrics + url so LLM/frontend can render.
         if metrics_summary:
             wrapped["metrics"] = metrics_summary
@@ -3668,7 +3352,7 @@ def build_default_registry() -> ToolRegistry:
                     "`{tokens, unknown_words, half_match_values}`. "
                     # bi-answer-correctness A: description has an 80-Chinese-character cap (test_bi_query_lean_p2); handling rules live in
                     # compute.md and result `_preflight_hint` naming sentences; leave only a pointer here.
-                    "`unknown_words 不空` = 结果没按它筛选, 看 `_preflight_hint`. "
+                    "`unknown_words` lists words the parser did not recognize; inspect `_preflight_hint` and the engine-reported query. "
                     "`half_match_values 不空` = value 半精确, 先 `bi_concept_resolve` 看候选.\n\n"
                     "若 query 含模糊 token (店名/区域别名/derived metric), 先调 "
                     "`bi_concept_resolve` 看候选再决定本 tool 怎么发. 本 tool **不**做"
@@ -3801,14 +3485,20 @@ def build_default_registry() -> ToolRegistry:
                 "全部完成后切回原来的工作区。"
             )
         if ctx.role != "lead" and ctx.role is not None:
-            # Team Agents have no clarification_ask / tool_switch_context / spawn: the Lead hints above would
-            # point them at Tools they lack, so they get the list and a neutral routing note.
+            # Analyst profiles have different grants; never require Lead-only
+            # question, delegation or Plan Tools to use this read-only list.
             return {
                 "ok": True,
                 "total": len(names),
                 "current": current,
                 "workspaces": names,
-                "hint": ("这就是完整列表。默认在当前北极九章工作区查询；问题看起来属于另一个工作区时，在回答里告诉用户，由用户决定是否切换。"),
+                "hint": (
+                    "This is the complete workspace list. Normally use the selected workspace. "
+                    "If the user explicitly requested another source and tool_switch_context is available, "
+                    "call it separately before dependent reads. Remember a source only on an explicit request. "
+                    "A topic mismatch alone does not authorize switching; return the needed choice through "
+                    "your existing question handoff. Use only Tools actually available to you."
+                ),
             }
         return {
             "ok": True,
@@ -3867,6 +3557,8 @@ def build_default_registry() -> ToolRegistry:
         if binding is None:
             return {"ok": False, "error": "unsupported_tool", "tool": tool}
         query = str(args.get("name") or "").strip()
+        remember_raw = args.get("remember")
+        remember = remember_raw is True or (isinstance(remember_raw, str) and remember_raw.strip().lower() == "true")
         accessible, names = _connector_accessible_roster(ctx, binding)
         if not query:
             return {"ok": False, "error": "empty_name", "accessible": names}
@@ -3893,11 +3585,10 @@ def build_default_registry() -> ToolRegistry:
             return [w for w in accessible if query in str(w.get("name") or "")]
 
         chosen: dict | None = None
-        tier_hit = ""
         for tier in ("exact", "prefix"):
             hits = _match(tier)
             if len(hits) == 1:
-                chosen, tier_hit = hits[0], tier
+                chosen = hits[0]
                 break
             if len(hits) > 1:
                 break  # Ambiguity → clarification
@@ -3946,6 +3637,7 @@ def build_default_registry() -> ToolRegistry:
                     "prompt": f"「{query}」匹配到 {len(sub_hits)} 个工作区，请确认用哪个：",
                     "options": [{"value": str(w["id"]), "label": str(w.get("name") or w["id"])} for w in sub_hits],
                     "remember_option": True,
+                    "remember_default": remember,
                 },
                 "rows": [],
             }
@@ -3959,80 +3651,35 @@ def build_default_registry() -> ToolRegistry:
         # Review P1-a: registry has no schema validation; qwen models often send booleans as strings;
         # accept only True / "true" (case-insensitive); all others (including "false") are False, preventing
         # explicit user refusal to remember from being inverted into a permanent default by bool("false")=True.
-        _rem_raw = args.get("remember")
-        remember = _rem_raw is True or (isinstance(_rem_raw, str) and _rem_raw.strip().lower() == "true")
-        # ── Consecutive-switch circuit breaker (commit-point check, review r3#1/#2 refactor) ─
-        # Criterion: SWITCH_STREAK_PAUSE_AT-1 consecutive **committed** switches with no intervening
-        # tools (execute chokepoint resets the container for other tools). Commit-point placement prevents
-        # miss/did_you_mean/ambiguity clarification/idempotent confirmation cards from being preempted by this gate, and ensures hint
-        # claims of N consecutive switches are always true (N=actual commits). Check + reserve are synchronously atomic
-        # (no await between) ⇒ parallel gather blind-switch bursts (the motivating incident)
-        # deterministically commit the first PAUSE_AT-1 and pause the rest. In mixed batches, other-tool resets
-        # and switch reservations have uncertain gather ordering; best effort for that shape.
-        _streak_box = getattr(ctx, "_switch_streak_box", None)
-        if _streak_box is None:
-            _streak_box = {"n": 0}
-            object.__setattr__(ctx, "_switch_streak_box", _streak_box)
-        if _streak_box["n"] >= SWITCH_STREAK_PAUSE_AT - 1:
-            _switch_metric("streak_paused")
+        try:
+            result = await switch_datarc_selection(ctx, new_id, new_name, remember=remember, streak_pause_at=SWITCH_STREAK_PAUSE_AT)
+        except Exception as error:
+            logger.warning("tool_switch_context.prepare_failed user=%s error=%s", ctx.user_id, type(error).__name__)
+            code = (
+                str(error)
+                if str(error)
+                in {
+                    "datarc_connection_changed",
+                    "datarc_selection_conflict",
+                    "datarc_scope_missing",
+                    "datarc_workspace_unavailable",
+                    "datarc_identity_required",
+                }
+                else "member_resolve_failed"
+            )
             return {
                 "ok": False,
-                "error": "switch_streak_paused",
-                "error_kind": "switch_streak_paused",
-                # Structural evidence (subagent._is_non_failure_result checks it): the paused attempt is consecutive switch
-                # number committed-count+1; carry the actual value.
-                "switch_streak": _streak_box["n"] + 1,
+                "error": code,
+                "error_kind": code,
+                "persistence": {"status": "not_attempted", "scope": "default" if remember else "session", "reason": code},
                 "hint": (
-                    f"你已连续切换 {_streak_box['n']} 次而没有读取任何工作区——连环切换互相覆盖，没有意义。"
-                    f"巡检要切一个读一个：先用 {binding.inspect_tool} 盘点当前工作区，再切下一个；"
-                    "全部完成后切回最初的工作区。"
+                    "The Team connection changed. Start a new Turn to resolve its current connection."
+                    if code == "datarc_connection_changed"
+                    else "The target source could not be authorized. List available workspaces again; if the target is missing, ask its administrator to verify your access."
                 ),
             }
-        _streak_box["n"] += 1  # Reserve a slot; roll back on switcher failure, so failed switches do not consume inspection quota
-        try:
-            new_member, _persisted = await switcher(new_id, new_name, remember=remember)
-        except Exception as e:
-            _streak_box["n"] -= 1
-            logger.warning(
-                "tool_switch_context.commit_failed user=%s to=%s err=%s",
-                ctx.user_id,
-                new_id,
-                scrub(str(e)),
-            )
-            _switch_metric("failed")
-            return {"ok": False, "error": "member_resolve_failed", "hint": "身份解析失败，工作区未切换，请稍后再试。"}
-        object.__setattr__(ctx, binding.active_id_attr, new_id)
-        object.__setattr__(ctx, binding.active_name_attr, new_name)
-        # T2#9 deliberately does not parameterize ①: member_uid is the identity axis, returned by the datarc switcher closure
-        # contract `(id, name, *, remember) -> (member_uid, persisted)`. Abstracting identity
-        # belongs to T2#10 (calibrate against real instances); retain residual datarc semantics here.
-        object.__setattr__(ctx, "member_uid", new_member)
-        logger.info(
-            "tool_switch_context.switched user=%s turn=%s to=%s(%s) tier=%s",
-            ctx.user_id,
-            ctx.turn_id,
-            new_id,
-            new_name,
-            tier_hit,
-        )
-        _switch_metric("switched")
-        return {
-            "ok": True,
-            "switched": {"id": new_id, "name": new_name},
-            "effective": "immediate",
-            # Old wording points to "设置→工具→北极九章" (panel removed, batch 2 Changelog(5)); in-chat
-            # remember is the only entry for setting defaults. Wording follows _persisted truthfully (review P1-c: never claim
-            # "已设为默认" when persistence is skipped/fails); terminology uses full zh_context_noun (P0 gate).
-            "note": (
-                f"已设为你的默认{binding.zh_context_noun}（跨会话生效）。"
-                if remember and _persisted
-                else (
-                    "已切换（本会话生效），但默认保存失败——稍后可以再说一次「记住」。"
-                    if remember
-                    else f"本会话内生效；要长期使用这个{binding.zh_context_noun}，请说「记住」或「以后都用它」。"
-                )
-            ),
-        }
+        _switch_metric("switched" if result.get("ok") else "refused")
+        return result
 
     reg.register(
         ToolSpec(
@@ -4077,6 +3724,9 @@ def build_default_registry() -> ToolRegistry:
     # ─── kb_search (V7 KB sprint Day 16) ─────────────────────
     async def _kb_search(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         """KB 4-stage retrieval pipeline. ctx.kb_retriever None → soft empty (KB unconfigured)."""
+        from bowhead_core.knowledge_source_runtime import require_prepared_read
+
+        require_prepared_read(ctx)
         if ctx.kb_retriever is None:
             # KB runtime is built only from team model settings. Most common cause now is missing
             # _peer_ctx wire (Bug 3 fix at turn_runner.py kb_retriever= wire).
@@ -4114,17 +3764,28 @@ def build_default_registry() -> ToolRegistry:
                 "latency_ms": 0,
                 "hint": "No readable KB scopes are granted for this workspace/team.",
             }
+        if ctx.knowledge_scope is not None and ctx.knowledge_readable_file_ids == ():
+            return {
+                "chunks": [],
+                "total_candidates": 0,
+                "rerank_used": False,
+                "latency_ms": 0,
+                "hint": "No knowledge sources are permitted by this Agent's selection and your current access. Review the source selection or provide an authorized task attachment.",
+            }
         from bowhead_core.kb.generations import use_guard_enabled
         from bowhead_core.kb.retrieval_policy import DEFAULT_TOP_K, MAX_TOP_K
 
-        top_k = args.get("top_k", getattr(ctx.kb_retriever, "default_top_k", DEFAULT_TOP_K))
+        configured_top_k = ctx.knowledge_scope.top_k if ctx.knowledge_scope is not None else None
+        top_k = args.get("top_k", configured_top_k or getattr(ctx.kb_retriever, "default_top_k", DEFAULT_TOP_K))
         if type(top_k) is not int or not 1 <= top_k <= MAX_TOP_K:
             return {"ok": False, "error": f"top_k must be an integer from 1 to {MAX_TOP_K}"}
 
         async def authorize(file):
             return bool(ctx.kb_file_authorizer and await ctx.kb_file_authorizer(file, ctx.user_id, ctx.team_id, ctx.workspace_id))
 
-        guard_args = {"authorize_file": authorize} if use_guard_enabled() else {}
+        guard_args = {"authorize_file": authorize} if use_guard_enabled() or ctx.knowledge_scope is not None else {}
+        if ctx.knowledge_scope is not None:
+            guard_args.update(allowed_file_ids=ctx.knowledge_readable_file_ids, enforce_source_access=True)
         result = await ctx.kb_retriever.invoke(
             query=str(args.get("query", "")),
             scope_ctx=scope_ctx,
@@ -4196,11 +3857,12 @@ def build_default_registry() -> ToolRegistry:
             schema=ToolSchema(
                 name="kb_search",
                 description=(
-                    "Semantic search across ALL knowledge base content (chunks from PDFs, "
-                    "Excel/XLS, contracts, receipts, ledgers, reports, glossaries, SOPs — "
-                    "every uploaded document, fully indexed).\n\n"
-                    "Use this for ANY question about KB content: 'find/search/look for / "
-                    "is there / what does X document say about Y'.\n\n"
+                    "Semantic search across authorized indexed knowledge sources in the current "
+                    "execution context. An uploaded file is not automatically a knowledge source.\n\n"
+                    "Use this when the task needs evidence that available sources may contain, "
+                    "even if the user does not explicitly mention the knowledge base. Source navigation "
+                    "is incomplete and does not establish that a source is absent or that a fact is true. "
+                    "Follow explicitly requested sources and cite only actual authorized results.\n\n"
                     "Use kb_list_tables INSTEAD only when user explicitly asks "
                     "'what schemas/tables/structured data do I have' (metadata-only question).\n\n"
                     "Returns top-K chunks with chunk_id, content, file_name, page, section_title, "
@@ -4234,6 +3896,9 @@ def build_default_registry() -> ToolRegistry:
         when tables are empty / not matching — per Anthropic agent tools guidance,
         actionable hints in tool output > prompt rules.
         """
+        from bowhead_core.knowledge_source_runtime import require_prepared_read
+
+        require_prepared_read(ctx)
         del args  # workspace_id comes from ctx; reject LLM-supplied ws (prevent cross-ws leaks).
         store = ctx.kb_doc_type_store
         if store is None or not ctx.workspace_id:
@@ -4249,12 +3914,30 @@ def build_default_registry() -> ToolRegistry:
         # record_count (BC), and also expose kind to distinguish types.
         from bowhead_core.kb.doc_type_store import derive_doc_type_kind as _dt_kind
 
+        source_counts = {}
+        if ctx.knowledge_scope is not None:
+            eligible_tables = []
+            for table in items:
+                if getattr(table, "graduated_mode", None) is not None:
+                    continue
+                records = ctx.kb_extracted_rows_store if table.cardinality == "many" else ctx.kb_extracted_record_store
+                if records is None:
+                    continue
+                count = await records.count_for_doc_type(
+                    workspace_id=ctx.workspace_id,
+                    doc_type_id=table.doc_type_id,
+                    allowed_file_ids=ctx.knowledge_readable_file_ids,
+                )
+                if count:
+                    source_counts[table.doc_type_id] = count
+                    eligible_tables.append(table)
+            items = eligible_tables
         out_items = [
             {
                 "doc_type_id": d.doc_type_id,
                 "name": d.name,
                 "description": d.description,
-                "record_count": (d.row_count if d.cardinality == "many" else d.record_count),
+                "record_count": source_counts.get(d.doc_type_id, d.row_count if d.cardinality == "many" else d.record_count),
                 "kind": _dt_kind(d),
                 "fields": [{"name": f.name, "type": f.type, "description": f.description} for f in d.fields],
             }
@@ -4322,6 +4005,9 @@ def build_default_registry() -> ToolRegistry:
         - `mode` field: 'rows' | 'aggregate'
         - `aggregate_result` (only when aggregate kwarg passed)
         """
+        from bowhead_core.knowledge_source_runtime import require_prepared_read
+
+        require_prepared_read(ctx)
         rec_store = ctx.kb_extracted_record_store
         rows_store = ctx.kb_extracted_rows_store
         dt_store = ctx.kb_doc_type_store
@@ -4332,6 +4018,8 @@ def build_default_registry() -> ToolRegistry:
         if not doc_type_id:
             return {"records": [], "error": "doc_type_id required"}
 
+        source_args = {"allowed_file_ids": ctx.knowledge_readable_file_ids} if ctx.knowledge_scope is not None else {}
+        doc_type = None
         # Resolve cardinality (Sprint 25 dispatch)
         cardinality = "one"  # default
         if dt_store is not None:
@@ -4341,6 +4029,14 @@ def build_default_registry() -> ToolRegistry:
                     cardinality = doc_type.cardinality
             except Exception:  # noqa: S110
                 pass
+
+        if ctx.knowledge_scope is not None:
+            if doc_type is None or doc_type.workspace_id != ctx.workspace_id or getattr(doc_type, "graduated_mode", None) is not None:
+                return {
+                    "records": [],
+                    "error": "knowledge_source_lineage_unavailable",
+                    "hint": "This table has no supported original-file lineage. Use kb_search for the selected source documents.",
+                }
 
         # Sprint 25: cardinality=many → use kb_extracted_rows
         if cardinality == "many" and rows_store is not None:
@@ -4393,6 +4089,7 @@ def build_default_registry() -> ToolRegistry:
                         where=list(args.get("where") or []),
                         top_level_filters=args.get("top_level_filters") or None,
                         raw_compare=raw_compare,
+                        **source_args,
                     )
                 except ValueError as e:
                     return {"records": [], "error": f"invalid aggregate: {e}"}
@@ -4430,6 +4127,7 @@ def build_default_registry() -> ToolRegistry:
                             where=list(args.get("where") or []),
                             top_level_filters=args.get("top_level_filters") or None,
                             numeric=not raw_compare,
+                            **source_args,
                         )
                         out["coverage"] = coverage
                         if coverage["included"] < coverage["total"]:
@@ -4458,6 +4156,7 @@ def build_default_registry() -> ToolRegistry:
                     limit=int(args.get("limit", 50)),
                     offset=int(args.get("offset", 0)),
                     cast_numeric=list(args.get("cast_numeric") or []),
+                    **source_args,
                 )
             except ValueError as e:
                 return {"records": [], "error": f"invalid query: {e}"}
@@ -4505,7 +4204,10 @@ def build_default_registry() -> ToolRegistry:
                         else f"{doc_type_name}第{row.row_seq}行{first_field_summary}"
                     )
                     # artifact_id = row_id (full uuid). dedup via registry.
-                    registry.register(row.row_id, label=label, kind="kb_row")
+                    if ctx.knowledge_scope is not None:
+                        ctx.knowledge_pending_citations.append((registry, row.row_id, label))
+                    else:
+                        registry.register(row.row_id, label=label, kind="kb_row")
             except Exception as _exc:
                 logger.warning("kb_row citation registry failed: %s", _exc)
             return {
@@ -4530,6 +4232,7 @@ def build_default_registry() -> ToolRegistry:
                 sort_dir=str(args.get("sort_dir", "DESC")),
                 limit=int(args.get("limit", 50)),
                 cast_numeric=list(args.get("cast_numeric") or []),
+                **source_args,
             )
         except ValueError as e:
             return {"records": [], "error": f"invalid query: {e}"}
@@ -4657,6 +4360,9 @@ def build_default_registry() -> ToolRegistry:
     # ─── kb_get_record (kb-knowledge-tables sprint v1.0) ─────────
     async def _kb_get_record(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
         """单条 record 详情 (含 fields_json + citation snippets + verify_status)."""
+        from bowhead_core.knowledge_source_runtime import require_prepared_read
+
+        require_prepared_read(ctx)
         store = ctx.kb_extracted_record_store
         if store is None:
             return {"record": None, "note": "kb_extracted_record_store 未配置"}
@@ -4670,6 +4376,11 @@ def build_default_registry() -> ToolRegistry:
         if record is None or record.workspace_id != ctx.workspace_id:
             # Do not disclose whether record exists (defense-in-depth); consistently return not-found.
             return {"record": None, "note": "记录不存在或已删"}
+        if ctx.knowledge_scope is not None:
+            from bowhead_core.knowledge_source_runtime import readable_source
+
+            if not await readable_source(ctx, record.file_id):
+                return {"record": None, "note": "Record unavailable"}
         return {"record": record.to_dict()}
 
     reg.register(

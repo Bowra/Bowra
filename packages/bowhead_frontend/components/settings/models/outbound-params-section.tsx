@@ -10,6 +10,7 @@
  * Three collapsed-heading states (quiet / N configured / N automatically adapted) and four parameter rows follow the design.
  */
 
+import { ConfigurationFieldHelp } from "@/components/settings/configuration-field-help";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -41,6 +42,8 @@ export interface OutboundParamsSectionProps {
   index: number;
   /** Reuse the controls inside the single runtime-parameter disclosure. */
   embedded?: boolean;
+  guidancePath?: string;
+  temperatureMaximum?: number;
   toolApplicable?: boolean;
 }
 
@@ -56,7 +59,9 @@ export function OutboundParamsSection({
   disabled,
   index,
   embedded = false,
+  guidancePath = "team_model_config.providers.*.models.*.outbound_params",
   toolApplicable = true,
+  temperatureMaximum,
 }: OutboundParamsSectionProps) {
   const t = useTranslations("settings.models.outbound");
   const [disputeOpen, setDisputeOpen] = useState<OutboundParamKey | null>(null);
@@ -138,7 +143,7 @@ export function OutboundParamsSection({
               className={`mset-outbound__row${mode !== "follow" ? " is-set" : ""}${adaptation ? " is-adapted" : ""}`}
             >
               <div className="mset-outbound__name">
-                {t(`param_${key}`)}
+                {t(`param_${key}`)}<ConfigurationFieldHelp includeChildren field={`${guidancePath}.${key}`} childFacts={{ [`${guidancePath}.${key}.mode`]: { enum: outboundParamModes(key, protocol) }, ...(key === "temperature" && temperatureMaximum !== undefined ? { [`${guidancePath}.${key}.value`]: { maximum: temperatureMaximum } } : {}) }} label={t(`param_${key}`)} />
                 {adaptation ? (
                   <span className="mset-outbound__flag">
                     {t("adapted_chip")}

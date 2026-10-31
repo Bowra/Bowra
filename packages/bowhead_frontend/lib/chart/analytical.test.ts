@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defaultChartTheme } from "../chart-theme";
 import { evidencePlanForViewer } from "./presentation-plan";
-import { analyticalBinding, analyticalX, analyticalDateTicks, groupedEntries, intervalPosition, validAnalyticalViews } from "./analytical";
+import { analyticalBinding, analyticalValue, analyticalX, analyticalDateTicks, groupedEntries, intervalPosition, validAnalyticalViews } from "./analytical";
 import { buildChartJSConfig } from "./build-config";
 import { normalizeChartForRenderingV1 } from "./normalize-chart-for-rendering";
 import { applyChartEdit, validChartComposition } from "./composition";
@@ -20,6 +20,12 @@ export function analyticalFixture(name: keyof typeof fixtures) {
 }
 
 describe("native analytical figures", () => {
+  it("keeps source units in analytical observation details", () => {
+    const spec: ChartSpec = { kind: "table", title: "Amounts", row_count: 1,
+      columns: [{ key: "amount", header: "Amount", type: "numeric", unit: "亿元" }],
+      rows: [{ amount: 0.0009 }] };
+    expect(analyticalValue(spec, "amount", 0.0009, "en-US")).toContain("0.0009亿元");
+  });
   it("aligns daily and monthly ticks to the original calendar granularity", () => {
     expect(analyticalDateTicks([Date.UTC(2026, 9, 10, 12), Date.UTC(2026, 9, 13, 12)], 10)).toEqual([Date.UTC(2026, 9, 11), Date.UTC(2026, 9, 12), Date.UTC(2026, 9, 13)]);
     expect(analyticalDateTicks([Date.UTC(2026, 0, 15), Date.UTC(2026, 3, 15)], 7)).toEqual([Date.UTC(2026, 1, 1), Date.UTC(2026, 2, 1), Date.UTC(2026, 3, 1)]);

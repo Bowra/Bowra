@@ -28,7 +28,7 @@ async def pause_ready(db: aiosqlite.Connection, *, turn_id: str, clarification_i
         from bowhead_core.chat_reference_lead_continuation import pause_ready as lead_ready
         from bowhead_core.chat_reference_lead_postdispatch import pause_ready as post_ready
 
-        return await lead_ready(db, turn_id=turn_id, clarification_id=clarification_id) or await post_ready(
+        return await post_ready(db, turn_id=turn_id, clarification_id=clarification_id) or await lead_ready(
             db, turn_id=turn_id, clarification_id=clarification_id
         )
     from bowhead_core.chat_reference_bi_continuation import pause_ready as bi_ready
@@ -60,7 +60,8 @@ async def require_resume(db: aiosqlite.Connection, *, turn_id: str, generation: 
         from bowhead_core.chat_reference_lead_postdispatch import read_pause as post_read
         from bowhead_core.chat_reference_lead_postdispatch import require_resume as post_require
 
-        if await post_read(db, turn_id) is not None:
+        post = await post_read(db, turn_id)
+        if post is not None and generation > post["delegation_generation"]:
             return await post_require(db, turn_id=turn_id, generation=generation)
         return await lead_require(db, turn_id=turn_id, generation=generation)
     from bowhead_core.chat_reference_bi_continuation import require_resume as bi_require
@@ -74,7 +75,8 @@ async def release_resume(db: aiosqlite.Connection, *, turn_id: str, generation: 
         from bowhead_core.chat_reference_lead_postdispatch import read_pause as post_read
         from bowhead_core.chat_reference_lead_postdispatch import release_resume as post_release
 
-        if await post_read(db, turn_id) is not None:
+        post = await post_read(db, turn_id)
+        if post is not None and generation > post["delegation_generation"]:
             await post_release(db, turn_id=turn_id, generation=generation)
             return
         await lead_release(db, turn_id=turn_id, generation=generation)

@@ -1,4 +1,4 @@
-"""@Coach starts only under the lead-delegation.v1 contract."""
+"""Bound specialists start only under the lead-delegation.v1 contract."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from fastapi.testclient import TestClient
 pytestmark = pytest.mark.unit
 
 
-def _reject_coach(contract: str | None) -> HTTPException:
+def _reject_specialist(contract: str | None, profile: str = "agent-coach") -> HTTPException:
     with pytest.raises(HTTPException) as rejected:
-        require_supported_orchestration_contract(SimpleNamespace(profile_name="agent-coach", orchestration_contract=contract), team_id="team_a")
+        require_supported_orchestration_contract(SimpleNamespace(profile_name=profile, orchestration_contract=contract), team_id="team_a")
     return rejected.value
 
 
@@ -27,7 +27,7 @@ def test_coach_mentioned_with_other_content_says_what_to_remove(monkeypatch: pyt
     selected = _lead_delegation_writer_selected(SimpleNamespace(nodes=[]), entry_mode="ordinary", has_attachments=True, attachment_refs=None)
     assert selected is False
 
-    rejected = _reject_coach(None)
+    rejected = _reject_specialist(None)
     assert rejected.status_code == 409
     assert rejected.detail == {"error": {"code": "coach_mention_unsupported"}}
 
@@ -36,20 +36,23 @@ def test_coach_mention_on_a_deployment_without_lead_delegation_points_to_the_age
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_LEAD_DELEGATION", "0")
     assert _lead_delegation_writer_selected(SimpleNamespace(nodes=[]), entry_mode="ordinary") is False
 
-    rejected = _reject_coach(None)
+    rejected = _reject_specialist(None)
     assert rejected.status_code == 409
     assert rejected.detail == {"error": {"code": "coach_mention_unavailable"}}
 
 
 @pytest.mark.parametrize(
-    ("flag", "code", "expected"),
+    ("profile", "flag", "code", "expected"),
     [
-        ("1", "coach_mention_unsupported", "Mention Coach on its own"),
-        ("0", "coach_mention_unavailable", "ask Coach through the Agent page"),
+        ("agent-coach", "1", "coach_mention_unsupported", "Mention Coach on its own"),
+        ("agent-coach", "0", "coach_mention_unavailable", "ask Coach through the Agent page"),
+        ("configuration-agent", "1", "configuration_mention_unsupported", "Mention Configuration Agent on its own"),
+        ("configuration-agent", "0", "configuration_mention_unavailable", "ask for the settings change in ordinary chat"),
     ],
 )
-def test_coach_rejection_reaches_the_member_as_a_specific_localized_message(
+def test_specialist_rejection_reaches_the_member_as_a_specific_localized_message(
     monkeypatch: pytest.MonkeyPatch,
+    profile: str,
     flag: str,
     code: str,
     expected: str,
@@ -59,11 +62,11 @@ def test_coach_rejection_reaches_the_member_as_a_specific_localized_message(
     register_error_handlers(app)
     app.state.error_catalog = load_error_catalog(default_error_catalog_dir())
 
-    @app.get("/coach-mention")
+    @app.get("/specialist-mention")
     async def reject():
-        raise _reference_rejected_before_admission(_reject_coach(None))
+        raise _reference_rejected_before_admission(_reject_specialist(None, profile))
 
-    response = TestClient(app, cookies={"NEXT_LOCALE": "en-US"}).get("/coach-mention")
+    response = TestClient(app, cookies={"NEXT_LOCALE": "en-US"}).get("/specialist-mention")
     assert response.status_code == 409
     error = response.json()["detail"]["error"]
     assert error["code"] == code
@@ -74,7 +77,17 @@ def test_coach_rejection_reaches_the_member_as_a_specific_localized_message(
 
 @pytest.mark.parametrize(
     ("profile", "contract"),
-    [("agent-coach", "lead-delegation.v1"), ("compute", None), ("configuration-agent", None)],
+    [("agent-coach", "lead-delegation.v1"), ("compute", None), ("configuration-agent", "lead-delegation.v1")],
 )
 def test_other_starts_keep_their_contract(profile: str, contract: str | None) -> None:
     require_supported_orchestration_contract(SimpleNamespace(profile_name=profile, orchestration_contract=contract), team_id="team_a")
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_configuration_reference_requires_its_original_settings_binding(monkeypatch, enabled):
+    monkeypatch.setenv("FEATURE_CHAT_REFERENCE_LEAD_DELEGATION", "1" if enabled else "0")
+    with pytest.raises(HTTPException) as rejected:
+        require_supported_orchestration_contract(SimpleNamespace(profile_name="configuration-agent", orchestration_contract=None), team_id="team_a")
+    expected = "configuration_mention_unsupported" if enabled else "configuration_mention_unavailable"
+    assert rejected.value.status_code == 409
+    assert rejected.value.detail == {"error": {"code": expected}}

@@ -305,13 +305,69 @@ async def upload(
         mime = resolve_effective_upload_mime(file.content_type or "application/octet-stream", file.filename or "")
     except OfficePackageError as exc:
         raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, exc.code) from None
+    # Sprint ι (PRD §4.B.2 / Phase B P2 carry from ι-12 review):
+    # Source resolution = first valid candidate in [header, query] order;
+    # invalid candidates are skipped (not silently swallowed) so a malicious
+    # / typo header can't override a legitimate query value.
+    header_source = (request.headers.get("X-Bowhead-Upload-Source") or "").lower()
+    query_source = (source or "").lower()
+    candidates = [c for c in (header_source, query_source) if c]
+    effective_source = next(
+        (c for c in candidates if c in _ALLOWED_UPLOAD_SOURCES),
+        "upload",
+    )
+    # Log every rejected candidate to surface header / query mismatches.
+    for c in candidates:
+        if c not in _ALLOWED_UPLOAD_SOURCES:
+            log.warning(
+                "files.upload.unknown_source candidate=%s effective=%s",
+                c,
+                effective_source,
+            )
+
+    # TeX is admitted only as an authenticated run output, never by a caller's
+    # source label or by relaxing ordinary browser upload MIME rules.
+    tex_output = False
+    if (file.filename or "").lower().endswith(".tex"):
+        from bowhead_core.artifact_store import artifact_fetch_producer_output
+
+        authorization = request.headers.get("Authorization", "")
+        secret = getattr(request.app.state, "artifact_fetch_secret", "")
+        scope = artifact_fetch_producer_output(str(secret), authorization[7:]) if secret and authorization.startswith("Bearer ") else None
+        store = getattr(request.app.state, "session_store", None)
+        session = await store.get_session(session_id) if store is not None and session_id else None
+        turn = await store.get_turn(created_by_turn) if store is not None and created_by_turn else None
+        if (
+            artifact_fetch_user_id
+            and scope is not None
+            and session is not None
+            and turn is not None
+            and scope == {"session_id": session_id, "turn_id": created_by_turn, "workspace_id": session.workspace_id or ""}
+            and session.user_id == artifact_fetch_user_id
+            and turn.session_id == session_id
+            and turn.status == "running"
+            and effective_source in {"python_sandbox", "sandbox_output"}
+            and (file.content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
+            in {"application/x-tex", "text/x-tex", "application/octet-stream", "text/plain"}
+        ):
+            mime = "text/x-tex"
+            tex_output = True
+        else:
+            raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
     inspect_office = mime in OFFICE_MIMES.values()
-    if mime not in ALLOWED_MIME and not inspect_office:
+    if mime not in ALLOWED_MIME and not inspect_office and not tex_output:
         raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
     limit = MAX_OFFICE_BYTES if inspect_office else MAX_SIZE
     content = await file.read(limit + 1)
     if len(content) > limit:
         raise _file_error(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file_office_package_limit" if inspect_office else "file_too_large")
+    if tex_output:
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported") from None
+        if not text.strip() or "\x00" in text:
+            raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
     inspection_authorizer = await _require_document_inspection_upload(
         request,
         filename=file.filename or "",
@@ -339,26 +395,6 @@ async def upload(
         _actual = sniff_image_mime(content)
         if _actual != mime.lower():
             raise _file_error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "file_type_unsupported")
-
-    # Sprint ι (PRD §4.B.2 / Phase B P2 carry from ι-12 review):
-    # Source resolution = first valid candidate in [header, query] order;
-    # invalid candidates are skipped (not silently swallowed) so a malicious
-    # / typo header can't override a legitimate query value.
-    header_source = (request.headers.get("X-Bowhead-Upload-Source") or "").lower()
-    query_source = (source or "").lower()
-    candidates = [c for c in (header_source, query_source) if c]
-    effective_source = next(
-        (c for c in candidates if c in _ALLOWED_UPLOAD_SOURCES),
-        "upload",
-    )
-    # Log every rejected candidate to surface header / query mismatches.
-    for c in candidates:
-        if c not in _ALLOWED_UPLOAD_SOURCES:
-            log.warning(
-                "files.upload.unknown_source candidate=%s effective=%s",
-                c,
-                effective_source,
-            )
 
     # Sprint pptx-from-template M1 review (P1 IDOR): if a session_id is supplied,
     # the caller MUST own that session — otherwise any authenticated user could
@@ -488,7 +524,7 @@ async def upload(
     if (getattr(art, "kind", None) or "tool_data") in _classify_kinds and not defer_office_content(filename=art.filename, mime=art.mime):
         import asyncio as _aio
 
-        _bg = _aio.create_task(_classify_then_maybe_index(request.app, art))
+        _bg = _aio.create_task(_classify_uploaded_artifact(request.app, art))
         _bg_tasks = getattr(request.app.state, "_classify_bg_tasks", None)
         if _bg_tasks is None:
             _bg_tasks = set()
@@ -505,15 +541,8 @@ async def upload(
     )
 
 
-async def _classify_then_maybe_index(app, art) -> None:  # type: ignore[no-untyped-def]
-    """后台：先分类（category + retention_hint 同一次调用），再按 D7 决定是否自动索引。
-
-    **自动索引必须挂在分类完成之后**——`classify_artifact` 是异步的，上传响应
-    返回时它还没跑完，内联在路由里拿不到 `retention_hint`（PRD §4.4.1-B3）。
-
-    整段 fail-soft：分类或索引失败都不影响已经成功的上传，用户看到的最坏结果
-    是"这份文件没被自动记住"，而不是上传失败。
-    """
+async def _classify_uploaded_artifact(app, art) -> None:  # type: ignore[no-untyped-def]
+    """Classify uploaded files for display; classification grants no knowledge action."""
     # Upload is not a template/reference declaration. Defer both LLM
     # classification and automatic indexing; explicit reads/manual promotion
     # remain separate authorized operations.
@@ -554,79 +583,6 @@ async def _classify_then_maybe_index(app, art) -> None:  # type: ignore[no-untyp
     except Exception as e:  # noqa: BLE001
         log.warning("files.classify_failed aid=%s error=%s", art.id, e)
         return
-
-    files_store = getattr(app.state, "kb_files_store", None)
-    if files_store is None:
-        return
-    # Reread: classification just wrote retention_hint.
-    fresh = await store.get(art.id)
-    if fresh is None:
-        return
-
-    from bowhead_gateway.kb_promotion import (
-        PromotionSkipped,
-        promote_artifact_to_kb,
-        should_auto_index,
-    )
-
-    ok, reason = should_auto_index(fresh)
-    if not ok:
-        log.info("files.auto_index_skipped aid=%s reason=%s", art.id, reason)
-        return
-    worker, miss = await _auto_index_worker(app, team_id)
-    if worker is None:
-        log.info("files.auto_index_skipped aid=%s reason=%s", art.id, miss)
-        return
-    try:
-        file_id = await promote_artifact_to_kb(
-            artifact=fresh,
-            files_store=files_store,
-            scope="personal",
-            scope_id=fresh.created_by or "",
-            team_id=team_id or "",
-            user_id=fresh.created_by or "",
-            trigger="auto",
-            worker=worker,
-        )
-        log.info("files.auto_indexed aid=%s kb_file=%s", art.id, file_id)
-    except PromotionSkipped as e:
-        log.info("files.auto_index_skipped aid=%s reason=%s", art.id, e.reason)
-    except Exception as e:  # noqa: BLE001
-        log.warning("files.auto_index_failed aid=%s error=%s", art.id, e)
-
-
-async def _auto_index_worker(app, team_id: str | None) -> tuple[Any | None, str]:  # type: ignore[no-untyped-def]
-    """Resolve the uploader team's KB parse worker for automatic indexing.
-
-    Automatic indexing creates a personal KB file in the uploader's team and parses it
-    right away, like the manual "Add to knowledge base" action. Without a team, a KB
-    license or a configured KB model there is nothing to index into: skip quietly
-    instead of creating a row that no KB list shows and no worker parses.
-    """
-    if not team_id:
-        return None, "uploader_team_unknown"
-    from bowhead_gateway._entitlement_gate import feature_license_checker
-
-    try:
-        if not await feature_license_checker(app, "kb")(team_id):
-            return None, "kb_not_licensed"
-    except Exception:
-        log.warning("files.auto_index_license_check_failed team=%s", team_id, exc_info=True)
-        return None, "kb_license_unavailable"
-    registry = getattr(app.state, "team_kb_runtime_registry", None)
-    user_store = getattr(app.state, "user_store", None)
-    if registry is None or user_store is None:
-        return None, "kb_runtime_unavailable"
-    try:
-        cfg, version = await user_store.get_team_llm_config_with_version(team_id)
-        runtime = await registry.get(team_id, cfg, version)
-    except Exception:
-        log.warning("files.auto_index_runtime_failed team=%s", team_id, exc_info=True)
-        return None, "kb_runtime_unavailable"
-    worker = getattr(runtime, "worker", None) if runtime is not None else None
-    if worker is None:
-        return None, "kb_not_configured"
-    return worker, ""
 
 
 def _user_id(request: Request) -> str:

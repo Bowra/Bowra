@@ -144,7 +144,6 @@ type DraftState = {
   display_name: string;
   description: string;
   model: string;
-  max_iterations: string;
   primary_capability: string;
   prompt_append: string;
   skills: string[];
@@ -160,7 +159,6 @@ function draftFrom(item: BuiltinSubagent): DraftState {
     display_name: ov?.display_name ?? "",
     description: ov?.description ?? "",
     model: ov?.model ?? "",
-    max_iterations: ov?.max_iterations != null ? String(ov.max_iterations) : "",
     primary_capability: ov?.primary_capability ?? "",
     prompt_append: ov?.prompt_append ?? "",
     skills: ov?.skills ?? [],
@@ -180,7 +178,6 @@ function bodyFrom(item: BuiltinSubagent, patch: { enabled?: boolean } = {}) {
     display_name: allowed("display_name", ov?.display_name),
     description: allowed("description", ov?.description),
     model: allowed("model", ov?.model),
-    max_iterations: allowed("max_iterations", ov?.max_iterations),
     primary_capability: allowed("primary_capability", ov?.primary_capability),
     prompt_append: allowed("prompt_append", ov?.prompt_append),
     skills: allowed("skills", ov?.skills),
@@ -207,14 +204,10 @@ function ConfigDialog({
   const [catalogRetry, setCatalogRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [maxIterationsError, setMaxIterationsError] = useState<string | null>(null);
   const savingRef = useRef(false); // State disables button next render; same-tick double click bypasses if(busy).
-  const maxIterationsRef = useRef<HTMLInputElement>(null);
   const allows = (field: BuiltinOverrideField) => allowsOverride(item, field);
   const skillsAllowed = allows("skills");
-  const showExecution = allows("primary_capability") || allows("model") || allows("max_iterations");
-  // Teams may lower or raise the step limit up to the platform ceiling; older servers allowed lowering only.
-  const maxIterationsCeiling = item.defaults.max_iterations_ceiling ?? item.defaults.max_iterations;
+  const showExecution = allows("primary_capability") || allows("model");
   const showGuidance = skillsAllowed || allows("prompt_append");
 
   useEffect(() => {
@@ -244,21 +237,9 @@ function ConfigDialog({
 
   const save = async () => {
     if (savingRef.current) return;
-    const rawMaxIterations = draft.max_iterations.trim();
-    const maxIterations = rawMaxIterations ? Number(rawMaxIterations) : null;
-    if (
-      maxIterations !== null
-      && (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > maxIterationsCeiling)
-    ) {
-      setError(null);
-      setMaxIterationsError(t("error_max_iterations", { ceiling: maxIterationsCeiling }));
-      maxIterationsRef.current?.focus();
-      return;
-    }
     savingRef.current = true;
     setBusy(true);
     setError(null);
-    setMaxIterationsError(null);
     try {
       const next = await putBuiltinSubagentOverride(
         item.name,
@@ -267,7 +248,6 @@ function ConfigDialog({
           display_name: allows("display_name") ? draft.display_name.trim() || null : null,
           description: allows("description") ? draft.description.trim() || null : null,
           model: allows("model") ? draft.model || null : null,
-          max_iterations: allows("max_iterations") ? maxIterations : null,
           primary_capability: allows("primary_capability") ? draft.primary_capability || null : null,
           prompt_append: allows("prompt_append") ? draft.prompt_append.trim() || null : null,
           skills: skillsAllowed && draft.skills.length > 0 ? draft.skills : null,
@@ -277,12 +257,7 @@ function ConfigDialog({
       onSaved(next);
       onClose();
     } catch (e) {
-      if (typeof e === "object" && e !== null && "code" in e && e.code === "builtin_max_iterations_invalid") {
-        setMaxIterationsError(t("error_max_iterations", { ceiling: maxIterationsCeiling }));
-        maxIterationsRef.current?.focus();
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       savingRef.current = false;
       setBusy(false);
@@ -419,32 +394,7 @@ function ConfigDialog({
               </select>
             </Field>
             ) : null}
-            {allows("max_iterations") ? (
-            <Field
-              id="bsa-max-iterations"
-              label={t("field_max_iterations")}
-              hint={t("hint_max_iterations", { default: item.defaults.max_iterations, ceiling: maxIterationsCeiling })}
-              error={maxIterationsError}
-            >
-              <input
-                ref={maxIterationsRef}
-                id="bsa-max-iterations"
-                type="number"
-                min={1}
-                max={maxIterationsCeiling}
-                step={1}
-                value={draft.max_iterations}
-                placeholder={String(item.defaults.max_iterations)}
-                aria-invalid={Boolean(maxIterationsError)}
-                aria-describedby={fieldDescribedBy("bsa-max-iterations", { hint: true, error: Boolean(maxIterationsError) })}
-                onChange={(e) => {
-                  setMaxIterationsError(null);
-                  setDraft((d) => ({ ...d, max_iterations: e.target.value }));
-                }}
-                className="ui-input"
-              />
-            </Field>
-            ) : null}
+
           </div>
 
         </section>

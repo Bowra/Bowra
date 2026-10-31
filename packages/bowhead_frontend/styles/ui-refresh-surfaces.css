@@ -20,7 +20,7 @@
 
 /* ═════════════════════════════════════════════════════════════
  * 1. Dialogs and panels: solid surface, radius r4, overlay shadow, system font (decision 2; Component Spec dialogs / confirmations)
- * Families: agent marketplace .am-dialog / .am-fork-dialog / more filters .am-filter-sheet, result preview .artifact-viewer-modal-panel,
+ * Families: agent marketplace .am-dialog / .am-fork-dialog / more filters .am-filter-sheet,
  * chart inspection .rc-inspect-panel, model discovery .discovery-picker and verification .verification-selector,
  * knowledge-base upload .kb-upload, reference parameters .reference-parameter-panel, five credits dialogs, share dialog
  * and revoke-access confirmation,
@@ -31,7 +31,6 @@
     .am-dialog,
     .am-fork-dialog,
     .am-filter-sheet,
-    .artifact-viewer-modal-panel,
     .rc-inspect-panel,
     .discovery-picker,
     .verification-selector,
@@ -47,6 +46,15 @@
   border-radius: var(--r-4);
   background: var(--c-surface);
   box-shadow: var(--shadow-overlay);
+  color: var(--c-ink);
+  font-family: var(--font-control);
+}
+/* Full-view content fills the viewport rather than using a floating card. */
+:root:root .artifact-viewer-modal-panel {
+  border: 0;
+  border-radius: 0;
+  background: var(--c-surface);
+  box-shadow: none;
   color: var(--c-ink);
   font-family: var(--font-control);
 }

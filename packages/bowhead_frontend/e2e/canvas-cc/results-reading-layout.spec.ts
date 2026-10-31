@@ -21,6 +21,61 @@ async function openReport(page: Page) {
   await expect(page.locator(".canvas-report-article")).toBeAttached();
 }
 
+test("desktop report reading width expands prose and keeps a local reversible margin choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openReport(page);
+  await page.getByRole("button", { name: "放大报告（隐藏对话）", exact: true }).click();
+  const paragraph = page.locator('.canvas-report-article [data-section-kind="narrative"] p').first();
+  await expect(paragraph).toBeVisible();
+  const standard = (await paragraph.boundingBox())!.width;
+  expect(standard).toBeGreaterThan(700);
+  await page.getByRole("button", { name: "更多操作", exact: true }).first().click();
+  await page.getByRole("menuitem", { name: "缩小边距并加宽正文" }).click();
+  await expect(page.locator(".canvas-report-shell")).toHaveAttribute("data-reading-width", "wide");
+  expect((await paragraph.boundingBox())!.width).toBeGreaterThan(standard + 150);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+  await page.reload();
+  await expect(page.locator(".canvas-report-shell")).toHaveAttribute("data-reading-width", "wide");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("tab", { name: "成果", exact: true }).click();
+  await page.getByRole("button", { name: "华东区销售归因分析 可编辑报告" }).click();
+  await expect(paragraph).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+  expect((await paragraph.boundingBox())!.width).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.getByRole("button", { name: "更多操作", exact: true }).first().click();
+  await page.getByRole("menuitem", { name: "恢复默认边距和正文宽度" }).click();
+  await expect(page.locator(".canvas-report-shell")).toHaveAttribute("data-reading-width", "standard");
+});
+
+for (const width of [1280, 390]) {
+  test(`artifact full view fills the viewport and returns focus at ${width}px`, async ({ page }) => {
+    const height = 844;
+    await page.setViewportSize({ width, height });
+    await openReport(page);
+    await page.goto("/?session=s_e2e&result=art_delivery&mode=preview");
+    await expect(page.locator('iframe[title="executive-brief.html"]')).toBeVisible();
+    const trigger = page.getByRole("button", { name: "全屏查看", exact: true });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "executive-brief.html", exact: true });
+    await expect(dialog).toBeVisible();
+    const panel = dialog;
+    await expect.poll(() => panel.boundingBox()).toEqual({ x: 0, y: 0, width, height });
+    await expect(panel).toHaveCSS("border-radius", "0px");
+    await expect(panel).toHaveCSS("box-shadow", "none");
+    await expect(panel).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const frame = await dialog.locator("iframe").boundingBox();
+    expect(frame).not.toBeNull();
+    expect(frame!.height).toBeGreaterThan(height / 2);
+    expect(frame!.x + frame!.width).toBeLessThanOrEqual(width);
+    expect(frame!.y + frame!.height).toBeLessThanOrEqual(height);
+    await page.screenshot({ path: test.info().outputPath(`artifact-full-view-${width}.jpg`) });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+}
+
 test("retained reports do not add gutters to file or code viewers", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openReport(page);

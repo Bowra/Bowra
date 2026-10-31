@@ -4,7 +4,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { renderIntl } from "@/__tests__/intl-render";
 import { AgentCreationReceipt } from "./agent-creation-receipt";
 
-const SUMMARY = { resources: "1 个插件 · 2 个工具", iterations: 12, visibility: "creator_only" };
+const SUMMARY = { resources: "1 个插件 · 2 个工具", visibility: "creator_only" };
 
 function renderReceipt(props: Partial<Parameters<typeof AgentCreationReceipt>[0]> = {}, locale: "zh-CN" | "en-US" = "zh-CN") {
   const handlers = { onRetry: vi.fn(), onManage: vi.fn(), onUse: vi.fn(), onOpenEvaluate: vi.fn(), onOpenWho: vi.fn() };
@@ -38,12 +38,10 @@ describe("AgentCreationReceipt (Item 2: creating releases v1)", () => {
     expect(steps.textContent).not.toContain("开始使用");
   });
 
-  it("shows what the Agent can use by kind, and the work-turn limit", () => {
+  it("shows what the Agent can use by kind", () => {
     renderReceipt();
     expect(screen.getByText("能用什么")).toBeTruthy();
     expect(screen.getByText("1 个插件 · 2 个工具")).toBeTruthy();
-    expect(screen.getByText("最多工作轮次")).toBeTruthy();
-    expect(screen.getByText("12 轮")).toBeTruthy();
   });
 
   it("drops the sharing hint for an Agent created for selected people", () => {

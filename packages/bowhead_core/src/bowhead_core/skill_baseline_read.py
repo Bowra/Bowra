@@ -88,7 +88,10 @@ def read_baseline_package(package: PreparedSkillPackage, arguments: dict, *, inv
             scripts=scripts,
             script_execution=(
                 script_execution_mode(
-                    has_scripts=bool(scripts), builtin=package.resource.source_kind == "builtin", knowledge=metadata.get("kind") == "knowledge"
+                    name=package.name,
+                    has_scripts=bool(scripts),
+                    builtin=package.resource.source_kind == "builtin",
+                    knowledge=metadata.get("kind") == "knowledge",
                 )
                 if invoke_allowed
                 else "disabled"

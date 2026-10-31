@@ -12,6 +12,7 @@ environment connection is seeded at startup.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -220,6 +221,24 @@ class DatarcConnectionStore:
         if not row or not row["auth_ref"]:
             return None
         return decrypt_llm_config(row["auth_ref"]).get("auth_key")
+
+    async def resolve_active_binding(self, team_id: str) -> tuple[DatarcConnection, str, str] | None:
+        """Read active metadata and credentials together; no secret enters the DTO.
+
+        The randomized Fernet reference distinguishes credential rotations even
+        when the registry timestamp has not advanced within the same second.
+        Its digest identifies a revision; it is not an authorization token.
+        """
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM datarc_connection WHERE team_id=? AND status='active'", (team_id,)) as cursor:
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        reference = row["auth_ref"] or ""
+        auth_key = decrypt_llm_config(reference).get("auth_key") if reference else ""
+        revision = row["updated_at"] + ":" + hashlib.sha256(reference.encode()).hexdigest()
+        return _row_to_conn(row), auth_key or "", revision
 
     async def update_connection_auth(self, dc_id: str, team_id: str, *, auth_key: str) -> bool:
         auth_ref = _encrypt_auth_or_raise(auth_key) if auth_key else None

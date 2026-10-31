@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 from bowhead_core.agents.clarification_tool import (
     SENTINEL_CLARIFICATION_PENDING,
     _clarification_ask,
+    collect_clarification_sentinels,
     is_clarification_sentinel,
     make_clarification_sentinel,
 )
@@ -21,6 +23,20 @@ class _StubCtx:
 def test_sentinel_key_is_special() -> None:
     """Sentinel key starts with underscore (avoids collision with user data)."""
     assert SENTINEL_CLARIFICATION_PENDING == "_clarification_pending"
+
+
+def test_forwarded_picker_is_one_card_and_nested_model_question_is_not_admitted() -> None:
+    picker = {
+        "error_kind": "needs_clarification",
+        "clarification": {"kind": "tool_context_select", "options": [{"value": "1", "label": "Source A"}]},
+    }
+    child = SimpleNamespace(result=picker)
+    native_question = SimpleNamespace(result=make_clarification_sentinel(candidates=["A"], fallback_text="Choose", aborted_turn_id="t_x"))
+    forwarded = {**picker, "tokens_input": 17}
+    spawn = SimpleNamespace(result=forwarded, nested=[child, native_question])
+    assert collect_clarification_sentinels([spawn], nested_invocations=[child]) == [forwarded]
+    assert collect_clarification_sentinels([SimpleNamespace(result={}, nested=[child, native_question])]) == [picker]
+    assert collect_clarification_sentinels([native_question]) == [native_question.result]
 
 
 def test_make_sentinel_includes_required_fields() -> None:
@@ -351,16 +367,41 @@ def test_extract_tool_none_for_non_dict() -> None:
 
 
 @pytest.mark.asyncio
-async def test_option_limit_does_not_apply_to_free_text_questions() -> None:
-    ctx = _StubCtx(turn_id="t_free")
-    result = await _clarification_ask(
-        {
-            "questions": [
-                {"question": "金额是多少?", "options": ["1", "2", "3", "4", "5"], "type": "free_text"},
-                {"question": "看哪个区域?", "options": ["华东", "华南"], "type": "single_select"},
-            ]
-        },
-        ctx,
-    )
-    assert result.get("error_kind") != "schema_invalid"
+@pytest.mark.parametrize("options", [["Beijing", "Shanghai"], None, "unexpected", ["1", "2", "3", "4", "5"]])
+async def test_free_text_keeps_the_question_despite_stray_options(options) -> None:
+    store = _RecordingStore()
+    questions = [
+        {"question": "Which city?", "options": options, "type": "free_text"},
+        {"question": "Which sections?", "options": ["Forecast", "Travel"], "type": "multi_select"},
+    ]
+    result = await _clarification_ask({"questions": questions}, _StubCtxWithStore(clarification_store=store))
     assert is_clarification_sentinel(result)
+    assert result["questions"] == [{**questions[0], "options": []}, questions[1]]
+    assert len(store.put_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "questions,field",
+    [
+        ([], "questions"),
+        (None, "questions"),
+        ([None], "questions[0]"),
+        ([{"question": " ", "options": ["A", "B"]}], "questions[0].question"),
+        ([{"question": "City?", "options": [None]}], "questions[0].options"),
+        ([{"question": "City?", "options": [" "]}], "questions[0].options"),
+        ([{"question": "City?", "options": []}], "questions[0].options"),
+        ([{"question": str(i), "options": [], "type": "free_text"} for i in range(4)], "questions"),
+    ],
+)
+async def test_invalid_questions_never_fall_back_to_partial_or_legacy_cards(questions, field) -> None:
+    store = _RecordingStore()
+    result = await _clarification_ask(
+        {"questions": questions, "candidates": ["Legacy A", "Legacy B"], "fallback_text": "Fallback"},
+        _StubCtxWithStore(clarification_store=store),
+    )
+    assert result["error_kind"] == "schema_invalid"
+    assert result["ok"] is False
+    assert field in result["error_message"]
+    assert not is_clarification_sentinel(result)
+    assert store.put_calls == []

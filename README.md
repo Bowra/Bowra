@@ -31,9 +31,11 @@ This is a **source preview**. You can build and initialize the reviewed Communit
 
 Known production dependency advisories remain under review. This source preview does not establish deployment security readiness; follow the [security guidance](SECURITY.md) and review the dependency lock before deployment.
 
-## Source snapshot 1.6.7
+## Source snapshot 1.6.43
 
-This snapshot updates Team execution and knowledge-search limits, supported Configuration Agent review, Coach test suggestions, and report reading and AI rewrite reliability. It also updates frontend security dependencies and the application build to Node.js 24.22.1. Team configuration assistance and Agent evaluation retain their opt-in controls and review requirements. Existing installations must follow the [upgrade precautions](deploy/README.md#upgrade-an-existing-installation); sandbox images remain separately managed.
+This snapshot adds explicit knowledge ingestion and authorized source navigation, unified Agent run controls, field-specific configuration guidance, richer chart edits, automatic/manual context compaction and isolated offline HTML interaction. It improves Coach and clarification continuity, personal Skill revisions, source-unit readouts and export recovery. Existing Tiptap 3.32.0 security fixes remain included. Read the [Community release notes](docs/help/release-notes/releases/v1.6.43.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+
+The complete database migration chain is required. Sandbox source/versions retain the separately reviewed Community baseline; this update does not publish runtime images. Basic Bowra document Skills retain their existing limits; private PowerPoint template authoring is unavailable.
 
 ## Verified Intelligence
 

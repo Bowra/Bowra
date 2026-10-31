@@ -30,6 +30,29 @@ def question_hashes(questions: list, fallback: str | None) -> list[str]:
     return hashes
 
 
+def validate_answer_questions(answers: list[dict], context: dict) -> None:
+    """Match question identities once while retaining every multi-select answer."""
+    expected = context[CONTEXT_KEY]["question_hashes"]
+    questions = context.get(QUESTIONS_KEY) or []
+    declared = {question_hashes([question], None)[0]: question for question in questions}
+    grouped: dict[str, list[dict]] = {}
+    for answer in answers:
+        identity = question_hashes([answer], None)[0]
+        if identity not in expected:
+            raise ValueError("clarification_answer_changed")
+        grouped.setdefault(identity, []).append(answer)
+    if set(grouped) != set(expected):
+        raise ValueError("clarification_answer_changed")
+    for identity, group in grouped.items():
+        if len(group) > 1:
+            if declared.get(identity, {}).get("type") not in {"multi_select", "rank_priorities"}:
+                raise ValueError("clarification_answer_changed")
+            # Repeated selections and a skip mixed with answers are not additional choices.
+            values = [(answer.get("source"), answer.get("answer"), answer.get("option_index")) for answer in group]
+            if any(answer.get("source") == "skip" for answer in group) or len(set(values)) != len(values):
+                raise ValueError("clarification_answer_changed")
+
+
 def history_contexts(rows: list) -> list[dict]:
     """Reject mixed old/new cards; never guess a missing prior round."""
     contexts = []

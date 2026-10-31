@@ -244,6 +244,12 @@ describe("ResultsExplorer", () => {
     expect(original.onRetry).toHaveBeenCalledOnce();
   });
 
+  it("explains an unsupported delivery receipt without suggesting regeneration", () => {
+    renderIntl(<ResultsExplorer {...props({ items: [], loadedCount: 0, loading: false,
+      error: "results_artifact_contract_unsupported", errorDirection: "base" })} />);
+    expect(screen.getByText("这些文件的交付记录需要更新版本支持。请联系管理员更新 Bowhead，然后刷新结果。")).toBeInTheDocument();
+  });
+
   it("does not call an unfiltered locate failure a filter mismatch or offer clearing nonexistent filters", () => {
     const onRetry = vi.fn();
     renderIntl(<ResultsExplorer {...props({

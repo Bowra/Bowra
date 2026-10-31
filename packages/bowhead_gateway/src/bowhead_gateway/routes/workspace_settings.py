@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
+from bowhead_gateway.configuration_field_guidance import page_field_contract
 from bowhead_gateway.routes.auth import _current_user
 from bowhead_gateway.routes.auth import _store as _user_store_dep
 
@@ -131,10 +132,12 @@ class SettingsValue(BaseModel):
 
 
 class SettingsAll(BaseModel):
+    field_contract: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     settings: dict[str, str]
 
 
 class WorkspaceMetadata(BaseModel):
+    field_contract: dict | None = Field(default=None, exclude_if=lambda value: value is None)
     name: str = Field(..., min_length=1, max_length=120)
     description: str | None = Field(None, max_length=2000)
     revision: int = Field(..., ge=1)
@@ -162,7 +165,7 @@ async def list_workspace_settings(
         require_admin=False,
     )
     settings = await store.list_for_workspace(workspace_id)
-    return SettingsAll(settings=settings)
+    return SettingsAll(settings=settings, **page_field_contract("workspace_i18n"))
 
 
 @router.put(
@@ -230,6 +233,7 @@ async def get_workspace_metadata(
     if workspace is None or workspace["team_id"] != user.team_id:
         raise HTTPException(404, detail="workspace not found")
     return WorkspaceMetadata(
+        **page_field_contract("workspace_metadata"),
         name=str(workspace["name"]),
         description=workspace["description"],
         revision=int(workspace["revision"]),
@@ -273,6 +277,7 @@ async def update_workspace_metadata(
         status_code = 409 if exc.code in {"stale_workspace_update", "duplicate_workspace_name"} else 422
         raise HTTPException(status_code, {"code": exc.code}) from exc
     return WorkspaceMetadata(
+        **page_field_contract("workspace_metadata"),
         name=str(updated["name"]),
         description=updated["description"],
         revision=int(updated["revision"]),

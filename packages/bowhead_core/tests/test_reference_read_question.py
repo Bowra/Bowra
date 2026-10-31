@@ -68,6 +68,84 @@ def test_read_question_resumes_exact_transcript_and_rejects_changed_authority():
         )
 
 
+def test_runtime_recovery_note_preserves_receipts_without_changing_the_checkpoint_contract():
+    from bowhead_core.output_recovery import OutputRecovery
+
+    messages, invocations, args = _case()
+    for index, invocation in enumerate(invocations):
+        messages[2 * index + 2].content = json.dumps(invocation.result)
+    recovery = OutputRecovery()
+    recovery.observe(invocations)
+    recovery.sync(messages)
+    checkpoint = ReferenceReadQuestion.capture(messages=messages, invocations=invocations, model_turn_count=2, **args)
+    assert checkpoint is not None and checkpoint.schema_version == 1
+    restored = OutputRecovery()
+    restored.observe(checkpoint.invocations())
+    assert restored == recovery
+    assert len(checkpoint.transcript()) == 5
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("attempts", 2),
+        ("instruction", "An unmatched recovery instruction."),
+        ("context_reduced", True),
+        ("operations", {"a" * 64}),
+        ("results", {"b" * 64}),
+    ],
+)
+def test_runtime_recovery_state_cannot_be_dropped_when_receipts_do_not_reconstruct_it(field, value):
+    from bowhead_core.output_recovery import OutputRecovery
+
+    messages, invocations, args = _case()
+    for index, invocation in enumerate(invocations):
+        messages[2 * index + 2].content = json.dumps(invocation.result)
+    recovery = OutputRecovery()
+    recovery.observe(invocations)
+    setattr(recovery, field, value)
+    recovery.sync(messages)
+    assert ReferenceReadQuestion.capture(messages=messages, invocations=invocations, model_turn_count=2, **args) is None
+
+
+def test_question_resume_keeps_receipt_digests_without_buying_new_output_corrections():
+    from bowhead_core.output_recovery import OutputRecovery
+    from bowhead_router.types import LLMResponse
+
+    messages, invocations, args = _case()
+    recovery = OutputRecovery()
+    assert recovery.observe(invocations)
+    recovery.sync(messages)
+    checkpoint = ReferenceReadQuestion.capture(messages=messages, invocations=invocations, model_turn_count=2, **args)
+    assert checkpoint is not None and checkpoint.output_recovery_json is not None
+    stored = ReferenceReadQuestion.model_validate_json(checkpoint.model_dump_json())
+    resumed = stored.resume_messages(**args, answer="Use the confirmed value.")
+    restored = OutputRecovery.restore(resumed)
+    assert restored.operations == recovery.operations and restored.results == recovery.results
+    assert restored.correct(LLMResponse(content="", finish_reason="length"), resumed)
+    assert not restored.observe(invocations)
+    assert restored.attempts == 1
+    assert len(stored.transcript()) == 5
+
+
+@pytest.mark.parametrize("state", ["active", "malformed", "reduced"])
+def test_question_capture_does_not_admit_invalid_or_active_output_recovery(state):
+    from bowhead_core.output_recovery import STATE_NAME, OutputRecovery
+    from bowhead_router.types import LLMResponse
+
+    messages, invocations, args = _case()
+    recovery = OutputRecovery()
+    recovery.observe(invocations)
+    if state == "active":
+        recovery.correct(LLMResponse(content="", finish_reason="length"), messages)
+    elif state == "reduced":
+        recovery.context_reduced = True
+    recovery.sync(messages)
+    if state == "malformed":
+        messages[-1] = Message(role="user", name=STATE_NAME, content='{"attempts":false}')
+    assert ReferenceReadQuestion.capture(messages=messages, invocations=invocations, model_turn_count=2, **args) is None
+
+
 def test_office_read_checkpoint_retains_exact_result_and_rejects_effects():
     messages, invocations, args = _case()
     arguments = {"artifact_id": "art_original"}

@@ -79,7 +79,8 @@ import { sha256HexFallback } from "./sha256-fallback";
 // Version 33: native table cells keep only short units inline (two characters or a currency code); longer unit text is
 // named once in the column header. Same input no longer yields identical pixels; old cached receipts must not be reused.
 // Version 34: ordinary numeric precision and base-unit Table readings; source verification retains available digits.
-export const CANVAS_VISUAL_RENDERER_VERSION = "35";
+// Version 37: Table captions and unit disclosures share resolved column display, including export.
+export const CANVAS_VISUAL_RENDERER_VERSION = "37";
 
 const VISUAL_FIELDS: Record<string, readonly string[]> = {
   image: ["artifact_id", "caption", "alt"],

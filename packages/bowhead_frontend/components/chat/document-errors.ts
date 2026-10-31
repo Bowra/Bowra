@@ -1,5 +1,17 @@
 /** Only reviewed, localized advice crosses the document error boundary. */
 const errors: Record<string, string> = {
+  document_canvas_unavailable: "error_canvas_source",
+  document_canvas_source_unavailable: "error_canvas_source",
+  document_canvas_input_unavailable: "error_canvas_source",
+  document_canvas_changed: "error_canvas_changed",
+  document_canvas_selection_invalid: "error_canvas_selection",
+  document_canvas_section_unavailable: "error_canvas_selection",
+  document_canvas_view_unavailable: "error_canvas_selection",
+  document_canvas_material_invalid: "error_data",
+  document_canvas_access_unavailable: "error_runtime",
+  document_authoring_no_output: "error_authoring_no_output",
+  document_authoring_budget_exhausted: "error_authoring_budget",
+  document_authoring_script_failed: "error_authoring_script",
   document_information_incomplete: "error_incomplete",
   document_history_unavailable: "error_history",
   planning_duplicate_key: "error_planning",

@@ -7,6 +7,25 @@ import {
 } from "./document-draft-client";
 
 describe("document Canvas projection and command identity", () => {
+  it("accepts only a read-only superseded predecessor with a distinct successor", () => {
+    const job = { ...fixture.review, state: "cancelled", can_confirm: false, can_revise: false, superseded_by_job_id: "djob_successor" };
+    expect(parseDocumentJob(job, fixture.context.jobId)).toEqual(job);
+    for (const patch of [{ state: "review" }, { can_confirm: true }, { can_revise: true }, { superseded_by_job_id: fixture.context.jobId }, { superseded_by_job_id: "" }, { draft: undefined }, { draft_digest: null }]) {
+      expect(() => parseDocumentJob({ ...job, ...patch }, fixture.context.jobId)).toThrow("Invalid document delivery projection");
+    }
+  });
+  it("reads versioned authoring with complete-page review and refuses a weakened projection", () => {
+    const job = { ...fixture.review, draft: { ...fixture.review.draft,
+      profile: "pptx-script-worker-v1", kind: "authoring_draft", semantic_status: "unapproved", requires_full_review: true,
+      manifest: { ...fixture.review.draft.manifest, schema_version: 2 },
+    } };
+    expect(parseDocumentJob(job, fixture.context.jobId)).toEqual(job);
+    const unavailable = { ...job, draft: { ...job.draft, manifest: { ...job.draft.manifest, comparison: "unavailable", changes: [] } } };
+    expect(parseDocumentJob(unavailable, fixture.context.jobId)).toEqual(unavailable);
+    for (const patch of [{ requires_full_review: false }, { requires_full_review: "true" }, { semantic_status: "approved" }, { profile: "ordinary-pptx-worker-v1" }]) {
+      expect(() => parseDocumentJob({ ...job, draft: { ...job.draft, ...patch } }, fixture.context.jobId)).toThrow("Invalid document delivery projection");
+    }
+  });
   it("reads the delivery fixture without promoting a private file to a publication", () => {
     expect(parseDocumentJob(fixture.review, fixture.context.jobId)).toEqual(
       fixture.review,

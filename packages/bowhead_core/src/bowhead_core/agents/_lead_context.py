@@ -296,3 +296,8 @@ def reset_parent_kb_invocations(token: contextvars.Token) -> None:
 
 def parent_kb_invocations() -> list:
     return list(_PARENT_KB_INVOCATIONS_CONTEXTVAR.get() or [])
+
+
+def replace_parent_kb_invocations(invocations: list) -> None:
+    """Install the receiver-authorized projection without changing the parent task."""
+    _PARENT_KB_INVOCATIONS_CONTEXTVAR.set(invocations)

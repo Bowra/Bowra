@@ -16,7 +16,7 @@ from bowhead_core.bi_workspace_continuation import BiWorkspaceContinuation
 from bowhead_core.events import TurnEventBus
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import build_default_registry
-from test_reference_continuation_boundary import bind_ambiguous_workspace, workspace_question
+from test_reference_continuation_boundary import bind_ambiguous_workspace, question_response, workspace_question
 from test_skill_model_invocation import adapter_for, router_for
 from test_skill_reference_runtime import claimed_case as _claimed_case
 from test_skill_reference_runtime import receiver_case as _receiver_case
@@ -50,23 +50,8 @@ def arguments(case):
     }
 
 
-def question_response(request):
-    response = workspace_question(request)
-    if not json.loads(request.content).get("stream"):
-        return response
-    body = response.json()
-    message = body["choices"][0]["message"]
-    calls = [{"index": index, **call} for index, call in enumerate(message["tool_calls"])]
-    events = [
-        {"choices": [{"delta": {"content": message["content"], "tool_calls": calls}, "finish_reason": None}]},
-        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
-        {"choices": [], "usage": body["usage"]},
-    ]
-    content = "".join("data: " + json.dumps(event) + "\n\n" for event in events) + "data: [DONE]\n\n"
-    return httpx2.Response(200, text=content, headers={"content-type": "text/event-stream"})
-
-
-async def test_native_resume_keeps_original_tool_result_and_appends_answer(runtime_case, monkeypatch):
+@pytest.mark.parametrize("runtime_limit", [None, 1, 2])
+async def test_native_resume_keeps_original_tool_result_and_appends_answer(runtime_case, monkeypatch, runtime_limit):
     monkeypatch.setenv("BOWHEAD_PEER_ITER_TELEMETRY", "1")
     # Without a language_context, language decision v2 appends its fallback rule in the final tail
     # slot; this case asserts the clarification answer is the last message, so pin that path off.
@@ -75,6 +60,10 @@ async def test_native_resume_keeps_original_tool_result_and_appends_answer(runti
     adapter = adapter_for("openai")
     runner = SubagentRunner(router=router_for(adapter), tool_registry=build_default_registry(), team_subagent_store=case.users)
     args = arguments(case)
+    if runtime_limit is not None:
+        from bowhead_core.agent_run_limits import AgentRunLimits, AgentRuntimeControls
+
+        args["parent_ctx"].agent_runtime_budget = AgentRuntimeControls(system_step_limit=runtime_limit).budget(AgentRunLimits())
     bodies = []
 
     def respond(request):
@@ -107,17 +96,26 @@ async def test_native_resume_keeps_original_tool_result_and_appends_answer(runti
             route = mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
             first = await runner.run(**args)
             continuation = first.bi_workspace_continuation
-            assert continuation is not None
+            assert continuation is not None, first.error
             assert first.tokens_input == 100 and first.tokens_output == 20
             assert first.final_answer == "" and len(first.tool_invocations) == 1
             # Round-trip private material as a future encrypted store will;
             # mutating the old result after capture cannot rewrite this snapshot.
             restored = BiWorkspaceContinuation.model_validate_json(continuation.model_dump_json())
+            if runtime_limit is not None:
+                assert restored.loop_budget.model_steps_used == 1
+                assert restored.loop_budget.step_limit == runtime_limit
+                args["parent_ctx"].agent_runtime_budget = AgentRuntimeControls(system_step_limit=100).budget(AgentRunLimits())
             first.tool_invocations[0].result["clarification"]["options"] = []
             args["parent_ctx"] = copy.copy(args["parent_ctx"])
             args["parent_ctx"].active_datarc_project = "project_b"
             args["parent_bus"] = TurnEventBus()
             resumed = await runner.run(**args, bi_workspace_continuation=restored, clarification_answer="请使用 B 工作区。")
+            if runtime_limit == 1:
+                assert resumed.completion == "partial" and resumed.stop_reason == "step_limit"
+                assert resumed.step_usage == {"used": 1, "limit": 1}
+                assert route.call_count == 1, "A resumed last-step question cannot replenish the saved budget"
+                return
             assert resumed.ok and resumed.final_answer == "OK"
             assert resumed.subagent_id == first.subagent_id and resumed.profile == first.profile
             assert resumed.tool_invocations == [] and resumed.bi_workspace_continuation is None
@@ -161,7 +159,11 @@ async def test_native_resume_rejects_changed_receiver_before_http(runtime_case, 
                 args["clarification_answer"] = " "
             else:
                 snapshot = first.bi_workspace_continuation
-                update = {"max_iterations": snapshot.max_iterations + 1} if change == "budget" else {"policy_fingerprint": "sha256:" + "0" * 64}
+                update = (
+                    {"max_iterations": 1 if snapshot.max_iterations is None else snapshot.max_iterations + 1}
+                    if change == "budget"
+                    else {"policy_fingerprint": "sha256:" + "0" * 64}
+                )
                 args["bi_workspace_continuation"] = snapshot.model_copy(update=update)
             with pytest.raises(ValueError):
                 await runner.run(**args)

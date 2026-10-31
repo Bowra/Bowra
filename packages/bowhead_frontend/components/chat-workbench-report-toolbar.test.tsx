@@ -217,6 +217,20 @@ describe("第 4b 批余项：写作中导出不可用、窄工具条、手机阅
   const exportButton = () => toolbar()!.querySelector<HTMLButtonElement>(".ws-export");
   const editHost = () => toolbar()!.querySelector(".results-report-edit-controls");
 
+  it("allows a desktop reader to change and restore report width without editing the report", async () => {
+    media.matches = false;
+    renderWorkbench();
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    expect(reportViewProps.last?.readingWidth).toBe("standard");
+    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "缩小边距并加宽正文" }));
+    await waitFor(() => expect(reportViewProps.last?.readingWidth).toBe("wide"));
+    expect(window.localStorage.getItem("bowhead.report.reading-width")).toBe("wide");
+    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "恢复默认边距和正文宽度" }));
+    await waitFor(() => expect(reportViewProps.last?.readingWidth).toBe("standard"));
+  });
+
   it("export is disabled while writing with the reason on line two (aria-describedby); it returns when writing ends", async () => {
     media.matches = false;
     canvasState.status = "streaming";

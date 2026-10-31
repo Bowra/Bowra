@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sqlite3
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -245,22 +246,32 @@ class DurableLocalExportRunner:
                 for fmt, profile in supported_pairs
                 for renderer_contract_version in self.renderer_contract_versions
             )
-            failed_unclaimable = await self.store.fail_unclaimable_queued_jobs(
-                supported_pairs=supported_pairs,
-            )
-            if failed_unclaimable:
-                logger.warning(
-                    "Failed %d queued Canvas exports without an enabled processor",
-                    failed_unclaimable,
+            queue_stage = "maintenance"
+            try:
+                failed_unclaimable = await self.store.fail_unclaimable_queued_jobs(
+                    supported_pairs=supported_pairs,
                 )
-            if not supported_pairs:
+                if failed_unclaimable:
+                    logger.warning(
+                        "Failed %d queued Canvas exports without an enabled processor",
+                        failed_unclaimable,
+                    )
+                if not supported_pairs:
+                    await self._wait_for_work()
+                    continue
+                queue_stage = "claim"
+                job = await self.store.claim_next(
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                    supported_targets=supported_targets,
+                )
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, "sqlite_errorcode", None)
+                if not isinstance(code, int) or code & 0xFF not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                    raise
+                logger.warning("canvas_export.queue_contention stage=%s sqlite_errorcode=%d", queue_stage, code)
                 await self._wait_for_work()
                 continue
-            job = await self.store.claim_next(
-                worker_id=self.worker_id,
-                lease_seconds=self.lease_seconds,
-                supported_targets=supported_targets,
-            )
             if job is None:
                 await self._wait_for_work()
                 continue

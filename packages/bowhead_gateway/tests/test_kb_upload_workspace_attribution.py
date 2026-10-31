@@ -203,7 +203,7 @@ def test_kb_single_upload_persists_artifact_workspace_attribution(
     r = client.post(
         "/api/v1/kb/files",
         files={"file": ("doc.pdf", b"%PDF-1.4\nsingle upload body", "application/pdf")},
-        data={"scope": scope, "scope_id": scope_id},
+        data={"knowledge_intent": "add_to_knowledge", "scope": scope, "scope_id": scope_id},
         # ★ The team case **deliberately also** carries a space header; do not remove it: this additionally proves the team branch
         # (`scope == "team"` in `decide_for_kb_scope`) **ignores** headers and persists the sentinel, not `ws_42`.
         headers={"X-Space-Id": "ws_42"},
@@ -251,7 +251,7 @@ def test_kb_bundle_upload_persists_attribution_for_root_and_children(
     r = client.post(
         "/api/v1/kb/files/bundle",
         files={"file": ("pack.zip", zip_body, "application/zip")},
-        data={"scope": scope, "scope_id": scope_id},
+        data={"knowledge_intent": "add_to_knowledge", "scope": scope, "scope_id": scope_id},
         headers={"X-Space-Id": "ws_42"},
     )
     assert r.status_code == 200, r.text
@@ -320,7 +320,7 @@ def test_kb_single_upload_emits_one_attribution_metric(
         r = client.post(
             "/api/v1/kb/files",
             files={"file": ("doc.pdf", b"%PDF-1.4\nsingle upload body", "application/pdf")},
-            data={"scope": scope, "scope_id": scope_id},
+            data={"knowledge_intent": "add_to_knowledge", "scope": scope, "scope_id": scope_id},
             headers={"X-Space-Id": "ws_42"} if with_space_header else {},
         )
         assert r.status_code == 200, r.text
@@ -338,7 +338,7 @@ def test_kb_single_upload_flag_off_control_writes_no_metric(client: TestClient, 
         r = client.post(
             "/api/v1/kb/files",
             files={"file": ("doc.pdf", b"%PDF-1.4\nsingle upload body", "application/pdf")},
-            data={"scope": "space", "scope_id": "ws_42"},
+            data={"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
             headers={"X-Space-Id": "ws_42"},
         )
         assert r.status_code == 200, r.text
@@ -361,14 +361,14 @@ def test_kb_single_upload_rejected_requests_are_not_counted(
         denied = client.post(
             "/api/v1/kb/files",
             files={"file": ("doc.pdf", b"%PDF-1.4\nbody", "application/pdf")},
-            data={"scope": "team", "scope_id": "team_test"},
+            data={"knowledge_intent": "add_to_knowledge", "scope": "team", "scope_id": "team_test"},
         )
         assert denied.status_code == 403, denied.text
         # 415: unsupported file type.
         unsupported = client.post(
             "/api/v1/kb/files",
             files={"file": ("x.bin", b"\x00\x01\x02\x03", "application/octet-stream")},
-            data={"scope": "space", "scope_id": "ws_42"},
+            data={"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
             headers={"X-Space-Id": "ws_42"},
         )
         assert unsupported.status_code == 415, unsupported.text
@@ -404,7 +404,7 @@ def test_kb_bundle_upload_emits_exactly_one_metric_not_one_per_artifact(
         r = client.post(
             "/api/v1/kb/files/bundle",
             files={"file": ("pack.zip", _build_zip({"a.pdf": b"%PDF-1.4\nA", "b.pdf": b"%PDF-1.4\nB"}), "application/zip")},
-            data={"scope": scope, "scope_id": scope_id},
+            data={"knowledge_intent": "add_to_knowledge", "scope": scope, "scope_id": scope_id},
             headers={"X-Space-Id": "ws_42"} if with_space_header else {},
         )
         assert r.status_code == 200, r.text
@@ -421,7 +421,7 @@ def test_kb_bundle_upload_flag_off_control_writes_no_metric(client: TestClient, 
         r = client.post(
             "/api/v1/kb/files/bundle",
             files={"file": ("pack.zip", _build_zip({"a.pdf": b"%PDF-1.4\nA"}), "application/zip")},
-            data={"scope": "space", "scope_id": "ws_42"},
+            data={"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
             headers={"X-Space-Id": "ws_42"},
         )
         assert r.status_code == 200, r.text
@@ -447,7 +447,7 @@ def test_kb_admin_import_is_counted_under_its_own_route_name(
     with client:
         r = client.post(
             "/api/v1/kb/admin/import",
-            json={"server_path": str(zip_path.resolve()), "scope": "space", "scope_id": "ws_42"},
+            json={"server_path": str(zip_path.resolve()), "knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
             headers={"X-Space-Id": "ws_42"},
         )
         assert r.status_code == 200, r.text
@@ -472,7 +472,7 @@ def test_kb_bundle_upload_and_admin_import_rejected_requests_are_not_counted(
 
     not_a_zip = tmp_path / "plain.txt"
     not_a_zip.write_text("not a zip")
-    body = {"scope": "space", "scope_id": "ws_42"}
+    body = {"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"}
     with client:
         bad_zip = client.post(
             "/api/v1/kb/files/bundle",
@@ -514,7 +514,7 @@ def test_kb_single_upload_failure_after_the_decision_is_not_counted(
 
     upload = {
         "files": {"file": ("doc.pdf", b"%PDF-1.4\nbody", "application/pdf")},
-        "data": {"scope": "space", "scope_id": "ws_42"},
+        "data": {"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
         "headers": {"X-Space-Id": "ws_42"},
     }
     with TestClient(app, raise_server_exceptions=False) as strict:
@@ -540,7 +540,7 @@ def test_kb_bundle_upload_failure_after_the_decision_is_not_counted(
     attribution_metrics.attach(app)
     upload = {
         "files": {"file": ("pack.zip", _build_zip({"a.pdf": b"%PDF-1.4\nA"}), "application/zip")},
-        "data": {"scope": "space", "scope_id": "ws_42"},
+        "data": {"knowledge_intent": "add_to_knowledge", "scope": "space", "scope_id": "ws_42"},
         "headers": {"X-Space-Id": "ws_42"},
     }
     with TestClient(app, raise_server_exceptions=False) as strict:
@@ -606,8 +606,12 @@ def test_every_kb_write_entry_rejects_a_missing_space_header_under_real_rbac(rea
     scopes = {"personal": user.id, "team": user.team_id, "space": workspace_id}
 
     async def _marker(scope: str, scope_id: str) -> str:
-        return await files_store.create(
-            artifact_id="art_marker",
+        from bowhead_core.kb.ingestion import KnowledgeAction
+
+        result = await files_store.create_admitted(
+            action=KnowledgeAction("marker:" + scope, "kb_ui", user.id, user.team_id, workspace_id),
+            source_fingerprint="marker",
+            artifact_id="art_marker_" + scope,
             filename="pack.zip",
             mime_type="application/zip",
             size_bytes=100,
@@ -618,11 +622,12 @@ def test_every_kb_write_entry_rejects_a_missing_space_header_under_real_rbac(rea
             uploaded_by=user.id,
             initial_parse_status="awaiting_upload",
         )
+        return result[0]
 
     not_rejected: list[str] = []
     with TestClient(app, raise_server_exceptions=False) as client:
         for scope, scope_id in scopes.items():
-            body = {"scope": scope, "scope_id": scope_id}
+            body = {"knowledge_intent": "add_to_knowledge", "scope": scope, "scope_id": scope_id}
             presign = {"filename": "a.pdf", "mime": "application/pdf", "size_bytes": 100, **body}
             bundle_presign = {"filename": "p.zip", "mime": "application/zip", "size_bytes": 100, **body}
             attempts = {
@@ -661,7 +666,10 @@ def test_kb_write_without_space_header_is_rejected_under_real_rbac(real_rbac_kb,
     app, user, workspace_id = real_rbac_kb
     monkeypatch.setenv(_METRICS_FLAG, "1")
     attribution_metrics.attach(app)
-    upload = {"files": {"file": ("doc.pdf", b"%PDF-1.4\nbody", "application/pdf")}, "data": {"scope": "personal", "scope_id": user.id}}
+    upload = {
+        "files": {"file": ("doc.pdf", b"%PDF-1.4\nbody", "application/pdf")},
+        "data": {"knowledge_intent": "add_to_knowledge", "scope": "personal", "scope_id": user.id},
+    }
 
     with TestClient(app, raise_server_exceptions=False) as client:
         no_header = client.post("/api/v1/kb/files", **upload)

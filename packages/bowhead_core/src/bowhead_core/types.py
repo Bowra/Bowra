@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from bowhead_core.agent_draft_send_target import AgentDraftSendTarget
+from bowhead_core.context_action import ContextMaintenanceAction
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef
 from bowhead_core.document_revision_target import DocumentRevisionTarget
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from bowhead_core.agent_execution_binding import TurnAgentBindingInput
     from bowhead_core.chat_reference_runtime import ReferencePrimaryRuntime
     from bowhead_core.chat_reference_storage import ReferenceScope
+    from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
+    from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
     from bowhead_core.language_context import LanguageContext
     from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadCheckpoint
 
@@ -125,6 +128,7 @@ class TurnRequest:
     user_id: str
     member_uid: str  # datarc member uid (from user memory)
     text: str
+    context_maintenance: ContextMaintenanceAction | None = None
     turn_id: str = field(default_factory=lambda: _new_id("t"))
     # Durable same-Turn resumes increment this fence before their worker starts.
     # Fresh turns remain generation 1; cancellation usage finalization must
@@ -176,6 +180,12 @@ class TurnRequest:
     # Batch 2/c6 (PRD §3.4): gateway-injected switch submission callback (live object, see
     # ToolExecutionContext.datarc_context_switcher). None = channel cannot switch.
     datarc_context_switcher: Any = field(default=None, repr=False, compare=False)
+    datarc_binding: Any = field(default=None, repr=False, compare=False)
+    datarc_source_evidence: dict | None = field(default=None, repr=False, compare=False)
+    datarc_switch_resolution: DatarcSwitchResolution | None = field(default=None, repr=False, compare=False)
+    datarc_helper_switch_resolution: DatarcHelperSwitchResolution | None = field(default=None, repr=False, compare=False)
+    # Server-bound current-viewer projection for chart authoring; never model input.
+    chart_authoring_projection: Any = field(default=None, repr=False, compare=False)
     # scheduled-recipe-runs S1: solidified workflow bound to this turn (``workflow_binding.BoundWorkflow``).
     # **Server-prefetched**: runner already checked parsing/fingerprint/admission; Lead executes it directly,
     # without rereading by name (bypasses all checks; Lead structurally lacks skill_read).
@@ -329,6 +339,8 @@ class TurnRequest:
     # Default False = no title generation. New producers must **declare** this capability, not inherit by default;
     # omission loses a nice title, while erroneous inheritance costs money every tick.
     interactive_session: bool = False
+    # Original human web ingress only; management writes retain this evidence on the Turn.
+    knowledge_user_request: bool = False
     # Sprint chat-redesign-2026-05-21 Phase 1.1 — L3 HITL picker hint (P0-7).
     # Set by gateway chat.py when the user message is empty + attachments present.
     # Lead injects this into system prompt (via prompts/lead.py

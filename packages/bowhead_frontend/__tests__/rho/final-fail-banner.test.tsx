@@ -24,6 +24,14 @@ const card = () => screen.getByTestId("final-fail");
 const primaryButtons = () => card().querySelectorAll(".settings-button--primary");
 
 describe("FinalFailBanner", () => {
+  it("shows a finite agent ceiling and its admitted decision count without offering blind retry", () => {
+    renderIntl(<FinalFailBanner kind="agent_step_limit" diagnostics={{
+      schemaVersion: 1, disclosure: "authenticated", code: "agent_step_limit", diagnosticCode: "chat_turn_failed", stepUsage: { used: 14, limit: 14 },
+    }} recoveryAction="edit_and_resend" onEditAndResend={vi.fn()} />);
+    expect(card()).toHaveTextContent("达到任务步骤上限");
+    expect(card()).toHaveTextContent("14 / 14");
+    expect(card()).toHaveTextContent("查看保留结果");
+  });
   it("shows the cause and next step without opening technical details", () => {
     renderIntl(<FinalFailBanner kind="llm_request_rejected" diagnostics={{
       schemaVersion: 1, disclosure: "authenticated", diagnosticCode: "chat_llm_failed",
@@ -212,7 +220,7 @@ describe("FinalFailBanner", () => {
   it.each([
     ["wallclock_exceeded", "本轮处理时间已达到上限", "可以缩小范围，或拆成几个请求分别处理。"],
     ["hop_cap_exceeded", "本轮已达到执行步骤上限", "请拆分剩余工作后重新发送。"],
-    ["llm_context_overflow", "对话内容超过了模型能处理的上限", "请新建会话，缩短问题或减少材料"],
+    ["llm_context_overflow", "对话内容超过了模型能处理的上限", "整理上下文或选择上下文容量更大的模型后重发"],
     ["llm_provider_auth_failed", "模型服务认证失败", "请联系团队管理员核对模型连接的 API 密钥和访问权限，并提供诊断信息；修正后再发送。"],
     ["reference_policy_changed", "团队权限变了，这次引用没有执行", "重新选择智能体和技能后再发送。"],
     ["service_interrupted", "服务执行中断，本轮未完成", "请先核对已显示的步骤和结果"],
@@ -235,6 +243,8 @@ describe("FinalFailBanner", () => {
   it.each([
     ["zh-CN", "document_information_incomplete", "文档没有完成", "回答后仍未生成可审阅草稿"],
     ["en-US", "document_planning_failed", "The document didn't finish", "The document task could not finish and no files were published"],
+    ["en-US", "document_authoring_script_failed", "The document didn't finish", "editing script failed"],
+    ["zh-CN", "document_candidate_invalid", "文档没有完成", "未通过文件结构检查"],
   ] as const)("shows the document outcome without a system-error claim (%s/%s)", (locale, kind, eyebrow, message) => {
     renderIntl(<FinalFailBanner kind={kind} />, { locale });
     expect(card()).toHaveTextContent(eyebrow);
@@ -422,7 +432,7 @@ describe("FinalFailBanner", () => {
       ["de-DE", "Neue Sitzung"],
       ["fr-FR", "Nouvelle session"],
     ] as const)("localizes the new-session action (%s)", (locale, label) => {
-      renderIntl(<FinalFailBanner kind="llm_context_overflow" recoveryAction="new_session" {...handlers()} />, { locale });
+      renderIntl(<FinalFailBanner kind="session_deleted" recoveryAction="new_session" {...handlers()} />, { locale });
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     });
   });

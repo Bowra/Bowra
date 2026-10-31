@@ -5,10 +5,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderIntl } from "@/__tests__/intl-render";
 import messages from "@/messages/en-US.json";
 
-vi.mock("@/lib/api", () => ({
-  getWorkspaceSettings: vi.fn(),
-  setWorkspaceSetting: vi.fn(),
-}));
+vi.mock("@/lib/api", () => {
+  const getWorkspaceSettings = vi.fn();
+  return { getWorkspaceSettings, getWorkspaceSettingsView: async (...args: unknown[]) => ({ settings: await getWorkspaceSettings(...args) }), setWorkspaceSetting: vi.fn() };
+});
 vi.mock("@/lib/team-storage", () => ({ getActiveTeamId: () => "team_original" }));
 
 import { getWorkspaceSettings, setWorkspaceSetting } from "@/lib/api";

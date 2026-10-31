@@ -1187,3 +1187,40 @@ for (const locale of ["zh-CN", "en-US", "de-DE", "fr-FR"] as const) for (const w
     expect(writes).toEqual([]); expect(errors).toEqual([]);
   });
 }
+
+for (const width of [390, 1000]) {
+  test(`table unit disclosure stays coherent through locale changes at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const writes: string[] = [];
+    await page.route("**/api/v1/**", async (route) => {
+      if (route.request().method() !== "GET") writes.push(route.request().url());
+      await route.fulfill({ contentType: "application/json", body: "{}" });
+    });
+    await installReferenceComponent(page, "", "_chart-composition-edit-entry.tsx");
+    await page.goto("/__reference_component_test");
+    await page.addStyleTag({ content: await nativeStyles });
+    const fixture: ReportSection = { id: "sec_units", kind: "chart", rev: 1, spec: {
+      kind: "table", title: "Revenue (万元)", subtitle: "单位：万元；synthetic values", row_count: 3,
+      columns: [{ key: "region", header: "Region", type: "categorical" }, { key: "revenue", header: "Revenue", type: "numeric", unit: "万元" }],
+      rows: [{ region: "West", revenue: 120.5 }, { region: "East", revenue: 87.25 }, { region: "North", revenue: 0 }],
+    } };
+    await page.evaluate(({ fixture, width }) => {
+      window.chartCompositionHost.configure({ width: width - 24, locale: "en-US" });
+      window.chartCompositionHost.readOnly(true); window.chartCompositionHost.embedded(true); window.chartCompositionHost.hydrate(fixture);
+    }, { fixture, width });
+    for (const locale of ["en-US", "zh-CN", "de-DE", "fr-FR"] as const) {
+      await page.evaluate((locale) => window.chartCompositionHost.configure({ locale }), locale);
+      const table = page.locator(".v2-chart-table");
+      await expect(table.getByRole("columnheader", { name: "Revenue (元)" })).toBeVisible();
+      await expect(table.getByRole("cell", { name: new Intl.NumberFormat(locale).format(1205000), exact: true })).toBeVisible();
+      await expect(table.getByRole("row")).toHaveCount(4);
+      await expect(table.locator("[data-chart-unit-note]")).toContainText("万元");
+      await expect(table.locator(".v2-chart-subtitle")).not.toHaveText("单位：万元；synthetic values");
+      const geometry = await table.evaluate((node) => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, noteTop: node.querySelector("[data-chart-unit-note]")!.getBoundingClientRect().top, tableTop: node.querySelector("table")!.getBoundingClientRect().top }));
+      expect(geometry.left).toBeGreaterThanOrEqual(0); expect(geometry.right).toBeLessThanOrEqual(width);
+      expect(geometry.noteTop).toBeLessThan(geometry.tableTop);
+    }
+    expect(writes).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath(`table-units-${width}.png`), fullPage: true });
+  });
+}

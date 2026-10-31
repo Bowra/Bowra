@@ -43,6 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
+from bowhead_gateway.configuration_field_guidance import page_field_contract
 from bowhead_gateway.error_handler import localize_error_message
 from bowhead_gateway.routes.auth import _current_user, _require_team_role_dep, _store
 from bowhead_gateway.team_llm_apply_service import (
@@ -117,6 +118,7 @@ def _llm_config_features(request: Request) -> dict[str, Any]:
     """Feature flags the model settings page reads; GET and PUT return the same set."""
     return {
         "model_discovery_v2": True,
+        "bowra_connect": bool(os.environ.get("BOWRA_URL", "").strip()),
         "model_runtime_parameters": model_runtime_parameters_enabled(),
         "capability_probes": True,
         "azure_openai": True,
@@ -128,6 +130,14 @@ def _llm_config_features(request: Request) -> dict[str, Any]:
 
 
 # ─── Read endpoints ────────────────────────────────────────
+
+
+def _llm_config_field_guidance() -> dict[str, Any]:
+    """Keep authorized GET and replacement save responses on the same current field contract."""
+    contracts = {
+        domain: metadata["field_contract"] for domain in ("team_model_config", "team_model_retry") if (metadata := page_field_contract(domain))
+    }
+    return {"field_contracts": contracts} if contracts else {}
 
 
 @router.get("/api/v1/admin/llm-config")
@@ -157,6 +167,7 @@ async def get_llm_config(
         "version": version,
         "migrated_from_legacy": bool(cfg and not is_v2_config(cfg) and effective_cfg),
         "features": _llm_config_features(request),
+        **_llm_config_field_guidance(),
     }
     if model_runtime_parameters_enabled():
         from bowhead_router.runtime_parameters import PROFILES
@@ -1459,6 +1470,7 @@ async def update_llm_config(
         # The page replaces its state with this response; without the features it would drop to the
         # pre-V2 view after Apply ("editing draft", "no assignments yet") until a reload.
         "features": _llm_config_features(request),
+        **_llm_config_field_guidance(),
     }
 
 

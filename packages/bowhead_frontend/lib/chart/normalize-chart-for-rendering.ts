@@ -48,6 +48,7 @@ export interface NormalizedChartForRenderingV1 {
   spec: ChartSpec;
   shape: NormalizedChartRenderShapeV1;
   origins?: CellOrigins;
+  observedSpec?: ChartSpec;
 }
 
 type Cell = string | number | null;
@@ -381,7 +382,8 @@ export function normalizeChartForRenderingV1(rawSpec: ChartSpec, opts: { trackOr
   spec = pivot?.spec ?? spec;
   const transpose = transposeTimeWideSpec(spec, opts.trackOrigins, pivot?.origins);
   spec = transpose?.spec ?? spec;
-  spec = normalizeAxisQuantities(orderDateAxisRows(spec));
+  const observedSpec = orderDateAxisRows(spec);
+  spec = normalizeAxisQuantities(observedSpec);
   const origins = transpose?.origins ?? pivot?.origins;
-  return { spec, shape: deriveNormalizedChartRenderShapeV1(spec), ...(origins ? { origins } : {}) };
+  return { spec, shape: deriveNormalizedChartRenderShapeV1(spec), ...(origins ? { origins } : {}), ...(spec !== observedSpec ? { observedSpec } : {}) };
 }

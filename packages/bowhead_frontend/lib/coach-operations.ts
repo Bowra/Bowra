@@ -154,6 +154,7 @@ export async function readCoachOperation(
 }
 
 export type CoachOperationOpen = {
+  source?: "live" | "replay";
   requestId: string;
   turnId: string;
   userId: string;
@@ -177,6 +178,7 @@ export const coachOperationOpens = (turnId: string | null) =>
   turnId ? (opens.get(turnId) ?? EMPTY) : EMPTY;
 export function projectCoachOperationOpen(
   payload: Record<string, unknown>,
+  source: "live" | "replay" = "live",
 ): void {
   const reference = parseCoachOperationReference(payload.reference);
   if (
@@ -198,6 +200,7 @@ export function projectCoachOperationOpen(
     ...current.slice(-63),
     {
       reference,
+      source,
       requestId: payload.request_id,
       turnId,
       userId: payload.user_id as string,
@@ -207,6 +210,41 @@ export function projectCoachOperationOpen(
     },
   ]);
   if (opens.size > 256) opens.delete(opens.keys().next().value!);
+  revision += 1;
+  listeners.forEach((listener) => listener());
+}
+
+
+export type CoachCaseEffect = {
+  turnId: string;
+  callId: string;
+  reference: { kind: "eval_cases"; agent_id: string; proposal_id: string };
+  reportedOk: boolean;
+};
+const caseEffects = new Map<string, readonly CoachCaseEffect[]>();
+const EMPTY_CASES: readonly CoachCaseEffect[] = [];
+export const coachCaseEffects = (turnId: string | null) => turnId ? caseEffects.get(turnId) ?? EMPTY_CASES : EMPTY_CASES;
+
+/** Discover original case effects separately from requests to open a view. */
+export function projectCoachCaseEffects(payload: Record<string, unknown>, turnId: string | null): void {
+  if (!turnId || turnId.length > 256) return;
+  const meta = record(record(payload.result_meta).coach_operations);
+  if (meta.schema_version !== 1 || typeof meta.truncated !== "boolean" || !Array.isArray(meta.receipts)
+    || meta.receipts.length > 20 || Object.keys(meta).some((key) => !["schema_version", "receipts", "truncated"].includes(key))) return;
+  const current = caseEffects.get(turnId) ?? EMPTY_CASES;
+  const next = [...current];
+  for (const raw of meta.receipts) {
+    const item = record(raw);
+    const reference = parseCoachOperationReference(item.operation_ref);
+    if (item.tool_name !== "agent_eval_case_propose" || typeof item.call_id !== "string" || !item.call_id || item.call_id.length > 256
+      || typeof item.reported_ok !== "boolean" || reference?.kind !== "eval_cases"
+      || Object.keys(item).some((key) => !["call_id", "tool_name", "operation_ref", "reported_ok"].includes(key))) continue;
+    if (next.some((entry) => entry.reference.agent_id === reference.agent_id && entry.reference.proposal_id === reference.proposal_id)) continue;
+    next.push({ turnId, callId: item.call_id, reference: { ...reference, kind: "eval_cases" }, reportedOk: item.reported_ok });
+  }
+  if (next.length === current.length) return;
+  caseEffects.set(turnId, next.slice(-20));
+  if (caseEffects.size > 256) caseEffects.delete(caseEffects.keys().next().value!);
   revision += 1;
   listeners.forEach((listener) => listener());
 }

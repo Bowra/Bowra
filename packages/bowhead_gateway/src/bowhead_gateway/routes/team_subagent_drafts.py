@@ -133,7 +133,7 @@ class ManualDefinitionBody(OmitAbsentBuiltinPlugins):
     def _builtin_plugin_ids(cls, value: list[str] | None) -> list[str] | None:
         return validate_builtin_plugin_ids(value)
 
-    max_iterations: int = Field(ge=1, le=50)
+    max_iterations: int = Field(default=12, ge=1, le=50, json_schema_extra={"readOnly": True})
     model: str | None = None
     output_schema: dict[str, Any] | None = Field(default=None, description=OUTPUT_SCHEMA_DESCRIPTION)
     output_schema_text: str = Field(default="", max_length=20000)
@@ -182,7 +182,7 @@ class DraftDefinitionBody(OmitAbsentBuiltinPlugins):
     description: str = Field(max_length=200)
     system_prompt: str = Field(max_length=MAX_SYSTEM_PROMPT)
     model: str | None = None
-    max_iterations: int = Field(ge=1, le=50)
+    max_iterations: int = Field(default=12, ge=1, le=50, json_schema_extra={"readOnly": True})
     output_schema: dict[str, Any] | None = Field(default=None, description=OUTPUT_SCHEMA_DESCRIPTION)
     visibility: Literal["creator_only"] = "creator_only"
 
@@ -1137,7 +1137,6 @@ async def apply_canvas_suggestion(
         "capability_ids",
         "builtin_plugin_ids",
         "model",
-        "max_iterations",
         "output_schema_text",
     }
     selected = body.selected_fields
@@ -1345,7 +1344,6 @@ async def validate_draft(
                             "description",
                             "system_prompt",
                             "model",
-                            "max_iterations",
                             "output_schema",
                             "visibility",
                         )
@@ -1389,7 +1387,6 @@ async def validate_draft(
                             "description",
                             "system_prompt",
                             "model",
-                            "max_iterations",
                             "output_schema",
                             "visibility",
                         )

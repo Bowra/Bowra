@@ -65,6 +65,10 @@ class FakeConnectionStore:
     def __init__(self) -> None:
         self.teams: list[str] = []
 
+    async def resolve_active_binding(self, team_id: str):
+        self.teams.append(team_id)
+        return SimpleNamespace(id="conn_decouple", base_url="https://datarc.example"), "auth_decouple", "revision_one"
+
     async def list_connections(self, team_id: str) -> list[Any]:
         self.teams.append(team_id)
         return [SimpleNamespace(id="conn_decouple", base_url="https://datarc.example")]

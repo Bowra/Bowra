@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bowhead_skill.bundle_files import BUNDLE_FILE_KINDS, BundleFileError, bundle_file_path, list_bundle_files, read_bundle_text
+from bowhead_skill.bundle_files import BUNDLE_FILE_KINDS, BundleFileError, bundle_file_path, is_python_cache_path, list_bundle_files, read_bundle_text
 from bowhead_skill.effective import (
     description_for,
     list_effective_skills,
@@ -81,19 +81,21 @@ def _k_should_enable(ctx: Any) -> bool:
     return _k_workspace_in_allowlist(ws)
 
 
-def _list_references(spec: SkillSpec) -> list[str]:
-    return [name for name, _size in list_bundle_files(spec.source_dir, "references")]
+def _list_references(spec: SkillSpec, *, builtin: bool = False) -> list[str]:
+    return [name for name, _size in list_bundle_files(spec.source_dir, "references") if not builtin or not is_python_cache_path(name)]
 
 
-def _read_reference(spec: SkillSpec, ref: str) -> dict[str, Any]:
+def _read_reference(spec: SkillSpec, ref: str, *, builtin: bool = False) -> dict[str, Any]:
     try:
+        if builtin and is_python_cache_path(ref):
+            raise BundleFileError("builtin_cache_file_unavailable")
         path = bundle_file_path(spec.source_dir, "references", ref)
         if not path.is_file() and not Path(ref).suffix:
             ref += ".md"  # Support legacy calls omitting .md; read other extensions by their original names.
         body = read_bundle_text(spec.source_dir, "references", ref)
     except BundleFileError as exc:
         error = f"reference '{ref}' not found" if exc.code == "skill_file_not_found" else f"invalid ref: {ref!r} ({exc.code})"
-        return {"error": error, "available": _list_references(spec)}
+        return {"error": error, "available": _list_references(spec, builtin=builtin)}
     return {"name": spec.name, "ref": ref, "body": body}
 
 
@@ -402,7 +404,7 @@ def build_skill_tools(
         """
         if assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None:
             return ctx.assigned_skill_material.spec
-        return await resolve_skill(
+        spec = await resolve_skill(
             name,
             catalog=catalog,
             user_id=getattr(ctx, "user_id", None),
@@ -413,6 +415,11 @@ def build_skill_tools(
             # (turn_runner injects them into ctx); default None → visibility alone (fail-safe).
             granted_team_skill_ids=getattr(ctx, "granted_team_skill_ids", None),
         )
+        if spec is not None and catalog.get(name) is not None:
+            scripts = [path for path in spec.scripts if not is_python_cache_path(path.relative_to(spec.source_dir))]
+            if scripts != spec.scripts:
+                return replace(spec, scripts=scripts)
+        return spec
 
     async def _list(_args: dict[str, Any], ctx: Any) -> Any:
         if denial := skill_operation_denial(ctx, "skill_list", _args):
@@ -463,12 +470,22 @@ def build_skill_tools(
         if not await _user_enabled(ctx, name):
             return {"error": f"skill '{name}' disabled by user"}
 
+        # Frozen assigned packages retain their original exact file map. Live
+        # builtin source excludes generated caches from both digest and reads.
+        live_builtin = _is_catalog(name, ctx) and not (assigned_skill_active(ctx) and getattr(ctx, "assigned_skill_material", None) is not None)
+        file = str(args.get("file") or "").strip()
+        ref = args.get("ref")
+        if live_builtin and any(is_python_cache_path(path) for path in (file, str(ref or "")) if path):
+            return {
+                "error": "builtin_cache_file_unavailable",
+                "error_kind": "invalid_args",
+                "hint": "Read a source reference or script instead of a generated Python cache file.",
+            }
         if material_observer is not None:
             await material_observer.reading(spec, args, ctx)
 
         # M137 follow-up: `ref` lets the LLM fetch .md files from the references/ subdirectory
         # (keep them outside the SKILL.md body to keep it concise; read subdocuments on demand).
-        file = str(args.get("file") or "").strip()
         if file:
             kind, _, filename = file.partition("/")
             try:
@@ -479,15 +496,14 @@ def build_skill_tools(
                     await material_observer.read_rejected(args, result, ctx)
                 return result
             return {"name": spec.name, "file": file, "body": body}
-        ref = args.get("ref")
         if ref is not None and str(ref).strip():
-            return _read_reference(spec, str(ref).strip())
+            return _read_reference(spec, str(ref).strip(), builtin=live_builtin)
 
         body = spec.body_md
         raw_args = args.get("args") or ""
         body = substitute_args(body, raw_args) if isinstance(raw_args, list) else substitute_args(body, str(raw_args))
         # List references/ files so the LLM knows what it can read in depth instead of inventing ref names.
-        references_available = _list_references(spec)
+        references_available = _list_references(spec, builtin=live_builtin)
         # M137 follow-up: frontmatter `pipes_output_to: <other-skill-name>` means
         # read that SOP after running this one to complete the pipeline. Expose it to the LLM for chained reading.
         pipes_to = spec.frontmatter.get("pipes_output_to")
@@ -498,7 +514,7 @@ def build_skill_tools(
             "allowed_tools": spec.allowed_tools,
             "scripts": spec.script_names,
             "script_execution": script_execution_mode(
-                has_scripts=bool(spec.scripts), builtin=_is_catalog(name, ctx), knowledge=getattr(spec, "kind", "tool") == "knowledge"
+                name=spec.name, has_scripts=bool(spec.scripts), builtin=_is_catalog(name, ctx), knowledge=getattr(spec, "kind", "tool") == "knowledge"
             ),
             "references": references_available,
             "body": body,
@@ -788,7 +804,12 @@ def build_skill_tools(
         # configuration is missed entirely → gVisor silently falls back to runc (dogfood-0708 F6). Trusted-root skills (catalog matches)
         # are not rewritten and still use the host path.
         _user_reqs: list[str] | None = None
-        if multiruntime_enabled() and not _is_catalog(name, ctx):
+        # The built-in compiler handles executable document input. Always use
+        # the isolated runner, independently of uploaded-Skill runtime switches.
+        _latex_report = name == "latex-report" and _is_catalog(name, ctx)
+        if _latex_report and extra_args:
+            return {"error_kind": "invalid_args", "error": "latex-report accepts input.source, not extra_args. The sandbox invocation is fixed."}
+        if _latex_report or (multiruntime_enabled() and not _is_catalog(name, ctx)):
             _entry_names = set(spec.script_names)
             # Command mode does not validate a single entry (argv contains the script path; the runner host side guards paths);
             # legacy/shim mode still requires entry ∈ the allowlist and a supported extension.
@@ -833,6 +854,10 @@ def build_skill_tools(
         # python_sandbox inputs.artifact_id → real art_ids via the turn's ref
         # allowlist, BEFORE any downstream (preview / fetch / drain). See helper.
         if name == "python_sandbox":
+            if _latex_report:
+                input_data["_requires_isolated_runtime"] = True
+                input_data["_output_purpose"] = "deliverable"
+                input_data["_deliverable_outputs"] = ["main.tex", "report.pdf"]
             if _direct_python_sandbox:
                 input_data["_output_purpose"] = _output_purpose
                 input_data["_deliverable_outputs"] = _deliverable_outputs
@@ -939,7 +964,11 @@ def build_skill_tools(
             if denial := await authorize_invoke(requested_name, ctx):
                 return denial
 
-        if _orig_skill_name is not None and (denial := skill_script_runtime_denial(_orig_skill_name, uploaded=True, command=_cmd_mode)):
+        if (
+            _orig_skill_name is not None
+            and not _latex_report
+            and (denial := skill_script_runtime_denial(_orig_skill_name, uploaded=True, command=_cmd_mode))
+        ):
             return denial
 
         result = await runtime.run(

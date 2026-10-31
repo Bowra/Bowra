@@ -62,7 +62,7 @@ _MAX_HEADLINE_BUFFER = 200
 # whitespace tolerated inside tags). Strict (chat|canvas) enum — Unicode
 # alternatives (e.g. `对话`) won't match → fall to "absent" branch.
 _FULL_MARKER_RE = re.compile(
-    r"<response_kind>\s*(chat|canvas)\s*</response_kind>",
+    r"<response_kind>\s*(chat|canvas)\s*</(?:response_kind|headline)>",
     re.IGNORECASE,
 )
 
@@ -74,7 +74,7 @@ _FULL_MARKER_RE = re.compile(
 # Chinese prose prefix (since `,` `\n` `。` are non-word), and is robust to
 # English-letter prefix too.
 _MISSING_OPEN_HINT_RE = re.compile(
-    r"(?<![A-Za-z0-9])_kind>\s*(chat|canvas)\s*</response_kind>",
+    r"(?<![A-Za-z0-9])_kind>\s*(chat|canvas)\s*</(?:response_kind|headline)>",
     re.IGNORECASE,
 )
 
@@ -144,7 +144,7 @@ _HEADLINE_FULL_RE = re.compile(
 # Only enum bodies and single-line headlines count as markers; orphan close
 # tags and non-enum bodies stay as text (same rule as the streaming filter).
 _POST_HOC_SANITIZE_RE = re.compile(
-    r"(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*</\s*response_kind\s*>"
+    r"(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*</\s*(?:response_kind|headline)\s*>"
     r"|<\s*headline\s*>[^\n]{0,200}?</\s*headline\s*>",
     re.IGNORECASE,
 )
@@ -225,13 +225,13 @@ def strip_response_kind_markers(text: str) -> str:
 # call can create a card and pause. The legacy rendering fallback below neither
 # executes arguments nor reconstructs a missing card.
 _STRAY_CLARIFICATION_RE = re.compile(
-    r"<\s*clarification_ask\b[^>]*>(.*?)</\s*clarification_ask\s*>",
+    r"<\s*(?:clarification_ask|questions)\b[^>]*>(.*?)</\s*(?:clarification_ask|questions)\s*>",
     re.IGNORECASE | re.DOTALL,
 )
 # Detection must also cover self-closing and truncated calls. Requiring a
 # matching closing tag lets malformed protocol text bypass both final gates.
 # Only the legacy rendering fallback needs a complete body to humanize.
-_UNINVOKED_CLARIFICATION_RE = re.compile(r"<\s*clarification_ask(?=[\s/>]|$)", re.IGNORECASE)
+_UNINVOKED_CLARIFICATION_RE = re.compile(r"<\s*(?:clarification_ask|questions)(?=[\s/>\"':=]|$)", re.IGNORECASE)
 
 
 def _clarification_prose(text: str) -> str:
@@ -255,10 +255,11 @@ def _clarification_prose(text: str) -> str:
 
 
 def has_uninvoked_clarification(text: str) -> bool:
-    """Recognize protocol leakage, never infer a question or execute its arguments."""
+    """Recognize non-executed native Tool syntax, never execute its arguments."""
     visible = _clarification_prose(text)
     return bool(
         _UNINVOKED_CLARIFICATION_RE.search(visible)
+        or re.search(r"<\s*(?:tool_call|tool_calls|function_call)(?=[\s/>\"':=]|$)", visible, re.IGNORECASE)
         or (re.search(r"^\s*questions\s*=\s*\[", visible, re.MULTILINE) and re.search(r"^\s*fallback_text\s*=", visible, re.MULTILINE))
     )
 
@@ -276,6 +277,8 @@ def _clarification_block_to_prose(payload: str) -> str:
         # Arguments are invalid JSON (the model mangled the entire call); at least remove angle brackets
         # while preserving text, rather than showing users markup.
         return inner
+    if isinstance(data, list):
+        data = {"questions": data}
     if not isinstance(data, dict):
         return inner
     lines: list[str] = []
@@ -299,7 +302,7 @@ def _clarification_block_to_prose(payload: str) -> str:
 
 def humanize_stray_clarification_ask(text: str) -> str:
     """Render stray protocol prose while preserving quoted examples verbatim."""
-    if not text or "clarification_ask" not in text.lower():
+    if not text or not any(token in text.lower() for token in ("clarification_ask", "questions")):
         return text
     parts: list[str] = []
     end = 0
@@ -508,7 +511,7 @@ def _feed_response_kind(
 
 _OPEN_PREFIXES = (_OPEN_TAG, _HEADLINE_OPEN)
 _MISSING_OPEN_PREFIX = "_kind>"
-_KIND_BODY_RE = re.compile(r"\s*(?:chat|canvas)\s*</response_kind>", re.IGNORECASE)
+_KIND_BODY_RE = re.compile(r"\s*(?:chat|canvas)\s*</(?:response_kind|headline)>", re.IGNORECASE)
 _KIND_WORDS = ("chat", "canvas")
 _MAX_KIND_SPAN = 64
 _MARKER_CANDIDATE_RE = re.compile(r"[<_]")
@@ -535,7 +538,7 @@ def _kind_body_status(rest: str) -> tuple[str, int]:
             return "hold", 0
         if stripped.startswith(word):
             close = stripped[len(word) :].lstrip()
-            if _CLOSE_TAG.startswith(close):
+            if _CLOSE_TAG.startswith(close) or _HEADLINE_CLOSE.startswith(close):
                 return "hold", 0
     return "text", 0
 

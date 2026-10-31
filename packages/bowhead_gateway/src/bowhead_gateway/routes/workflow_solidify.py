@@ -577,6 +577,7 @@ async def _dispatch_dryrun_turn(
             text=trigger_query,
             team_id=user.team_id,
             active_datarc_project=_datarc_ctx.active_datarc_project,
+            datarc_binding=_datarc_ctx.connection_binding,
             datarc_client=_datarc_ctx.datarc_client,
             datarc_unavailable=_datarc_ctx.datarc_unavailable,
             vector_client=_datarc_ctx.vector_client,

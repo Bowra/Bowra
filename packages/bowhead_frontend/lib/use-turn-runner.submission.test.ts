@@ -597,7 +597,7 @@ describe("batch A submission receipt client", () => {
       persistedAction.actionId,
       "adopted",
     );
-    expect(sendSettled).toHaveBeenCalledWith(persistedAction.actionId, true);
+    expect(sendSettled).toHaveBeenCalledWith(persistedAction.actionId, true, { turnId: "t_00112233445546778899aabbccddeeff", sessionId: "s_00112233445546778899aabbccddeeff" });
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
@@ -932,7 +932,7 @@ describe("batch A submission receipt client", () => {
       model_control_batch: "a",
     });
     expect(String(body.client_submission_id)).toMatch(/^[0-9a-f-]{36}$/);
-    expect(settled).toHaveBeenCalledWith("legacy_1", true);
+    expect(settled).toHaveBeenCalledWith("legacy_1", true, { turnId: "t_a", sessionId: "s_a" });
   });
 
   it("reconciles a response-loss through GET receipt without creating a new ID", async () => {

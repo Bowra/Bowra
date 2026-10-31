@@ -7,7 +7,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from bowhead_core.config_copilot import POLICY_GENERATED, FieldIssue, FormContext, FormRegistration, LiteApplyError, MaterializeResult, register_form
-from bowhead_core.team_llm_config import SECRET_KEYS, TeamLlmConfigError, migrate_legacy_config_to_v2, validate_v2_config
+from bowhead_core.rate_card import model_credit_rates_schema
+from bowhead_core.team_llm_config import SECRET_KEYS, TeamLlmConfigError, capability_config_schema, migrate_legacy_config_to_v2, validate_v2_config
+from bowhead_router.agent_tiers import tiers_schema
+from bowhead_router.outbound import outbound_parameters_schema
 from bowhead_router.retry import DEFAULT_MAX_RETRIES, MAX_RETRIES_LIMIT
 from bowhead_router.runtime_parameters import PROFILES, runtime_parameters_schema
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, create_model
@@ -33,8 +36,6 @@ def _projection_fields(model: type[BaseModel], excluded: dict[str, str]) -> dict
         if name in excluded:
             continue
         definition = copy.deepcopy(info)
-        if not definition.description:
-            definition.description = name.replace("_", " ").capitalize() + "; validated by the original model configuration service."
         result[name] = (info.annotation, definition)
     return result
 
@@ -59,13 +60,22 @@ model_fields.update(
         ),
     ),
     protocol=(str | None, Field(default=None, description="Embedding or rerank wire protocol accepted by the original service.")),
-    credit_rates=(dict[str, str] | None, Field(default=None, description="Input, cached_input and output credit multipliers; decimal strings.")),
+    credit_rates=(
+        dict[str, str] | None,
+        Field(
+            default=None,
+            description="Input, cached_input and output credit multipliers; decimal strings.",
+            json_schema_extra={"anyOf": [model_credit_rates_schema(), {"type": "null"}]},
+        ),
+    ),
 )
+model_fields["outbound_params"][1].json_schema_extra = {"anyOf": [outbound_parameters_schema(strict_values=False), {"type": "null"}]}
 ModelSettings = create_model("ConfigurationModelSettings", __config__=ConfigDict(extra="forbid"), **model_fields)
 provider_fields = _projection_fields(V2ProviderDraft, PROVIDER_MANUAL_FIELDS)
 models_definition = copy.deepcopy(V2ProviderDraft.model_fields["models"])
 models_definition.description = "Model declarations and runtime parameters. Preserve unrelated models and fields."
 provider_fields["models"] = (list[ModelSettings | str], models_definition)
+provider_fields["outbound_params"][1].json_schema_extra = {"anyOf": [outbound_parameters_schema(strict_values=False), {"type": "null"}]}
 ProviderSettings = create_model("ConfigurationProviderSettings", __config__=ConfigDict(extra="forbid"), **provider_fields)
 
 
@@ -77,18 +87,22 @@ class TeamModelSettings(BaseModel):
     )
     tiers: dict[str, JsonValue] = Field(
         default_factory=dict,
-        description="Model assignments: primary {provider, model}, primary_fallback list, fast/judge {provider, model}, {follow: primary} or {auto: true}, as accepted by the original service.",
+        json_schema_extra=tiers_schema(),
+        description="Model assignments include the primary model, ordered fallbacks, an explicit or primary-following Fast model, and an explicit or automatic Judge model. Original service validation applies.",
     )
     kb: dict[str, JsonValue] = Field(
         default_factory=dict,
+        json_schema_extra=capability_config_schema("kb"),
         description="Knowledge models, active embedding/rerank assignments and retrieval_top_k. Changing embeddings requires original reindex review. Index status is server-owned.",
     )
     media: dict[str, JsonValue] = Field(
         default_factory=dict,
+        json_schema_extra=capability_config_schema("media"),
         description="Image models and active assignments using existing Team connections; original capability and protocol validation applies.",
     )
     search: dict[str, JsonValue] = Field(
         default_factory=dict,
+        json_schema_extra=capability_config_schema("search"),
         description="Search models and active assignments using existing Team connections; original capability and protocol validation applies.",
     )
 
@@ -99,6 +113,7 @@ class ModelRetrySettings(BaseModel):
         default=DEFAULT_MAX_RETRIES,
         ge=0,
         le=MAX_RETRIES_LIMIT,
+        json_schema_extra={"x-bowhead-field": {"unit": "count"}},
         description="Retries after a failed first model attempt. Zero disables retries; changes affect subsequent model calls.",
     )
 

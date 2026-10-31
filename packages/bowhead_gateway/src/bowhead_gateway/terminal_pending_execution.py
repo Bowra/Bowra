@@ -120,30 +120,51 @@ class TerminalPendingExecutionRecovery:
         )
         if access.team_id != context.scope.team_id:
             raise DecisionAuthorizationDeniedError("access_revoked")
-        datarc = await resolve_datarc_turn_context(
-            self._app,
-            team_id=context.scope.team_id,
-            workspace_id=clarification.workspace_id,
-            user_id=context.principals.requester_ref,
-            session_id=context.scope.session_id,
-            pinned_project=(
-                clarification.chosen_value
-                if clarification.kind == "tool_context_select" and clarification.chosen_value != "__bowhead_clarification_skip__"
-                else None
-            ),
+        from bowhead_gateway.datarc_context import clarification_runtime_context, recovered_datarc_source, resolve_datarc_recovery_context
+
+        original_context = clarification_runtime_context(clarification, db_path=getattr(clarification_store, "db_path", None))
+        source_evidence = original_context.get("datarc_selection")
+        selected_project = (
+            clarification.chosen_value
+            if clarification.kind == "tool_context_select" and clarification.chosen_value != "__bowhead_clarification_skip__"
+            else None
         )
-        member_uid = await _resolve_recovery_member_uid(
-            self._app,
-            user_id=context.principals.requester_ref,
-            datarc_client=datarc.datarc_client,
-            datarc_workspace_id=datarc.datarc_project_for_calls,
-        )
+        if source_evidence is not None:
+            datarc, member_uid = await resolve_datarc_recovery_context(
+                self._app,
+                team_id=context.scope.team_id,
+                user_id=context.principals.requester_ref,
+                workspace_id=clarification.workspace_id,
+                session_id=context.scope.session_id,
+                evidence=source_evidence,
+                selected_project=selected_project,
+            )
+        else:
+            datarc = await resolve_datarc_turn_context(
+                self._app,
+                team_id=context.scope.team_id,
+                workspace_id=clarification.workspace_id,
+                user_id=context.principals.requester_ref,
+                session_id=context.scope.session_id,
+                pinned_project=(
+                    clarification.chosen_value
+                    if clarification.kind == "tool_context_select" and clarification.chosen_value != "__bowhead_clarification_skip__"
+                    else None
+                ),
+            )
+            member_uid = await _resolve_recovery_member_uid(
+                self._app,
+                user_id=context.principals.requester_ref,
+                datarc_client=datarc.datarc_client,
+                datarc_workspace_id=datarc.datarc_project_for_calls,
+            )
         team_router, team_kb = await resolve_terminal_team_runtime(
             self._app.state,
             context.scope.team_id,
         )
         turn_request = build_resume_turn_request(
             clarification,
+            source_db_path=getattr(clarification_store, "db_path", None),
             datarc_client=datarc.datarc_client,
             datarc_unavailable=datarc.datarc_unavailable,
             vector_client=datarc.vector_client,
@@ -164,6 +185,8 @@ class TerminalPendingExecutionRecovery:
             SimpleNamespace(app=self._app),
             context.principals.requester_ref,
             context.scope.session_id,
+            workspace_id=clarification.workspace_id,
+            binding=datarc.connection_binding,
             ws_enforce=ws_membership_enforce_enabled(),
             log=logging.getLogger(__name__),
         )
@@ -185,6 +208,13 @@ class TerminalPendingExecutionRecovery:
             team_id=context.scope.team_id,
             turn_id=context.scope.turn_id,
         )
+        from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
+        from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
+
+        outcome_reader = getattr(clarification_store, "get_resolution_outcome", None)
+        outcome = await outcome_reader(clarification.request_id) if callable(outcome_reader) else None
+        persistence = (outcome or {}).get("tool_context_persistence")
+
         turn_request = replace(
             turn_request,
             session_id=context.scope.session_id,
@@ -195,6 +225,24 @@ class TerminalPendingExecutionRecovery:
             member_uid=member_uid,
             access_context=access.as_dict(),
             active_datarc_project=datarc.active_datarc_project,
+            datarc_binding=datarc.connection_binding,
+            datarc_source_evidence=recovered_datarc_source(datarc, context.principals.requester_ref, context.scope.team_id, member_uid)
+            if source_evidence is not None
+            else None,
+            datarc_switch_resolution=DatarcSwitchResolution.from_card(
+                clarification,
+                source=recovered_datarc_source(datarc, context.principals.requester_ref, context.scope.team_id, member_uid),
+                persistence=persistence,
+            )
+            if source_evidence is not None
+            else None,
+            datarc_helper_switch_resolution=DatarcHelperSwitchResolution.from_card(
+                clarification,
+                source=recovered_datarc_source(datarc, context.principals.requester_ref, context.scope.team_id, member_uid),
+                persistence=persistence,
+            )
+            if source_evidence is not None
+            else None,
             active_datarc_workspace_name=(datarc.active_datarc_workspace_name or ""),
             accessible_datarc_workspaces=(datarc.accessible_datarc_workspaces or ()),
             datarc_absence_reason=datarc.datarc_absence_reason or "",
@@ -393,24 +441,37 @@ async def resolve_terminal_followup_request(
     )
     if access.team_id != parent_scope.team_id:
         raise DecisionAuthorizationDeniedError("access_revoked")
-    datarc = await resolve_datarc_turn_context(
-        app,
-        team_id=parent_scope.team_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        session_id=parent_scope.session_id,
-        pinned_project=(
-            intent.get("active_datarc_project")
-            if isinstance(intent.get("active_datarc_project"), str) and intent.get("active_datarc_project")
-            else None
-        ),
-    )
-    member_uid = await _resolve_recovery_member_uid(
-        app,
-        user_id=user_id,
-        datarc_client=datarc.datarc_client,
-        datarc_workspace_id=datarc.datarc_project_for_calls,
-    )
+    source_evidence = intent.get("datarc_selection")
+    if source_evidence is not None:
+        from bowhead_gateway.datarc_context import resolve_datarc_recovery_context
+
+        datarc, member_uid = await resolve_datarc_recovery_context(
+            app,
+            team_id=parent_scope.team_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=parent_scope.session_id,
+            evidence=source_evidence,
+        )
+    else:
+        datarc = await resolve_datarc_turn_context(
+            app,
+            team_id=parent_scope.team_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=parent_scope.session_id,
+            pinned_project=(
+                intent.get("active_datarc_project")
+                if isinstance(intent.get("active_datarc_project"), str) and intent.get("active_datarc_project")
+                else None
+            ),
+        )
+        member_uid = await _resolve_recovery_member_uid(
+            app,
+            user_id=user_id,
+            datarc_client=datarc.datarc_client,
+            datarc_workspace_id=datarc.datarc_project_for_calls,
+        )
     if member_uid != member_uid_snapshot:
         raise DecisionAuthorizationDeniedError("dependency_missing")
     team_router, team_kb = await resolve_terminal_team_runtime(
@@ -457,6 +518,8 @@ async def resolve_terminal_followup_request(
         datarc_unavailable=datarc.datarc_unavailable,
         vector_client=datarc.vector_client,
         active_datarc_project=datarc.active_datarc_project,
+        datarc_binding=datarc.connection_binding,
+        datarc_source_evidence=source_evidence,
         active_datarc_workspace_name=(datarc.active_datarc_workspace_name or ""),
         accessible_datarc_workspaces=(datarc.accessible_datarc_workspaces or ()),
         datarc_absence_reason=datarc.datarc_absence_reason or "",
@@ -509,6 +572,7 @@ async def build_terminal_approval_executor(
         tool_registry=registry,
         datarc=datarc.datarc_client,
         active_datarc_project=datarc.active_datarc_project,
+        datarc_binding=datarc.connection_binding,
         approver_member_uid=member_uid or None,
         datarc_unavailable=datarc.datarc_unavailable,
         vector_client=datarc.vector_client,

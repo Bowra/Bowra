@@ -240,3 +240,39 @@ describe("同一组事件 · live 渲染与重放渲染一致", () => {
     expect(pos(findText(replay, INTRO), trace)).toBeTruthy();
   });
 });
+
+describe("knowledge receipt narrative reconciliation", () => {
+  beforeEach(resetAll);
+  afterEach(resetAll);
+
+  it.each(["live", "replay"])("shows one receipt after internal Artifact cleanup in %s", (path) => {
+    const intro = "I will check the requested personal membership.";
+    const receipt = "The file is searchable; the original remains stored.";
+    const narrative = `Added again.\n\nkblive-personal.md（art_666e5f8cbfcf） ${receipt}`;
+    const answer = `Added again.\n\nkblive-personal.md ${receipt}`;
+    const raw: Array<[string, Record<string, unknown>]> = [
+      ["turn_started", { turn_id: T, session_id: "s_1" }],
+      ["step_list_card_created", { card_id: T }],
+      ["narrative.delta", { card_id: T, delta: intro }],
+      ["step_started", { card_id: T, step_id: "kb-add", step_type: "tool_run", tool_name: "kb_add_file" }],
+      ["step_done", { card_id: T, step_id: "kb-add", state: "done", duration_ms: 100 }],
+      ["narrative.delta", { card_id: T, delta: narrative }],
+      ["final_answer", { card_id: T, turn_id: T, text: answer }],
+      ["step_list_card_finalized", { card_id: T, state: "completed", step_count: 1 }],
+      ["done", { turn_id: T, status: "completed" }],
+    ];
+    const rows: Row[] = raw.map(([event_type, payload], i) => ({
+      seq: i + 1, event_type, payload: { ...payload, seq: i + 1 }, occurred_at: "",
+    }));
+    if (path === "live") {
+      rows.forEach((row) => dispatchToTurnStore(row.event_type, row.payload));
+    } else {
+      replayTurnEventRows(T, rows);
+    }
+    const { container } = render(<TurnContainer runner={runner({ answer })} />);
+    const text = container.textContent ?? "";
+    expect(text.split(receipt).length - 1).toBe(1);
+    expect(text).not.toContain("art_666e5f8cbfcf");
+    expect(text).toContain(intro);
+  });
+});

@@ -18,7 +18,6 @@ from bowhead_core.builtin_subagent_override import (
     MODEL_ALLOWLIST,
     apply_to_profile,
     effective_description,
-    effective_max_iterations,
     effective_model,
 )
 from bowhead_core.builtin_subagent_override_store import BuiltinSubagentOverride
@@ -119,23 +118,14 @@ def test_model_override_applies_and_non_allowlisted_is_ignored() -> None:
     assert effective_model("analyst", _ov(model="judge")) == "analyst"
 
 
-def test_max_iterations_follow_the_team_within_the_platform_ceiling() -> None:
-    p = _profile(max_iterations=30)
-    assert apply_to_profile(p, _ov(max_iterations=20)).max_iterations == 20
-    # Teams may raise the limit for long tasks, up to the platform ceiling of 100.
-    assert apply_to_profile(p, _ov(max_iterations=80)).max_iterations == 80
-    assert apply_to_profile(p, _ov(max_iterations=200)).max_iterations == 100
-    assert effective_max_iterations(12, _ov(max_iterations=0)) == 1
-
-
 def test_coach_runtime_takes_the_team_step_limit(monkeypatch) -> None:
     """Coach's manifest lets Teams set its step limit; the resolve-side floor must not drop it."""
     from bowhead_core.builtin_subagent_override import restrict_override_to_manifest
 
     ov = restrict_override_to_manifest("agent-coach", _ov(name="agent-coach", max_iterations=60, model="narrative"))
-    assert ov.max_iterations == 60
+    assert ov.max_iterations is None
     assert ov.model is None  # Model stays platform policy for Coach.
-    assert apply_to_profile(_profile(name="agent-coach", max_iterations=30), ov).max_iterations == 60
+    assert apply_to_profile(_profile(name="agent-coach", max_iterations=30), ov).max_iterations == 30
 
 
 def test_skills_override_adds_prelude_and_forces_skill_read() -> None:
@@ -321,7 +311,7 @@ def test_resolve_applies_override() -> None:
         )
         assert p is not None
         assert p.llm_agent_type == "narrative"
-        assert p.max_iterations == min(7, base.max_iterations)
+        assert p.max_iterations == base.max_iterations
         assert PROFILES[name] is base  # Never mutate global PROFILES in place (process-shared)
 
     _run(go())
@@ -336,7 +326,6 @@ def test_default_on_is_inert_without_any_delta(monkeypatch) -> None:
     assert apply_to_profile(p, None) is p
     assert effective_description("默认描述", None) == ("默认描述", False)
     assert effective_model("analyst", None) == "analyst"
-    assert effective_max_iterations(100, None) == 100
 
 
 def test_prefetch_failure_is_fail_safe(monkeypatch) -> None:

@@ -11,14 +11,15 @@ import re
 
 StopReason = str  # "step_limit" | "time_limit" | "tool_call_limit" | "no_progress" | "budget"
 
-STOP_REASONS = ("step_limit", "time_limit", "tool_call_limit", "no_progress", "budget")
+STOP_REASONS = ("step_limit", "time_limit", "tool_call_limit", "no_progress", "budget", "agent_stalled")
 WRAP_UP_TIMEOUT_S = 90.0
 WRAP_UP_MAX_OUTPUT_TOKENS = 2000
 # Lead receives each section up to this length; persisted events use a shorter bound.
 SECTION_MAX_CHARS = 4000
 
 _REASON_TEXT = {
-    "step_limit": "the Team's step limit for one task",
+    "step_limit": "the effective model-step limit for one task",
+    "agent_stalled": "the local execution stall timeout",
     "time_limit": "the time limit of this turn",
     "tool_call_limit": "the Team's tool-call limit for this turn",
     "no_progress": "several steps in a row that produced no new results",
@@ -66,7 +67,8 @@ def partial_directive(stop_reason: StopReason) -> str:
     return (
         f"This helper stopped at {reason} and returned partial work. Tell the user the task is only partially "
         "complete and why, give the finished results from `done`, list what remains from `remaining`, and say "
-        "they can continue. Never present it as complete. Do not dispatch this task again in this turn."
+        "continuation is available only if this result includes a supported checkpoint. "
+        "Never present it as complete. Do not dispatch this task again in this turn."
     )
 
 

@@ -64,6 +64,9 @@ interface Props {
  * what to do. Reason codes outside the table keep their own localized sentence as the title.
  */
 const FAILURE_GROUPS = {
+  agent_step_limit: "agent_step_limit",
+  agent_tool_call_limit: "agent_tool_call_limit",
+  agent_stalled: "agent_stalled",
   llm_provider_unavailable: "llm_provider_unavailable",
   llm_provider_timeout: "llm_provider_timeout",
   llm_provider_rate_limited: "llm_provider_rate_limited",
@@ -91,11 +94,12 @@ const FAILURE_GROUPS = {
 } as const satisfies Partial<Record<ReasonCode, string>>;
 
 const LIMIT_REASONS = new Set<ReasonCode>([
+  "agent_step_limit", "agent_tool_call_limit",
   "wallclock_exceeded", "llm_stream_deadline_exceeded", "token_cap_exhausted",
   "hop_cap_exceeded", "peer_depth_exceeded", "cost_cap_exceeded",
 ]);
 
-const DOCUMENT_REASONS = new Set<ReasonCode>(["document_information_incomplete", "document_planning_failed"]);
+const DOCUMENT_REASONS = new Set<ReasonCode>(["document_information_incomplete", "document_planning_failed", "document_authoring_script_failed", "document_candidate_invalid"]);
 
 /** Narrower copy is used only for facts published for this same model failure. */
 function modelFailureGroup(
@@ -309,6 +313,7 @@ export function FinalFailBanner({
       {rejectedParameter ? <p className="ui-card__text">{t("failure_card.model_rejected_parameter", { parameter: rejectedParameter })}</p> : null}
       {modelFailure && safeDiagnostics?.providerMessage ? <p className="ui-card__text"><strong>{t("failure_card.provider_message_label")}</strong> {safeDiagnostics.providerMessage}</p> : null}
       {body ? <p className="ui-card__text">{modelFailure ? <strong>{t("failure_card.recommended_step_label")}</strong> : null}{body}</p> : null}
+      {safeDiagnostics?.stepUsage ? <p className="ui-card__text">{t("failure_card.step_usage", { ...safeDiagnostics.stepUsage })}</p> : null}
       {responsesRejected ? <p className="ui-card__text">{t("failure_card.responses_rejected_hint")}</p> : null}
       {outcomeUnknown ? <p className="ui-card__text">{t("failure_card.model_outcome_unknown")}</p> : null}
       {clarificationStage && answerBody ? <p className="ui-card__text">{answerBody}</p> : null}

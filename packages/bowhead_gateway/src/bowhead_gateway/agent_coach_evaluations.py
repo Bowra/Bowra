@@ -120,7 +120,7 @@ class AgentCoachEvaluations:
             "ok": True,
             "items": items,
             "next_offset": offset + limit if len(rows) > limit else None,
-            "evaluation": "not_run",
+            "executed_by_this_call": False,
             "missing_suite_action": "propose_initial_suite" if not items and offset == 0 else None,
             "scoring_contract": core_scoring_contract(),
         }
@@ -170,7 +170,7 @@ class AgentCoachEvaluations:
             "next_offset": offset + len(items) if offset + len(items) < len(revision.cases) else None,
             "content_role": "untrusted_evaluation_data",
             "independent_quality_proof": False,
-            "evaluation": "not_run",
+            "executed_by_this_call": False,
         }
 
     async def propose(self, *, target: dict, cases: list[dict], rationale: str, request_id: str, turn_id: str, alignment: dict | None = None) -> dict:
@@ -220,7 +220,7 @@ class AgentCoachEvaluations:
             "ok": True,
             "proposal": redact_held_out_cases(asdict(result)),
             "applied": False,
-            "evaluation": "not_run",
+            "executed_by_this_call": False,
             "independent_quality_proof": False,
         }
 
@@ -263,7 +263,7 @@ class AgentCoachEvaluations:
         if result.provenance.get("workspace_id") != resource.workspace_id:
             raise AgentChangeProposalError("agent_change_proposal_not_found")
         await self.reauthorize(agent_id)
-        return {"ok": True, "proposal": redact_held_out_cases(asdict(result)), "evaluation": "not_run", "independent_quality_proof": False}
+        return {"ok": True, "proposal": redact_held_out_cases(asdict(result)), "executed_by_this_call": False, "independent_quality_proof": False}
 
     async def call(self, operation: str, args: dict, *, turn_id: str) -> dict:
         if operation == "agent_eval_evidence_get":

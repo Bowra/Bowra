@@ -6,45 +6,40 @@ PRD §3.3b/c：用户点选工作区 → resolve 端点 server 侧写 user 偏�
 
 from __future__ import annotations
 
-import sqlite3
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
 from bowhead_core.clarification_store import ClarificationCandidate, ClarificationStore
-from bowhead_core.user_memory import ProjectMemoryStore, UserMemoryStore
+from bowhead_core.user_memory import ProjectMemoryStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from test_datarc_context_selection import datarc_environment as datarc_environment
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch):
+async def app_ctx(datarc_environment, monkeypatch):
+    env = datarc_environment
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "dev")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "1")
-    clarify = ClarificationStore(tmp_path / "c.db")
-    await clarify.initialize()
-    with sqlite3.connect(tmp_path / "c.db") as connection:
-        connection.execute(
-            "CREATE TABLE clarification_resolution_outbox ("
-            "request_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL, "
-            "state TEXT NOT NULL, channel TEXT NOT NULL, work_json TEXT NOT NULL, "
-            "payload_json TEXT, lease_owner TEXT, lease_expires_at TEXT, "
-            "attempt_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
-        )
-    user_mem = UserMemoryStore(tmp_path / "m.db")
-    await user_mem.initialize()
-    proj_mem = ProjectMemoryStore(tmp_path / "m.db")
-    await proj_mem.initialize()
     app = create_app()
     app.state.settings = Settings()
     app.state.settings.auth_mode = "dev"
-    app.state.clarification_store = clarify
-    app.state.user_memory_store = user_mem
-    app.state.project_memory_store = proj_mem
+    for key, value in vars(env.app.state).items():
+        setattr(app.state, key, value)
+    app.state.clarification_store = ClarificationStore(env.path)
+    app.state.project_memory_store = ProjectMemoryStore(env.path)
+    app.state.test_actor = env.user
+    app.state.test_space = env.workspace
+    app.state.test_team = env.team.id
+    app.state.test_scope = env.scope
+
+    async def model_runtime(*args, **kwargs):
+        from bowhead_gateway.turn_service import TeamModelRuntimeResolution
+
+        return TeamModelRuntimeResolution(router=object(), result="team_safe_success", reason="configured")
+
+    monkeypatch.setattr("bowhead_gateway.turn_service.resolve_team_model_runtime", model_runtime)
     from bowhead_core.events import get_event_registry
 
     registry = get_event_registry()
@@ -63,7 +58,7 @@ async def app_ctx(tmp_path: Path, monkeypatch):
 @pytest.fixture
 async def http(app_ctx):
     transport = httpx2.ASGITransport(app=app_ctx)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"X-Bowhead-User-Id": app_ctx.state.test_actor.id}) as c:
         yield c
 
 
@@ -71,8 +66,8 @@ async def _seed(app, *, resume_context: dict | None = None):
     store: ClarificationStore = app.state.clarification_store
     req = await store.put(
         turn_id="t_ws_pick",
-        user_id="u_dev_alice",
-        workspace_id="ws_a",
+        user_id=app.state.test_actor.id,
+        workspace_id=app.state.test_space,
         token="",
         rationale="选工作区",
         candidates=[
@@ -96,7 +91,7 @@ async def test_resolve_by_value_writes_explicit_pref(http, app_ctx):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["action"] == "noop"
-    ctx = await app_ctx.state.user_memory_store.get_tool_context("u_dev_alice", "datarc")
+    ctx = await app_ctx.state.user_memory_store.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope)
     assert ctx == {**ctx, "id": "7", "name": "华东大区", "source": "explicit"}
     assert "session_id" not in ctx
 
@@ -111,7 +106,7 @@ async def test_resolve_by_label_fallback_normalizes_to_id(http, app_ctx):
     )
     assert r.status_code == 200, r.text
     assert r.json()["chosen_value"] == "42"  # Normalize primary to Datarc workspace ID.
-    ctx = await app_ctx.state.user_memory_store.get_tool_context("u_dev_alice", "datarc")
+    ctx = await app_ctx.state.user_memory_store.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope)
     assert ctx["id"] == "42"
 
 
@@ -131,11 +126,11 @@ async def test_resolve_remember_false_writes_session_pref(http, app_ctx):
     )
     assert r.status_code == 200, r.text
     # BUG1 fix: remember=False writes session overlay (@session key), not permanent default.
-    assert await app_ctx.state.user_memory_store.get_tool_context("u_dev_alice", "datarc") is None
-    sess = await app_ctx.state.user_memory_store.get_tool_context(
-        "u_dev_alice",
-        "datarc",
-        session_scoped=True,
+    assert await app_ctx.state.user_memory_store.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope) is None
+    sess = await app_ctx.state.user_memory_store.get_datarc_workspace(
+        app_ctx.state.test_actor.id,
+        app_ctx.state.test_scope,
+        session_id="s_soft",
     )
     assert sess["source"] == "session"
     assert sess["session_id"] == "s_soft"
@@ -149,7 +144,7 @@ async def test_resolve_skip_writes_nothing(http, app_ctx):
         json={"skip": True},
     )
     assert r.status_code == 200, r.text
-    assert await app_ctx.state.user_memory_store.get_tool_context("u_dev_alice", "datarc") is None
+    assert await app_ctx.state.user_memory_store.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope) is None
 
 
 # ─── BUG2 regression: skip '让模型判断' → Datarc workspace directory+routing instruction, not a dead end ──
@@ -206,10 +201,10 @@ async def test_skip_routes_via_catalog_not_deadend(http, app_ctx, monkeypatch):
             "user_text": "今年营业额多少",
             "session_id": "s_skip",
             "parent_turn_id": "t_ws_pick",
-            "workspace_id": "ws_a",
-            "user_id": "u_dev_alice",
+            "workspace_id": app_ctx.state.test_space,
+            "user_id": app_ctx.state.test_actor.id,
             "member_uid": "m",
-            "team_id": None,
+            "team_id": app_ctx.state.test_team,
             "kb_role": "user",
             "paradigm_v2": False,
             "snapshot_at": "2026-07-09T00:00:00Z",
@@ -248,10 +243,10 @@ async def test_skip_wires_switcher_when_per_user(http, app_ctx, monkeypatch):
             "user_text": "今年营业额多少",
             "session_id": "s_skip_pu",
             "parent_turn_id": "t_ws_pick",
-            "workspace_id": "ws_a",
-            "user_id": "u_dev_alice",
+            "workspace_id": app_ctx.state.test_space,
+            "user_id": app_ctx.state.test_actor.id,
             "member_uid": "m",
-            "team_id": None,
+            "team_id": app_ctx.state.test_team,
             "kb_role": "user",
             "paradigm_v2": False,
             "snapshot_at": "2026-07-09T00:00:00Z",
@@ -266,7 +261,7 @@ async def test_skip_wires_switcher_when_per_user(http, app_ctx, monkeypatch):
     orch = app_ctx.state.orchestrator
     assert orch.calls, "resume_turn 应 spawn 一个 turn"
     assert orch.calls[0].datarc_context_switcher is not None, "per-user resume 必须注入 switcher，否则 tool_switch_context 空转 → dead-end"
-    assert callable(orch.calls[0].datarc_context_switcher)
+    assert hasattr(orch.calls[0].datarc_context_switcher, "prepare_selection")
 
 
 # ─── connector-context T1#6: tool discriminator round-trip (red/green test for B1 broken chain) ──
@@ -279,8 +274,8 @@ async def test_resolve_uses_row_tool_discriminator(http, app_ctx):
     store: ClarificationStore = app_ctx.state.clarification_store
     req = await store.put(
         turn_id="t_ws_pick_pbi",
-        user_id="u_dev_alice",
-        workspace_id="ws_a",
+        user_id=app_ctx.state.test_actor.id,
+        workspace_id=app_ctx.state.test_space,
         token="",
         rationale="选工作区",
         candidates=[
@@ -296,10 +291,10 @@ async def test_resolve_uses_row_tool_discriminator(http, app_ctx):
     )
     assert r.status_code == 200, r.text
     umem = app_ctx.state.user_memory_store
-    pbi_ctx = await umem.get_tool_context("u_dev_alice", "pbi")
+    pbi_ctx = await umem.get_tool_context(app_ctx.state.test_actor.id, "pbi")
     assert pbi_ctx is not None and pbi_ctx["id"] == "w2"
     # Cross-write guard: datarc key must stay clean (B1 incident wrote wrong key without errors).
-    assert await umem.get_tool_context("u_dev_alice", "datarc") is None
+    assert await umem.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope) is None
 
 
 @pytest.mark.integration
@@ -312,5 +307,5 @@ async def test_resolve_null_tool_falls_back_datarc(http, app_ctx):
         json={"chosen_value": "7"},
     )
     assert r.status_code == 200, r.text
-    ctx = await app_ctx.state.user_memory_store.get_tool_context("u_dev_alice", "datarc")
+    ctx = await app_ctx.state.user_memory_store.get_datarc_workspace(app_ctx.state.test_actor.id, app_ctx.state.test_scope)
     assert ctx is not None and ctx["id"] == "7"

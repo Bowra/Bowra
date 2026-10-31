@@ -25,7 +25,7 @@ import type { AgentDraftSuggestionsModel } from "./agent-draft-suggestions";
 // Reading order of a suggestion: what the owner names and describes first; the internal identifier last.
 const SUGGESTED_FIELDS: Array<keyof ManualSubagentDraftDefinition> = [
   "display_name", "description", "system_prompt", "builtin_plugin_ids", "tool_refs", "skill_grants", "capability_ids",
-  "model", "max_iterations", "output_schema_text", "name",
+  "model", "output_schema_text", "name",
 ];
 
 export function SubagentCanvasDraftEditor({

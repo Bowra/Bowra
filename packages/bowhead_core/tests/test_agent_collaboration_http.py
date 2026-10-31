@@ -184,7 +184,6 @@ async def test_default_peer_exchange_and_clarification_resume_keep_original_work
             await db.execute("BEGIN")
             record = await read_ordinary_card_in_tx(db, card_id=card_id)
             checkpoint = reopen_ordinary_checkpoint(record)
-        assert checkpoint.contract == "ordinary-lead-loop.v9"
         assert checkpoint.collaboration["cursor"] > 0
         operations = rows(case, "agent_collaboration_operation")
         exchange_ids = [row["id"] for row in operations if row["action"] in {"ask", "reply", "resolve", "wait"}]

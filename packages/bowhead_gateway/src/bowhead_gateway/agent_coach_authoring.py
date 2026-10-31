@@ -235,7 +235,10 @@ class AgentCoachAuthoring:
                     "message": "Nothing was written: a Skill this change adds needs other Skills the Agent doesn't have. "
                     "Add the missing Skills in the same change, or tell the user which ones are needed.",
                 }
-            proposal, version, written = await AgentChangeProposalStore(resource.store.db_path).create_applied(
+            from bowhead_gateway.routes.agents import _revision_store
+
+            revisions = await _revision_store(resource.request, user=resource.user, store=resource.store)
+            proposal, version, written = await AgentChangeProposalStore(resource.store.db_path, revision_store=revisions).create_applied(
                 team_id=resource.user.team_id,
                 agent_id=target["agent_id"],
                 effective_owner_user_id=resource.user.id,

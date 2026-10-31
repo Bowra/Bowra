@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { HtmlPreviewIssue, InteractiveHtmlDocument } from "@/lib/html-preview-contract";
+import { INTERACTIVE_HTML_PERMISSIONS, INTERACTIVE_HTML_SANDBOX } from "@/lib/html-preview-contract";
 import { appFetch } from "@/lib/base-path";
+import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 
-export const MAX_SAFE_HTML_BYTES = 5 * 1024 * 1024;
+export const MAX_SAFE_HTML_BYTES = 25 * 1024 * 1024;
 const MAX_CONFIGURABLE_HTML_BYTES = 50 * 1024 * 1024;
 
 function responseHtmlLimit(response: Response): number {
@@ -85,12 +88,15 @@ export type SafeHtmlErrorCode =
   | "too_large"
   | "unsupported"
   | "unavailable"
-  | "load_failed";
+  | "load_failed"
+  | "interaction_unavailable";
 
 type SafeHtmlState = {
   key: string;
   document: string | null;
   error: SafeHtmlErrorCode | null;
+  maxBytes?: number;
+  interactive?: InteractiveHtmlDocument;
 };
 
 export class SafeHtmlStaticContentEmptyError extends Error {
@@ -221,26 +227,39 @@ export function useSafeHtmlDocument({
   href,
   declaredSize,
   reloadToken = 0,
+  presentation = "static",
 }: {
   enabled: boolean;
   href: string;
   declaredSize?: number | null;
   reloadToken?: number;
+  presentation?: "static" | "interactive";
 }): {
   document: string | null;
   error: SafeHtmlErrorCode | null;
   loading: boolean;
+  maxBytes: number | null;
+  interactive?: InteractiveHtmlDocument;
 } {
+  const auth = useOptionalAuthSession();
+  const scope = auth
+    ? JSON.stringify([auth.status, auth.me?.id, auth.me?.team_id, auth.me?.auth_session_generation])
+    : "standalone";
+  const sourceKey = `${scope}:${href}:${declaredSize ?? ""}:${reloadToken}`;
+  const sourceCache = useRef<{ key: string; raw: string; maxBytes: number } | null>(null);
   const requestKey = useMemo(
-    () => `${enabled ? "1" : "0"}:${href}:${declaredSize ?? ""}:${reloadToken}`,
-    [declaredSize, enabled, href, reloadToken],
+    () => `${enabled ? "1" : "0"}:${sourceKey}:${presentation}`,
+    [sourceKey, enabled, presentation],
   );
   const [state, setState] = useState<SafeHtmlState | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      sourceCache.current = null;
+      return;
+    }
     if (declaredSize != null && declaredSize > MAX_CONFIGURABLE_HTML_BYTES) {
-      setState({ key: requestKey, document: null, error: "too_large" });
+      setState({ key: requestKey, document: null, error: "too_large", maxBytes: MAX_CONFIGURABLE_HTML_BYTES });
       return;
     }
     const controller = new AbortController();
@@ -249,6 +268,24 @@ export function useSafeHtmlDocument({
     };
     void (async () => {
       try {
+        const prepare = async (raw: string, maxBytes: number) => {
+          if (presentation === "interactive") {
+            try {
+              const { buildInteractiveHtmlDocument } = await import("@/lib/interactive-html");
+              const interactive = await buildInteractiveHtmlDocument(raw);
+              commit({ key: requestKey, document: interactive.document, interactive, error: null, maxBytes });
+            } catch {
+              commit({ key: requestKey, document: null, error: "interaction_unavailable", maxBytes });
+            }
+          } else {
+            commit({ key: requestKey, document: await buildSafeHtmlDocument(raw), error: null, maxBytes });
+          }
+        };
+        if (sourceCache.current?.key === sourceKey) {
+          await prepare(sourceCache.current.raw, sourceCache.current.maxBytes);
+          return;
+        }
+        sourceCache.current = null;
         const response = await appFetch(href, {
           cache: "no-store",
           signal: controller.signal,
@@ -268,16 +305,17 @@ export function useSafeHtmlDocument({
           || (declaredSize != null && declaredSize > maxBytes)
         ) {
           await response.body?.cancel();
-          commit({ key: requestKey, document: null, error: "too_large" });
+          commit({ key: requestKey, document: null, error: "too_large", maxBytes });
           return;
         }
         const rawHtml = await readResponseTextWithinLimit(response, maxBytes);
         if (rawHtml === null) {
-          commit({ key: requestKey, document: null, error: "too_large" });
+          commit({ key: requestKey, document: null, error: "too_large", maxBytes });
           return;
         }
-        const document = await buildSafeHtmlDocument(rawHtml);
-        commit({ key: requestKey, document, error: null });
+        if (controller.signal.aborted) return;
+        sourceCache.current = { key: sourceKey, raw: rawHtml, maxBytes };
+        await prepare(rawHtml, maxBytes);
       } catch (error) {
         commit({
           key: requestKey,
@@ -289,13 +327,15 @@ export function useSafeHtmlDocument({
       }
     })();
     return () => controller.abort();
-  }, [declaredSize, enabled, href, reloadToken, requestKey]);
+  }, [declaredSize, enabled, href, reloadToken, requestKey, presentation, sourceKey]);
 
   const current = enabled && state?.key === requestKey ? state : null;
   return {
     document: current?.document ?? null,
     error: current?.error ?? null,
     loading: enabled && current === null,
+    maxBytes: current?.maxBytes ?? null,
+    interactive: current?.interactive,
   };
 }
 
@@ -304,17 +344,37 @@ export function SafeHtmlFrame({
   title,
   className,
   height,
+  interactive,
+  onEscape,
+  onIssue,
 }: {
   document: string;
   title: string;
   className?: string;
   height?: number | string;
+  interactive?: InteractiveHtmlDocument;
+  onEscape?: () => void;
+  onIssue?: (issue: HtmlPreviewIssue) => void;
 }) {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    if (!interactive) return;
+    const receive = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow || event.data?.channel !== interactive.channel) return;
+      if (event.data.type === "bowhead-html-escape") onEscape?.();
+      if (event.data.type === "bowhead-html-runtime") onIssue?.("runtime");
+      if (event.data.type === "bowhead-html-blocked") onIssue?.("blocked");
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [interactive, onEscape, onIssue]);
   return (
     <iframe
+      ref={frameRef}
       srcDoc={document}
       title={title}
-      sandbox=""
+      sandbox={interactive ? INTERACTIVE_HTML_SANDBOX : ""}
+      allow={interactive ? INTERACTIVE_HTML_PERMISSIONS : undefined}
       referrerPolicy="no-referrer"
       className={className}
       style={height == null ? undefined : { height }}

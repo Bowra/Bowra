@@ -71,7 +71,7 @@ async function setupRunningTurn() {
 }
 
 describe("legacy terminal error isolation", () => {
-  it.each(["document_information_incomplete", "document_planning_failed", "document_history_unavailable", "document_request_rejected", "document_routing_invalid", "document_routing_uncertain", "document_routing_source_unavailable"])("preserves the document result in a failed done (%s)", async (reasonCode) => {
+  it.each(["document_information_incomplete", "document_planning_failed", "document_authoring_script_failed", "document_candidate_invalid", "document_history_unavailable", "document_request_rejected", "document_routing_invalid", "document_routing_uncertain", "document_routing_source_unavailable"])("preserves the document result in a failed done (%s)", async (reasonCode) => {
     const { hook, es } = await setupRunningTurn();
     const retryable = reasonCode === "document_routing_invalid";
     act(() => es.emit("done", {
@@ -80,7 +80,7 @@ describe("legacy terminal error isolation", () => {
       diagnostics: {
         schema_version: 1, disclosure: "authenticated", diagnostic_code: "chat_turn_failed", retryable,
         occurrence_id: "0123456789abcdef0123456789abcdef", turn_id: "t_1",
-        safe_detail: `phase=chat; failure_class=${reasonCode === "document_information_incomplete" || reasonCode === "document_request_rejected" || reasonCode === "document_routing_uncertain" ? "content" : reasonCode === "document_history_unavailable" ? "configuration" : reasonCode === "document_routing_source_unavailable" ? "access" : "runtime"}`,
+        safe_detail: `phase=chat; failure_class=${reasonCode === "document_information_incomplete" || reasonCode === "document_candidate_invalid" || reasonCode === "document_request_rejected" || reasonCode === "document_routing_uncertain" ? "content" : reasonCode === "document_history_unavailable" ? "configuration" : reasonCode === "document_routing_source_unavailable" ? "access" : "runtime"}`,
       },
     }));
     expect(hook.result.current.errorReason).toMatchObject({

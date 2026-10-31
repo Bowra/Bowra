@@ -72,17 +72,23 @@ CONFIGURATION_PROPOSE = "configuration_propose"
 CONFIGURATION_READ = "configuration_read"
 CONFIGURATION_RESULT = "configuration_result"
 CONFIGURATION_SUBMIT = "configuration_submit"
+EDIT_CHART = "edit_chart"
 GET_CURRENT_USER = "get_current_user"
 GOOGLE_DOC_WRITE = "google_doc_write"
 GOOGLE_SHEET_WRITE = "google_sheet_write"
 GOOGLE_SLIDES_WRITE = "google_slides_write"
 IMAGE_GENERATE = "image_generate"
+KB_ADD_FILE = "kb_add_file"
 KB_GET_RECORD = "kb_get_record"
 KB_LIST_TABLES = "kb_list_tables"
+KB_OPERATION_STATUS = "kb_operation_status"
 KB_QUERY_RECORDS = "kb_query_records"
+KB_REMOVE_FILE = "kb_remove_file"
 KB_SEARCH = "kb_search"
+PRESENT_ARTIFACTS = "present_artifacts"
 PYTHON_EXEC = "python_exec"
 PYTHON_SANDBOX = "python_sandbox"
+READ_CHART = "read_chart"
 READ_REPORT = "read_report"
 RECALL = "recall"
 REMEMBER = "remember"
@@ -174,17 +180,23 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "configuration_read",
     "configuration_result",
     "configuration_submit",
+    "edit_chart",
     "get_current_user",
     "google_doc_write",
     "google_sheet_write",
     "google_slides_write",
     "image_generate",
+    "kb_add_file",
     "kb_get_record",
     "kb_list_tables",
+    "kb_operation_status",
     "kb_query_records",
+    "kb_remove_file",
     "kb_search",
+    "present_artifacts",
     "python_exec",
     "python_sandbox",
+    "read_chart",
     "read_report",
     "recall",
     "remember",

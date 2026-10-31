@@ -42,6 +42,20 @@ async def read_pause(db: aiosqlite.Connection, turn_id: str, *, resume_generatio
         )
     finally:
         db.row_factory = original_factory
+    origin = None
+    if rows:
+        post = await _row(
+            db,
+            "SELECT request_id FROM clarification_requests WHERE turn_id=? AND CASE WHEN json_valid(resume_context_json) "
+            "THEN json_extract(resume_context_json,'$.reference_continuation.contract') END='reference-lead-postdispatch.v1'",
+            (turn_id,),
+        )
+        if post is not None:
+            from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+            origin = await read_question_origin_in_tx(db, turn_id=turn_id, postdispatch_card_id=post["request_id"])
+            if tuple(row["request_id"] for row in rows) != origin.card_ids:
+                raise ValueError("reference_continuation_changed")
     if rows and "question_round" in json.loads(rows[-1]["resume_context_json"]):
         from bowhead_core.clarification_rounds import history_contexts, read_history, resume_generation_bounds
 
@@ -50,17 +64,19 @@ async def read_pause(db: aiosqlite.Connection, turn_id: str, *, resume_generatio
         history = await read_history(
             db, turn_id=turn_id, user_id=row["original_user_id"], workspace_id=row["original_workspace_id"], session_id=row["original_session_id"]
         )
-        if len(history) != len(rows):
+        if origin is None and len(history) != len(rows):
             raise ValueError("reference_continuation_changed")
         if any(row["status"] != "resolved" for row in rows[:-1]):
             raise ValueError("reference_continuation_changed")
         if resume_generation is not None:
             for index, row in enumerate(rows):
                 lower, upper = resume_generation_bounds(contexts, index)
+                if upper is None and origin is not None:
+                    upper = origin.generation
                 if lower < resume_generation and (upper is None or resume_generation <= upper):
-                    return row
+                    return {**dict(row), "question_origin": origin} if origin is not None else row
             return None
-        return rows[-1]
+        return {**dict(rows[-1]), "question_origin": origin} if origin is not None else rows[-1]
     return rows[0] if len(rows) == 1 else None
 
 
@@ -132,6 +148,12 @@ def answer(row) -> str:
 
 async def all_answers(db, row) -> str:
     """Carry every answered card into the final original-task delegation."""
+    from bowhead_core.chat_reference_question_origin import ReferenceQuestionOrigin
+
+    origin = dict(row).get("question_origin")
+    if isinstance(origin, ReferenceQuestionOrigin):
+        _context(row)
+        return json.dumps([item["answer"] for item in origin.answers], ensure_ascii=False, separators=(",", ":"))
     if "question_round" not in _context(row):
         return answer(row)
     from bowhead_core.clarification_rounds import history_contexts, read_history
@@ -147,6 +169,8 @@ async def all_answers(db, row) -> str:
 
 
 async def pause_ready(db: aiosqlite.Connection, *, turn_id: str, clarification_id: str | None = None) -> bool:
+    if await _row(db, "SELECT 1 FROM chat_reference_resolutions WHERE turn_id=? AND resolution_seq=2", (turn_id,)):
+        return False
     row = await read_pause(db, turn_id)
     if row is None or row["primary_status"] != "admitted" or row["status"] not in ("pending", "resolved"):
         return False

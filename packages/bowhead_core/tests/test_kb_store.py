@@ -595,3 +595,26 @@ async def test_search_timeout_marks_result_partial(store: KbStore, monkeypatch) 
     assert [r["content"] for r in results] == ["空间内容"]
     assert results.partial is True
     assert results.skipped_collections == 1
+
+
+@pytest.mark.asyncio
+async def test_source_preview_reads_only_opening_chunks_of_current_generation(store: KbStore) -> None:
+    file = _make_file()
+    file.active_generation_id = "published"
+    current = [_make_chunk(file.file_id, i, f"Current section {i}") for i in range(1, 9)]
+    for chunk in current:
+        chunk.metadata.generation_id = "published"
+    retired = _make_chunk(file.file_id, 1, "Retired private text")
+    retired.metadata.generation_id = "retired"
+    inactive = _make_chunk(file.file_id, 2, "Inactive text", is_active=False)
+    inactive.metadata.generation_id = "published"
+    other = _make_chunk("kbf_other", 1, "Other document")
+    other.metadata.generation_id = "published"
+    await store.add_chunks(file, [*reversed(current), retired, inactive, other])
+
+    rows = await store.preview_current_chunks(file)
+
+    assert [row[1] for row in rows] == ["Current section 1", "Current section 2", "Current section 3"]
+    assert all(row[2]["generation_id"] == "published" for row in rows)
+    file.active_generation_id = None
+    assert await store.preview_current_chunks(file) == []

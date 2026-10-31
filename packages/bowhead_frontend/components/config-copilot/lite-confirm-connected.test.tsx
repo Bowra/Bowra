@@ -259,7 +259,7 @@ describe("LiteConfirmConnected", () => {
     });
     renderIntl(<LiteConfirmConnected proposalId="ccd_meta" />);
     const card = await screen.findByTestId("lite-applied");
-    expect(card.textContent).toContain("Space 名称改为华东零售分析空间。名称和描述的修改不能撤销，可以直接改回。");
+    expect(card.textContent).toContain("Space 名称改为华东零售分析空间。这些设置不支持自动撤销。要恢复原值，请重新编辑并确认保存。");
     expect(screen.queryByRole("button", { name: "撤销" })).toBeNull();
   });
 

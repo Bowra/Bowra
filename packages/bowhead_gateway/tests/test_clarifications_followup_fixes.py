@@ -46,7 +46,7 @@ def test_b1_no_pick_keeps_original() -> None:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch):
+async def app_ctx(tmp_path: Path, monkeypatch, completed_community_user_store):
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "dev")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "1")
     clarify = ClarificationStore(tmp_path / "c.db")
@@ -67,6 +67,13 @@ async def app_ctx(tmp_path: Path, monkeypatch):
     await proj_mem.initialize()
     app = create_app()
     app.state.settings = Settings()
+    from test_clarifications_routes import _LegacyTeamResolver
+
+    app.state.user_store = _LegacyTeamResolver(completed_community_user_store.db_path)
+    if app.state.edition == "community":
+        from bowhead_core.entitlements import CommunityResolver
+
+        app.state.entitlements = CommunityResolver(mode="saas", user_store=app.state.user_store)
     app.state.settings.auth_mode = "dev"
     app.state.clarification_store = clarify
     app.state.user_memory_store = user_mem

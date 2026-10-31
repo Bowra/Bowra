@@ -1,4 +1,6 @@
 import { parseDocumentRevisionTarget, type DocumentRevisionTarget } from "./composer-document-revision";
+import { parseContextMaintenanceAction, parseMaintenanceChatAction, type ContextMaintenanceAction } from "./context-maintenance";
+import type { ComposerChatAction } from "./composer-chat-action";
 import type { AttachmentRef } from "./types";
 import { apiFetch, readApiError } from "./api-client";
 import {
@@ -28,6 +30,7 @@ export type SubmissionRecoveryScope = ComposerPersistenceScope;
 const CHUNK_BYTES = 64 * 1024;
 
 export interface ComposerSubmissionWireSnapshot {
+  contextMaintenance?: import("./context-maintenance").ContextMaintenanceAction;
   composerSurface: "home" | "workbench";
   userProfile: Record<string, string> | null;
   preferredProvider: string | null;
@@ -46,6 +49,7 @@ export interface ComposerSubmissionWireSnapshot {
 }
 
 export interface SubmissionRecoveryDraft {
+  terminalAction?: ComposerChatAction;
   schemaVersion?: number;
   sourceDraftRevision?: string | null;
   message: string;
@@ -93,6 +97,7 @@ export interface SubmissionAbandonOutcome {
 }
 
 interface ManifestRecord {
+  maintenanceIdentity?: { action: ComposerChatAction | null; context: ContextMaintenanceAction };
   manifestKey: string;
   identityKey: string;
   principalKey: string;
@@ -141,10 +146,80 @@ export async function preparePendingSubmission(
   draft: SubmissionRecoveryDraft,
 ): Promise<{ clientSubmissionId: string; contentChecksum: string }> {
   const capturedScope = { ...scope };
+  if (draft.wireSnapshot?.contextMaintenance) {
+    throw new ComposerRecoveryUnavailableError("Maintenance requires its independent journal");
+  }
   const revision = draft.wireSnapshot && Object.hasOwn(draft.wireSnapshot, "documentRevisionTarget")
     ? captureDocumentRevisionSubmission(capturedScope, draft) : null;
   return prepareEncodedPendingSubmission(capturedScope, revision
     ? new TextEncoder().encode(JSON.stringify(revision)) : encodeDraft(draft));
+}
+
+export interface PendingContextMaintenance {
+  journalId: string;
+  action: ComposerChatAction | null;
+  context: ContextMaintenanceAction;
+  draft: RecoveredSubmission | null;
+}
+
+export async function prepareContextMaintenanceJournal(scope: SubmissionRecoveryScope, draft: SubmissionRecoveryDraft): Promise<PendingContextMaintenance> {
+  const captured = captureContextMaintenanceSubmission(scope, draft);
+  const identity = { action: captured.terminalAction ?? null, context: captured.wireSnapshot!.contextMaintenance! };
+  await prepareEncodedPendingSubmission(scope, new TextEncoder().encode(JSON.stringify(captured)), identity);
+  const pending = await readContextMaintenanceJournal(scope);
+  if (!pending?.draft) throw new ComposerRecoveryUnavailableError("Maintenance request could not be restored");
+  return pending;
+}
+
+export async function readContextMaintenanceJournal(scope: SubmissionRecoveryScope): Promise<PendingContextMaintenance | null> {
+  if (!completeComposerScope(scope) || !scope.requestedSessionId) return null;
+  const keys = await composerPersistenceKeys(scope);
+  const db = await openComposerLocalPersistenceDB();
+  let manifest: ManifestRecord | undefined;
+  try {
+    const transaction = db.transaction(["manifests"], "readonly");
+    manifest = await requestValue(transaction.objectStore("manifests").get(`${keys.manifestKey}:context-maintenance.v1`) as IDBRequest<ManifestRecord | undefined>);
+    await transactionDone(transaction);
+  } finally { db.close(); }
+  if (!manifest) return null;
+  const context = parseContextMaintenanceAction(manifest.maintenanceIdentity?.context);
+  const action = manifest.maintenanceIdentity?.action === null ? null : parseMaintenanceChatAction(manifest.maintenanceIdentity?.action, scope.requestedSessionId);
+  if (!context || (manifest.maintenanceIdentity?.action !== null && !action)
+    || manifest.manifestKey !== `${keys.manifestKey}:context-maintenance.v1`
+    || manifest.principalKey !== keys.principalKey || manifest.identityKey !== keys.identityKey
+    || manifest.workspaceId !== scope.workspaceId || manifest.requestedSessionId !== scope.requestedSessionId
+    || typeof manifest.clientSubmissionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(manifest.clientSubmissionId))
+    throw new ComposerRecoveryUnavailableError("Maintenance journal identity is invalid");
+  let draft: RecoveredSubmission | null = null;
+  if (manifest.authSessionGenerationHash === keys.authSessionGenerationHash) {
+    try {
+      const restored = await readPendingSubmissionRecord(scope, false, true);
+      if (restored?.schemaVersion === 4 && restored.contentChecksum === manifest.contentChecksum
+        && JSON.stringify(restored.terminalAction ?? null) === JSON.stringify(action)
+        && JSON.stringify(restored.wireSnapshot?.contextMaintenance) === JSON.stringify(context)) draft = restored;
+    } catch { /* Retain the exact original identity for lookup after payload loss. */ }
+  }
+  return { journalId: manifest.clientSubmissionId, context, action, draft };
+}
+
+export async function clearContextMaintenanceJournal(scope: SubmissionRecoveryScope, journalId: string): Promise<void> {
+  await clearPendingSubmission(scope, journalId, true);
+}
+
+export function captureContextMaintenanceSubmission(scope: SubmissionRecoveryScope, draft: SubmissionRecoveryDraft): SubmissionRecoveryDraft & { schemaVersion: 4 } {
+  const wire = draft.wireSnapshot;
+  const action = parseContextMaintenanceAction(wire?.contextMaintenance);
+  if (!completeComposerScope(scope) || !scope.requestedSessionId || !action || !wire
+    || Object.keys(draft).some((key) => !["schemaVersion", "message", "attachments", "submissionKind", "replaySourceTurnId", "expectedParentTurnId", "expectedExecutionGeneration", "wireSnapshot", "terminalAction"].includes(key))
+    || (draft.schemaVersion !== undefined && draft.schemaVersion !== 4)
+    || Object.keys(wire).some((key) => !["contextMaintenance", "composerSurface", "userProfile", "preferredProvider", "preferredModel", "planningMode", "draftChatBinding", "workspaceSettingsBinding", "coachCanvasBinding", "continueCheckpointIds"].includes(key))
+    || draft.message !== "" || !Array.isArray(draft.attachments) || draft.attachments.length || draft.replaySourceTurnId || draft.expectedParentTurnId || draft.expectedExecutionGeneration != null
+    || (draft.submissionKind && draft.submissionKind !== "start") || wire.planningMode === "planning" || wire.documentRevisionTarget
+    || wire.draftChatBinding || wire.workspaceSettingsBinding || wire.coachCanvasBinding || wire.continueCheckpointIds?.length)
+    throw new ComposerRecoveryUnavailableError("Context maintenance requires its original idle conversation");
+  const terminalAction = draft.terminalAction === undefined ? undefined : parseMaintenanceChatAction(draft.terminalAction, scope.requestedSessionId);
+  if (terminalAction === null) throw new ComposerRecoveryUnavailableError("Invalid maintenance action identity");
+  return structuredClone({ schemaVersion: 4, message: "", attachments: [], submissionKind: "start", wireSnapshot: { ...wire, contextMaintenance: action }, ...(terminalAction ? { terminalAction } : {}) });
 }
 
 /** One immutable revision envelope; neither a text nor reference reader may strip its target. */
@@ -375,8 +450,10 @@ export async function preparePendingReferenceSubmission(
 async function prepareEncodedPendingSubmission(
   scope: SubmissionRecoveryScope,
   content: Uint8Array,
+  maintenanceIdentity?: ManifestRecord["maintenanceIdentity"],
 ): Promise<{ clientSubmissionId: string; contentChecksum: string }> {
   const keys = await composerPersistenceKeys(scope);
+  if (maintenanceIdentity) keys.manifestKey += ":context-maintenance.v1";
   const contentChecksum = await sha256Hex(content);
   const db = await openComposerLocalPersistenceDB();
   let transaction: IDBTransaction | null = null;
@@ -410,6 +487,7 @@ async function prepareEncodedPendingSubmission(
     const createdAt = new Date().toISOString();
     const chunkCount = Math.max(1, Math.ceil(content.byteLength / CHUNK_BYTES));
     const manifest: ManifestRecord = {
+      ...(maintenanceIdentity ? { maintenanceIdentity } : {}),
       manifestKey: keys.manifestKey,
       identityKey: keys.identityKey,
       principalKey: keys.principalKey,
@@ -431,7 +509,7 @@ async function prepareEncodedPendingSubmission(
       identityKey: keys.identityKey,
       authSessionGenerationHash: keys.authSessionGenerationHash,
     }, keys.principalKey);
-    transaction.objectStore("submission_fences").put({
+    if (!maintenanceIdentity?.action) transaction.objectStore("submission_fences").put({
       identityKey: keys.identityKey,
       principalUserId: scope.userId,
       teamId: scope.teamId,
@@ -490,8 +568,10 @@ export async function readPendingReferenceSubmission(
 async function readPendingSubmissionRecord(
   scope: SubmissionRecoveryScope,
   referencePreview: boolean,
+  maintenance = false,
 ): Promise<RecoveredSubmission | RecoveredReferenceSubmission | null> {
   const keys = await composerPersistenceKeys(scope);
+  if (maintenance) keys.manifestKey += ":context-maintenance.v1";
   const db = await openComposerLocalPersistenceDB();
   let pendingSubmissionId: string | null = null;
   try {
@@ -543,6 +623,11 @@ async function readPendingSubmissionRecord(
       sourceDraftRevision?: string | null;
       wireSnapshot?: ComposerSubmissionWireSnapshot | null;
     };
+    if (decoded.schemaVersion === 4) {
+      if (!maintenance) throw new ComposerRecoveryUnavailableError("Maintenance is not a Composer submission");
+      const captured = captureContextMaintenanceSubmission(scope, decoded);
+      return { ...captured, clientSubmissionId: manifest.clientSubmissionId, contentChecksum: manifest.contentChecksum, createdAt: manifest.createdAt };
+    }
     if (decoded.schemaVersion === 3) {
       if (Object.keys(decoded).some((key) => !["schemaVersion", "message", "attachments", "submissionKind", "replaySourceTurnId", "expectedParentTurnId", "expectedExecutionGeneration", "sourceDraftRevision", "wireSnapshot"].includes(key)))
         throw new ComposerRecoveryUnavailableError("Invalid document revision recovery envelope");
@@ -668,8 +753,10 @@ export async function reconcileStaleSubmissionFence(
 export async function clearPendingSubmission(
   scope: SubmissionRecoveryScope,
   clientSubmissionId: string,
+  maintenance = false,
 ): Promise<void> {
   const keys = await composerPersistenceKeys(scope);
+  if (maintenance) keys.manifestKey += ":context-maintenance.v1";
   const db = await openComposerLocalPersistenceDB();
   try {
     const transaction = db.transaction([...COMPOSER_SUBMISSION_STORES], "readwrite");

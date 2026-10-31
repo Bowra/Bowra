@@ -475,6 +475,30 @@ async def test_simple_computation_returns_once_without_report_schema_retry() -> 
 
 
 @pytest.mark.unit
+async def test_ledger_recovery_uses_verified_formulas_without_a_sandbox(monkeypatch) -> None:
+    from bowhead_core.types import ToolInvocation
+
+    monkeypatch.setenv("BOWHEAD_ANALYST_LEDGER", "enforce")
+    registry = ToolRegistry()
+    register_subagent_return_tool(registry)
+    ctx = _stub_ctx()
+    ctx._current_subagent_invocations = [
+        ToolInvocation(tool_name="teammcp.metrics.read", arguments={}, result={"values": [10, 20]}, call_id="metrics")
+    ]
+    payload = {"delivery_surface": "chat", "exec_summary": "The combined rate is 30%.", "ground_facts": []}
+
+    rejected = await registry.execute("subagent_return", {"payload": payload}, ctx)
+
+    assert rejected.result["_ledger_retry"] is True
+    assert "available Tools" in rejected.result["error"]
+    assert "python_sandbox" not in rejected.result["error"]
+    payload["ground_facts"] = [{"key": "combined", "label": "Combined rate", "value": 30, "unit": "%", "formula": "10+20"}]
+    corrected = await registry.execute("subagent_return", {"payload": payload}, ctx)
+    assert corrected.result["ok"] is True, corrected.result
+    assert corrected.result[TERMINAL_FLAG] is True
+
+
+@pytest.mark.unit
 async def test_simple_computation_never_enters_eager_report_composer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -533,6 +557,21 @@ def _eager_harness(monkeypatch: pytest.MonkeyPatch) -> tuple[ToolRegistry, ToolE
     ctx.canvas_store = object()
     ctx.parent_bus = SimpleNamespace()
     return reg, ctx, calls
+
+
+@pytest.mark.unit
+async def test_question_return_never_writes_report_content_before_shared_clarification(monkeypatch: pytest.MonkeyPatch) -> None:
+    reg, ctx, calls = _eager_harness(monkeypatch)
+    payload = _good_payload()
+    payload["error"] = {
+        "kind": "needs_user_input",
+        "message": "A quarter is required.",
+        "clarification_payload": {"questions": [{"question": "Which quarter?", "type": "free_text", "options": []}]},
+    }
+    invocation = await reg.execute("subagent_return", {"payload": payload}, ctx)
+    assert invocation.result["ok"] is True and invocation.result["__terminal"] is True
+    assert calls == []
+    assert consume_returned_payload(ctx)["error"]["kind"] == "needs_user_input"
 
 
 @pytest.mark.unit
@@ -999,7 +1038,7 @@ async def test_missing_question_text_gives_model_a_specific_repair_shape() -> No
     assert consume_returned_payload(ctx) is None
 
 
-@pytest.mark.parametrize("invalid", ["missing", "malformed", "conflicting", "too_many", "free_text_choices"])
+@pytest.mark.parametrize("invalid", ["missing", "malformed", "conflicting", "too_many"])
 @pytest.mark.unit
 async def test_peer_question_rejected_before_terminal_return(invalid: str) -> None:
     reg = ToolRegistry()
@@ -1014,12 +1053,31 @@ async def test_peer_question_rejected_before_terminal_return(invalid: str) -> No
         payload["clarification_payload"] = {"questions": [{**question, "question": "分析哪家公司？"}]}
     elif invalid == "too_many":
         payload["error"]["clarification_payload"] = {"questions": [question] * 4}
-    elif invalid == "free_text_choices":
-        payload["error"]["clarification_payload"] = {"questions": [{"question": "平均权益是多少？", "options": ["50"], "type": "free_text"}]}
     invocation = await reg.execute("subagent_return", {"payload": payload}, ctx)
     assert invocation.result["ok"] is False
     assert not invocation.result.get(TERMINAL_FLAG)
     assert consume_returned_payload(ctx) is None
+
+
+@pytest.mark.unit
+async def test_peer_free_text_question_preserves_explicit_input_type_with_stray_choices() -> None:
+    registry = ToolRegistry()
+    register_subagent_return_tool(registry)
+    ctx = _stub_ctx()
+    payload = {
+        "error": {
+            "kind": "needs_user_input",
+            "message": "The quarter is required.",
+            "clarification_payload": {
+                "questions": [{"question": "Which quarter?", "type": "free_text", "options": ["2026-Q3"]}],
+            },
+        }
+    }
+    invocation = await registry.execute("subagent_return", {"payload": payload}, ctx)
+    assert invocation.result["ok"] is True
+    assert consume_returned_payload(ctx)["error"]["clarification_payload"]["questions"] == [
+        {"question": "Which quarter?", "type": "free_text", "options": []},
+    ]
 
 
 @pytest.mark.unit

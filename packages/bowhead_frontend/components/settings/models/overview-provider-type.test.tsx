@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsOverview, type ModelSettingsOverviewProvider } from "@/components/settings/models/model-settings-overview";
 import messagesDe from "@/messages/de-DE.json";
 import messagesEn from "@/messages/en-US.json";
+import messagesFr from "@/messages/fr-FR.json";
 import messagesZh from "@/messages/zh-CN.json";
 
 afterEach(cleanup);
@@ -20,12 +21,14 @@ const PROVIDERS: ModelSettingsOverviewProvider[] = [
   { runtimeKey: "c", displayName: "旧网关", type: "legacy_vendor_x", endpoint: "https://c.example.com", modelCount: 1 },
 ];
 
-function renderOverview(locale: "zh-CN" | "en-US") {
+const MESSAGES = { "zh-CN": messagesZh, "en-US": messagesEn, "de-DE": messagesDe, "fr-FR": messagesFr };
+
+function renderOverview(locale: keyof typeof MESSAGES, providers = PROVIDERS) {
   return render(
-    <NextIntlClientProvider locale={locale} messages={locale === "zh-CN" ? messagesZh : messagesEn}>
+    <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
       <ModelSettingsOverview
         version={1}
-        providers={PROVIDERS}
+        providers={providers}
         readiness={null}
         readinessLoading={false}
         readinessError={null}
@@ -46,6 +49,21 @@ function renderOverview(locale: "zh-CN" | "en-US") {
 function typeLabel(name: string): string | null {
   return screen.getByText(name).nextElementSibling?.textContent ?? null;
 }
+
+describe("Connection authentication status", () => {
+  it.each(["en-US", "zh-CN", "de-DE", "fr-FR"] as const)("shows explicit no-auth after credential removal in %s", (locale) => {
+    renderOverview(locale, [{ ...PROVIDERS[0], authType: "none", fingerprint: "sha256:stale" }]);
+    expect(screen.getByText(MESSAGES[locale].settings.models.connect.no_auth)).not.toBeNull();
+    expect(screen.queryByText(MESSAGES[locale].settings.models.overview.secret_saved)).toBeNull();
+    expect(screen.queryByText("sha256:stale")).toBeNull();
+  });
+
+  it("retains the fingerprint for an authenticated connection", () => {
+    renderOverview("en-US", [{ ...PROVIDERS[0], authType: "api_key", fingerprint: "sha256:configured" }]);
+    expect(screen.getByText("sha256:configured")).not.toBeNull();
+    expect(screen.queryByText(messagesEn.settings.models.connect.no_auth)).toBeNull();
+  });
+});
 
 describe("模型概览连接的接口类型标签", () => {
   it("中文界面：已知协议显示中文名，未知协议显示「其他接口」，不露出原始值", () => {

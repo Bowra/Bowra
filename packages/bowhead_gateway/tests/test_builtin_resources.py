@@ -9,6 +9,8 @@ import httpx2
 import jwt
 import pytest
 from bowhead_cli.migrate import upgrade
+from bowhead_core.agents._generated.tool_kinds import USER_VISIBLE_TOOLS
+from bowhead_core.system_plugins import latest_builtin_plugin
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.team_settings_store import TeamSettingsStore
 from bowhead_core.user_settings_store import UserSettingsStore
@@ -68,7 +70,7 @@ async def test_team_disable_is_admin_only_and_blocks_personal_restore(context):
     plugins = {item["name"]: item for item in (await member.get("/api/v1/builtin-plugins")).json()["plugins"]}
     assert plugins["web-research"]["team_disabled"] is True
     assert plugins["data-analysis"]["listing"]["en-US"]["name"] == "Data analysis"
-    assert plugins["settings-space-preferences"]["version"] == 5
+    assert plugins["settings-space-preferences"]["version"] == latest_builtin_plugin("settings-space-preferences").version
     assert plugins["designs"]["ready"] is True and plugins["designs"]["unavailable_tools"] == []
     assert (await admin.put("/api/v1/builtin-plugins/nope/team-state", json={"disabled": True})).status_code == 404
     # Settings Plugins are disabled like any other: the settings assistant refuses their forms.
@@ -91,7 +93,7 @@ async def test_personal_disable_affects_only_that_user(context):
 async def test_high_risk_tool_needs_acknowledgement_to_turn_on(context):
     admin, member, _store = context
     tools = {item["name"]: item for item in (await member.get("/api/v1/builtin-tools")).json()["tools"]}
-    assert len(tools) == 34
+    assert set(tools) == USER_VISIBLE_TOOLS
     # High-risk Tools stay enabled by default until per-call confirmation ships (option A).
     assert tools["send_email"] == {"name": "send_email", "risk": "external_write", "enabled": True}
     assert tools["web_search"]["enabled"] is True

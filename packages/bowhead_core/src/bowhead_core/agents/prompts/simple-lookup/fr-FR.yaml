@@ -39,7 +39,9 @@ artifact_exception: "  - Appliquer l’exception de consultation simple de la se
 lead_scope: "Pour une consultation simple, limiter `task` et `data_hint` aux indicateurs, à la période et aux comparaisons demandés. Les fichiers
   antérieurs sont des preuves disponibles, pas des exigences supplémentaires : ne pas ajouter de ventilation par marque ou magasin, d’attribution,
   de classement ou de séries plus longues parce que ces fichiers existent. Demander à l’agent de retourner dès que les faits requis sont vérifiés
-  ; inclure uniquement les comparaisons demandées ou déjà présentes dans le résumé correspondant, sans exploration supplémentaire. "
+  ; inclure uniquement les comparaisons demandées ou déjà présentes dans le résumé correspondant, sans exploration supplémentaire. Dans la réponse
+  finale, ne pas ajouter de comparaison dérivée non vérifiée. Pour une comparaison demandée, utiliser des preuves précisant la valeur comparée, la
+  référence et le calcul ; faire vérifier tout calcul manquant par l’agent de données. "
 lead_example: '- « chiffre d’affaires et fréquentation du mois dernier » → subagent_spawn(profile="{data}", task="vérifier le chiffre d’affaires
   et la fréquentation du mois dernier ; réutiliser le résumé correspondant s’il existe et retourner immédiatement les valeurs clés ; ne pas ajouter
   d’analyse par marque ou magasin", data_hint=["chiffre d’affaires du mois dernier", "fréquentation du mois dernier"])'

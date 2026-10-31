@@ -152,6 +152,8 @@ class AccountExternalCleanup:
                     if "file_id" in expected:
                         for file_id in file_ids:
                             await db.execute(f"DELETE FROM {_q(table)} WHERE file_id=?", (file_id,))
+                    if table == "kb_membership_operations":
+                        await db.execute("DELETE FROM kb_membership_operations WHERE actor_user_id=?", (user_id,))
                     if "user_id" in expected:
                         await db.execute(f"DELETE FROM {_q(table)} WHERE user_id=?", (user_id,))
                 # Matrices are shared resources. Remove the departed user's

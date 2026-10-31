@@ -40,14 +40,21 @@ def retained_read_tool(name: str) -> bool:
     return canonical_tool_name(name) in RETAINED_READ_TOOLS
 
 
-def collecting(ctx) -> bool:
+def material_observations(ctx):
+    """Select original continuation evidence or context-only reader observations."""
     state = getattr(ctx, "ordinary_lead_state", None)
-    return state is not None and state.checkpoint is None and getattr(ctx, "ordinary_call_identity", None) is not None
+    if state is not None and state.checkpoint is None:
+        return state
+    return getattr(ctx, "context_source_observations", None)
+
+
+def collecting(ctx) -> bool:
+    return material_observations(ctx) is not None and getattr(ctx, "ordinary_call_identity", None) is not None
 
 
 def note_known_rejection(ctx, tool: str, arguments: dict, result: dict, *, error: str | None = None) -> None:
     if collecting(ctx) and tool in {"skill_read", "skill_list", "python_exec", "skill_invoke"}:
-        ctx.ordinary_lead_state.tool_materials[ctx.ordinary_call_identity] = {
+        material_observations(ctx).tool_materials[ctx.ordinary_call_identity] = {
             "tool": tool,
             "arguments_hash": content_hash(arguments),
             "result_hash": content_hash(result),
@@ -60,7 +67,7 @@ def note_known_rejection(ctx, tool: str, arguments: dict, result: dict, *, error
 def note_attachment_read(ctx, arguments: dict, result: dict, artifact) -> None:
     """Record only the authorized native reader's successful extraction."""
     if collecting(ctx):
-        ctx.ordinary_lead_state.tool_materials[ctx.ordinary_call_identity] = {
+        material_observations(ctx).tool_materials[ctx.ordinary_call_identity] = {
             "tool": "attachment_read",
             "arguments_hash": content_hash(arguments),
             "result_hash": content_hash(result),
@@ -169,7 +176,7 @@ async def revalidate_material_authority_in_connection(ctx, db, material: dict, *
                 raise OrdinaryContinuationUnavailable()
             artifacts.extend(expected["artifacts"])
     for expected in artifacts:
-        art = await ctx.artifact_store.get(expected["artifact_id"], check_created_by=ctx.user_id, reject_null_owner=True)
+        art = await ctx.artifact_store.get(expected["artifact_id"], check_created_by=ctx.user_id, reject_null_owner=True, connection=db)
         if art is None or _artifact_metadata_hash(art, contract=contract) != expected["metadata_hash"]:
             raise OrdinaryContinuationUnavailable()
 
@@ -187,6 +194,8 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v9",
         "ordinary-lead-loop.v10",
         "ordinary-lead-loop.v11",
+        "ordinary-lead-loop.v12",
+        "ordinary-lead-loop.v13",
     }:
         raise OrdinaryContinuationUnavailable()
     metadata = asdict(art)
@@ -201,6 +210,8 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v9",
         "ordinary-lead-loop.v10",
         "ordinary-lead-loop.v11",
+        "ordinary-lead-loop.v12",
+        "ordinary-lead-loop.v13",
     }:
         # Classification can settle after the output observer. These labels
         # do not change content or provenance; actual deletion still invalidates
@@ -297,16 +308,16 @@ class OrdinarySkillObserver:
     async def read_rejected(self, arguments, result, ctx) -> None:
         """Retain a native bundle validation failure with no returned material."""
         if collecting(ctx):
-            ctx.ordinary_lead_state.pending_skill_reads.pop(ctx.ordinary_call_identity, None)
+            material_observations(ctx).pending_skill_reads.pop(ctx.ordinary_call_identity, None)
             try:
                 note_known_rejection(ctx, "skill_read", arguments, result)
             except Exception:
-                ctx.ordinary_lead_state.tool_materials.pop(ctx.ordinary_call_identity, None)
+                material_observations(ctx).tool_materials.pop(ctx.ordinary_call_identity, None)
 
     async def reading(self, spec, arguments, ctx) -> None:
         if not collecting(ctx):
             return
-        state = ctx.ordinary_lead_state
+        state = material_observations(ctx)
         key = ctx.ordinary_call_identity
         state.pending_skill_reads.pop(key, None)
         try:
@@ -342,7 +353,7 @@ class OrdinarySkillObserver:
     async def listed(self, entries, arguments, ctx) -> None:
         if not collecting(ctx):
             return
-        state = ctx.ordinary_lead_state
+        state = material_observations(ctx)
         key = ctx.ordinary_call_identity
         state.tool_materials.pop(key, None)
         try:
@@ -372,7 +383,7 @@ class OrdinarySkillObserver:
     async def invoking(self, spec, script, inputs, ctx) -> None:
         if not collecting(ctx):
             return
-        state, key = ctx.ordinary_lead_state, ctx.ordinary_call_identity
+        state, key = material_observations(ctx), ctx.ordinary_call_identity
         state.tool_materials.pop(key, None)
         try:
             if (
@@ -410,7 +421,7 @@ class OrdinarySkillObserver:
     async def executed(self, result, ctx) -> None:
         if not collecting(ctx):
             return
-        state, key = ctx.ordinary_lead_state, ctx.ordinary_call_identity
+        state, key = material_observations(ctx), ctx.ordinary_call_identity
         record = state.tool_materials.get(key)
         if record is None or record["kind"] != "sandbox":
             return
@@ -437,7 +448,7 @@ class OrdinarySkillObserver:
     async def finished(self, tool, arguments, result, ctx) -> None:
         if not collecting(ctx):
             return
-        state, key = ctx.ordinary_lead_state, ctx.ordinary_call_identity
+        state, key = material_observations(ctx), ctx.ordinary_call_identity
         try:
             if tool == "skill_read":
                 pending = state.pending_skill_reads.pop(key, None)

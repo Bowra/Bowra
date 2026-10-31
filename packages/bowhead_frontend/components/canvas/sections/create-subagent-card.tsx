@@ -182,7 +182,7 @@ export interface AgentDraftEditorPort {
 }
 
 type Step = "describe" | "tools" | "configure" | "success";
-type CopilotField = "display_name" | "description" | "system_prompt" | "tool_refs" | "max_iterations" | "skills" | "output_schema";
+type CopilotField = "display_name" | "description" | "system_prompt" | "tool_refs" | "skills" | "output_schema";
 type FieldSnapshot = { field: CopilotField; value: unknown };
 type ManualConflictField = "name" | "display_name" | "description" | "system_prompt"
   | "tool_refs" | "skill_grants" | "capability_ids" | "model" | "max_iterations" | "output_schema_text" | "text_only_confirmed";
@@ -195,7 +195,6 @@ const MANUAL_CONFLICT_FIELDS: { key: ManualConflictField; label: string }[] = [
   { key: "skill_grants", label: "suggestion_field_skill_grants" },
   { key: "capability_ids", label: "suggestion_field_capability_ids" },
   { key: "model", label: "model_label" },
-  { key: "max_iterations", label: "max_iters_label" },
   { key: "output_schema_text", label: "schema_label" },
   { key: "text_only_confirmed", label: "draft_text_only_confirm" },
 ];
@@ -603,7 +602,6 @@ export function CreateSubagentCard({
   const descId = `${fieldId}-desc`;
   const personaId = `${fieldId}-persona`;
   const modelId = `${fieldId}-model`;
-  const itersId = `${fieldId}-iters`;
   const toolsRequiredId = `${fieldId}-tools-required`;
   const isEditing = !!editing;
   const [step, setStep] = useState<Step>(initialManualDraft?.result ? "success" : "describe");
@@ -782,12 +780,12 @@ export function CreateSubagentCard({
 
   const copilot = useCopilotFields<CopilotField, FieldSnapshot>({
     enabled: !!editing && !!draftSubscribe,
-    fields: ["display_name", "description", "system_prompt", "tool_refs", "max_iterations", "skills", "output_schema"],
+    fields: ["display_name", "description", "system_prompt", "tool_refs", "skills", "output_schema"],
     snapshotOf: (field) => ({
       field,
       value: ({
         display_name: displayName, description: desc, system_prompt: persona,
-        tool_refs: [...sel], max_iterations: iters, skills: [...skillSel], output_schema: schemaText,
+        tool_refs: [...sel], skills: [...skillSel], output_schema: schemaText,
       })[field],
     }),
     restoreSnapshot: ({ field, value }) => {
@@ -795,7 +793,6 @@ export function CreateSubagentCard({
       if (field === "description") setDesc(value as string);
       if (field === "system_prompt") setPersona(value as string);
       if (field === "tool_refs") setSel(new Set(value as string[]));
-      if (field === "max_iterations") setIters(value as number);
       if (field === "skills") setSkillSel(new Set(value as string[]));
       if (field === "output_schema") setSchemaText(value as string);
     },
@@ -810,13 +807,12 @@ export function CreateSubagentCard({
     if (typeof fields.description === "string" && admit("description", "description")) setDesc(fields.description.slice(0, MAX_DESC));
     if (typeof fields.system_prompt === "string" && admit("system_prompt", "system_prompt")) setPersona(fields.system_prompt.slice(0, MAX_PROMPT));
     if (Array.isArray(fields.tool_refs) && fields.tool_refs.every((item) => typeof item === "string") && admit("tool_refs", "tool_refs")) setSel(new Set(fields.tool_refs as string[]));
-    if (typeof fields.max_iterations === "number" && admit("max_iterations", "max_iterations")) setIters(fields.max_iterations);
     if (Array.isArray(fields.skills) && fields.skills.every((item) => typeof item === "string") && admit("skills", "skills")) { setSkillSel(new Set(fields.skills as string[])); setSkillsOpen(true); }
     if ((fields.output_schema === null || (typeof fields.output_schema === "object" && !Array.isArray(fields.output_schema))) && admit("output_schema", "output_schema")) {
       setSchemaText(fields.output_schema ? JSON.stringify(fields.output_schema, null, 2) : "");
       setSchemaOpen(true);
     }
-    return session.commit(["display_name", "description", "system_prompt", "tool_refs", "max_iterations", "skills", "output_schema"]);
+    return session.commit(["display_name", "description", "system_prompt", "tool_refs", "skills", "output_schema"]);
   };
   const applyDraftRef = useRef(applyAiDraft);
   applyDraftRef.current = applyAiDraft;
@@ -827,7 +823,7 @@ export function CreateSubagentCard({
     const counts = [
       keys.filter((key) => ["display_name", "description", "system_prompt"].includes(key)).length,
       keys.filter((key) => key === "tool_refs").length,
-      keys.filter((key) => ["max_iterations", "skills", "output_schema"].includes(key)).length,
+      keys.filter((key) => ["skills", "output_schema"].includes(key)).length,
     ];
     setStep((["describe", "tools", "configure"] as const)[counts.indexOf(Math.max(...counts))]);
   }, [initialDraft, editing]);
@@ -1432,7 +1428,7 @@ export function CreateSubagentCard({
           await saveAgentWorkingCopy(editing.id, {
             definition: {
               ...nextDefinition,
-              system_prompt: persona.trim(), max_iterations: iters, output_schema: outputSchema,
+              system_prompt: persona.trim(), output_schema: outputSchema,
               model: typeof source.definition.model === "string" && revisioned.catalog.model_policy.allowed_roles.includes(source.definition.model)
                 ? source.definition.model : revisioned.catalog.model_policy.effective_role,
               ...(toolChanged || !Array.isArray(source.definition.tool_refs)
@@ -1458,7 +1454,6 @@ export function CreateSubagentCard({
             description: desc.trim(),
             system_prompt: persona.trim(),
             tool_refs: [...sel],
-            max_iterations: iters,
             skills: [...skillSel],
             output_schema,
           },
@@ -1497,7 +1492,6 @@ export function CreateSubagentCard({
           description: desc.trim(),
           system_prompt: persona.trim(),
           tool_refs: [...sel],
-          max_iterations: iters,
           skills: [...skillSel],
           model,
           output_schema,
@@ -1525,7 +1519,7 @@ export function CreateSubagentCard({
   const stepIdx = step === "describe" ? 0 : step === "tools" ? 1 : step === "success" ? 3 : 2;
   const suggestedLabels = suggestedFields.map((field) => ({
     display_name: t("display_label"), description: t("desc_label"), system_prompt: t("persona_label"),
-    tool_refs: t("step_tools"), max_iterations: t("max_iters_label"), skills: t("skills_label"),
+    tool_refs: t("step_tools"), skills: t("skills_label"),
     output_schema: t("schema_label"),
   })[field as CopilotField]).filter(Boolean).join(" · ");
   const flush = embedded || presentation === "canvas";
@@ -1831,29 +1825,6 @@ export function CreateSubagentCard({
             </div>
             <div style={{ fontSize: "0.6875rem", color: "var(--c-ink-4)", marginTop: 6 }}>{t("model_only_tier")}</div>
           </div>
-          <div style={{ width: 180, flex: "0 0 180px" }}>
-            <FieldLabel htmlFor={itersId}>{t("max_iters_label")}</FieldLabel>
-            <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--c-line)",
-              borderRadius: "var(--r-1)", background: "var(--c-surface)", overflow: "hidden" }}>
-              <button type="button" aria-label={t("decrease")} onClick={() => { copilot.touchField("max_iterations"); setIters((v) => Math.max(MIN_ITER, v - 1)); }}
-                style={{ width: 40, height: 42, border: "none", borderRight: "1px solid var(--c-line)",
-                  background: "var(--c-surface-2)", color: "var(--c-ink-3)", cursor: "pointer",
-                  display: "grid", placeItems: "center" }}>
-                <Icon name="minus" s={15} />
-              </button>
-              <input id={itersId} className="bh-mono bh-num" value={iters} inputMode="numeric"
-                onChange={(e) => { copilot.touchField("max_iterations"); const n = parseInt(e.target.value, 10); setIters(isNaN(n) ? MIN_ITER : Math.min(MAX_ITER, Math.max(MIN_ITER, n))); }}
-                style={{ flex: 1, width: "100%", minWidth: 0, border: "none", outline: "none", textAlign: "center",
-                  background: "transparent", fontSize: "0.875rem", fontWeight: 600, color: "var(--c-ink)", padding: "10px 0" }} />
-              <button type="button" aria-label={t("increase")} onClick={() => { copilot.touchField("max_iterations"); setIters((v) => Math.min(MAX_ITER, v + 1)); }}
-                style={{ width: 40, height: 42, border: "none", borderLeft: "1px solid var(--c-line)",
-                  background: "var(--c-surface-2)", color: "var(--c-ink-3)", cursor: "pointer",
-                  display: "grid", placeItems: "center" }}>
-                <Icon name="plus" s={15} />
-              </button>
-            </div>
-            <div style={{ fontSize: "0.6875rem", color: "var(--c-ink-4)", marginTop: 6 }}>{t("iters_hint")}</div>
-          </div>
         </div>
 
         <div>
@@ -2108,7 +2079,6 @@ export function CreateSubagentCard({
               // The created Agent's released definition when it has been read; this session's selection otherwise.
               // A receipt reopened after a reload has no selection of its own, so it waits for the read.
               resources: receiptResources ? resourceSummary(receiptResources) : initialManualDraft?.result ? null : resourceSummary(localResourceCounts),
-              iterations: definition?.max_iterations ?? iters,
               visibility: savedAgent.visibility,
             }} readFailed={receiptReadFailed} onRetry={() => setReceiptReadEpoch((value) => value + 1)}
             onManage={() => router.push(`/agents/manage/?agent_id=${encodeURIComponent(savedAgent.id)}`)}
@@ -2319,12 +2289,6 @@ export function CreateSubagentCard({
             <div>
               <FieldRow title={t("model_label")} description={t("model_only_tier")}
                 control={<span className={canvasStyles.readValue}>{t("model_analyst_option")}</span>} />
-              <FieldRow title={<label htmlFor={itersId}>{t("max_iters_label")}</label>} description={t("iters_hint")}
-                control={(
-                  <input id={itersId} className={`settings-input ${canvasStyles.stepsInput}`} type="number" inputMode="numeric"
-                    min={MIN_ITER} max={MAX_ITER} value={iters}
-                    onChange={(event) => { copilot.touchField("max_iterations"); const n = parseInt(event.target.value, 10); setIters(isNaN(n) ? MIN_ITER : Math.min(MAX_ITER, Math.max(MIN_ITER, n))); }} />
-                )} />
               <FieldRow title={t("visibility_label")} description={t("create_private_hint")}
                 control={<span className={canvasStyles.readValue}>{t("vis_me")}</span>} />
             </div>
@@ -2364,7 +2328,6 @@ export function CreateSubagentCard({
           ? agentResourceCounts({ tool_refs: recoveredAgent.tool_refs })
           : { ...localResourceCounts, skills: localResourceCounts.skills + skillSel.size }))],
         ["brain", t("chip_model")],
-        ["sliders", t("chip_iters", { n: recoveredAgent?.max_iterations ?? iters })],
       ] as [string, string][]) : []),
       [teamVisible ? "globe" : "user", teamVisible ? t("chip_vis_team") : t("chip_vis_me")],
     ];

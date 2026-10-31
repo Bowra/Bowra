@@ -407,6 +407,8 @@ interface Props {
   canvasObjectList?: React.ReactNode;
   /** Session-scoped explicit Results selection, including restored document navigation. */
   resultsRevealRequest?: number;
+  /** A manual pane choice supersedes pending Tool view requests. */
+  onCanvasInteraction?: () => void;
   documentResultsRefresh?: { scope: DocumentCanvasScope; revision: string } | null;
   /** Tab title for the open session (its display title); the canvas title when absent. */
   documentTitle?: string | null;
@@ -497,7 +499,7 @@ interface Props {
 
 // Batch3/c3 (discovery C15): rename FE shell Workspace→ChatWorkbench to avoid a name collision;
 // this chat/canvas split shell is unrelated to tenant Space, the fourth of five meanings of the overloaded term.
-export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, onCancel, stopRequested = false, onSteer, onReplay, replayRestoresDraft = false, lastReferenceDocument = null, readOnly, reportOnly = false, startMaximized = false, onSolidify, onSolidifySession, prefillAttachments = null, prefillText = null, onPrefillConsumed, composerSubmitRequest, prefillInputDocument = null, onPrefillInputDocumentConsumed, submissionRecoveryPending = false, submissionRecoveryVariant = "submission", submissionRecoveryAllowAbandon = true, submissionRecoveryLocked = false, draftControlRef, composerRevealRequest = null, onComposerRevealConsumed, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", onRetryRecoveredSubmission, onAbandonRecoveredSubmission, configDrawer, configDrawerOpen = false, creationPanel, creationPanelOpen = false, creationPanelTitle, creationPanelCount, onShowCreationPanel, homePane, canvasObjectOpener, canvasObjectTabs, canvasObjectList, resultsRevealRequest = 0, documentResultsRefresh = null, documentTitle = null }: Props) {
+export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, onCancel, stopRequested = false, onSteer, onReplay, replayRestoresDraft = false, lastReferenceDocument = null, readOnly, reportOnly = false, startMaximized = false, onSolidify, onSolidifySession, prefillAttachments = null, prefillText = null, onPrefillConsumed, composerSubmitRequest, prefillInputDocument = null, onPrefillInputDocumentConsumed, submissionRecoveryPending = false, submissionRecoveryVariant = "submission", submissionRecoveryAllowAbandon = true, submissionRecoveryLocked = false, draftControlRef, composerRevealRequest = null, onComposerRevealConsumed, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", onRetryRecoveredSubmission, onAbandonRecoveredSubmission, configDrawer, configDrawerOpen = false, creationPanel, creationPanelOpen = false, creationPanelTitle, creationPanelCount, onShowCreationPanel, homePane, canvasObjectOpener, canvasObjectTabs, canvasObjectList, resultsRevealRequest = 0, onCanvasInteraction, documentResultsRefresh = null, documentTitle = null }: Props) {
   const t = useTranslations("canvas");
   const copyDiagnosticsAction = useCopyDiagnosticsToastAction();
   const tCreateAgent = useTranslations("create_subagent");
@@ -640,6 +642,10 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const [resultsPinPreferred, setResultsPinPreferred] = useState(false);
   const [resultsOpenedByUser, setResultsOpenedByUser] = useState(false);
   const [resultsPaneWidth, setResultsPaneWidth] = useState(0);
+  const [wideReportReading, setWideReportReading] = useState(false);
+  useEffect(() => {
+    try { setWideReportReading(window.localStorage.getItem("bowhead.report.reading-width") === "wide"); } catch { /* Storage is optional. */ }
+  }, []);
   const [reportReturnContext, setReportReturnContext] =
     useState<ReportReturnContext | null>(null);
   const [resultReferencePrefills, setResultReferencePrefills] = useState<AttachmentRef[]>([]);
@@ -1853,6 +1859,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && isDesktop
     && (splitBranchActive ? resultsPaneVisible : hasCanvas);
   const closeResultsPane = useCallback(() => {
+    onCanvasInteraction?.();
     resultsInteractionEpochRef.current += 1;
     if (runner.running) resultsClosedDuringTurnRef.current = true;
     setReportReturnContext(null);
@@ -1860,7 +1867,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     pendingReportReturnRef.current = false;
     pendingReportReturnFocusRef.current = null;
     setPanelMode("chat");
-  }, [runner.running]);
+  }, [runner.running, onCanvasInteraction]);
   // Workbench Spec §10: new results while results are hidden show a dot on the mobile `成果` switch and desktop restore strip;
   // clear after viewing (opening results / switching to `成果`).
   const resultsNewIds = useMemo(
@@ -2771,6 +2778,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       <Tabs
         value={hasRightPane && canvasMaximized ? "canvas" : "chat"}
         onValueChange={(pane) => {
+          onCanvasInteraction?.();
           if (pane === "chat") {
             setPanelMode("chat");
             return;
@@ -2960,6 +2968,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           />
         ) : null}
         <V2Composer
+          onInputInteraction={onCanvasInteraction}
           surface="workbench"
           draftControlRef={composerControlRef}
           hidden={planAwaitingApproval}
@@ -3141,6 +3150,15 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       </button>
       <MenuFloating menu={moreMenu}>
         <div ref={moreMenu.refs.setFloating} {...moreMenu.getFloatingProps({ className: "ws-menu" })}>
+          {isDesktop ? (
+            <WorkbenchMenuItem onSelect={() => {
+              const next = !wideReportReading;
+              setWideReportReading(next);
+              try { window.localStorage.setItem("bowhead.report.reading-width", next ? "wide" : "standard"); } catch { /* Storage is optional. */ }
+            }}>
+              {t(wideReportReading ? "report_standard_width" : "report_wide_width")}
+            </WorkbenchMenuItem>
+          ) : null}
           {/* Appearance refresh batch 4b remainder: `导出` submenu on narrow toolbars and `编辑` during mobile reading. */}
           {reportToolbarNarrow ? (
             exportBlockedByWriting || exportBusy || !canvas.canvasId ? (
@@ -3288,6 +3306,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
       ) : null}
       <ReportView
         ref={reportViewRef}
+        readingWidth={wideReportReading ? "wide" : "standard"}
         presentation={resultsWorkspaceEnabled ? "results-reading" : "canvas"}
         sections={reportSections}
         exportSections={exportVisibleSections}

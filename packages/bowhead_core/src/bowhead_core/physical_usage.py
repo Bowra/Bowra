@@ -122,11 +122,8 @@ class PhysicalUsageObserver:
         self.generation = generation
         self.plan_id = plan_id
         self.model_credit_rates = model_credit_rates or {}
-        self.failed = False
 
     async def begin(self, spec: PhysicalInvocationSpec, *, request: LLMRequest | None, body: Mapping[str, object], family: str | None):
-        if self.failed:
-            raise ValueError("physical_usage_observer_failed")
         ctx = current_usage_context()
         if ctx.turn_id != self.turn_id:
             raise ValueError("physical_usage_turn_changed")
@@ -220,24 +217,20 @@ class _UsageAttempt:
             usage.output_tokens if usage else 0,
             usage.cached_tokens if usage else 0,
         )
-        try:
-            async with open_shared_ctx(self.observer.db_path) as db:
-                await db.execute(
-                    "UPDATE llm_usage_events SET receipt_state=?,outcome_code=?,response_digest=?,tokens_input=?,tokens_output=?,tokens_cached=?,settled_at=? "
-                    "WHERE id=? AND receipt_state='pending'",
-                    (*expected, datetime.now(UTC).isoformat(), self.identity),
-                )
-                await db.commit()
-                async with db.execute(
-                    "SELECT receipt_state,outcome_code,response_digest,tokens_input,tokens_output,tokens_cached FROM llm_usage_events WHERE id=?",
-                    (self.identity,),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                if row is None or tuple(row) != expected:
-                    raise ValueError("physical_usage_settlement_conflict")
-        except BaseException:
-            self.observer.failed = True
-            raise
+        async with open_shared_ctx(self.observer.db_path) as db:
+            await db.execute(
+                "UPDATE llm_usage_events SET receipt_state=?,outcome_code=?,response_digest=?,tokens_input=?,tokens_output=?,tokens_cached=?,settled_at=? "
+                "WHERE id=? AND receipt_state='pending'",
+                (*expected, datetime.now(UTC).isoformat(), self.identity),
+            )
+            await db.commit()
+            async with db.execute(
+                "SELECT receipt_state,outcome_code,response_digest,tokens_input,tokens_output,tokens_cached FROM llm_usage_events WHERE id=?",
+                (self.identity,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None or tuple(row) != expected:
+                raise ValueError("physical_usage_settlement_conflict")
         return True
 
     async def confirmed_not_applied(self, *, evidence_code: str, evidence_digest: str) -> bool:

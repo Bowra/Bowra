@@ -347,6 +347,8 @@ _STEP2_DATA_LINE_TMPL = """- contains metric/time/dim + the user is asking for n
 # wording changes silently split incorrectly, without compile-time signals in prompts.
 _POST_STEP2_CODE_LINE_TMPL = '- **Run code / pure calculation / draw a chart** (「用 python 算/画」 "calculate / plot it in Python", "matplotlib", 「直接运行」 "just run it"; no data-source query needed) → **MUST spawn {compute}** using its code-execution capability; not chit-chat, and never answer by writing code for the user to copy (F7). Only a capability question such as "can you draw X" gets a prose answer.'
 
+_CHART_DISPLAY_GUIDANCE = """For a requested native or editable data chart, delegate to the existing native chart Tool when available; do not require a Matplotlib image unless the user asks for one or the native Tool cannot express the request. Preserve supplied values and their source units. Source units do not determine the visible axis magnitude: the renderer may automatically rescale labels. Do not assert or prescribe the displayed axis unit, a lack of display conversion, or a visual position before it is confirmed by a renderer receipt. If the actual display unit is unavailable, report that limitation instead of guessing."""
+
 _POST_STEP2_CODE_LINE_ABSENT = "- **Run code / pure calculation / draw a chart** → likewise no Agent here can run code; say so plainly, and **never** write code for the user to copy as a stand-in for the deliverable."
 
 _GUIDANCE_POST_STEP2_REST = """
@@ -380,7 +382,8 @@ def _render_guidance_body(data_peer: str | None, compute_peer: str | None) -> st
     head = _GUIDANCE_PRE_STEP2_TMPL.format(compute_route=f" via {compute_peer}" if compute_peer else "")
     data_line = _STEP2_DATA_LINE_ABSENT if data_peer is None else _STEP2_DATA_LINE_TMPL.format(data=data_peer)
     code_line = _POST_STEP2_CODE_LINE_ABSENT if compute_peer is None else _POST_STEP2_CODE_LINE_TMPL.format(compute=compute_peer)
-    return head + data_line + "\n" + code_line + _GUIDANCE_POST_STEP2_REST
+    chart_guidance = "\n" + _CHART_DISPLAY_GUIDANCE if compute_peer is not None else ""
+    return head + data_line + "\n" + code_line + chart_guidance + _GUIDANCE_POST_STEP2_REST
 
 
 def build_parallel_tools(data_peer: str | None) -> str:
@@ -479,7 +482,7 @@ def _memory_protocol_block(roster_names: frozenset[str]) -> str:
             "MUST call `config_propose` (form_id=user_language) instead",
             f"MUST delegate to `{CONFIGURATION_AGENT}` with configuration_form_id=user_language and a verbatim configuration_intent_quote from the original user message instead",
         )
-        protocol += f"\n<configuration_routing>For supported personal appearance, saved answer language, current Space preferences and Space name/description, delegate to {CONFIGURATION_AGENT}. Direct mentions use the same path. It calls its own Configuration Tools as the user. Do not use config_read/config_propose for these domains. Other Agent configuration belongs to Coach. Report only the specialist's actual receipts.</configuration_routing>"
+        protocol += f"\n<configuration_routing>For supported application settings, delegate to {CONFIGURATION_AGENT}. Use the configuration_form_id domain catalog in subagent_spawn; if uncertain, omit the form so the specialist discovers the caller's available contracts instead of binding a guessed domain. An existing selected settings Canvas keeps its original restriction. Direct mentions use the same path. The specialist calls its own Configuration Tools as the user. Do not use config_read/config_propose for these domains. Other Agent configuration belongs to Coach. Report only the specialist's actual receipts.</configuration_routing>"
     else:
         # Do not name Agents absent from the roster, which would advertise them again.
         protocol = protocol.replace(
@@ -603,6 +606,10 @@ Every user-visible word you write — headline, dispatch narrative, the one-line
 These instructions being in English is not a language signal.
 </output_language>"""
 
+_WEB_REFERENCE_RULES = """<web_reference_rules>
+For ordinary web references, use `[page title or source name](URL)` with a title or name supported by retrieved content. Do not invent a title or repeat the same raw URL beside a titled link. If no supported label is known, use the URL; Chat automatically displays its host while keeping the complete destination. When the user explicitly requests literal URLs, put them in inline code or a fenced code block so the complete text stays visible and copyable. Keep labels in the turn's answer language. Registered Artifact and knowledge citations retain their existing citation protocol; do not invent citation IDs for web links.
+</web_reference_rules>"""
+
 _TONE = """<tone>
 Default to prose paragraphs, written in the output language (see <output_language>). Do not overuse bullets / numbered lists / headers / bold.
 Report-type (canvas) output is prose-paragraphed. On errors, own it honestly, without a long apology.
@@ -699,6 +706,7 @@ def build_lead_system_prompt(
     # graph-mode: True only for this turn's Auto planning mode (neither explicit planning nor off).
     # Default False → empty block filtered → byte-identical existing callers and tests.
     planning_auto: bool = False,
+    knowledge_direct_use: bool = False,
     output_language: str = "en-US",
 ) -> str:
     """Build Lead orchestrator system prompt (G3 wire #1 + G2 lean).
@@ -795,7 +803,7 @@ def build_lead_system_prompt(
     _blk_no_datarc = _NO_DATARC_NOTICE_BY_REASON.get(no_datarc_reason, _NO_DATARC_NOTICE) if not has_datarc else ""
     _blk_datarc_scope = _DATARC_WORKSPACE_SCOPE if has_datarc else ""
     _blk_tool_guidance = build_tool_use_guidance(planning_auto=planning_auto, data_peer=_data_peer, compute_peer=_compute_peer)
-    if "kb-analyst" in _roster.names:
+    if "kb-analyst" in _roster.names and not knowledge_direct_use:
         _blk_tool_guidance = _blk_tool_guidance.replace(
             "- KB question → kb_search; table rows / voucher numbers / amount aggregation → kb_query_records (incl. aggregate SUM/AVG/COUNT)",
             "- KB question or document records → delegate directly to kb-analyst. Do not search first or ask a second Agent to repeat the same lookup. "
@@ -834,6 +842,7 @@ def build_lead_system_prompt(
         _PEER_BAIL_HANDLING,
         _blk_parallel_tools,
         _DATA_REFERENCE_RULES,
+        _WEB_REFERENCE_RULES,
         _REFUSAL_AND_SAFETY,
         _TONE,
         _blk_error_handling,
@@ -876,6 +885,7 @@ def build_lead_system_prompt(
         _PEER_BAIL_HANDLING,
         _blk_parallel_tools,
         _DATA_REFERENCE_RULES,
+        _WEB_REFERENCE_RULES,
         _REFUSAL_AND_SAFETY,
         _TONE,
         _blk_error_handling,

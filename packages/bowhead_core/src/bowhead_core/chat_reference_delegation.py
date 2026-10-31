@@ -232,8 +232,20 @@ async def open_delegation(
     if not db.in_transaction:
         raise ValueError("reference_shared_transaction_required")
     row = await _row(db, "SELECT * FROM chat_reference_resolutions WHERE turn_id=? AND resolution_seq=2", (runtime.turn_id,))
-    if row is None or row["execution_id"] != primary.binding.execution_id or row["created_generation"] != 1:
+    if row is None or row["execution_id"] != primary.binding.execution_id:
         raise ValueError("reference_delegation_unavailable")
+    if row["created_generation"] != 1:
+        from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
+
+        post = await _row(
+            db,
+            "SELECT request_id FROM clarification_requests WHERE turn_id=? AND CASE WHEN json_valid(resume_context_json) "
+            "THEN json_extract(resume_context_json,'$.reference_continuation.contract') END='reference-lead-postdispatch.v1'",
+            (runtime.turn_id,),
+        )
+        origin = await read_question_origin_in_tx(db, turn_id=runtime.turn_id, postdispatch_card_id=post["request_id"] if post is not None else None)
+        if (origin.execution_id, origin.generation) != (primary.binding.execution_id, row["created_generation"]):
+            raise ValueError("reference_delegation_unavailable")
     delegation = ReferenceDelegation.model_validate_json(row["composition_json"])
     if row["composition_digest"] != delegation.digest or delegation.execution_id != primary.binding.execution_id:
         raise ValueError("reference_delegation_changed")

@@ -34,6 +34,7 @@ from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
 if TYPE_CHECKING:
     from bowhead_core.document_chat_continuation import DocumentTurnOwner
+    from bowhead_core.documents.canvas_inputs import CanvasInputAdmission
     from bowhead_core.documents.continuation import DocumentRuntimeSnapshot
 
 
@@ -394,6 +395,7 @@ class DocumentStore:
         runtime: DocumentRuntimeAdmission | None = None,
         _answer: _AnswerContext | None = None,
         _revision: PreparedRevision | None = None,
+        _canvas: CanvasInputAdmission | None = None,
     ) -> DocumentReceipt:
         """Commit proposal + exact source hash + receipt/link/event atomically.
 
@@ -410,9 +412,15 @@ class DocumentStore:
             request_data["answer"] = _answer.as_json()
         if _revision is not None:
             request_data["revision"] = _revision.as_json()
+        if _canvas is not None:
+            request_data["canvas_input"] = _canvas.manifest.model_dump(mode="json")
+            if _canvas.source_job_id is not None:
+                request_data["canvas_source_job_id"] = _canvas.source_job_id
         if runtime is not None:
             request_data["runtime"] = {
-                "profile": "ordinary-pptx-worker-v1",
+                "profile": runtime.turn_snapshot.planner_profile
+                if runtime.turn_snapshot is not None and runtime.turn_snapshot.schema_version == 2
+                else "ordinary-pptx-worker-v1",
                 "image_id": runtime.image_id,
                 "model_config_version": runtime.model_config_version,
             }
@@ -425,6 +433,12 @@ class DocumentStore:
             await _authorize(db, scope, write=False)
             previous = await _receipt(db, scope, command_id, request_hash)
             if previous is not None:
+                if runtime is not None:
+                    from bowhead_core.documents.agent_caller import document_job_caller_in_tx
+
+                    caller = await document_job_caller_in_tx(db, scope=scope, turn_id=turn_id, job_id=previous.job_id)
+                    if caller != runtime.binding.execution_id:
+                        raise DocumentRequestError("document_command_conflict")
                 return previous  # Remains recoverable after the Turn ends.
             await _authorize(db, scope, write=True)
             source = await _live_source(db, scope, turn_id)
@@ -438,6 +452,26 @@ class DocumentStore:
                 raise DocumentRequestError("document_revision_conflict")
             else:
                 await _validate_inputs(db, scope, source, proposal, answer=_answer)
+            if _canvas is not None:
+                from bowhead_core.documents.canvas_inputs import inherit_canvas_input_in_tx, validate_current_canvas_in_tx
+
+                if _revision is not None or _answer is not None:
+                    parent_id = _revision.target.job_id if _revision is not None else _answer.parent_job_id
+                    inherited = await inherit_canvas_input_in_tx(db, scope=scope, job_id=parent_id)
+                    if inherited != _canvas:
+                        raise DocumentRequestError("document_canvas_input_unavailable")
+                elif proposal.canvas is None or _canvas.source_job_id is not None:
+                    raise DocumentRequestError("document_canvas_selection_invalid")
+                else:
+                    await validate_current_canvas_in_tx(db, scope=scope, manifest=_canvas.manifest, section_ids=proposal.canvas.section_ids)
+            elif proposal.canvas is not None:
+                raise DocumentRequestError("document_canvas_unavailable")
+            elif _revision is not None or _answer is not None:
+                from bowhead_core.documents.canvas_inputs import inherit_canvas_input_in_tx
+
+                parent_id = _revision.target.job_id if _revision is not None else _answer.parent_job_id
+                if await inherit_canvas_input_in_tx(db, scope=scope, job_id=parent_id) is not None:
+                    raise DocumentRequestError("document_canvas_input_unavailable")
             if _answer is not None:
                 parent, execution, instruction, digest = await _question(db, scope, _answer.parent_job_id)
                 expected_instruction = (
@@ -476,11 +510,14 @@ class DocumentStore:
             if runtime is not None:
                 from bowhead_core.documents.capability import admit_capability
 
-                capability_id = await admit_capability(db, runtime=runtime, scope=scope, turn_id=turn_id, inputs=proposal.inputs, now=now)
+                capability_id = await admit_capability(
+                    db, path=self._path, runtime=runtime, scope=scope, turn_id=turn_id, inputs=proposal.inputs, now=now
+                )
                 await db.execute(
-                    "INSERT INTO document_dispatches(job_id,profile,image_id,model_config_version,capability_execution_id,model_selection_json) VALUES (?,'ordinary-pptx-worker-v1',?,?,?,?)",
+                    "INSERT INTO document_dispatches(job_id,profile,image_id,model_config_version,capability_execution_id,model_selection_json) VALUES (?,?,?,?,?,?)",
                     (
                         job_id,
+                        request_data["runtime"]["profile"],
                         runtime.image_id,
                         runtime.model_config_version,
                         capability_id,
@@ -513,6 +550,10 @@ class DocumentStore:
                 )
             if _revision is not None:
                 await commit_revision_in_tx(db, revision=_revision, job_id=job_id, now=now)
+            if _canvas is not None:
+                from bowhead_core.documents.canvas_inputs import commit_canvas_input_in_tx
+
+                await commit_canvas_input_in_tx(db, scope=scope, job_id=job_id, admission=_canvas, now=now)
             await db.commit()
             return result
 

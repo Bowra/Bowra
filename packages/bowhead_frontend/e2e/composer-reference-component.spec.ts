@@ -4,6 +4,7 @@ import fixtures from "../../../contracts/chat-references/catalog-v1.json";
 import { installReferenceComponent } from "./_composer-reference-component-modules";
 import type {} from "./_composer-reference-component-entry";
 import type { ReferenceCatalogResponse } from "../lib/reference-catalog-api";
+import { parseResourceReference } from "../lib/composer-input-document";
 
 function response() {
   const result = structuredClone(fixtures.cases[0].response);
@@ -425,6 +426,78 @@ test("slash lists builtin Skill metadata across pages without inserting or execu
   await expect(editor).toHaveText("/");
 });
 
+
+for (const kind of ["skill", "mcp_tool"] as const) {
+  test(`select available ${kind} and submit its exact Agent and parameters`, async ({ page }) => {
+    await page.setViewportSize({ width: kind === "skill" ? 1440 : 390, height: 900 });
+    await installReferenceComponent(page, "/bowhead");
+    const data = structuredClone(fixtures.cases.find((item) => item.name === "builtin_skill")!.response) as ReferenceCatalogResponse;
+    const skill = data.groups[0].items[0];
+    if (skill.kind !== "skill" || !skill.resource) throw new Error("Expected exact builtin Skill fixture");
+    const item = kind === "skill" ? { ...skill, availability: "baseline" as const, reason_code: null } : {
+      kind, source_kind: "team" as const, id: "teammcp.ots_finance.margin", source_id: "ots_finance",
+      label: "Margin", summary: "Read margin",
+      resource: { kind, source_id: "ots_finance", connection_binding_id: "ots_finance",
+        local_contract_revision: `sha256:${"1".repeat(64)}`, connection_subject_fingerprint: `sha256:${"2".repeat(64)}`,
+        operation_name: "teammcp.ots_finance.margin", operation_contract_revision: `sha256:${"3".repeat(64)}` },
+      parameter_schema: { type: "object" as const, properties: { year: { type: "integer" as const } }, required: ["year"], additionalProperties: false as const },
+      remote_version: { status: "unknown" as const, value: null, evidence: null }, availability: "baseline" as const, reason_code: null,
+    };
+    for (const cell of data.entry_support) if (cell.authorization_mode === "baseline" && ["agent", kind].includes(cell.resource_kind)) Object.assign(cell, {
+      adapter_id: cell.resource_kind === "mcp_tool" ? "initial-mcp-read" : "initial-agent-skill", adapter_version: 1, supported: true, reason_code: null,
+    });
+    data.groups.forEach((group) => { group.items = []; });
+    data.groups[kind === "skill" ? 0 : 2].items = [item];
+    data.groups[kind === "skill" ? 0 : 2].error = null;
+    const requests: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/chat/references/catalog", async (route) => {
+      const request = route.request().postDataJSON();
+      requests.push(request);
+      const result = structuredClone(data);
+      if (request.exact_resource) Object.assign(result.groups[kind === "skill" ? 0 : 2].items[0], { availability: "unavailable", reason_code: "unsupported_entry" });
+      await route.fulfill({ json: result });
+    });
+    await page.goto("/bowhead/__reference_component_test");
+    await expect(page.getByRole("combobox")).toBeVisible();
+    const agent = parseResourceReference(fixtures.cases[0].response.groups[0].items[0].resource);
+    if (agent.kind !== "agent") throw new Error("Expected exact Agent fixture");
+    await page.evaluate((resource) => {
+      const scope = { userId: "u_test", teamId: "t_test", workspaceId: "ws_test", requestedSessionId: null, authSessionGeneration: "auth_test" };
+      window.referenceComponent.update({ scope, snapshot: { scope, resetKey: "available-resource", document: { schema_version: 1, nodes: [
+        { type: "reference", node_id: "12345678-1234-4123-8123-123456789abc", resource, label: "Analyst", parameters: {} },
+        { type: "text", text: " Review margin " },
+      ] } } });
+    }, agent);
+    const input = page.getByRole("combobox");
+    await expect(input).toContainText("Review margin");
+    await input.focus();
+    await input.press("ControlOrMeta+End");
+    await page.keyboard.type("/");
+    const option = page.getByRole("option").filter({ hasText: item.label });
+    await expect(option).toHaveAttribute("aria-disabled", "false");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    expect(await page.evaluate(() => window.referenceComponent.submits)).toEqual([]);
+    if (kind === "mcp_tool") {
+      await page.getByRole("button", { name: /Margin/ }).click();
+      await page.getByRole("textbox", { name: /year/ }).fill("2026");
+      await page.getByRole("button", { name: "应用参数" }).click();
+    }
+    await expect(input).toBeFocused();
+    await page.keyboard.press("Enter");
+    const submits = await page.evaluate(() => window.referenceComponent.submits);
+    expect(submits).toHaveLength(1);
+    const references = submits[0].nodes.filter((node) => node.type === "reference");
+    expect(references).toHaveLength(2);
+    expect(references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ resource: agent, parameters: {} }),
+      expect.objectContaining({ resource: item.resource, parameters: kind === "skill" ? {} : { year: 2026 } }),
+    ]));
+    expect(submits[0].nodes.filter((node) => node.type === "text").map((node) => node.text).join("")).toContain("Review margin");
+    expect(requests[0]).toMatchObject({ trigger: "/", entry_mode: "ordinary", workspace_id: "ws_test", selected_refs: [agent] });
+    await page.screenshot({ path: test.info().outputPath(`selected-${kind}.png`) });
+  });
+}
 
 for (const kind of ["capability", "mcp_tool"] as const) {
   test(`saved ${kind} parameters use native keyboard editing and preserve submitted identity`, async ({ page }) => {

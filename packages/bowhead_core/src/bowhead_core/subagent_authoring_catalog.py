@@ -312,6 +312,10 @@ def _capability_classes(tool_ref: str, risk: Risk) -> frozenset[str]:
         return frozenset(
             {"data_discovery" if tool_ref.endswith(("schema", "measures")) else "data_query"},
         )
+    from bowhead_core.kb.management_tools import TOOLS as MANAGEMENT_TOOLS
+
+    if tool_ref in MANAGEMENT_TOOLS:
+        return frozenset({"knowledge_management"})
     if tool_ref.startswith("kb_"):
         return frozenset({"knowledge_search"})
     if tool_ref.startswith("web_"):

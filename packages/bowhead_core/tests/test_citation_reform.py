@@ -33,6 +33,12 @@ from bowhead_core.citations import (
 # ─── TurnCitationRegistry primitives ─────────────────────────────────────
 
 
+def test_internal_artifact_label_is_removed_with_its_identity() -> None:
+    text = "File policy.md（artifact_id = art_123456789abc） was added."
+    assert _strip_data_markers(text) == "File policy.md was added."
+    assert _resolve_citations(text, type("Context", (), {})()) == "File policy.md was added."
+
+
 def test_registry_register_returns_1_based_seq() -> None:
     """First register → seq=1; second different artifact → seq=2."""
     r = TurnCitationRegistry()

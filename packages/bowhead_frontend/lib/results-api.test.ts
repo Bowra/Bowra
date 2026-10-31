@@ -231,3 +231,7 @@ describe("results-api", () => {
     }));
   });
 });
+
+it("does not downgrade an unsupported delivery contract to the legacy reader", () => {
+  expect(new ResultsApiError("results_artifact_contract_unsupported", 409).allowsLegacyFallback).toBe(false);
+});

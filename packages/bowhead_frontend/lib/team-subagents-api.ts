@@ -174,7 +174,6 @@ export interface CreateSubagentBody {
   description?: string;
   system_prompt?: string;
   tool_refs: string[];
-  max_iterations?: number;
   skills?: string[];
   visibility?: "team_wide" | "creator_only";
   model?: string | null;
@@ -186,7 +185,6 @@ export interface PatchSubagentBody {
   description?: string;
   system_prompt?: string;
   tool_refs?: string[];
-  max_iterations?: number;
   skills?: string[];
   model?: string | null;
   output_schema?: Record<string, unknown> | null;
@@ -348,7 +346,6 @@ export type BuiltinOverrideField =
   | "model"
   | "skills"
   | "prompt_append"
-  | "max_iterations"
   | "primary_capability";
 
 export interface BuiltinSubagent {
@@ -369,8 +366,6 @@ export interface BuiltinSubagent {
     model: string;
     description: string;
     max_iterations: number;
-    /** Highest step limit a Team may set, above or below the default. Older servers omit it (lower-only). */
-    max_iterations_ceiling?: number;
     primary_capability?: string | null;
   };
   overridden_fields: string[];
@@ -385,7 +380,7 @@ export interface BuiltinSubagent {
     model: string | null;
     skills: string[] | null;
     prompt_append: string | null;
-    max_iterations: number | null;
+    max_iterations?: number | null;
     primary_capability?: string | null;
   } | null;
   row_version: number;
@@ -408,7 +403,6 @@ export interface BuiltinSubagentOverrideBody {
   model?: string | null;
   skills?: string[] | null;
   prompt_append?: string | null;
-  max_iterations?: number | null;
   primary_capability?: string | null;
 }
 

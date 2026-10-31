@@ -1,5 +1,7 @@
 "use client";
 
+import { AGENT_PENDING_ANCHOR } from "@/lib/agent-case-proposal-path";
+
 /**
  * Agent version workbench: change proposals and Validate and release › Release check (Claude Design
  * "Agent CI Spec" part 1). This component loads and polls the workbench and hands each view its
@@ -101,7 +103,7 @@ function toggleAtomicGroup(
 }
 
 /** First line of a proposal's rationale, for undo toasts ("Dismissed Coach proposal “…”"). */
-export const AGENT_PENDING_ANCHOR = "agent-pending-changes";
+export { AGENT_PENDING_ANCHOR } from "@/lib/agent-case-proposal-path";
 
 
 function proposalName(proposal: AgentChangeProposal): string {
@@ -457,13 +459,20 @@ function ProposalsView({
   const [caseTasks, setCaseTasks] = useState<Record<string, string>>({});
   const [caseReview, setCaseReview] = useState<Record<string, string>>({});
   const [suiteByProposal, setSuiteByProposal] = useState<Record<string, string>>({});
-  const [ownerSuites, setOwnerSuites] = useState<AgentEvalSuite[]>([]);
+  const [suiteRetry, setSuiteRetry] = useState(0);
+  const [suiteRead, setSuiteRead] = useState<{
+    agentId: string;
+    proposals: AgentChangeProposal[];
+    status: "loading" | "ready" | "failed" | "unavailable";
+    suites: AgentEvalSuite[];
+    cause?: unknown;
+  } | null>(null);
   const pendingDismissals = usePendingDismissals();
   const allMerges = useCiMerges();
 
   // Merged CI proposals stay as "Merged" cards with the next step until CI's candidate appears (§6).
   const proposals = useMemo(() => {
-    const listed = pendingProposals(workbench.change_proposals ?? []);
+    const listed = pendingProposals(workbench.change_proposals ?? []).filter((proposal) => proposal.agent_id === agentId);
     const merged = waitingCiMerges(allMerges, agentId, workbench)
       .map((merge) => merge.proposal)
       .filter((proposal) => !listed.some((item) => item.proposal_id === proposal.proposal_id));
@@ -485,23 +494,26 @@ function ProposalsView({
   };
 
   const needsSuites = proposals.some((proposal) => proposal.suggested_cases.some((item) => item.decision_status === "pending"));
+  const suiteState = suiteRead?.agentId === agentId && suiteRead.proposals === proposals ? suiteRead.status : "loading";
+  const ownerSuites = suiteState === "ready" ? suiteRead!.suites : [];
   useEffect(() => {
     if (!needsSuites) return;
     let cancelled = false;
+    setSuiteRead({ agentId, proposals, status: "loading", suites: [] });
     void getAgentEvalManager(agentId).then((manager) => {
       if (cancelled) return;
       const suites = manager.suites.filter((suite) => suite.suite_kind === "owner_quality" && suite.state !== "archived" && suite.revision);
-      setOwnerSuites(suites);
+      setSuiteRead({ agentId, proposals, status: "ready", suites });
       setSuiteByProposal((current) => {
         const next = { ...current };
         for (const proposal of proposals) next[proposal.proposal_id] ??= suites[0]?.revision?.suite_revision_id ?? "";
         return next;
       });
-    }).catch(() => {
-      if (!cancelled) setOwnerSuites([]);
+    }).catch((cause: unknown) => {
+      if (!cancelled) setSuiteRead({ agentId, proposals, status: cause instanceof ApiError && [401, 403, 404].includes(cause.status) ? "unavailable" : "failed", suites: [], cause });
     });
     return () => { cancelled = true; };
-  }, [agentId, needsSuites, proposals]);
+  }, [agentId, needsSuites, proposals, suiteRetry]);
 
   const mutate = async <T,>(id: string, key: string, operation: () => Promise<T>, success: string, failure: string | ((cause: unknown) => string), onSuccess?: (result: T) => void): Promise<boolean> => {
     if (busy) return false;
@@ -571,6 +583,12 @@ function ProposalsView({
       {visibleProposals.map((proposal) => {
         const selected = selectedGroups[proposal.proposal_id] ?? proposal.atomic_groups.map((group) => group.id);
         const pendingCases = proposal.suggested_cases.filter((item) => item.decision_status === "pending" && !pendingDismissals.has(caseKey(agentId, proposal.proposal_id, item.id)));
+        if (pendingCases.length && suiteState === "unavailable") return (
+          <Notice key={proposal.proposal_id} tone="muted">
+            <span>{t("version_suggested_case_suites_unavailable")}</span>
+            <Button variant="secondary" size="sm" onClick={() => void reload()}>{t("version_retry")}</Button>
+          </Notice>
+        );
         const caseSelection = (selectedCases[proposal.proposal_id] ?? pendingCases.map((item) => item.id)).filter((id) => pendingCases.some((item) => item.id === id));
         const allGroupsSelected = selected.length === proposal.atomic_groups.length;
         const allCasesSelected = caseSelection.length === pendingCases.length;
@@ -582,7 +600,7 @@ function ProposalsView({
         const initialSuite = Boolean(proposal.base.initial_suite_name && !proposal.case_target_suite_revision_id);
         const targetSuiteRevision = proposal.case_target_suite_revision_id ?? proposal.base.suite_revision_id ?? suiteByProposal[proposal.proposal_id] ?? "";
         const selectedSuite = ownerSuites.find((suite) => suite.revision?.suite_revision_id === targetSuiteRevision);
-        const staleSuite = initialSuite ? ownerSuites.length > 0 : caseOnly && !selectedSuite;
+        const staleSuite = suiteState === "ready" && (initialSuite ? ownerSuites.length > 0 : caseOnly && !selectedSuite);
         const invalidCaseReview = caseSelection.some((id) => {
           const item = proposal.suggested_cases.find((entry) => entry.id === id)!;
           return Boolean(item.case_spec && !caseReviewFields(reviewText(proposal, id)));
@@ -717,7 +735,9 @@ function ProposalsView({
                 </details>
                 {pendingCases.length ? (
                   <div className="am-ci-case-actions">
-                    {initialSuite ? <p className="am-ci-note">{t("version_suggested_case_initial_suite", { name: proposal.base.initial_suite_name! })}</p> : selectedSuite && (caseOnly || ownerSuites.length === 1) ? (
+                    {suiteState === "loading" ? <p className="am-ci-note" role="status">{t("version_suggested_case_suites_loading")}</p> : suiteState === "failed" ? (
+                      <CardStatus status={{ tone: "error", message: t("version_suggested_case_suites_failed"), cause: suiteRead?.cause, onRetry: () => { setSuiteRead(null); setSuiteRetry((value) => value + 1); } }} />
+                    ) : initialSuite ? <p className="am-ci-note">{t("version_suggested_case_initial_suite", { name: proposal.base.initial_suite_name! })}</p> : selectedSuite && (caseOnly || ownerSuites.length === 1) ? (
                       <p className="am-ci-note">{t("version_suggested_case_suite")}: {selectedSuite.name}</p>
                     ) : (
                       <div className="am-ci-fld">
@@ -739,7 +759,7 @@ function ProposalsView({
                     <div className="am-ci-acts">
                       <Button
                         variant={proposal === firstActionable && (caseOnly || proposal.status !== "open") ? "primary" : "secondary"}
-                        disabled={busy !== null || staleSuite || invalidCaseReview || (!initialSuite && !targetSuiteRevision) || !caseSelection.length || caseSelection.some((id) => !(caseTasks[`${proposal.proposal_id}:${id}`] ?? proposal.suggested_cases.find((item) => item.id === id)!.task).trim())}
+                        disabled={busy !== null || suiteState !== "ready" || staleSuite || invalidCaseReview || (!initialSuite && !targetSuiteRevision) || !caseSelection.length || caseSelection.some((id) => !(caseTasks[`${proposal.proposal_id}:${id}`] ?? proposal.suggested_cases.find((item) => item.id === id)!.task).trim())}
                         loading={busy === `cases:${proposal.proposal_id}`}
                         onClick={() => void mutate(
                           proposal.proposal_id,

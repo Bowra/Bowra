@@ -50,10 +50,12 @@ from bowhead_core.agent_collaboration_runtime import (
     RunnablePermit,
     collaboration_tool_spec,
 )
+from bowhead_core.agent_knowledge_policy import KnowledgeAccess, KnowledgeAccessError, bind_knowledge_scope, require_supported_knowledge_access
 from bowhead_core.agent_model_policy import (
     TEAM_SUBAGENT_ALLOWED_MODEL_ROLES,
     TEAM_SUBAGENT_DEFAULT_MODEL_ROLE,
 )
+from bowhead_core.agent_run_limits import UNBOUNDED_STEPS, AgentLoopBudget, get_run_limits, get_runtime_controls
 from bowhead_core.agent_run_wrap_up import EVENT_SECTION_MAX_CHARS
 from bowhead_core.agents._generated.tool_display import TOOL_DISPLAY
 from bowhead_core.agents._generated.tool_renames import canonical_tool_name
@@ -62,7 +64,7 @@ from bowhead_core.agents.capability_protocols import render_capability_protocols
 # bi-hitl-cleanup B3 (2026-05-21): removed `is_clarification_sentinel` import.
 # Batch 2 (workspace-space-split): import REVIVED; c4 reintroduces a legitimate Shape-2 producer
 # (tool_context_select dispatch-gate sentinel), restoring loop break (see comment at :2246).
-from bowhead_core.agents.clarification_tool import is_clarification_sentinel
+from bowhead_core.agents.clarification_tool import collect_clarification_sentinels, is_clarification_sentinel, is_tool_context_selection
 from bowhead_core.agents.plan_propose_tool import is_plan_propose_sentinel
 from bowhead_core.analysis_payload import is_short_answer_payload
 from bowhead_core.bi_workspace_continuation import (
@@ -77,6 +79,11 @@ from bowhead_core.capability_resolver import (
     effective_tool_names,
 )
 from bowhead_core.context_assembly import split_system_for_prefix
+from bowhead_core.datarc_selection import (
+    ensure_datarc_run,
+    fork_datarc_run,
+    project_datarc_scope,
+)
 from bowhead_core.document_runtime import read_document_profile
 from bowhead_core.effective_language import (
     effective_output_language,
@@ -88,8 +95,10 @@ from bowhead_core.events import (
     OrchestratorEvent,
     TerminalDurabilityAbort,
     TurnEventBus,
+    emit_required_tool_result,
     raise_if_terminal_bus_failed,
 )
+from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS, SHARED_KNOWLEDGE_GUIDANCE, KnowledgeReadState
 from bowhead_core.llm_failure import (
     ORCHESTRATOR_DEADLINE_PROVIDER,
     LLMDeliveryFailedError,
@@ -151,6 +160,9 @@ if TYPE_CHECKING:
         ExactAgentExecutionBinding,
         ProjectedSystemAgentRevision,
     )
+    from bowhead_core.context_execution import ExecutionContextView
+    from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
+    from bowhead_core.documents.agent_caller import DocumentAgentOutcome
     from bowhead_core.ordinary_lead_checkpoint import OrdinaryHelperCompletionReason
     from bowhead_core.plan_driver import PlanRunOutcome
     from bowhead_core.skill_read_model_input import RequiredSkillModelInput
@@ -323,6 +335,20 @@ def _public_skill_invoke_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def _public_tool_result(tool_name: str, result: Any) -> tuple[Any, str | None]:
     """Keep model-facing dispatch guidance and host paths out of live and replayed tool events."""
+    if tool_name in {"read_chart", "edit_chart"} and isinstance(result, dict):
+        # Chart contents are checked against the current viewer on every read.
+        # Persisting a sample in step events would bypass a later revocation.
+        return {
+            key: result[key] for key in ("section_id", "rev", "current_rev", "view_id", "error", "path", "hint", "chart_guarded") if key in result
+        }, None
+    if tool_name == "add_chart" and isinstance(result, dict):
+        public = {key: value for key, value in result.items() if key != "display_receipt"}
+        if isinstance(public.get("views"), list):
+            public["views"] = [
+                {key: value for key, value in view.items() if key != "display_receipt"} if isinstance(view, dict) else view
+                for view in public["views"]
+            ]
+        return public, None
     if tool_name == "skill_invoke" and isinstance(result, dict):
         return _public_skill_invoke_result(result), None
     if tool_name == "agent_message":
@@ -678,6 +704,14 @@ def _canvas_write_succeeded(inv: Any) -> bool:
     if getattr(inv, "error", None) is not None:
         return False
     res = getattr(inv, "result", None)
+    if name == "edit_chart":
+        return (
+            isinstance(res, dict)
+            and not res.get("error")
+            and res.get("ok") is not False
+            and bool(res.get("section_id"))
+            and isinstance(res.get("rev"), int)
+        )
     if isinstance(res, dict):
         if res.get("ok") is False or res.get("error"):
             return False
@@ -697,6 +731,9 @@ def _canvas_sections_from_invocations(invocations: Any) -> list[dict[str, Any]]:
         # silently disables the **entire chat inline-figure chain** (this function feeds both lead.subagent_summary
         # and Lead's available-figure list). See docs/design/工具改名迁移.md.
         if not is_canvas_tool(_tn):
+            continue
+        if canonical_tool_name(_tn) == "edit_chart":
+            # An edited chart is not a newly created section or inline figure.
             continue
         _res = getattr(_inv, "result", None)
         if not isinstance(_res, dict):
@@ -833,6 +870,7 @@ class SubagentProfile:
     # Team Agents with Plugins: where each Tool and Skill came from (resource_disable.ResourceProvenance),
     # set at run admission. None = no Plugin breakdown available.
     resource_provenance: Any | None = None
+    knowledge_access: KnowledgeAccess | None = None
 
 
 def _apply_resource_disable(
@@ -946,6 +984,7 @@ def _materialize_team_profile(
     skill_runtime_scope: ExactSkillRuntimeScope | None = None,
     skill_runtime_grants: tuple[ExactSkillGrant, ...] | None = None,
     capability_protocol_block: bool = False,
+    knowledge_access: KnowledgeAccess | None = None,
 ) -> SubagentProfile | None:
     """Apply the single Team-Agent safety/materialization policy."""
     from bowhead_core.agents.exceptions import ManifestSecurityError
@@ -1016,6 +1055,7 @@ def _materialize_team_profile(
         skill_runtime_scope=skill_runtime_scope,
         skill_runtime_grants=skill_runtime_grants,
         capability_protocol_block=capability_protocol_block,
+        knowledge_access=knowledge_access,
     )
 
 
@@ -1027,6 +1067,8 @@ def _team_revision_projection(
 ) -> dict[str, Any]:
     """Normalize authored and imported-baseline revision shapes."""
     import json as _json
+
+    require_supported_knowledge_access(definition)
 
     def _list_field(current: str, legacy: str) -> list[str]:
         value = definition.get(current)
@@ -1095,6 +1137,7 @@ def _team_revision_projection(
         "skill_runtime_grants": skill_runtime_grants,
         "output_schema": output_schema,
         "capability_protocol_block": capability_protocol_block,
+        "knowledge_access": require_supported_knowledge_access(definition),
     }
 
 
@@ -1105,6 +1148,7 @@ def _system_profile_snapshot(profile: SubagentProfile) -> dict[str, Any]:
 
     catalog = default_catalog()
     return {
+        **({"knowledge_access": profile.knowledge_access.canonical_value()} if profile.knowledge_access is not None else {}),
         "name": profile.name,
         "llm_agent_type": profile.llm_agent_type,
         "tool_whitelist": list(profile.tool_whitelist),
@@ -1154,6 +1198,7 @@ def _materialize_system_profile_snapshot(
     """Validate an immutable system profile snapshot without applying new deltas."""
     from bowhead_core.system_skill_snapshot import decode_system_skill_snapshot
 
+    require_supported_knowledge_access(definition)
     if definition.get("name") != expected_name:
         raise ValueError("system Agent snapshot identity mismatch")
     skill_runtime_scope, skill_runtime_grants = decode_system_skill_snapshot(definition)
@@ -1210,6 +1255,7 @@ def _materialize_system_profile_snapshot(
     ):
         raise ValueError("system Agent snapshot field shape is invalid")
     return SubagentProfile(
+        knowledge_access=require_supported_knowledge_access(definition),
         name=expected_name,
         llm_agent_type=str(definition["llm_agent_type"]),
         tool_whitelist=tuple(tool_whitelist),
@@ -1494,6 +1540,8 @@ def get_compute_profile() -> SubagentProfile:
             # Unified entries: bi_query replaces ask/fetch/breakdown; bi_schema replaces list_*
             "bi_query",
             "bi_schema",
+            "tool_list_workspaces",
+            "tool_switch_context",
             # bi-hitl-cleanup B1: LLM-callable concept resolver (ar2 embedded LLM capability
             # exposed as an atomic tool). compute peers may also invoke it to disambiguate
             # tokens before bi_query (PRD r2.1 §4 B1).
@@ -1525,6 +1573,8 @@ def get_compute_profile() -> SubagentProfile:
             # Batch 5ⓑ: flat sandbox entry taught by compute.md ④; omitting it silently disables that fallback action.
             "python_exec",
             "add_chart",
+            "read_chart",
+            "edit_chart",
             # M137 #142: structured-output contract
             "subagent_return",
         ),
@@ -1602,6 +1652,7 @@ class SubagentResult:
     # a durable continuation owner must bind/authorize it before resuming.
     bi_workspace_continuation: BiWorkspaceContinuation | None = field(default=None, repr=False)
     reference_read_question: ReferenceReadQuestion | None = field(default=None, repr=False)
+    document_outcome: DocumentAgentOutcome | None = field(default=None, repr=False)
     model_turn_count: int = 0
     model_turn_limit: int = 0
     ordinary_lead_checkpoint: Any = field(default=None, repr=False)
@@ -1610,7 +1661,7 @@ class SubagentResult:
         default=None,
         repr=False,
     )
-    # Agent run limits (FEATURE_AGENT_RUN_LIMITS): a run stopped at a limit returns its
+    # Agent run limits: a run stopped at a limit returns its
     # partial work. "partial" keeps ok=False (the task did not finish) and carries the
     # stop reason plus the wrap-up call's Done/Remaining text when that call succeeded.
     completion: Literal["complete", "partial"] = "complete"
@@ -1623,6 +1674,100 @@ class SubagentResult:
     # The typed model failure behind a failed run (`llm_failure.LLM_REASON_CODES`), when the model call
     # itself failed; `error` stays the coarse code. Agent Eval reads it to say which cause it was.
     llm_reason_code: str | None = None
+
+    @property
+    def step_usage(self) -> dict[str, int] | None:
+        if self.completion == "partial" and self.model_turn_limit > 0:
+            return {"used": self.model_turn_count, "limit": self.model_turn_limit}
+        return None
+
+
+class _RuntimeExecution:
+    """One run's decision counter and asynchronous local-stall ownership."""
+
+    def __init__(self, budget: AgentLoopBudget, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self.budget = budget
+        self.clock = clock
+        self.used = budget.model_steps_used
+        self.progress_at = self.clock()
+        self.owners = 0
+        self.changed = asyncio.Event()
+        self.stalled = False
+        self.stop = None
+
+    @property
+    def can_decide(self) -> bool:
+        if self.budget.step_limit is None and self.used >= UNBOUNDED_STEPS:
+            raise RuntimeError("agent_internal_execution_bound")
+        return self.budget.step_limit is None or self.used < self.budget.step_limit
+
+    def admit(self) -> bool:
+        if not self.can_decide:
+            return False
+        self.used += 1
+        self.progress()
+        return True
+
+    def snapshot(self) -> AgentLoopBudget:
+        return self.budget.model_copy(update={"model_steps_used": self.used})
+
+    def progress(self) -> None:
+        self.progress_at = self.clock()
+        self.changed.set()
+
+    @contextlib.contextmanager
+    def owned(self):
+        self.owners += 1
+        self.changed.set()
+        try:
+            yield
+        finally:
+            self.owners -= 1
+            self.progress()
+
+    async def watch(self, owner: asyncio.Task) -> None:
+        while True:
+            self.changed.clear()
+            if self.owners or self.stop is None:
+                await self.changed.wait()
+                continue
+            remaining = self.budget.stall_timeout_s - (self.clock() - self.progress_at)
+            if remaining <= 0:
+                self.stalled = True
+                owner.cancel(self)
+                return
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.changed.wait(), timeout=remaining)
+
+
+class _RuntimeTimeExpired(Exception):
+    """The run's existing time budget ended while awaiting a tool batch."""
+
+
+async def _controlled_execution(work, control: _RuntimeExecution | None):
+    if control is None:
+        return await work
+    owner = asyncio.current_task()
+    assert owner is not None
+    initial_cancels = owner.cancelling()
+    watchdog = asyncio.create_task(control.watch(owner))
+    try:
+        return await work
+    except asyncio.CancelledError as exc:
+        if not control.stalled or exc.args != (control,) or owner.cancelling() != initial_cancels + 1:
+            raise
+        owner.uncancel()
+        if control.stop is None:
+            raise
+        return await control.stop("agent_stalled")
+    except _RuntimeTimeExpired:
+        if control.stop is None:
+            raise
+        return await control.stop("time_limit")
+    finally:
+        watchdog.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watchdog
 
 
 # The resume grant for the next spawn dispatch in this task (set by _resume_handler).
@@ -1659,9 +1804,11 @@ async def _capture_resume_checkpoint(
     partial_remaining: str | None,
     messages: Sequence[Message],
     allowlist: Any,
+    knowledge_read: KnowledgeReadState | None = None,
 ) -> str | None:
     """Save a finished or partial helper run so a later turn can continue it; never fails the run."""
-    from bowhead_core.subagent_resume import capture, subagent_resume_enabled
+    from bowhead_core.datarc_selection import current_datarc_selection
+    from bowhead_core.subagent_resume import capture
 
     store = getattr(parent_ctx, "session_store", None)
     session_id = str(getattr(parent_ctx, "session_id", "") or "")
@@ -1669,7 +1816,6 @@ async def _capture_resume_checkpoint(
     db_path = getattr(store, "db_path", None)
     if (
         profile_name == "lead"
-        or not subagent_resume_enabled()
         or not isinstance(db_path, str)
         or not session_id
         or not user_id
@@ -1678,6 +1824,11 @@ async def _capture_resume_checkpoint(
     ):
         return None
     try:
+        from bowhead_core.knowledge_source_runtime import retained_knowledge_scope
+
+        source = None
+        if any(name.startswith("bi_") or name in {"tool_switch_context", "tool_list_workspaces"} for name in tool_names):
+            source = current_datarc_selection(parent_ctx).snapshot(team_id=parent_ctx.team_id or "")
         inventory = allowlist.snapshot() if allowlist is not None else []
         checkpoint_id = await capture(
             db_path,
@@ -1698,6 +1849,11 @@ async def _capture_resume_checkpoint(
             partial_remaining=partial_remaining,
             messages=messages,
             reference_inventory=inventory,
+            knowledge_read=knowledge_read,
+            knowledge_scope=retained_knowledge_scope(parent_ctx),
+            knowledge_sources=parent_ctx.knowledge_source_uses,
+            datarc_selection=source,
+            segmented=True,
         )
     except Exception as exc:  # noqa: BLE001 — a missing checkpoint only means a later turn starts fresh
         logger.warning("subagent_resume.capture_failed turn=%s sub=%s profile=%s err=%s", turn_id, subagent_id, profile_name, exc)
@@ -1776,6 +1932,18 @@ class _TurnRetryObserver:
         return True
 
 
+def _propagate_tool_result_context(source: ToolExecutionContext, target: ToolExecutionContext) -> None:
+    """Carry explicit result channels across context copies without replacing execution scope."""
+    from bowhead_core.subagent_return_tool import CTX_PAYLOAD_ATTR
+
+    for attribute in (CTX_PAYLOAD_ATTR, "_psi_compose_attempted", "_reference_read_question"):
+        if hasattr(source, attribute):
+            try:
+                setattr(target, attribute, getattr(source, attribute))
+            except Exception:
+                logger.warning("subagent.result_context_propagation_failed attribute=%s", attribute)
+
+
 def _unasked_resolve_question(payload: Any, invocations: list[ToolInvocation]) -> dict[str, Any] | None:
     """Turn a prose question back into the resolver's structured question.
 
@@ -1792,7 +1960,7 @@ def _unasked_resolve_question(payload: Any, invocations: list[ToolInvocation]) -
     if payload.get("kpis") or payload.get("insights") or payload.get("deliverables"):
         return None
     steps = [inv for inv in invocations if canonical_tool_name(inv.tool_name) != "subagent_return"]
-    if not steps or steps[-1].error:
+    if not steps or steps[-1].error or canonical_tool_name(steps[-1].tool_name) != "bi_concept_resolve":
         return None
     result = steps[-1].result
     if isinstance(result, str):
@@ -2568,6 +2736,7 @@ class SubagentRunner:
         parent_turn_id: str,
         parent_bus: TurnEventBus,
         parent_ctx: ToolExecutionContext,
+        artifact_presentation_entry: bool = False,
         extra_instructions: str | None = None,
         stream_callback: Callable[[str], Awaitable[None]] | None = None,  # Sprint κ
         stream_on_tool_call: Callable[[], Awaitable[None]] | None = None,  # Sprint κ r2
@@ -2600,6 +2769,7 @@ class SubagentRunner:
         iteration_offset: int = 0,
         resume_grant: ResumeGrant | None = None,
         forced_tool_calls: Sequence[ToolCall] | None = None,
+        native_switch_resolution: DatarcSwitchResolution | None = None,
     ) -> SubagentResult:
         # cca block ③ formerly calculated the per-turn team-tool view here for langgraph.
         # That backend is retired; _legacy_run computes the same effective view internally,
@@ -2612,6 +2782,10 @@ class SubagentRunner:
         # None → the backend reports the usual unknown-profile error
         # (_legacy_run re-resolves to None).
         from bowhead_core.documents.turn_policy import DocumentTurnState
+
+        ensure_datarc_run(parent_ctx)
+        if profile_name != "lead" and not artifact_presentation_entry:
+            parent_ctx = fork_datarc_run(parent_ctx)
 
         if profile_name == "lead" and exact_binding is None:
             from bowhead_core.agent_collaboration_runtime import prepare_lead_collaboration
@@ -2664,9 +2838,28 @@ class SubagentRunner:
         if getattr(parent_ctx, "document_admission_binding", None) is not None or profile_name == "lead":
             parent_ctx = copy.copy(parent_ctx)
             parent_ctx.document_admission_binding = None
+            parent_ctx.document_caller_execution_id = None
         if profile_name != "lead" and getattr(parent_ctx, "document_turn_state", None) is not None:
             parent_ctx = copy.copy(parent_ctx)
             parent_ctx.document_turn_state = None
+        if parent_ctx.document_admission_guard is not None and (
+            exact_binding is None or parent_ctx.document_admission_guard.execution_id != exact_binding.execution_id
+        ):
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.document_admission_guard = None
+        if profile_name != "lead" and exact_binding is not None and resolved is not None and "template_document_submit" in resolved.tool_whitelist:
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.document_turn_state = DocumentTurnState(
+                revision_required=getattr(parent_ctx, "document_revision_target", None) is not None,
+            )
+            parent_ctx.document_caller_execution_id = exact_binding.execution_id
+
+            async def exact_document_binding():
+                # Borrow only the current execution. Admission rechecks its
+                # original assignment, revision and enabled resources.
+                return exact_binding, False
+
+            parent_ctx.document_admission_binding = exact_document_binding
         if profile_name == "lead":
 
             async def document_binding():
@@ -2691,37 +2884,69 @@ class SubagentRunner:
         )
         from bowhead_router.request_record import request_change_scope
 
+        from bowhead_core.agent_run_limits import DEFAULT_LIMITS
+
+        retained = (
+            (getattr(getattr(parent_ctx, "ordinary_lead_state", None), "checkpoint", None) if profile_name == "lead" else None)
+            or reference_read_question
+            or bi_workspace_continuation
+        )
+        budget = getattr(parent_ctx, "agent_runtime_budget", None)
+        if retained is not None:
+            budget = retained.loop_budget
+        elif budget is None:
+            controls = get_runtime_controls()
+            limits = get_run_limits() or parent_ctx.agent_run_limits or DEFAULT_LIMITS
+            budget = controls.budget(limits)
+        if budget is not None or retained is not None:
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.agent_runtime_budget = budget.model_copy(update={"model_steps_used": 0}) if budget is not None else None
+            if budget is not None:
+                parent_ctx.agent_run_limits = get_run_limits() or parent_ctx.agent_run_limits or DEFAULT_LIMITS
+        runtime_control = _RuntimeExecution(budget) if budget is not None else None
+        from bowhead_core.context_history import run_context_lead
+
         async with permit if permit is not None and not permit.acquired else contextlib.nullcontext():
             with request_change_scope():
-                return await self._legacy_run(
-                    resolved_profile=resolved,  # cca P3 §2.4 — skip the re-resolve in _legacy_run
-                    profile_name=profile_name,
-                    task=task,
-                    parent_turn_id=parent_turn_id,
-                    parent_bus=parent_bus,
-                    parent_ctx=parent_ctx,
-                    extra_instructions=extra_instructions,
-                    stream_callback=stream_callback,  # Sprint κ
-                    stream_on_tool_call=stream_on_tool_call,  # Sprint κ r2
-                    pre_minted_subagent_id=pre_minted_subagent_id,  # chat-v4 W3.2
-                    language_override=language_override,  # spawn-language
-                    tool_deny=tool_deny,  # Batch 1 review P0-1: per-run hard gate
-                    dispatch_guard=dispatch_guard,  # ξ B1 revived: per-run guard; shared runner kills constructor guard
-                    exact_binding=exact_binding,
-                    required_model_input=required_model_input,
-                    history=history,
-                    history_rules=history_rules,
-                    turn_context_block=turn_context_block,
-                    attachment_context=attachment_context,
-                    message_images=message_images,
-                    capture_bi_workspace_continuation=capture_bi_workspace_continuation,
-                    bi_workspace_continuation=bi_workspace_continuation,
-                    capture_reference_read_question=capture_reference_read_question,
-                    reference_read_question=reference_read_question,
-                    clarification_answer=clarification_answer,
-                    iteration_offset=iteration_offset,
-                    resume_grant=resume_grant,
-                    forced_tool_calls=forced_tool_calls,
+                return await _controlled_execution(
+                    run_context_lead(
+                        parent_ctx,
+                        exact_binding,
+                        self._legacy_run(
+                            resolved_profile=resolved,  # cca P3 §2.4 — skip the re-resolve in _legacy_run
+                            profile_name=profile_name,
+                            task=task,
+                            parent_turn_id=parent_turn_id,
+                            parent_bus=parent_bus,
+                            parent_ctx=parent_ctx,
+                            artifact_presentation_entry=artifact_presentation_entry,
+                            extra_instructions=extra_instructions,
+                            stream_callback=stream_callback,  # Sprint κ
+                            stream_on_tool_call=stream_on_tool_call,  # Sprint κ r2
+                            pre_minted_subagent_id=pre_minted_subagent_id,  # chat-v4 W3.2
+                            language_override=language_override,  # spawn-language
+                            tool_deny=tool_deny,  # Batch 1 review P0-1: per-run hard gate
+                            dispatch_guard=dispatch_guard,  # ξ B1 revived: per-run guard; shared runner kills constructor guard
+                            exact_binding=exact_binding,
+                            required_model_input=required_model_input,
+                            history=history,
+                            history_rules=history_rules,
+                            turn_context_block=turn_context_block,
+                            attachment_context=attachment_context,
+                            message_images=message_images,
+                            capture_bi_workspace_continuation=capture_bi_workspace_continuation,
+                            bi_workspace_continuation=bi_workspace_continuation,
+                            capture_reference_read_question=capture_reference_read_question,
+                            reference_read_question=reference_read_question,
+                            clarification_answer=clarification_answer,
+                            iteration_offset=iteration_offset,
+                            resume_grant=resume_grant,
+                            forced_tool_calls=forced_tool_calls,
+                            native_switch_resolution=native_switch_resolution,
+                            runtime_control=runtime_control,
+                        ),
+                    ),
+                    runtime_control,
                 )
 
     def _maybe_shadow_check_profile(self, profile_name: str, live_profile: SubagentProfile) -> None:
@@ -2942,7 +3167,23 @@ class SubagentRunner:
                 ):
                     rec = None
             if rec is not None:
+                knowledge_access = None
+                policy_db_path = getattr(self.team_subagent_store, "db_path", None)
+                if isinstance(policy_db_path, (str, Path)):
+                    from bowhead_core._db import open_shared_ctx
+
+                    async with (
+                        open_shared_ctx(policy_db_path) as policy_db,
+                        policy_db.execute(
+                            "SELECT r.definition_json FROM team_subagent a JOIN team_subagent_revision r ON r.id=a.live_revision_id WHERE a.id=? AND a.team_id=?",
+                            (rec.id, team_id),
+                        ) as policy_cursor,
+                    ):
+                        policy_row = await policy_cursor.fetchone()
+                    if policy_row is not None:
+                        knowledge_access = require_supported_knowledge_access(json.loads(policy_row[0]))
                 return _materialize_team_profile(
+                    knowledge_access=knowledge_access,
                     name=rec.name,
                     display_name=rec.display_name,
                     description=rec.description,
@@ -3042,11 +3283,13 @@ class SubagentRunner:
         parent_turn_id: str,
         parent_bus: TurnEventBus,
         parent_ctx: ToolExecutionContext,
+        artifact_presentation_entry: bool = False,
         extra_instructions: str | None = None,
         stream_callback: Callable[[str], Awaitable[None]] | None = None,  # Sprint κ
         stream_on_tool_call: Callable[[], Awaitable[None]] | None = None,  # Sprint κ r2
         pre_minted_subagent_id: str | None = None,  # Sprint chat-v4 W3.2
         resolved_profile: SubagentProfile | None = None,  # cca P3 §2.4 — pre-resolved
+        runtime_control: _RuntimeExecution | None = None,
         language_override: str | None = None,  # spawn-language: Lead's explicit output language
         tool_deny: frozenset[str] = frozenset(),  # Batch 1 review P0-1: per run (see run())
         dispatch_guard: LeadDispatchGuard | None = None,  # ξ B1 per-run guard
@@ -3065,6 +3308,7 @@ class SubagentRunner:
         iteration_offset: int = 0,
         resume_grant: ResumeGrant | None = None,
         forced_tool_calls: Sequence[ToolCall] | None = None,
+        native_switch_resolution: DatarcSwitchResolution | None = None,
     ) -> SubagentResult:
         """Subagent legacy backend tool-use loop.
 
@@ -3075,6 +3319,10 @@ class SubagentRunner:
         turn_runner must explicitly pass ``state`` to maintain compression.
         """
         raise_if_terminal_bus_failed(parent_bus)
+        ensure_datarc_run(parent_ctx)
+        parent_ctx = copy.copy(parent_ctx)
+        parent_ctx.artifact_presentation_entry = artifact_presentation_entry
+        parent_ctx.artifact_presentation_call = None
         if required_model_input is not None:
             from bowhead_router.input_admission import LLMInputAdmissionError
             from bowhead_router.router import Router
@@ -3118,6 +3366,24 @@ class SubagentRunner:
                 error=f"unknown profile: {profile_name}",
             )
 
+        from bowhead_core.knowledge_source_runtime import inherited_execution_scope
+
+        inherited_scope = await inherited_execution_scope(parent_ctx, exact_binding)
+        if inherited_scope is not None:
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.knowledge_scope = inherited_scope
+        if profile.knowledge_access is not None and exact_binding is None:
+            raise KnowledgeAccessError("knowledge_source_exact_binding_required")
+        if profile.knowledge_access is not None or parent_ctx.knowledge_scope is not None:
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.knowledge_scope = bind_knowledge_scope(
+                parent_ctx,
+                profile.knowledge_access,
+                revision=exact_binding.revision_ref if exact_binding else profile.name,
+            )
+            parent_ctx.knowledge_source_ancestors = (*parent_ctx.knowledge_source_ancestors, parent_ctx.knowledge_source_uses)
+            parent_ctx.knowledge_source_uses = {}
+
         # lead-analyst-logic batch 1: apply hard tool_deny gate to a profile copy, synchronously narrowing
         # all three tool_whitelist consumers: advertisement/per-call gate/include_tool.
         # Never mutate shared PROFILES (frozen dataclass; replace creates a new object).
@@ -3148,13 +3414,24 @@ class SubagentRunner:
             turn_id=getattr(parent_ctx, "turn_id", None),
             team_id=getattr(parent_ctx, "team_id", None),
         )
-        # Agent run limits (FEATURE_AGENT_RUN_LIMITS): the Team's step limit replaces manifest,
-        # override and custom-Agent step limits for every subagent; Lead keeps its own.
-        from bowhead_core.agent_run_limits import get_run_limits as _get_run_limits
-        from bowhead_core.agent_run_limits import loop_step_limit as _loop_step_limit
+        # Agent run limits: the Team's step limit replaces manifest,
+        # override and custom-Agent step limits for new Lead and helper executions.
 
-        if profile.name != "lead" and (_step_limits := _get_run_limits()) is not None:
-            profile = replace(profile, max_iterations=_loop_step_limit(_step_limits))
+        retained = (
+            (getattr(getattr(parent_ctx, "ordinary_lead_state", None), "checkpoint", None) if profile.name == "lead" else None)
+            or reference_read_question
+            or bi_workspace_continuation
+        )
+        if runtime_control is not None:
+            profile = replace(profile, max_iterations=UNBOUNDED_STEPS)
+        elif retained is not None:
+            old_bound = retained.max_iterations
+            if profile.name == "lead":
+                old_bound -= 1
+            profile = replace(profile, max_iterations=old_bound if old_bound is not None else UNBOUNDED_STEPS)
+
+        def can_decide(iteration: int) -> bool:
+            return runtime_control.can_decide if runtime_control is not None else iteration < profile.max_iterations
 
         # cca block ③: resolve the per-turn tool view + augmented whitelist ONCE
         # from parent_ctx, then use these locals at every dispatch / filter site
@@ -3213,10 +3490,12 @@ class SubagentRunner:
             team_tool_bundle=profile.team_tool_bundle,
         )
 
-        # A callable KB specialist owns document retrieval for this Turn.
-        # Keep the direct path only when that specialist is absent.
-        _delegate_kb = profile.name == "lead" and any(
-            peer.name == "kb-analyst" for peer in (getattr(parent_ctx, "_actor_scoped_prompt_peers", ()) or ())
+        # The admitted policy never enlarges the Agent whitelist or source permissions.
+        _shared_kb = bool(getattr(parent_ctx, "knowledge_direct_use", False))
+        _delegate_kb = (
+            not _shared_kb
+            and profile.name == "lead"
+            and any(peer.name == "kb-analyst" for peer in (getattr(parent_ctx, "_actor_scoped_prompt_peers", ()) or ()))
         )
         _delegated_kb_tools = {"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"} if _delegate_kb else set()
         effective_whitelist -= _delegated_kb_tools
@@ -3286,73 +3565,6 @@ class SubagentRunner:
             or (iteration_offset and (bi_workspace_continuation is not None or reference_read_question is not None))
         ):
             raise ValueError("reference_continuation_changed")
-        # In-place resume: continue the saved transcript of the same helper run. When the Agent
-        # or its tools changed since it was saved, the helper runs fresh from the saved task and
-        # the step list shows why.
-        _resume_from: ResumeGrant | None = None
-        _resume_refused: str | None = None
-        _resume_tool_names = frozenset(effective_whitelist)
-        _lineage_task = task
-        if resume_grant is not None:
-            from bowhead_core.subagent_resume import fallback_task, resume_instruction, resume_refusal_for
-
-            if profile.name == "lead" or bi_workspace_continuation is not None or reference_read_question is not None or iteration_offset or history:
-                raise ValueError("subagent_resume_conflict")
-            _lineage_task = resume_grant.checkpoint.task
-            _resume_refused = resume_grant.refused or (
-                resume_refusal_for(
-                    resume_grant.checkpoint,
-                    profile=profile.name,
-                    agent_revision_id=exact_binding.revision_ref if exact_binding is not None else None,
-                    tool_names=_resume_tool_names,
-                )
-                if resume_grant.material is not None
-                else "unreadable"
-            )
-            resume_grant.refused = _resume_refused
-            if _resume_refused is None:
-                _resume_from = resume_grant
-                task = resume_instruction(resume_grant.instruction, resume_grant.checkpoint)
-            else:
-                task = fallback_task(resume_grant.checkpoint, resume_grant.instruction)
-        # plan-report-assembly batch 1-e: record spawn order on turn-scoped bus attributes, like
-        # _psi_compose_done/_d6_session_id. Non-plan multi-leg turns use it for chapter order;
-        # Lead deliberately sets meaningful dispatch order, stronger than completion order
-        # (see canvas_composer.spawn_order_slots). Deduplicate by **first occurrence**:
-        # polymorphic agent_spawned emits the same ID again on completion.
-        with contextlib.suppress(Exception):
-            _spawn_order = getattr(parent_bus, "_spawn_order", None)
-            if not isinstance(_spawn_order, list):
-                _spawn_order = []
-                parent_bus._spawn_order = _spawn_order  # type: ignore[attr-defined]
-            if subagent_id not in _spawn_order:
-                _spawn_order.append(subagent_id)
-        spawn_payload: dict[str, Any] = {
-            "subagent_id": subagent_id,
-            "profile": profile.name,
-            "task": task[:200],
-        }
-        if display_name := profile.display_name.strip():
-            spawn_payload["display_name"] = display_name
-        if _resume_from is not None:
-            spawn_payload["resumed_from"] = _resume_from.checkpoint.id
-        elif _resume_refused is not None:
-            spawn_payload["resume_refused"] = _resume_refused
-        spawn_payload.update(
-            _agent_attribution_payload(
-                exact_binding,
-                display_name=profile.display_name,
-            )
-        )
-        await parent_bus.emit(
-            OrchestratorEvent(
-                event_type="agent_spawned",  # type: ignore[arg-type]
-                turn_id=parent_turn_id,
-                payload=spawn_payload,
-                parent_agent_id=subagent_id,  # ρ Phase E — peer-scope
-            )
-        )
-
         # Filter whitelist (cca ③: per-turn view + augmented whitelist).
         # cca P3 role-aware advertise filter (fresh-1): for the LEAD profile ONLY,
         # also drop tools whose allowed_for_roles excludes the Lead's role — else
@@ -3399,6 +3611,111 @@ class SubagentRunner:
         filtered_schemas = [schema for schema in filtered_schemas if schema.name not in _delegated_kb_tools]
         if not filtered_schemas:
             logger.warning("subagent.no_tools_whitelisted profile=%s", profile.name)
+
+        # In-place resume: continue the saved transcript of the same helper run. When the Agent
+        # or its tools changed since it was saved, the helper runs fresh from the saved task and
+        # the step list shows why.
+        _resume_from: ResumeGrant | None = None
+        _resume_refused: str | None = None
+        _resume_tool_names = frozenset(schema.name for schema in filtered_schemas)
+        _lineage_task = task
+        if resume_grant is not None:
+            from bowhead_core.subagent_resume import fallback_task, resume_instruction, resume_refusal_for
+
+            if profile.name == "lead" or bi_workspace_continuation is not None or reference_read_question is not None or iteration_offset or history:
+                raise ValueError("subagent_resume_conflict")
+            _lineage_task = resume_grant.checkpoint.task
+            _resume_refused = resume_grant.refused or (
+                resume_refusal_for(
+                    resume_grant.checkpoint,
+                    profile=profile.name,
+                    agent_revision_id=exact_binding.revision_ref if exact_binding is not None else None,
+                    tool_names=_resume_tool_names,
+                )
+                if resume_grant.material is not None
+                else "unreadable"
+            )
+            resume_grant.refused = _resume_refused
+            if _resume_refused is None:
+                _resume_from = resume_grant
+                task = resume_instruction(resume_grant.instruction, resume_grant.checkpoint)
+            else:
+                task = fallback_task(resume_grant.checkpoint, resume_grant.instruction)
+        if resume_grant is not None and resume_grant.material is not None and resume_grant.material.knowledge_scope is not None:
+            retained_scope = resume_grant.material.knowledge_scope
+            retained_scope.require_context(parent_ctx)
+            current_scope = parent_ctx.knowledge_scope
+            if current_scope is not None:
+                retained_ids = retained_scope.file_ids
+                current_ids = current_scope.file_ids
+                if current_ids is not None:
+                    retained_ids = current_ids if retained_ids is None else tuple(sorted(set(retained_ids).intersection(current_ids)))
+                retained_scope = retained_scope.model_copy(update={"file_ids": retained_ids})
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.knowledge_scope = retained_scope
+            from bowhead_core.knowledge_source_runtime import validate_retained_sources
+
+            await validate_retained_sources(parent_ctx, resume_grant.material.knowledge_sources or {})
+            parent_ctx.knowledge_source_uses = dict(resume_grant.material.knowledge_sources or {})
+            if _resume_refused is not None:
+                raise KnowledgeAccessError("knowledge_source_continuation_changed")
+        if _resume_from is not None and _resume_from.material is not None:
+            from bowhead_core.datarc_selection import restore_datarc_selection
+
+            saved_source = _resume_from.material.datarc_selection
+            needs_source = any(name.startswith("bi_") or name in {"tool_switch_context", "tool_list_workspaces"} for name in _resume_tool_names)
+            if needs_source and saved_source is None:
+                return SubagentResult(profile=profile_name, subagent_id=subagent_id, ok=False, final_answer="", error="datarc_resume_scope_missing")
+            if saved_source is not None:
+                try:
+                    restored = await restore_datarc_selection(parent_ctx, saved_source)
+                except Exception:
+                    return SubagentResult(
+                        profile=profile_name, subagent_id=subagent_id, ok=False, final_answer="", error="datarc_resume_scope_changed"
+                    )
+                parent_ctx = fork_datarc_run(parent_ctx, selection=restored)
+        if _resume_from is not None:
+            _shared_kb = _resume_from.material.knowledge_read is not None
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.knowledge_direct_use = _shared_kb
+        # plan-report-assembly batch 1-e: record spawn order on turn-scoped bus attributes, like
+        # _psi_compose_done/_d6_session_id. Non-plan multi-leg turns use it for chapter order;
+        # Lead deliberately sets meaningful dispatch order, stronger than completion order
+        # (see canvas_composer.spawn_order_slots). Deduplicate by **first occurrence**:
+        # polymorphic agent_spawned emits the same ID again on completion.
+        with contextlib.suppress(Exception):
+            _spawn_order = getattr(parent_bus, "_spawn_order", None)
+            if not isinstance(_spawn_order, list):
+                _spawn_order = []
+                parent_bus._spawn_order = _spawn_order  # type: ignore[attr-defined]
+            if subagent_id not in _spawn_order:
+                _spawn_order.append(subagent_id)
+        spawn_payload: dict[str, Any] = {
+            "subagent_id": subagent_id,
+            "profile": profile.name,
+            "task": task[:200],
+        }
+        if display_name := profile.display_name.strip():
+            spawn_payload["display_name"] = display_name
+        if _resume_from is not None:
+            spawn_payload["resumed_from"] = _resume_from.checkpoint.id
+        elif _resume_refused is not None:
+            spawn_payload["resume_refused"] = _resume_refused
+        spawn_payload.update(
+            _agent_attribution_payload(
+                exact_binding,
+                display_name=profile.display_name,
+            )
+        )
+        await parent_bus.emit(
+            OrchestratorEvent(
+                event_type="agent_spawned",  # type: ignore[arg-type]
+                turn_id=parent_turn_id,
+                payload=spawn_payload,
+                parent_agent_id=subagent_id,  # ρ Phase E — peer-scope
+            )
+        )
+
         if ordinary_checkpoint is not None:
             from bowhead_core.ordinary_lead_continuation import content_hash
 
@@ -3572,6 +3889,9 @@ class SubagentRunner:
         if profile.capability_protocol_block:
             _blk_capability = render_capability_protocols(tuple(schema.name for schema in filtered_schemas))
 
+        if _shared_kb and KNOWLEDGE_READ_TOOLS.intersection(schema.name for schema in filtered_schemas):
+            _blk_capability += "\n\n" + SHARED_KNOWLEDGE_GUIDANCE
+
         _split = split_system_for_prefix(
             profile_prompt=system,
             extra_instructions_block=_blk_extra,
@@ -3628,16 +3948,32 @@ class SubagentRunner:
         if ordinary_checkpoint is not None:
             messages = ordinary_checkpoint.resume_messages(ordinary_state.answers)
         if _resume_from is not None:
-            # Images are not kept in checkpoints; the saved text stands for them.
+            # Segmented checkpoints retain images; legacy checkpoints retain text only.
             messages = [*(_resume_from.material.messages if _resume_from.material is not None else ()), Message(role="user", content=task)]
+        switch_resolution = getattr(parent_ctx, "datarc_switch_resolution", None) if profile.name == "lead" else native_switch_resolution
+        if switch_resolution is not None:
+            if _continued_messages is not None or ordinary_checkpoint is not None or _resume_from is not None:
+                raise ValueError("datarc_resume_scope_changed")
+            messages.extend(switch_resolution.messages(parent_ctx))
+        helper_switch_resolution = getattr(parent_ctx, "datarc_helper_switch_resolution", None) if profile.name == "lead" else None
+        if helper_switch_resolution is not None:
+            if _continued_messages is not None or ordinary_checkpoint is not None or _resume_from is not None or switch_resolution is not None:
+                raise ValueError("datarc_resume_scope_changed")
+            messages.extend(helper_switch_resolution.skipped_messages(parent_ctx))
+        from bowhead_core.knowledge_source_runtime import validate_source_messages
+
+        await validate_source_messages(parent_ctx, messages)
         _bi_continuation = None
         invocations: list[ToolInvocation] = ordinary_checkpoint.invocations() if ordinary_checkpoint is not None else []
         from bowhead_core.output_recovery import OutputRecovery, output_exhausted
 
         output_recovery = OutputRecovery.restore(messages)
         output_recovery.observe([inv for inv in invocations if not _is_inv_failure(inv)])
+        if reference_read_question is not None:
+            output_recovery.observe(reference_read_question.invocations())
+            output_recovery.sync(messages)
         retained_call_ids = ordinary_checkpoint.retained_call_ids() if ordinary_checkpoint is not None else frozenset()
-        document_state = parent_ctx.document_turn_state if profile.name == "lead" else None
+        document_state = parent_ctx.document_turn_state
         tokens_in = 0
         tokens_out = 0
         tokens_cached = 0  # perf WP-1 P1-b: accumulate cache-hit tokens
@@ -3694,12 +4030,23 @@ class SubagentRunner:
 
         _subagent_id_token = set_current_subagent_id(subagent_id)
         _ref_allowlist_token = set_current_ref_allowlist(None)
+        from bowhead_core.knowledge_source_runtime import filter_inherited_knowledge
+
         from .agents._lead_context import inherit_parent_kb_invocations, parent_kb_invocations, reset_parent_kb_invocations
 
         _parent_kb_token = inherit_parent_kb_invocations()
+        if parent_ctx.knowledge_scope is not None:
+            from .agents._lead_context import replace_parent_kb_invocations
+
+            replace_parent_kb_invocations(await filter_inherited_knowledge(parent_ctx, parent_kb_invocations()))
 
         retained_artifact_ids = None
-        if ordinary_checkpoint is not None and ordinary_checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11"}:
+        if ordinary_checkpoint is not None and ordinary_checkpoint.contract in {
+            "ordinary-lead-loop.v10",
+            "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
+        }:
             from bowhead_core._ref_allowlist import RefAllowlist
 
             inventory = json.loads(ordinary_checkpoint.context_json)["reference_inventory"]
@@ -3768,42 +4115,26 @@ class SubagentRunner:
         tool_failure_counts: dict[str, int] = {}
         TOOL_HARD_LIMIT = 3  # ≥3 failures per tool → hard denial (#95 reduced from 4)
 
-        # chat-truth R2 (2026-05-14): wallclock budget for compute peer.
-        # Q3 dogfood revealed peer could iterate 20+ rounds (~17min) when datarc
-        # async-tasks repeatedly time out — no hard time cap, only iter cap.
-        # Force-stop after BOWHEAD_PEER_WALLCLOCK_SEC (default 480s = 8min,
-        # matching user's stated ceiling for "complex enterprise query") so
-        # user gets *some* answer even if peer didn't fully converge.
-        # Cancel via raising 'wallclock_exhausted' synthetic exhausted error path.
         import time as _ct_time
 
-        # chat-truth R4 (2026-05-14 e2e finding): bump 480 → 900s. L3+
-        # multi-metric queries observed at 120s/iter (28k context per iter,
-        # heavy DeepSeek inference) — hit wallclock at iter 5 before DR-1
-        # force_bail iter=22 could fire. 900s gives ~7-8 iter slack.
-        # env_utils unified: invalid/nonpositive falls back to default; no runtime turn ValueError
-        _peer_wallclock_budget = env_float("BOWHEAD_PEER_WALLCLOCK_SEC", 900.0)
-        _peer_started_at = _ct_time.monotonic()
-        # Agent run limits (FEATURE_AGENT_RUN_LIMITS): no separate 900 s. A subagent uses the
-        # turn's remaining time minus the Lead wrap-up reserve; Lead uses the remaining turn time.
-        from bowhead_core.agent_run_limits import NO_PROGRESS_NUDGE_STEPS, NO_PROGRESS_STOP_STEPS, get_run_limits, run_time_budget_s
+        from bowhead_core.agent_run_limits import DEFAULT_LIMITS, NO_PROGRESS_NUDGE_STEPS, NO_PROGRESS_STOP_STEPS, get_run_limits, run_time_budget_s
         from bowhead_core.agents._lead_context import get_current_ref_allowlist, get_turn_deadline
 
-        _run_limits = get_run_limits()
-        # No-progress state (used only with run limits on).
+        _peer_started_at = _ct_time.monotonic()
+        _run_limits = get_run_limits() or parent_ctx.agent_run_limits or DEFAULT_LIMITS
+        # Progress guidance also preserves retained legacy continuation semantics.
         _np_seen_success: set[tuple[str, tuple[str, str]]] = set()
         _np_refs_seen = 0
         _np_idle_steps = 0
         _np_prev_baseline = 0
         _np_nudged = False
         _lead_wrap_up_told = False
-        if _run_limits is not None:
-            _peer_wallclock_budget = run_time_budget_s(
-                _run_limits,
-                is_lead=profile.name == "lead",
-                turn_deadline=get_turn_deadline(),
-                now=_peer_started_at,
-            )
+        _peer_wallclock_budget = run_time_budget_s(
+            _run_limits,
+            is_lead=profile.name == "lead",
+            turn_deadline=get_turn_deadline(),
+            now=_peer_started_at,
+        )
         # chat-truth R2: total-failure cap across ALL tools. Prevents the
         # "tool A fails 3 → switch to B fails 3 → switch to C fails 3" pattern
         # observed in Q3 (compute peer cycled bi_query → bi_fetch_rows → bi_ask
@@ -3815,30 +4146,23 @@ class SubagentRunner:
         # (occasional dirty Qwen JSON; schema validation supports progressive self-correction).
         TOOL_LIMIT_OVERRIDE = {"subagent_return": 5}
 
-        # chat-truth R3 (2026-05-14): DR-1 peer "no subagent_return commit"
-        # bail mechanism. Root cause: compute peer iterates python_sandbox +
-        # clear_pass + DeepSeek calls 14+ rounds without ever calling
-        # subagent_return, eventually hitting max_iter cap (100) → user waits
-        # forever then sees "cap-fired" filename.
-        #
-        # Fix: track subagent_return ATTEMPTS (regardless of success). If at
-        # iter >= PEER_HARD_BAIL_ITER (default 16) attempts == 0, inject a
-        # system message to force the LLM to commit. If at iter >=
-        # PEER_FORCE_BAIL_ITER (default 22) still no attempts, synthesize a
-        # bail SubagentResult and exit immediately — Lead picks up the bail
-        # and completes the turn with a graceful forced-finalization answer.
-        _subagent_return_attempt_count: int = 0
-        # chat-truth R3 DR-1.2 (2026-05-14 e2e finding): track whether ANY
-        # subagent_return SUCCEEDED (not just attempted). Force-bail must fire
-        # when peer keeps attempting subagent_return but gate keeps rejecting
-        # (ξ.report_gate_reject loop) — attempt_count > 0 but no success.
-        # Real e2e: CAUSAL/DIAG hit iter 14+ with attempt_count=1 (rejected by
-        # gate) → DR-1 v1 didn't bail (only checked attempt_count==0) → ran to
-        # peer wallclock 480s. Fix: bail on not _subagent_return_succeeded.
         _subagent_return_succeeded: bool = False
         from bowhead_core.kb_search_budget import KnowledgeSearchBudget
 
-        _kb_search_budget = KnowledgeSearchBudget() if profile.name == "kb-analyst" else None
+        _knowledge_state = (
+            ordinary_checkpoint.knowledge_read
+            if ordinary_checkpoint is not None
+            else _resume_from.material.knowledge_read
+            if _resume_from is not None
+            else None
+        )
+        _kb_search_budget = (
+            KnowledgeSearchBudget.restore(_knowledge_state)
+            if _knowledge_state is not None
+            else KnowledgeSearchBudget()
+            if _shared_kb or profile.name == "kb-analyst"
+            else None
+        )
         _kb_closeout_calls = 0
         _empty_lead_retry_attempted = False
         _empty_lead_retry_iteration: int | None = None
@@ -3846,28 +4170,7 @@ class SubagentRunner:
         # Settings have their own admitted terminal Tool; never substitute a
         # generic payload return for their original submission/receipt checks.
         _empty_peer_closeout_tool = "configuration_submit" if profile.name == "configuration-agent" else "subagent_return"
-        # chat-truth R4 (2026-05-14 e2e finding): thresholds were too tight.
-        # Complex L3+ queries (multi-metric report, causal, derived calc)
-        # naturally need 12-16 iters for legitimate work:
-        #   ~3-6 bi_query × ~3-6 sandbox + canvas-write + subagent_return.
-        # History: caps 8/12 → 16/22 (false-positive 70%+) → now resolved from the
-        # turn's ANALYSIS DEPTH (fast/standard/thorough), so an admin tunes
-        # thoroughness as ONE intent knob instead of raw numbers. Layering:
-        # explicit env override → depth profile → standard default (24/32). The
-        # soft-inject MESSAGE forces an immediate commit, so firing it on
-        # legitimate mid-analysis truncates a multi-dimension report into a thin
-        # payload (dogfood) — depth=thorough gives such work room; force_bail still
-        # catches a runaway. See analysis_depth.py / feedback_design_no_hard_caps.
-        from bowhead_core.agents.analysis_depth import (
-            resolve_peer_bail_iters,
-        )
-
-        _peer_hard_bail_iter, _peer_force_bail_iter = resolve_peer_bail_iters()
-        _peer_hard_bail_msg_injected: bool = False
-        # Only enforce DR-1 bail for non-lead peer profiles (lead has its own
-        # orchestration semantics and is allowed to iterate without
-        # subagent_return — it emits final_answer instead).
-        _dr1_active = profile.name != "lead"
+        _is_helper = profile.name != "lead"
 
         # W1-B: per-turn token hard cap (Lead-only safety fallback; default 0=off, respecting soft-cap policy
         # with ops enabling as needed). Count at iteration start, where tokens_in/out are actual counters. env_float maps NaN/nonpositive/invalid
@@ -3956,6 +4259,24 @@ class SubagentRunner:
 
         _history_sizes: list[int] = _turn_sizes(_history_msgs)
 
+        # Preserve the native transcript for Tool receipts and original pause
+        # capture. Only the outgoing model projection adopts a summary.
+        context_view = self._execution_context_view(
+            ctx=parent_ctx,
+            bus=parent_bus,
+            profile=profile,
+            subagent_id=subagent_id,
+            execution_id=exact_binding.execution_id if exact_binding is not None else None,
+            lane="ordinary",
+            runtime_control=runtime_control,
+        )
+
+        def record_context_usage(response: LLMResponse) -> None:
+            nonlocal tokens_in, tokens_out, tokens_cached
+            tokens_in += response.usage.input_tokens
+            tokens_out += response.usage.output_tokens
+            tokens_cached += response.usage.cached_tokens
+
         def _window_budget(window: int, *, user_pref: Any, has_images: bool) -> int:
             """输入侧可用预算：窗口 × 0.9 与「窗口 − 输出上限 − 余量」取小。
 
@@ -4015,7 +4336,11 @@ class SubagentRunner:
             overflow: tuple[int | None, int | None] | None = None,
             after_overflow: bool = False,
         ) -> int:
-            """第一层清工具结果；仍超线再掉最老的历史整轮。返回本次腾出的 token 总数（两层合计）。"""
+            """Legacy callers reduce Tool bodies, then complete historical turns."""
+            if context_view is not None:
+                # Auto off still requires hard admission; it never restores
+                # the old implicit Tool-body clearing or history dropping.
+                return 0
             from bowhead_router.request_record import note_request_change
 
             from bowhead_core.context_assembly import WINDOW_GUARD_HYSTERESIS, drop_history_turns, guard_window
@@ -4060,7 +4385,9 @@ class SubagentRunner:
             return cleared + dropped_tokens
 
         def _window_guard(msgs: list[Message], *, system: str, extra_texts: tuple[str, ...], user_pref: Any) -> int:
-            """返回本圈清掉/掉掉的量（0 = 没动）。**永远不抛**——守卫不能成为杀掉 turn 的那个东西。"""
+            """Retain the old bounded preparation only for legacy admissions."""
+            if context_view is not None:
+                return 0
             try:
                 _win_for = getattr(self.router, "context_window_for", None)
                 window = _win_for(profile.llm_agent_type, profile_name, user_pref) if callable(_win_for) else None
@@ -4100,6 +4427,9 @@ class SubagentRunner:
                 return 0
 
         _overflow_retried = ordinary_checkpoint.overflow_retried if ordinary_checkpoint is not None else False
+        _context_retry_target: tuple[str, str] | None = None
+        _context_retry_error: BaseException | None = None
+        _context_retried_targets: set[tuple[str, str]] = set()
         _deadline_retried = ordinary_checkpoint.deadline_retried if ordinary_checkpoint is not None else False
         _unhonorable_warned = False
         from bowhead_core.context_assembly import WINDOW_GUARD_HYSTERESIS as _WG_HYST
@@ -4212,6 +4542,8 @@ class SubagentRunner:
                     overflow_retried=_overflow_retried,
                     deadline_retried=_deadline_retried,
                     reference_allowlist=_ν15_allowlist,
+                    knowledge_read=_kb_search_budget.snapshot() if _shared_kb else None,
+                    loop_budget=runtime_control.snapshot() if runtime_control is not None else None,
                 )
             except OrdinaryQuestionUnavailable as exc:
                 # This is still the unpublished result of the optional question.
@@ -4237,10 +4569,19 @@ class SubagentRunner:
             )
 
             done = remaining = None
+            if runtime_control is not None:
+                done = f"Retained {len(invocations)} tool results in this run." if invocations else None
+                remaining = "The task is incomplete. Review the retained results before starting further work."
             wrap_in = wrap_out = 0
             _wrap_deadline = get_turn_deadline()
             _wrap_budget = WRAP_UP_TIMEOUT_S if _wrap_deadline is None else min(WRAP_UP_TIMEOUT_S, _wrap_deadline - _ct_time.monotonic() - 30.0)
-            if _wrap_budget >= 10.0:
+            if runtime_control is not None:
+                from bowhead_core.agent_run_limits import model_call_budget_s
+
+                _wrap_budget = min(
+                    _wrap_budget, model_call_budget_s(_run_limits, remaining_s=_peer_started_at + _peer_wallclock_budget - _ct_time.monotonic())
+                )
+            if _wrap_budget >= 10.0 and (runtime_control is None or (stop_reason not in {"step_limit", "agent_stalled"} and runtime_control.admit())):
                 try:
                     _wrap_req = LLMRequest(
                         model="",
@@ -4253,10 +4594,11 @@ class SubagentRunner:
                         invocation_execution_id=exact_binding.execution_id if exact_binding is not None else None,
                         invocation_subagent_id=subagent_id,
                     )
-                    _wrap_resp = await asyncio.wait_for(
-                        self.router.invoke(profile.llm_agent_type, _wrap_req, profile=profile_name, user_pref=user_pref),
-                        timeout=_wrap_budget,
-                    )
+                    with runtime_control.owned() if runtime_control is not None else contextlib.nullcontext():
+                        _wrap_resp = await asyncio.wait_for(
+                            self.router.invoke(profile.llm_agent_type, _wrap_req, profile=profile_name, user_pref=user_pref),
+                            timeout=_wrap_budget,
+                        )
                     done, remaining = parse_wrap_up(_wrap_resp.content or "")
                     wrap_in = _wrap_resp.usage.input_tokens
                     wrap_out = _wrap_resp.usage.output_tokens
@@ -4277,7 +4619,7 @@ class SubagentRunner:
                 subagent_id,
                 profile.name,
                 stop_reason,
-                "unlimited" if _run_limits is None or _run_limits.step_limit is None else _run_limits.step_limit,
+                "unlimited" if _run_limits.step_limit is None else _run_limits.step_limit,
                 done is not None,
             )
             _wrap_dur = int((time.perf_counter() - t0) * 1000)
@@ -4295,6 +4637,7 @@ class SubagentRunner:
                 partial_remaining=remaining,
                 messages=messages,
                 allowlist=_ν15_allowlist,
+                knowledge_read=_kb_search_budget.snapshot() if _shared_kb else None,
             )
             with contextlib.suppress(Exception):
                 await parent_bus.emit(
@@ -4306,6 +4649,11 @@ class SubagentRunner:
                             "profile": profile.name,
                             "status": "partial",
                             "stop_reason": stop_reason,
+                            **(
+                                {"step_usage": {"used": runtime_control.used, "limit": runtime_control.budget.step_limit}}
+                                if runtime_control is not None and runtime_control.budget.step_limit is not None
+                                else {}
+                            ),
                             "tokens_input": tokens_in + wrap_in,
                             "tokens_output": tokens_out + wrap_out,
                             "tokens_cached": tokens_cached,
@@ -4334,8 +4682,13 @@ class SubagentRunner:
                 partial_done=done,
                 partial_remaining=remaining,
                 resume_checkpoint_id=_checkpoint_id,
+                model_turn_count=runtime_control.used if runtime_control is not None else 0,
+                model_turn_limit=runtime_control.budget.step_limit or 0 if runtime_control is not None else 0,
             )
 
+        if runtime_control is not None:
+            runtime_control.stop = _limit_wrap_up
+            runtime_control.progress()
         if ordinary_checkpoint is not None:
             _history_sizes = list(ordinary_checkpoint.history_sizes)
         _forced_first_response = (
@@ -4353,7 +4706,20 @@ class SubagentRunner:
             else iteration_offset,
             profile.max_iterations + 1,
         ):
-            _kb_closing = _kb_search_budget is not None and _kb_search_budget.exhausted
+            from bowhead_core.knowledge_source_runtime import validate_retained_sources
+
+            try:
+                await validate_retained_sources(parent_ctx, parent_ctx.knowledge_source_uses)
+                if profile.name == "lead" and parent_ctx.ordinary_lead_state is not None:
+                    await validate_retained_sources(parent_ctx, parent_ctx.ordinary_lead_state.knowledge_sources)
+            except KnowledgeAccessError:
+                _ν_cleanup_ctx()
+                raise
+            if runtime_control is not None:
+                runtime_control.progress()
+                if _forced_first_response is None and not runtime_control.can_decide:
+                    return await _limit_wrap_up("step_limit")
+            _kb_closing = not _shared_kb and _kb_search_budget is not None and _kb_search_budget.exhausted
             if _kb_closing:
                 _kb_closeout_calls += 1
             collaboration_roster = None
@@ -4462,7 +4828,7 @@ class SubagentRunner:
                     f"Too many Tool failures ({_tool_failure_summary(invocations)}); "
                     "return insufficient_data instead of retrying further."
                 )
-            if _cap_tripped is not None and _run_limits is not None and _dr1_active and _elapsed >= _peer_wallclock_budget:
+            if _cap_tripped is not None and _is_helper and _elapsed >= _peer_wallclock_budget:
                 return await _limit_wrap_up("time_limit")
             if _cap_tripped is not None:
                 logger.warning(
@@ -4497,8 +4863,7 @@ class SubagentRunner:
 
             # Agent run limits: when Lead enters the turn's wrap-up reserve, tell it once to answer now.
             if (
-                _run_limits is not None
-                and profile.name == "lead"
+                profile.name == "lead"
                 and not _lead_wrap_up_told
                 and (_lw_deadline := get_turn_deadline()) is not None
                 and _lw_deadline - _ct_time.monotonic() <= _run_limits.wrap_up_reserve_s
@@ -4515,22 +4880,22 @@ class SubagentRunner:
                 )
                 _lead_wrap_up_told = True
                 _bail_msg_injected_this_iter = True
-            # Agent run limits (FEATURE_AGENT_RUN_LIMITS): a no-progress criterion replaces the
-            # fixed-step force-bail below. Progress is judged from observable facts only: a
+            # Agent run limits: a no-progress criterion replaces the
+            # retired fixed-step force-bail. Progress is judged from observable facts only: a
             # successful tool call not seen before in this run, a new reference (chart, data,
             # code, document) or a subagent_return attempt.
-            if _dr1_active:
+            if _is_helper and runtime_control is None:
                 from bowhead_core import turn_progress as _turn_progress
 
                 _turn_progress.note_step(parent_turn_id, subagent_id, profile=profile.name, display_name=profile.display_name, step=iteration + 1)
-            if _run_limits is not None and _dr1_active and iteration > 0:
+            if _is_helper and iteration > 0:
                 # In-turn credit check (phase 3): stop with partial work once this turn has
                 # used the user's or the Team pool's balance up.
                 from bowhead_core.agent_run_limits import get_credit_gate as _get_credit_gate
 
                 if (_credit_gate := _get_credit_gate()) is not None and await _credit_gate.exhausted() is not None:
                     return await _limit_wrap_up("budget")
-            if _run_limits is not None and _dr1_active:
+            if _is_helper or runtime_control is not None:
                 if iteration > 0:
                     _np_progressed = False
                     for _np_inv in invocations[_np_prev_baseline:_inv_baseline_iter]:
@@ -4550,7 +4915,7 @@ class SubagentRunner:
                     if any((_lim_inv.error or "").startswith("tool_call_limit") for _lim_inv in invocations[_np_prev_baseline:_inv_baseline_iter]):
                         return await _limit_wrap_up("tool_call_limit")
                 _np_prev_baseline = _inv_baseline_iter
-                if _np_idle_steps >= NO_PROGRESS_STOP_STEPS:
+                if _np_idle_steps >= NO_PROGRESS_STOP_STEPS and runtime_control is None:
                     logger.warning(
                         "agent_run_limits.no_progress_stop turn=%s sub=%s profile=%s iter=%d idle_steps=%d",
                         parent_turn_id,
@@ -4567,85 +4932,17 @@ class SubagentRunner:
                             content=(
                                 f"[System] Your last {_np_idle_steps} steps produced no new results. "
                                 "Either return what you have now with subagent_return, or state in one "
-                                "sentence what you will do differently and do it. If the next "
-                                f"{NO_PROGRESS_STOP_STEPS - NO_PROGRESS_NUDGE_STEPS} steps still produce "
-                                "nothing new, the run stops."
+                                "sentence what you will do differently and do it. "
+                                + (
+                                    f"If the next {NO_PROGRESS_STOP_STEPS - NO_PROGRESS_NUDGE_STEPS} steps still produce nothing new, the run stops."
+                                    if runtime_control is None
+                                    else "Use the remaining budget only for work that advances the task."
+                                )
                             ),
                         )
                     )
                     _np_nudged = True
                     _bail_msg_injected_this_iter = True
-            # chat-truth R3 DR-1: peer no-commit force-bail. Triggered when
-            # peer iterates without ever attempting subagent_return.
-            # DR-1.2 (post e2e): bail on no SUCCESS, not no ATTEMPT
-            elif _dr1_active and not _subagent_return_succeeded:
-                # Force-bail hard exit at iter >= PEER_FORCE_BAIL_ITER.
-                if iteration >= _peer_force_bail_iter:
-                    logger.warning(
-                        "chat_truth_r3.peer_force_bail turn=%s sub=%s "
-                        "profile=%s iter=%d — no subagent_return after "
-                        "PEER_FORCE_BAIL_ITER=%d, synthesizing bail result.",
-                        parent_turn_id,
-                        subagent_id,
-                        profile.name,
-                        iteration,
-                        _peer_force_bail_iter,
-                    )
-                    try:
-                        from bowhead_core import metrics as _m_dr1f
-
-                        _m_dr1f.inc(
-                            "bowhead_peer_no_commit_force_bail_total",
-                            labels={"profile": profile.name},
-                            help=("chat-truth R3 DR-1: peer hit force-bail without ever calling subagent_return."),
-                        )
-                    except Exception:  # noqa: S110
-                        pass
-                    _ν_cleanup_ctx()
-                    return SubagentResult(
-                        ordinary_completion_reason="return_limit",
-                        profile=profile.name,
-                        subagent_id=subagent_id,
-                        ok=False,
-                        final_answer=(
-                            "强制收尾 (peer 未在 iter cap 内 commit): "
-                            f"peer profile={profile.name} 迭代 {iteration} 轮仍未调 "
-                            "subagent_return, 已强制退出. 已有结果见 tool_invocations."
-                        ),
-                        error="peer_no_commit_force_bail",
-                        tool_invocations=invocations,
-                    )
-                # Soft inject: at iter >= PEER_HARD_BAIL_ITER, inject a system
-                # message into the messages list ONCE to force LLM to commit.
-                if iteration >= _peer_hard_bail_iter and not _peer_hard_bail_msg_injected:
-                    _bail_msg = (
-                        "⚠️ 强制收尾: 你已 iter "
-                        f"{iteration}+ 未调 subagent_return. 下一步**必须**立即 "
-                        "subagent_return(...) 提交当前最佳答案. 禁止再调任何其他 "
-                        "tool. 如数据不全, 在 narrative 写 '由于 X 数据未取到, "
-                        "报告基于已有结果'. 再不 commit 系统将强退并给用户兜底答案."
-                    )
-                    messages.append(Message(role="user", content=_bail_msg))
-                    _peer_hard_bail_msg_injected = True
-                    _bail_msg_injected_this_iter = True
-                    logger.warning(
-                        "chat_truth_r3.peer_hard_bail_msg_injected turn=%s sub=%s profile=%s iter=%d",
-                        parent_turn_id,
-                        subagent_id,
-                        profile.name,
-                        iteration,
-                    )
-                    try:
-                        from bowhead_core import metrics as _m_dr1h
-
-                        _m_dr1h.inc(
-                            "bowhead_peer_hard_bail_msg_injected_total",
-                            labels={"profile": profile.name},
-                            help=("chat-truth R3 DR-1: peer hit hard-bail soft inject (still no subagent_return)."),
-                        )
-                    except Exception:  # noqa: S110
-                        pass
-
             # Sprint ν1.5 — refresh allowlist + append xml to system before LLM call.
             # Refresh each iteration: prior tool outputs (kb_search chunks, newly added chart sections) enter allowlist.
             _system_aug = system
@@ -4738,6 +5035,36 @@ class SubagentRunner:
                 getattr(parent_ctx, "preferred_model", None),
             )
 
+            # Request projection is not the canonical schema fingerprint retained for resume.
+            _request_schemas = filtered_schemas
+            if document_state is not None:
+                _request_schemas = document_state.request_tools(filtered_schemas)
+            if _empty_peer_closeout_attempted:
+                _request_schemas = [schema for schema in _request_schemas if schema.name == _empty_peer_closeout_tool]
+            if _shared_kb and _kb_search_budget.exhausted:
+                _request_schemas = [schema for schema in _request_schemas if schema.name != "kb_search"]
+            if _kb_closing:
+                _request_schemas = [schema for schema in _request_schemas if schema.name in {"subagent_return", "write_report"}]
+
+            _document_inputs = ""
+            if parent_ctx.document_caller_execution_id and any(schema.name == "template_document_submit" for schema in _request_schemas):
+                from bowhead_core.documents.input_metadata import document_input_metadata
+
+                _document_inputs = await document_input_metadata(parent_ctx)
+
+            # Source navigation is per-request data, never reusable transcript material.
+            _source_hint = None
+            if (
+                _shared_kb
+                and not _kb_search_budget.exhausted
+                and not _empty_peer_closeout_attempted
+                and getattr(parent_ctx, "_reference_lead_runtime", None) is None
+                and any(s.name == "kb_search" for s in filtered_schemas)
+            ):
+                from bowhead_core.knowledge_source_hints import build_source_hint
+
+                _source_hint = await build_source_hint(parent_ctx)
+
             # Context-engineering sprint batch 4-b: window guard, the sole hard limit and last resort.
             # Act only with a catalog-declared window (batch 4-a). Estimates above window×0.9 replace oldest tool results
             # with placeholders until below threshold. Rewriting mid-messages invalidates prefix caching, so trigger only
@@ -4751,6 +5078,8 @@ class SubagentRunner:
                     _turn_tail_language,
                     _refs_xml if _refs_in_messages else "",
                     collaboration_roster.content if collaboration_roster is not None else "",
+                    _source_hint[0] if _source_hint is not None else "",
+                    _document_inputs,
                 ),
                 user_pref=user_pref,
             )
@@ -4772,6 +5101,8 @@ class SubagentRunner:
                 # Exact primary task files stay user data even with legacy
                 # prefix ordering, and are never dropped as old chat history.
                 _tail_msgs.append(Message(role="user", content=attachment_context))
+            if _document_inputs:
+                _tail_msgs.append(Message(role="user", content=_document_inputs))
             if not _tail_msgs:
                 _llm_messages = messages
             elif _bail_msg_injected_this_iter:
@@ -4808,14 +5139,22 @@ class SubagentRunner:
                     # Same recency principle already documented in hard-bail branch above.
                     _llm_messages = [*messages, *_tail_msgs, _refs_msg, *_lang_msgs]
 
-            # Request projection is not the canonical schema fingerprint retained for resume.
-            _request_schemas = filtered_schemas
-            if document_state is not None:
-                _request_schemas = document_state.request_tools(filtered_schemas)
-            if _empty_peer_closeout_attempted:
-                _request_schemas = [schema for schema in _request_schemas if schema.name == _empty_peer_closeout_tool]
-            if _kb_closing:
-                _request_schemas = [schema for schema in _request_schemas if schema.name in {"subagent_return", "write_report"}]
+            if _source_hint is not None and any(schema.name == "kb_search" for schema in _request_schemas):
+                from bowhead_core.knowledge_source_runtime import record_source_uses, validate_retained_sources
+
+                try:
+                    await validate_retained_sources(parent_ctx, _source_hint[1])
+                except Exception:  # A failed final source check omits metadata; no broad fallback.
+                    _source_hint = None
+                if _source_hint is not None:
+                    record_source_uses(parent_ctx, _source_hint[1])
+                    _hint_message = Message(role="user", content=_source_hint[0])
+                    # Preserve final user instructions without splitting a native
+                    # assistant Tool-call batch from its required Tool responses.
+                    if _llm_messages and _llm_messages[-1].role == "user" and (context_view is None or _bail_msg_injected_this_iter):
+                        _llm_messages = [*_llm_messages[:-1], _hint_message, _llm_messages[-1]]
+                    else:
+                        _llm_messages = [*_llm_messages, _hint_message]
             parent_bus._team_operation_tool_loads = int(getattr(parent_bus, "_team_operation_tool_loads", 0)) + len(_request_schemas)
 
             # turn-latency A (2026-08-24): **read-only** prompt-shape logging.
@@ -4894,16 +5233,21 @@ class SubagentRunner:
                 invocation_execution_id=exact_binding.execution_id if exact_binding is not None else None,
                 invocation_subagent_id=subagent_id,
             )
+            _context_prefix_count = 0
             if required_model_input is not None:
+                _unattached_messages = llm_req.messages
                 llm_req = required_model_input.attach(llm_req)
+                if context_view is not None:
+                    _context_prefix_count = len(llm_req.messages) - len(_unattached_messages)
+                    if _context_prefix_count < 0 or llm_req.messages[_context_prefix_count:] != _unattached_messages:
+                        raise ValueError("context_required_input_projection_unavailable")
 
+            _ordinary_model_admitted = False
             try:
                 raise_if_terminal_bus_failed(parent_bus)
-                llm_timeout = env_float("BOWHEAD_SUBAGENT_LLM_TIMEOUT_SEC", 300.0)
-                if _run_limits is not None:
-                    from bowhead_core.agent_run_limits import model_call_budget_s
+                from bowhead_core.agent_run_limits import model_call_budget_s
 
-                    llm_timeout = model_call_budget_s(_run_limits, remaining_s=_peer_started_at + _peer_wallclock_budget - _ct_time.monotonic())
+                llm_timeout = model_call_budget_s(_run_limits, remaining_s=_peer_started_at + _peer_wallclock_budget - _ct_time.monotonic())
                 # Lead streams through its gateway callback; peers use the existing event bus.
                 # Allow Lead's first iteration to stream even without previous tool results so
                 # pure-chat answers do not wait for complete generation. Frontend segId boundaries
@@ -4920,6 +5264,44 @@ class SubagentRunner:
                 # into live partial_answer before the terminal evidence check.
                 if source_urls and not source_urls.issubset(_successful_web_fetch_urls(invocations)):
                     want_stream = False
+                if context_view is not None and _forced_first_response is None:
+                    _context_source_request = llm_req
+                    _context_recovered = False
+                    while True:
+                        with collaboration.model_guard() if collaboration is not None else contextlib.nullcontext():
+                            prepared_context = await context_view.prepare(
+                                _context_source_request,
+                                router=self.router,
+                                agent_type=profile.llm_agent_type,
+                                profile=profile.name,
+                                user_pref=user_pref,
+                                controller=runtime_control,
+                                current_request=sum(_history_sizes) + _context_prefix_count,
+                                canonical_count=len(messages) + _context_prefix_count,
+                                prefix_count=_context_prefix_count,
+                                timeout=llm_timeout,
+                                max_growth_tokens=profile.max_output_tokens or 8192,
+                                stream=want_stream,
+                                record_usage=record_context_usage,
+                                target=_context_retry_target,
+                                trigger="capacity" if _context_retry_target is not None else "threshold",
+                                rejection=_context_retry_error,
+                            )
+                        if prepared_context.attempted and collaboration is not None:
+                            # Summary and ordinary continuation are distinct logical
+                            # decisions under the original collaboration owner.
+                            collaboration.next_step()
+                        _context_recovered = _context_recovered or prepared_context.candidate is not None or prepared_context.trimmed_messages > 0
+                        if _context_retry_error is not None and not _context_recovered:
+                            raise _context_retry_error
+                        # Summary time belongs to the same original execution.
+                        llm_timeout = model_call_budget_s(
+                            _run_limits,
+                            remaining_s=_peer_started_at + _peer_wallclock_budget - _ct_time.monotonic(),
+                        )
+                        if not prepared_context.needs_more:
+                            break
+                    llm_req = prepared_context.request
                 _llm_call_started_at = utc_now_iso()
                 _llm_call_started = time.perf_counter()
                 _llm_timing: dict[str, float | None] = {
@@ -4934,7 +5316,17 @@ class SubagentRunner:
                     "requested_mode": "stream" if want_stream else "invoke",
                 }
                 try:
+                    if _forced_first_response is None and runtime_control is not None and not runtime_control.admit():
+                        return await _limit_wrap_up("step_limit")
+                    _ordinary_model_admitted = _forced_first_response is None
+                    if runtime_control is not None and _forced_first_response is None and _is_helper:
+                        from bowhead_core import turn_progress as _turn_progress
+
+                        _turn_progress.note_step(
+                            parent_turn_id, subagent_id, profile=profile.name, display_name=profile.display_name, step=runtime_control.used
+                        )
                     with (
+                        runtime_control.owned() if runtime_control is not None else contextlib.nullcontext(),
                         collaboration.model_guard() if collaboration is not None else contextlib.nullcontext(),
                         retry_observer_scope(
                             _TurnRetryObserver(
@@ -4981,6 +5373,8 @@ class SubagentRunner:
                                 profile_name=profile_name,
                                 timing=_llm_timing,
                                 call_diagnostics=_llm_diagnostics,
+                                progress_idle=runtime_control is not None,
+                                **({"target": _context_retry_target} if _context_retry_target is not None else {}),
                             )
                             # P0-CTO-1 fix (κ-11): if LLM streamed pre-tool prose AND
                             # then emitted tool_calls, the streamed text was thinking
@@ -5015,6 +5409,7 @@ class SubagentRunner:
                                     llm_req,
                                     profile=profile_name,
                                     user_pref=user_pref,
+                                    **({"target": _context_retry_target} if _context_retry_target is not None else {}),
                                 ),
                                 timeout=llm_timeout,
                             )
@@ -5103,18 +5498,33 @@ class SubagentRunner:
                 raise
             except Exception as e:
                 raise_if_terminal_bus_failed(parent_bus)
+                if context_view is not None and _ordinary_model_admitted and can_decide(iteration):
+                    from bowhead_core.context_maintenance import recoverable_context_target
+
+                    rejected_target = recoverable_context_target(e)
+                    if rejected_target is not None and rejected_target not in _context_retried_targets:
+                        _context_retried_targets.add(rejected_target)
+                        _context_retry_target = rejected_target
+                        _context_retry_error = e
+                        continue
                 # Context-engineering sprint batch 4-c: upstream structured CONTEXT_OVERFLOW means guard estimation
                 # or catalog window is inaccurate. Shrink current estimate another 25%, clearing oldest tool results,
                 # and **retry once only**; without clearable results, fail normally. continue enters the next iteration,
                 # rebuilding from rewritten messages; this counts against iterations and occurs at most once per run.
                 _is_ovf, _ovf_numbers = _context_overflow_of(e)
                 # Review fix: never continue on last iteration; natural loop end would return successful ok=True with empty final_answer.
-                if not _overflow_retried and _is_ovf and iteration < profile.max_iterations:
+                if not _overflow_retried and _is_ovf and can_decide(iteration):
                     _overflow_retried = True
                     _cleared_retry = _window_shrink_after_overflow(
                         messages,
                         system=_system_aug,
-                        extra_texts=(_turn_tail, attachment_context or "", _turn_tail_language, _refs_xml if _refs_in_messages else ""),
+                        extra_texts=(
+                            _turn_tail,
+                            attachment_context or "",
+                            _turn_tail_language,
+                            _refs_xml if _refs_in_messages else "",
+                            _document_inputs,
+                        ),
                         numbers=_ovf_numbers,
                     )
                     if _cleared_retry:
@@ -5151,7 +5561,7 @@ class SubagentRunner:
                     _is_deadline
                     and profile_name != "lead"
                     and not _deadline_retried
-                    and iteration < profile.max_iterations
+                    and can_decide(iteration)
                     and (_ct_time.monotonic() - _peer_started_at) + llm_timeout <= _peer_wallclock_budget
                 ):
                     _deadline_retried = True
@@ -5164,14 +5574,14 @@ class SubagentRunner:
                         llm_timeout,
                     )
                     continue
-                from bowhead_router.output_budget import OutputBudgetError
+                from bowhead_router.output_budget import ContextCapacityError, OutputBudgetError
 
-                local_output_failure = isinstance(e, OutputBudgetError)
+                local_output_failure = isinstance(e, OutputBudgetError) and llm_failure is None
                 error_code = (
                     "llm_request_rejected"
                     if local_output_failure
                     else llm_failure.reason_code
-                    if profile_name == "lead" and llm_failure is not None
+                    if llm_failure is not None and (profile_name == "lead" or isinstance(e, ContextCapacityError))
                     else "lead_internal_error"
                     if profile_name == "lead"
                     # Timeouts are not internal errors. Previously all were internal, directing Lead not to retry and to tell users
@@ -5197,6 +5607,16 @@ class SubagentRunner:
                     if profile_name == "lead"
                     else None
                 )
+                if isinstance(e, ContextCapacityError):
+                    logger.warning(
+                        "context.capacity_rejected turn=%s profile=%s input_estimate=%d input_limit=%d required_output=%d context_window=%d",
+                        parent_turn_id,
+                        profile.name,
+                        e.budget.input_estimate,
+                        e.budget.input_limit,
+                        e.budget.required_output,
+                        e.budget.context_window,
+                    )
                 if llm_failure is not None:
                     for failure_index, failure in enumerate(target_failures(e), start=1):
                         logger.error(
@@ -5336,12 +5756,16 @@ class SubagentRunner:
                     else None,
                 )
 
+            _context_retry_target = None
+            _context_retry_error = None
             tokens_in += resp.usage.input_tokens
             tokens_out += resp.usage.output_tokens
             tokens_cached += resp.usage.cached_tokens  # perf WP-1 P1-b
 
             if output_exhausted(resp):
-                if iteration < profile.max_iterations and output_recovery.correct(resp, messages):
+                if runtime_control is not None and not runtime_control.can_decide:
+                    return await _limit_wrap_up("step_limit")
+                if can_decide(iteration) and output_recovery.correct(resp, messages):
                     if stream_on_tool_call is not None and not resp.tool_calls:
                         await stream_on_tool_call()
                     await parent_bus.emit(
@@ -5393,10 +5817,12 @@ class SubagentRunner:
                         _salvaged,
                     )
                 else:
+                    if runtime_control is not None and not runtime_control.can_decide and not (resp.content or "").strip():
+                        return await _limit_wrap_up("step_limit")
                     # No operation has run: a single correction can safely resume
                     # the original request without replaying discovery or writes.
                     if profile.name == "lead" and not (resp.content or "").strip() and not invocations:
-                        if not _empty_lead_retry_attempted and iteration < profile.max_iterations and resp.finish_reason != "content_filter":
+                        if not _empty_lead_retry_attempted and can_decide(iteration) and resp.finish_reason != "content_filter":
                             _empty_lead_retry_attempted = True
                             _empty_lead_retry_iteration = iteration + 1
                             messages.append(
@@ -5436,7 +5862,7 @@ class SubagentRunner:
                         and not _kb_closing
                         and (_empty_peer_closeout_tool in effective_whitelist or profile.name == "agent-coach")
                         and any(not _is_inv_failure(inv) for inv in invocations)
-                        and iteration < profile.max_iterations
+                        and can_decide(iteration)
                     ):
                         _empty_peer_closeout_attempted = True
                         messages.append(
@@ -5475,7 +5901,7 @@ class SubagentRunner:
                         and source_fetch_advertised
                         and not source_bounce_used
                         and not any(inv.tool_name in {"web_fetch", "web_extract"} for inv in invocations)
-                        and iteration < profile.max_iterations
+                        and can_decide(iteration)
                     ):
                         source_bounce_used = True
                         messages.append(
@@ -5492,7 +5918,7 @@ class SubagentRunner:
                     # while this seam can bounce the answer. Gate owns its limit (closure counter, at most twice per turn since r10); no limit here.
                     _final_gate = getattr(parent_ctx, "_final_answer_gate", None)
                     _bounce = await collaboration.completion_guidance() if collaboration is not None else None
-                    if _bounce is None and _final_gate is not None and iteration < profile.max_iterations:
+                    if _bounce is None and _final_gate is not None and (runtime_control is not None or can_decide(iteration)):
                         try:
                             _bounce = await _final_gate(resp.content or "", profile.name, list(invocations))
                         except Exception:  # noqa: BLE001 — gate itself must never fail a turn
@@ -5514,7 +5940,7 @@ class SubagentRunner:
             # After salvage, whose recovered tool_calls require the same normalization.
             # Standard: docs/design/工具改名迁移.md.
             canonicalize_tool_calls(resp.tool_calls, source=f"agent_loop:{profile.name}")
-            if profile.name == "lead" and parent_ctx.document_turn_state is not None:
+            if parent_ctx.document_turn_state is not None:
                 parent_ctx.document_turn_state.select(resp.tool_calls)
 
             # ─── graph-mode: **preexecution** gate for one tool-call batch ─────────────────
@@ -5575,11 +6001,6 @@ class SubagentRunner:
             for tc in resp.tool_calls:
                 if tc.id in retained_call_ids:
                     raise OrdinaryContinuationUnavailable()
-                # chat-truth R3 DR-1: count subagent_return ATTEMPTS (regardless of
-                # success / whitelist / circuit-break outcome). Tracks "did the LLM
-                # *try* to commit?" — if yes, suppress hard-bail injection.
-                if tc.name == "subagent_return":
-                    _subagent_return_attempt_count += 1
                 if _empty_peer_closeout_attempted and tc.name != _empty_peer_closeout_tool:
                     messages.append(
                         Message(
@@ -5616,11 +6037,16 @@ class SubagentRunner:
                         )
                     )
                     continue
-                if _kb_search_budget is not None and tc.name == "kb_search" and not _kb_search_budget.admit(tc.arguments):
+                if (
+                    tc.name in effective_whitelist
+                    and _kb_search_budget is not None
+                    and tc.name == "kb_search"
+                    and not _kb_search_budget.admit(tc.arguments)
+                ):
                     messages.append(
                         Message(
                             role="tool",
-                            content="Repeated query or per-round retrieval limit reached. Use only meaningful new queries within the original assignment; otherwise close out.",
+                            content="Repeated query, exhausted budget, or per-round retrieval limit reached. Use only meaningful new queries within the original assignment; otherwise close out.",
                             tool_call_id=tc.id,
                             name=tc.name,
                         )
@@ -5794,6 +6220,22 @@ class SubagentRunner:
                 with contextlib.suppress(Exception):
                     parent_ctx._lead_spawn_batch_seq = int(getattr(parent_ctx, "_lead_spawn_batch_seq", 0) or 0) + 1
 
+            # Snapshot after profile/schema and batch policy metadata are finalized.
+            # Handlers retain the active return contract and accepted Datarc source.
+            batch_ctx = copy.copy(parent_ctx)
+            project_datarc_scope(batch_ctx, ensure_datarc_run(parent_ctx).current)
+            batch_ctx.datarc_batch_refusal = (
+                {
+                    "ok": False,
+                    "error_kind": "context_switch_batch_conflict",
+                    "error": "context_switch_batch_conflict",
+                    "execution_outcome": "not_dispatched",
+                    "hint": "Call tool_switch_context alone, then dispatch dependent work after it settles.",
+                }
+                if len(resp.tool_calls) > 1 and any(call.name == "tool_switch_context" for call in resp.tool_calls)
+                else None
+            )
+
             _parallel_exec = (
                 _chi_flags.parallel_exec_enabled()
                 and len(survived_tcs) >= 2
@@ -5826,19 +6268,32 @@ class SubagentRunner:
                     timeout=selected_timeout,
                     window_guard=_window_guard,
                     prior_coordination=retained_messages,
+                    runtime_control=runtime_control,
+                    record_usage=record_context_usage,
                 )
-                tokens_in += usage.input_tokens
-                tokens_out += usage.output_tokens
-                tokens_cached += usage.cached_tokens
                 invocations.extend(coordinated_invocations)
                 retained_messages.extend(retained)
 
             async def _await_tools(work, has_spawn=any(tc.name == "subagent_spawn" for tc, _ in survived_tcs)):
-                if collaboration is not None and profile.name == "lead" and has_spawn:
-                    return await collaboration.runtime.while_suspended(
-                        work, execution_id=collaboration.execution_id, coordinate=_coordinate_collaboration
-                    )
-                return await work
+                async def execute():
+                    if collaboration is not None and profile.name == "lead" and has_spawn:
+                        return await collaboration.runtime.while_suspended(
+                            work, execution_id=collaboration.execution_id, coordinate=_coordinate_collaboration
+                        )
+                    return await work
+
+                if runtime_control is None:
+                    return await execute()
+                remaining = max(0.0, _peer_started_at + _peer_wallclock_budget - time.monotonic())
+                timer = asyncio.timeout(remaining)
+                try:
+                    with runtime_control.owned():
+                        async with timer:
+                            return await execute()
+                except TimeoutError:
+                    if timer.expired():
+                        raise _RuntimeTimeExpired() from None
+                    raise
 
             # Sprint chat-redesign-2026-05-21 Phase 1.1 (P0-2) — concurrency_group_id
             # for parallel batches. When _parallel_exec runs N≥2 sibling tools
@@ -5863,7 +6318,7 @@ class SubagentRunner:
                     inv = await _await_tools(
                         self._execute_tool(
                             _tc,
-                            parent_ctx,
+                            batch_ctx,
                             parent_bus,
                             parent_turn_id,
                             subagent_id,
@@ -5926,9 +6381,9 @@ class SubagentRunner:
                             subagent_id,
                             profile.name,
                         )
-                        _subagent_return_succeeded = True  # DR-1.2 sequential path
+                        _subagent_return_succeeded = True
                         break  # 0.14.1 equivalent: exit survived_tcs loop; do not run later calls
-                    # DR-1.2: track success even when NOT __terminal (e.g. ν1 fallback / ξ strip-pass)
+                    # Preserve successful nonterminal returns for knowledge outcomes and resume capture.
                     if _tc.name == "subagent_return" and inv.error is None and isinstance(inv.result, dict) and inv.result.get("ok") is True:
                         _subagent_return_succeeded = True
             else:
@@ -5956,6 +6411,7 @@ class SubagentRunner:
                     _tc: ToolCall,
                     current_iteration: int = iteration,
                     question_batch: Sequence[ToolCall] = tuple(resp.tool_calls),
+                    batch_ctx: ToolExecutionContext = batch_ctx,
                 ) -> ToolInvocation | InvocationOutcomeUnknownError | TerminalDurabilityAbort:
                     # B-P2-9: this task's context snapshot (gather copies context at task creation;
                     # set affects only this sibling). Thin-path reads prefer ContextVar,
@@ -5974,7 +6430,7 @@ class SubagentRunner:
                         try:
                             return await self._execute_tool(
                                 _tc,
-                                parent_ctx,
+                                batch_ctx,
                                 parent_bus,
                                 parent_turn_id,
                                 subagent_id,
@@ -6081,9 +6537,11 @@ class SubagentRunner:
                             profile.name,
                             _idx,
                         )
-                    # DR-1.2: track success for force-bail gating
+                    # Preserve successful returns for knowledge outcomes and resume capture.
                     if _tc.name == "subagent_return" and inv.error is None and isinstance(inv.result, dict) and inv.result.get("ok") is True:
                         _subagent_return_succeeded = True
+
+            _propagate_tool_result_context(batch_ctx, parent_ctx)
 
             # Temporary coordination messages enter the base transcript only
             # after every original native call has its actual Tool result.
@@ -6098,7 +6556,7 @@ class SubagentRunner:
             # open-card action with a failed turn.
             if _kb_search_budget is not None:
                 _kb_guidance = _kb_search_budget.observe(
-                    invocations[_inv_baseline_iter:], search_requested=any(tc.name == "kb_search" for tc in resp.tool_calls)
+                    invocations[_inv_baseline_iter:], search_requested=any(tc.name == "kb_search" for tc in resp.tool_calls), shared=_shared_kb
                 )
                 if any(tc.name == "kb_search" for tc in resp.tool_calls):
                     from bowhead_core.kb_search_budget import retrieval_receipt
@@ -6106,17 +6564,31 @@ class SubagentRunner:
                     messages.append(
                         Message(
                             role="user",
-                            content=f"{_kb_guidance or ''}\nActual execution receipt: {json.dumps(retrieval_receipt(invocations))}. "
+                            content=f"{_kb_guidance or ''}\nActual execution receipt: {json.dumps(_kb_search_budget.receipt() if _shared_kb else retrieval_receipt(invocations))}. "
                             "Use these observed counts only if useful; never infer executed searches from the budget or planned calls.",
                         )
                     )
 
+            if getattr(getattr(parent_ctx, "document_turn_state", None), "planning_result", None) is not None:
+                # The native result belongs to the original shared finalizer.
+                final_answer = ""
+                break
+            document_receipt = next(
+                (
+                    inv.result.get("message")
+                    for inv in invocations[_inv_baseline_iter:]
+                    if inv.tool_name == "template_document_submit"
+                    and inv.error is None
+                    and isinstance(inv.result, dict)
+                    and inv.result.get("document_terminal") is True
+                    and isinstance(inv.result.get("message"), str)
+                ),
+                None,
+            )
+            if document_receipt:
+                final_answer = document_receipt
+                break
             if profile.name == "lead":
-                if getattr(getattr(parent_ctx, "document_turn_state", None), "planning_result", None) is not None:
-                    # The trusted in-process outcome belongs to the shared
-                    # finalizer. Its Tool receipt deliberately has no answer text.
-                    final_answer = ""
-                    break
                 _action_receipt: str | None = None
                 for _inv in invocations[_inv_baseline_iter:]:
                     _result = _inv.result if isinstance(_inv.result, dict) else {}
@@ -6182,12 +6654,16 @@ class SubagentRunner:
             # wastes a call, and act-first qwen-family models may call clarification_ask again,
             # creating duplicate pending rows + N=2 mistaken multi_select (dogfood
             # t_102a292a65b0 confirmed double questions), or even select a workspace themselves, bypassing server-led choice.
-            if any(is_clarification_sentinel(getattr(_inv, "result", None)) for _inv in invocations):
+            if collect_clarification_sentinels(invocations):
                 # Native questions were prepared before publication. Keep the
                 # existing boundary for other domain-owned pause sentinels.
-                if ordinary_state is not None and (
-                    ordinary_checkpoint is not None
-                    or (ordinary_state.captured is None and any(inv.tool_name == "subagent_spawn" for inv in invocations))
+                if (
+                    ordinary_state is not None
+                    and any(is_clarification_sentinel(inv.result) and not is_tool_context_selection(inv.result) for inv in invocations)
+                    and (
+                        ordinary_checkpoint is not None
+                        or (ordinary_state.captured is None and any(inv.tool_name == "subagent_spawn" for inv in invocations))
+                    )
                 ):
                     raise OrdinaryContinuationUnavailable(stage="clarification_capture" if ordinary_checkpoint is None else None)
                 if capture_bi_workspace_continuation and not (
@@ -6206,6 +6682,7 @@ class SubagentRunner:
                         tool_deny=tool_deny,
                         effective_tools=frozenset(effective_whitelist),
                         max_iterations=profile.max_iterations,
+                        loop_budget=runtime_control.snapshot() if runtime_control is not None else None,
                     )
                 logger.info(
                     "subagent.clarification_sentinel_break sub=%s profile=%s — shape-2 sentinel terminates loop (不回喂 LLM)",
@@ -6298,7 +6775,7 @@ class SubagentRunner:
                 final_answer = ""
                 break
 
-            if iteration == profile.max_iterations and _run_limits is not None and _dr1_active:
+            if iteration == profile.max_iterations and _is_helper and runtime_control is None:
                 return await _limit_wrap_up("step_limit")
             if iteration == profile.max_iterations:
                 # Iterations exhausted without terminal empty tool_calls → peer did not finish normally.
@@ -6316,6 +6793,8 @@ class SubagentRunner:
                     "verified results show, name what is still unfinished, and offer to continue in a follow-up message. "
                     "Do NOT redispatch it in this Turn and do NOT present the work as complete."
                 )
+                if runtime_control is not None:
+                    exhausted_err = "agent_internal_execution_bound: the internal orchestration bound was exhausted; retained results are incomplete."
                 await parent_bus.emit(
                     OrchestratorEvent(
                         event_type="agent_spawned",  # type: ignore[arg-type]
@@ -6323,7 +6802,7 @@ class SubagentRunner:
                         payload={
                             "subagent_id": subagent_id,
                             "profile": profile.name,
-                            "status": "max_iterations_exhausted",
+                            "status": "internal_execution_bound" if runtime_control is not None else "max_iterations_exhausted",
                             "tokens_input": tokens_in,
                             "tokens_output": tokens_out,
                             "tokens_cached": tokens_cached,
@@ -6353,7 +6832,27 @@ class SubagentRunner:
                 )
 
         dur = int((time.perf_counter() - t0) * 1000)
-        if _kb_search_budget is not None and _kb_search_budget.exhausted and not _subagent_return_succeeded:
+        if profile.name != "lead" and document_state is not None and document_state.planning_result is not None:
+            from bowhead_core.documents.agent_caller import DocumentAgentOutcome
+
+            _ν_cleanup_ctx()
+            return SubagentResult(
+                profile=profile.name,
+                subagent_id=subagent_id,
+                ok=True,
+                final_answer="",
+                payload={"document_job_id": document_state.planning_result.job_id, "state": "private_document_handoff", "files_published": False},
+                document_outcome=DocumentAgentOutcome(parent_ctx.document_caller_execution_id, document_state.planning_result),
+                tool_invocations=invocations,
+                tokens_input=tokens_in,
+                tokens_output=tokens_out,
+                tokens_cached=tokens_cached,
+                duration_ms=dur,
+                model_turn_count=iteration + 1,
+                model_turn_limit=profile.max_iterations + 1,
+                ordinary_completion_reason="completed",
+            )
+        if not _shared_kb and _kb_search_budget is not None and _kb_search_budget.exhausted and not _subagent_return_succeeded:
             _ν_cleanup_ctx()
             return SubagentResult(
                 profile=profile.name,
@@ -6418,6 +6917,7 @@ class SubagentRunner:
                 max_iterations=profile.max_iterations,
                 language_override=language_override,
                 attachment_context=attachment_context,
+                loop_budget=runtime_control.snapshot() if runtime_control is not None else None,
             )
 
         if source_urls and not source_urls.issubset(_successful_web_fetch_urls(invocations)):
@@ -6677,8 +7177,8 @@ class SubagentRunner:
                 )
 
         # Sprint ι auto-chart fallback (PRD §4.C.2 / I-ι3): peer-side, only
-        # sandbox-capable peers. Each chart is a backend-initiated add_chart call
-        # through `_execute_tool`, so it passes the same guards and emits the
+        # opted-in peers with add_chart advertised in this run. Each backend-initiated
+        # chart goes through `_execute_tool`, so it passes the same guards and emits the
         # same step events as a model-issued call; the `auto_chart_` call id
         # marks it as backend-initiated. Non-fatal: any exception below is
         # logged + swallowed; never breaks subagent return.
@@ -6691,7 +7191,7 @@ class SubagentRunner:
             if (
                 not is_short_answer_payload(returned_payload)
                 and peer_supports_auto_chart(profile.name)
-                and effective.has("add_chart")  # cca ③: per-turn view
+                and any(schema.name == "add_chart" for schema in filtered_schemas)
             ):
                 for ac_payload in collect_auto_chart_candidates(invocations):
                     try:
@@ -6751,9 +7251,7 @@ class SubagentRunner:
         # The existing Lead finalizer owns clarification persistence and resume.
         # Yielding to that path must not settle the collaboration execution or
         # publish successful completion while its obligations remain pending.
-        collaboration_paused = (
-            collaboration is not None and profile.name == "lead" and any(is_clarification_sentinel(inv.result) for inv in invocations)
-        )
+        collaboration_paused = bool(collect_clarification_sentinels(invocations))
         # Auto hands the same owner to the Plan finalizer. The gate can already
         # have finished the Turn; a proposal sentinel has not started it yet.
         collaboration_plan_handoff = (
@@ -6809,6 +7307,7 @@ class SubagentRunner:
                 partial_remaining=None,
                 messages=messages,
                 allowlist=_ν15_allowlist,
+                knowledge_read=_kb_search_budget.snapshot() if _shared_kb else None,
             )
         if not collaboration_paused and not collaboration_empty and not collaboration_plan_handoff:
             await parent_bus.emit(
@@ -6885,6 +7384,22 @@ class SubagentRunner:
         if not _chat_direct_delivered:
             final_answer = translate_doc_refs(final_answer, _ν15_allowlist)
 
+        if (
+            context_view is not None
+            and context_view.last_budget is not None
+            and profile.name == "lead"
+            and exact_binding is not None
+            and exact_binding.parent_execution_id is None
+            and (
+                getattr(parent_ctx, "_model_context_history", None) is not None
+                or (ordinary_checkpoint is not None and ordinary_checkpoint.context_projection_enabled)
+            )
+        ):
+            from bowhead_core.context_compaction import balanced_boundaries
+
+            if balanced_boundaries(messages)[-1] == len(messages):
+                parent_bus._context_publication = await context_view.conversation_publication(messages)
+
         return SubagentResult(
             profile=profile.name,
             subagent_id=subagent_id,
@@ -6947,6 +7462,12 @@ class SubagentRunner:
             )
         retained: list[Message] = []
         usage = TokenUsage()
+        runtime_control = _RuntimeExecution(ctx.agent_runtime_budget) if ctx.agent_runtime_budget is not None else None
+
+        def record_plan_usage(response: LLMResponse) -> None:
+            usage.input_tokens += response.usage.input_tokens
+            usage.output_tokens += response.usage.output_tokens
+            usage.cached_tokens += response.usage.cached_tokens
 
         async def coordinate(context: dict) -> None:
             # Reauthorize the frozen source for every paid response, including
@@ -6983,10 +7504,9 @@ class SubagentRunner:
                 window_guard=window_guard,
                 prior_coordination=retained,
                 running_line="Your delegated Plan work is still running.",
+                runtime_control=runtime_control,
+                record_usage=record_plan_usage,
             )
-            usage.input_tokens += delta.input_tokens
-            usage.output_tokens += delta.output_tokens
-            usage.cached_tokens += delta.cached_tokens
             retained.extend(messages)
             # Reuse the Plan invocation bag for trace/accounting consumers.
             ctx._plan_step_invocations = [*(getattr(ctx, "_plan_step_invocations", None) or []), *invocations]
@@ -6998,6 +7518,85 @@ class SubagentRunner:
         if context["items"]:
             await coordinate(context)
         return result, usage
+
+    def _execution_context_view(
+        self,
+        *,
+        ctx: ToolExecutionContext,
+        bus: TurnEventBus,
+        profile: SubagentProfile,
+        subagent_id: str,
+        execution_id: str | None,
+        lane: Literal["ordinary", "coordination"],
+        runtime_control: _RuntimeExecution | None,
+        projection_key: str | None = None,
+    ) -> ExecutionContextView | None:
+        """Bind maintenance to the existing worker and exact Agent execution."""
+        from bowhead_core.context_ownership import context_owner
+
+        worker = context_owner(ctx)
+        if (
+            runtime_control is not None
+            and execution_id is not None
+            and ctx.session_store is not None
+            and worker is not None
+            and callable(getattr(self.router, "supports_context_maintenance", None))
+            and self.router.supports_context_maintenance(
+                profile.llm_agent_type,
+                profile.name,
+                model_pref_for_agent_type(profile.llm_agent_type, ctx.preferred_provider, ctx.preferred_model),
+            )
+            is True
+        ):
+            from bowhead_core.chat_reference_storage import ReferenceCipher
+            from bowhead_core.context_activity import ContextActivity
+            from bowhead_core.context_dependencies import ContextSourceObservations, ContextSourceValidator, capture_execution_dependencies
+            from bowhead_core.context_execution import ExecutionContextView
+
+            if ctx.context_source_observations is None:
+                ctx.context_source_observations = ContextSourceObservations()
+
+            async def context_activity(payload: dict) -> None:
+                activity = ContextActivity(
+                    **payload,
+                    execution_id=execution_id,
+                    lane=lane,
+                    subagent_id=subagent_id if profile.name != "lead" else None,
+                    profile=profile.name,
+                )
+                published = await bus.emit(
+                    OrchestratorEvent(
+                        event_type="agent.context",
+                        turn_id=ctx.turn_id,
+                        payload=activity.payload(ctx.turn_id),
+                        parent_agent_id=activity.subagent_id,
+                        durable_event_id=activity.event_id(),
+                        persist_before_delivery=True,
+                    )
+                )
+                if not published:
+                    raise RuntimeError("context_activity_publication_unavailable")
+
+            retained_checkpoint = getattr(getattr(ctx, "ordinary_lead_state", None), "checkpoint", None)
+            inherited_generation = getattr(getattr(ctx, "_model_context_history", None), "generation_id", None)
+            if retained_checkpoint is not None and retained_checkpoint.context_projection_enabled:
+                inherited_generation = retained_checkpoint.context_base_generation
+            return ExecutionContextView(
+                db_path=ctx.session_store.db_path,
+                worker=worker,
+                execution_id=execution_id,
+                lane=lane,
+                cipher=ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", "")),
+                validate_sources=ContextSourceValidator(ctx),
+                activity=context_activity,
+                projection_key=projection_key,
+                source_dependencies=lambda: capture_execution_dependencies(ctx),
+                inherited_generation=(inherited_generation if lane == "ordinary" and profile.name == "lead" else None),
+                subagent_id=subagent_id if profile.name != "lead" else None,
+                profile=profile.name,
+            )
+
+        return None
 
     async def _coordinate_collaboration(
         self,
@@ -7013,6 +7612,8 @@ class SubagentRunner:
         window_guard: Callable,
         prior_coordination: list[Message],
         running_line: str = "Your delegation call is still running.",
+        runtime_control: _RuntimeExecution | None = None,
+        record_usage: Callable[[LLMResponse], None] | None = None,
     ) -> tuple[TokenUsage, list[ToolInvocation], list[Message]]:
         """One bounded response on the same execution while a spawn is pending.
 
@@ -7046,7 +7647,20 @@ class SubagentRunner:
         brief = _coordination_brief(context, frame.execution_id, running_line)
         input_message = Message(role="user", content=brief + "\n" + json.dumps(context, ensure_ascii=False))
         transcript = [*copy.deepcopy(accepted_request.messages), *copy.deepcopy(prior_coordination), input_message]
-        window_guard(transcript, system=accepted_request.system or "", extra_texts=(), user_pref=user_pref)
+        from bowhead_core.context_compaction import message_digest
+
+        context_view = self._execution_context_view(
+            ctx=ctx,
+            bus=bus,
+            profile=profile,
+            subagent_id=subagent_id,
+            execution_id=frame.execution_id,
+            lane="coordination",
+            runtime_control=runtime_control,
+            projection_key=message_digest(accepted_request.messages),
+        )
+        if context_view is None:
+            window_guard(transcript, system=accepted_request.system or "", extra_texts=(), user_pref=user_pref)
         request = replace(
             accepted_request,
             messages=transcript,
@@ -7079,6 +7693,11 @@ class SubagentRunner:
                 usage=usage,
                 invocations=invocations,
                 retained=retained,
+                runtime_control=runtime_control,
+                context_view=context_view,
+                prefix_count=len(accepted_request.messages),
+                current_request=len(transcript) - 1,
+                record_usage=record_usage,
             )
             settled = True
         except asyncio.CancelledError:
@@ -7117,6 +7736,11 @@ class SubagentRunner:
         usage: TokenUsage,
         invocations: list[ToolInvocation],
         retained: list[Message],
+        runtime_control: _RuntimeExecution | None = None,
+        context_view: ExecutionContextView | None = None,
+        prefix_count: int = 0,
+        current_request: int = 0,
+        record_usage: Callable[[LLMResponse], None] | None = None,
     ) -> None:
         # One repair round for a wholly rejected batch, or for no call while a
         # required question awaits this execution. It uses the same execution,
@@ -7127,16 +7751,23 @@ class SubagentRunner:
             if correction:
                 frame.next_step()
                 request = replace(request, messages=transcript, physical_receipt_recorded=False)
-                window_guard(transcript, system=request.system or "", extra_texts=(), user_pref=user_pref)
-            deadline = await frame.runtime.store.next_deadline(frame.runtime.worker, execution_id=frame.execution_id)
-            with frame.model_guard():
-                response = await asyncio.wait_for(
-                    self.router.invoke(profile.llm_agent_type, request, profile=profile.name, user_pref=user_pref),
-                    timeout=min(timeout, max(0, deadline - frame.runtime.store.clock())),
-                )
-            usage.input_tokens += response.usage.input_tokens
-            usage.output_tokens += response.usage.output_tokens
-            usage.cached_tokens += response.usage.cached_tokens
+                if context_view is None:
+                    window_guard(transcript, system=request.system or "", extra_texts=(), user_pref=user_pref)
+            response = await self._invoke_coordination_model(
+                request=request,
+                frame=frame,
+                profile=profile,
+                user_pref=user_pref,
+                timeout=timeout,
+                usage=usage,
+                runtime_control=runtime_control,
+                context_view=context_view,
+                prefix_count=prefix_count,
+                current_request=current_request,
+                on_usage=record_usage,
+            )
+            if response is None:
+                return
             current = []
             for call in response.tool_calls:
                 if call.name != "agent_message":
@@ -7190,6 +7821,91 @@ class SubagentRunner:
                 )
             )
 
+    async def _invoke_coordination_model(
+        self,
+        *,
+        request: LLMRequest,
+        frame: CollaborationExecution,
+        profile: SubagentProfile,
+        user_pref: UserModelPref | None,
+        timeout: float,
+        usage: TokenUsage,
+        runtime_control: _RuntimeExecution | None,
+        context_view: ExecutionContextView | None,
+        prefix_count: int,
+        current_request: int,
+        on_usage: Callable[[LLMResponse], None] | None,
+    ) -> LLMResponse | None:
+        from bowhead_core.context_maintenance import recoverable_context_target
+
+        def record_usage(response: LLMResponse) -> None:
+            usage.input_tokens += response.usage.input_tokens
+            usage.output_tokens += response.usage.output_tokens
+            usage.cached_tokens += response.usage.cached_tokens
+            if on_usage is not None:
+                on_usage(response)
+
+        target = None
+        rejected = None
+        recovered = False
+        retried: set[tuple[str, str]] = set()
+        while True:
+            deadline = await frame.runtime.store.next_deadline(frame.runtime.worker, execution_id=frame.execution_id)
+            ordinary_request = request
+            if context_view is not None and runtime_control is not None:
+                with frame.model_guard():
+                    prepared = await context_view.prepare(
+                        request,
+                        router=self.router,
+                        agent_type=profile.llm_agent_type,
+                        profile=profile.name,
+                        user_pref=user_pref,
+                        controller=runtime_control,
+                        current_request=current_request,
+                        canonical_count=len(request.messages),
+                        prefix_count=prefix_count,
+                        timeout=min(timeout, max(0, deadline - frame.runtime.store.clock())),
+                        max_growth_tokens=request.max_output_tokens or 2048,
+                        stream=False,
+                        record_usage=record_usage,
+                        target=target,
+                        trigger="capacity" if target is not None else "threshold",
+                        rejection=rejected,
+                    )
+                if prepared.attempted:
+                    frame.next_step()
+                recovered = recovered or prepared.candidate is not None or prepared.trimmed_messages > 0
+                if rejected is not None and not recovered:
+                    raise rejected
+                ordinary_request = prepared.request
+                if prepared.needs_more:
+                    continue
+            if runtime_control is not None and not runtime_control.admit():
+                return None
+            try:
+                with frame.model_guard(), runtime_control.owned() if runtime_control is not None else contextlib.nullcontext():
+                    response = await asyncio.wait_for(
+                        self.router.invoke(
+                            profile.llm_agent_type,
+                            ordinary_request,
+                            profile=profile.name,
+                            user_pref=user_pref,
+                            **({"target": target} if target is not None else {}),
+                        ),
+                        timeout=min(timeout, max(0, deadline - frame.runtime.store.clock())),
+                    )
+            except Exception as error:
+                destination = recoverable_context_target(error)
+                if context_view is None or runtime_control is None or not runtime_control.can_decide or destination is None or destination in retried:
+                    raise
+                retried.add(destination)
+                target, rejected = destination, error
+                recovered = False
+                frame.next_step()
+                continue
+            record_usage(response)
+            return response
+
     async def _stream_invoke(
         self,
         *,
@@ -7223,6 +7939,8 @@ class SubagentRunner:
         profile_name: str | None = None,
         timing: dict[str, float | None] | None = None,
         call_diagnostics: dict[str, Any] | None = None,
+        progress_idle: bool = False,
+        target: tuple[str, str] | None = None,
     ) -> LLMResponse:
         """Sprint κ Phase B + Sprint π Phase A §J: stream LLM response.
 
@@ -7263,6 +7981,8 @@ class SubagentRunner:
                     profile=profile,
                     user_pref=user_pref,
                     idle_timeout_s=_KAPPA_STREAM_IDLE_TIMEOUT_SEC,
+                    **({"progress_idle": True} if progress_idle else {}),
+                    **({"target": target} if target is not None else {}),
                 )
                 async for chunk in it:
                     if chunk.diagnostics is not None:
@@ -7544,6 +8264,7 @@ class SubagentRunner:
                 profile=profile,
                 user_pref=user_pref,
                 retry_policy=RetryPolicy(max_attempts_per_target=1),
+                **({"target": target} if target is not None else {}),
             )
             if bus is not None:
                 raise_if_terminal_bus_failed(bus)
@@ -7585,11 +8306,12 @@ class SubagentRunner:
 
         # A new profile supplies its own scope; internal calls without a new
         # profile retain the caller's scope. Never mutate the shared parent.
-        scope_ctx = ctx
+        scope_ctx = copy.copy(ctx)
+        project_datarc_scope(scope_ctx, ctx.datarc_execution_scope or ensure_datarc_run(ctx).current)
+        scope_ctx.artifact_presentation_call = (subagent_id, tc.id)
         collaboration = ctx.collaboration_execution
-        collaboration_denial = None
-        if isinstance(collaboration, CollaborationExecution):
-            scope_ctx = copy.copy(ctx)
+        collaboration_denial = ctx.datarc_batch_refusal
+        if isinstance(collaboration, CollaborationExecution) and collaboration_denial is None:
             scope_ctx.collaboration_call = collaboration.call(tc.id, permit=collaboration_permit)
             if tc.name == "subagent_return":
                 guidance = await collaboration.completion_guidance()
@@ -7633,7 +8355,12 @@ class SubagentRunner:
             scope_ctx.skill_runtime_grants = execution_profile.skill_runtime_grants
             scope_ctx.assigned_skill_material = None
 
-        if retained_state is not None and retained_state.checkpoint is None and running_profile != "lead":
+        if (
+            retained_state is not None
+            and retained_state.checkpoint is None
+            and running_profile != "lead"
+            or ctx.context_source_observations is not None
+        ):
             scope_ctx = copy.copy(scope_ctx)
             scope_ctx.ordinary_call_identity = (subagent_id, tc.id)
 
@@ -7864,36 +8591,11 @@ class SubagentRunner:
                 if dispatch_ctx is ctx:
                     dispatch_ctx = copy.copy(ctx)
                 dispatch_ctx.role = "analyst"
-            # Sprint ψ-D: backend hard gate on bi_query budget (≥20 → synthetic error).
-            # Belt+suspenders: prompt guidance + backend enforcement (memory
-            # `feedback_llm_internal_syntax_unreliable` says prompt-only unreliable).
-            _psi_bi_block = False
-            # Agent run limits (FEATURE_AGENT_RUN_LIMITS): one per-turn budget counts every
-            # tool alike and replaces the bi_query-specific cap.
-            from bowhead_core.agent_run_limits import get_tool_call_budget as _get_tool_call_budget
+            # One shared Turn budget covers every Tool, including automatic calls.
+            from bowhead_core.agent_run_limits import get_tool_call_budget
 
-            _turn_budget = _get_tool_call_budget()
-            _turn_budget_refusal: str | None = None
-            if _turn_budget is not None:
-                if not _turn_budget.admit(tc.name):
-                    _turn_budget_refusal = _turn_budget.refusal()
-            elif tc.name == "bi_query":
-                _bi_count = getattr(ctx, "_psi_bi_query_count", 0) or 0
-                if _bi_count >= 20:
-                    _psi_bi_block = True
-                    try:
-                        from bowhead_core import metrics as _m_psid
-
-                        _m_psid.inc(
-                            "subagent_bi_query_budget_exceeded_total",
-                            labels={"peer_profile": (running_profile or "unknown")},
-                            help="ψ-D: peer hit bi_query=20 cap; synthetic error returned.",
-                        )
-                    except Exception:  # noqa: S110
-                        pass
-                else:
-                    with contextlib.suppress(Exception):
-                        ctx._psi_bi_query_count = _bi_count + 1
+            _turn_budget = get_tool_call_budget()
+            _turn_budget_refusal = _turn_budget.refusal() if _turn_budget is not None and not _turn_budget.admit(tc.name) else None
 
             # Sprint chat-redesign-2026-05-21 Phase 1.1 (P1) — orphan-step prevention.
             # If `tool_registry.execute` raises (network drop, asyncio cancel
@@ -7907,18 +8609,6 @@ class SubagentRunner:
                     tool_name=tc.name,
                     arguments=tc.arguments,
                     error=_turn_budget_refusal,
-                    started_at=utc_now_iso(),
-                    ended_at=utc_now_iso(),
-                )
-            elif _psi_bi_block:
-                inv = ToolInvocation(
-                    tool_name=tc.name,
-                    arguments=tc.arguments,
-                    error=(
-                        "budget_exhausted: ≥20 bi_query in single peer turn. "
-                        "Stop fetching and close out with verified results and explicit "
-                        "gaps using this agent's existing completion contract."
-                    ),
                     started_at=utc_now_iso(),
                     ended_at=utc_now_iso(),
                 )
@@ -7985,18 +8675,7 @@ class SubagentRunner:
             # (2026-06-02); prod 0.52+ also had this bug. (Inside the else branch: the early path for unregistered tools
             # has no dispatch_ctx.)
             if dispatch_ctx is not ctx:
-                from bowhead_core.subagent_return_tool import CTX_PAYLOAD_ATTR as _CTX_PAYLOAD
-
-                for _xattr in (_CTX_PAYLOAD, "_psi_compose_attempted"):
-                    if hasattr(dispatch_ctx, _xattr):
-                        try:
-                            setattr(ctx, _xattr, getattr(dispatch_ctx, _xattr))
-                        except Exception:
-                            logger.warning(
-                                "f6_followup.ctx_transplant_failed attr=%s tool=%s",
-                                _xattr,
-                                tc.name,
-                            )
+                _propagate_tool_result_context(dispatch_ctx, ctx)
 
         # Implement design P2 (provenance id seam): the citation/SourceRef system keys
         # SourceRef.id on the tool-call EVENT's tc.id (source_ref_aggregator),
@@ -8061,6 +8740,13 @@ class SubagentRunner:
                     inv.error = _pbi_failure_code
                 else:
                     inv.result = _pbi_failure
+
+        # Preserve typed Coach identities independently of inline/prose caps.
+        _coach_receipt_meta = None
+        if running_profile == "agent-coach":
+            from bowhead_core.coach_operation_history import receipt_metadata
+
+            _coach_receipt_meta = receipt_metadata([inv])
 
         # Sprint ψ-B: per-tool result token cap, drain-side.
         # Snapshot full result FIRST so SSE / drawer / artifact path can still
@@ -8129,34 +8815,47 @@ class SubagentRunner:
         # bi_fetch_rows rows[]) use lazy fetch via /api/v1/trace/{turn}/tool/{step}
         # (future endpoint, 0.14.1). This handles inline display for the 80% of results that are small.
         # env tunable: BOWHEAD_PHI_SSE_INLINE_MAX_BYTES (default 4096).
+        from bowhead_core.artifact_presentation import NativePresentationResult
+
+        _native_presentation = _event_source if _event_source is not None else inv.result
+        if inv.error is not None or type(_native_presentation) is not NativePresentationResult:
+            _native_presentation = None
         _phi_result_inline = _result_inline_capped(public_result)
+        _event_result_meta = _tool_result_meta(public_result)
+        if _native_presentation is not None:
+            _event_result_meta = {**(_event_result_meta or {}), **_native_presentation.result_metadata()}
+        if _coach_receipt_meta is not None and _coach_receipt_meta.receipts:
+            _event_result_meta = {**(_event_result_meta or {}), "coach_operations": _coach_receipt_meta.model_dump(mode="json")}
 
         # A rejected attempt is not success merely because the model can retry.
         # Expected pauses retain the shared live/persist/replay classification.
         _evt_ok = inv.error is None and (_extract_result_ok(inv.result) is not False or _is_non_failure_result(inv.result))
-        await bus.emit(
-            OrchestratorEvent(
-                event_type="tool_result",  # type: ignore[arg-type]
-                turn_id=parent_turn_id,
-                payload={
-                    "subagent_id": subagent_id,
-                    "tool_name": _surface_tool_name,
-                    "call_id": tc.id,
-                    "ok": _evt_ok,
-                    "duration_ms": inv.duration_ms,
-                    "error": public_error,
-                    "result_preview": _preview(public_result),
-                    "result_token_count": _result_token_count,  # r3.1 §2.15 A.1.1
-                    "result_meta": _tool_result_meta(public_result),
-                    # φ Phase C: full raw result if small (≤4KB) for Inspector
-                    "result_inline": _phi_result_inline,
-                    # V5 PRD-E2 (optional, may be None if disabled or unsupported)
-                    "preview_payload": preview_payload,
-                },
-                # ρ Phase E — peer scope (Lead path stays None).
-                parent_agent_id=subagent_id if running_profile != "lead" else None,
-            )
+        _result_event = OrchestratorEvent(
+            event_type="tool_result",
+            turn_id=parent_turn_id,
+            payload={
+                "subagent_id": subagent_id,
+                "tool_name": _surface_tool_name,
+                "call_id": tc.id,
+                "ok": _evt_ok,
+                "duration_ms": inv.duration_ms,
+                "error": public_error,
+                "result_preview": _preview(public_result),
+                "result_token_count": _result_token_count,  # r3.1 §2.15 A.1.1
+                "result_meta": _event_result_meta,
+                # φ Phase C: full raw result if small (≤4KB) for Inspector
+                "result_inline": _phi_result_inline,
+                # V5 PRD-E2 (optional, may be None if disabled or unsupported)
+                "preview_payload": preview_payload,
+            },
+            # ρ Phase E — peer scope (Lead path stays None).
+            parent_agent_id=subagent_id if running_profile != "lead" else None,
+            persist_before_delivery=_native_presentation is not None,
         )
+        # An exact replay already has its ordered durable receipt. Keep the
+        # current step projection, but never insert a second declaration.
+        if _native_presentation is None or not _native_presentation.persisted:
+            await emit_required_tool_result(bus, _result_event)
         # Sprint chat-redesign-2026-05-21 Phase 1.1 — parallel emit step_done so
         # FE can mark the step row done (success/failure) + collapse to 1-line.
         # Backward-compat fields mirror tool_result; legacy event drops Phase 1.5.
@@ -8200,7 +8899,7 @@ class SubagentRunner:
                 "result_inline": _phi_result_inline,
                 # Keep user-safe result shape in live, persisted and replayed events.
                 "result_preview": _preview(public_result),
-                "result_meta": _tool_result_meta(public_result),
+                "result_meta": _event_result_meta,
                 "result_token_count": _result_token_count,
             }
             if inv.error is not None:
@@ -8330,7 +9029,7 @@ class SubagentRunner:
         # skill_read / add_chart / kb_read /
         # kb_list_documents), short-circuit haiku call with template-based
         # static finding (0 cost). User sees real verb text instead of "—".
-        if inv.error is None and admission_block_code is None:
+        if inv.error is None and admission_block_code is None and not is_clarification_sentinel(inv.result):
             try:
                 from bowhead_core.tool_category import (
                     lookup_kind,
@@ -8366,7 +9065,7 @@ class SubagentRunner:
             except Exception as _static_err:
                 logger.debug("tool_finding.static_failed tool=%s err=%s", tc.name, _static_err)
 
-        if inv.error is None and preview_payload is not None and not tc.name.startswith("personalmcp."):
+        if inv.error is None and preview_payload is not None and not tc.name.startswith("personalmcp.") and not is_clarification_sentinel(inv.result):
             try:
                 from bowhead_core.tool_finding import schedule_finding
 
@@ -8765,6 +9464,30 @@ def _first_clause_label(s: str) -> str:
 # Mirror _prettify_input_preview pattern.
 
 _OUTPUT_PREVIEW_MAX_LEN = 80
+
+
+def _peer_tool_execution_receipt(invocations: list[ToolInvocation]) -> dict[str, Any]:
+    """Count returned Tool receipts without inferring task or effect completion."""
+    counts = dict.fromkeys(("succeeded", "failed", "non_failure", "unconfirmed"), 0)
+    by_tool: dict[str, dict[str, int]] = {}
+    for invocation in invocations:
+        result = invocation.result
+        if isinstance(result, dict) and result.get("execution_outcome") == "unknown":
+            status = "unconfirmed"
+        elif getattr(invocation, "error", None) is not None:
+            status = "failed"
+        elif _is_non_failure_result(result):
+            status = "non_failure"
+        elif _extract_result_ok(result) is False:
+            status = "failed"
+        elif result is None and not getattr(invocation, "ended_at", ""):
+            status = "unconfirmed"
+        else:
+            status = "succeeded"
+        counts[status] += 1
+        tool_counts = by_tool.setdefault(invocation.tool_name, dict.fromkeys(counts, 0))
+        tool_counts[status] += 1
+    return {"recorded": len(invocations), **counts, "by_tool": by_tool}
 
 
 def _extract_result_ok(result: Any) -> bool | None:
@@ -9731,6 +10454,9 @@ def _output_artifact_meta(obj: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(mime, str) and mime:
             ref["mime"] = mime[:_OUTPUT_ARTIFACT_TEXT_CAP]
         size = item.get("size")
+        for key, limit in (("title", 120), ("description", 256)):
+            if isinstance(item.get(key), str) and item[key]:
+                ref[key] = item[key][:limit]
         if isinstance(size, int) and not isinstance(size, bool) and size >= 0:
             ref["size"] = size
         data_role = item.get("data_role")
@@ -9848,6 +10574,8 @@ def _tool_result_meta(obj: Any) -> dict[str, Any] | None:
         return None
 
     meta: dict[str, Any] = {}
+    if type(obj.get("chart_guarded")) is bool and isinstance(obj.get("section_id"), str):
+        meta["chart_guard"] = {"section_id": obj["section_id"], "blocked": obj["chart_guarded"]}
     metrics = obj.get("metrics")
     if isinstance(metrics, list):
         meta.update({"type": "ask_question", "metric_count": len(metrics), "q_type": obj.get("type")})
@@ -10449,6 +11177,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 return {
                     "error": "用户点名的章节在报告里找不到，这一轮不再派活",
                     "error_kind": "invalid_args",
+                    "reason_code": "revise_scope_unresolved",
                     "hint": (
                         "不要再调用 subagent_spawn。"
                         + (
@@ -10543,13 +11272,33 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 _raw_scope = [_raw_scope]
             if canvas_mode == "revise" and isinstance(_raw_scope, list) and any(str(x or "").strip() for x in _raw_scope):
                 from bowhead_core.canvas_revise import note_revise_scope_unresolved as _note_scope_miss
+                from bowhead_core.canvas_revise import resolve_chart_revise_scope as _resolve_chart_scope
                 from bowhead_core.canvas_revise import resolve_revise_scope as _resolve_scope
                 from bowhead_core.canvas_revise import revise_scope_question as _scope_question
                 from bowhead_core.canvas_revise import revise_scope_units as _scope_units
                 from bowhead_core.canvas_revise import scope_unit_display_names as _scope_names
+                from bowhead_core.canvas_revise import user_mentions_chart_id as _mentions_chart_id
 
                 _units = _scope_units(_cm_sections, this_turn_id=getattr(ctx, "turn_id", None))
-                _allowed, _unresolved = _resolve_scope(_units, _raw_scope)
+                _user_text = str(getattr(ctx, "user_text", "") or "")
+                _explicit_chart_ids: set[str] = set()
+                _chapter_items = []
+                for _item in _raw_scope:
+                    _candidate, _ = _resolve_chart_scope(_cm_sections, [_item], user_text=_user_text, this_turn_id=getattr(ctx, "turn_id", None))
+                    _explicit = {section_id for section_id in _candidate if _mentions_chart_id(_user_text, section_id)}
+                    if _explicit:
+                        _explicit_chart_ids |= _explicit
+                    else:
+                        _chapter_items.append(_item)
+                _allowed, _unresolved = _resolve_scope(_units, _chapter_items)
+                _allowed |= _explicit_chart_ids
+                _chart_allowed = set(_explicit_chart_ids)
+                if _unresolved:
+                    _resolved_charts, _unresolved = _resolve_chart_scope(
+                        _cm_sections, _unresolved, user_text=_user_text, this_turn_id=getattr(ctx, "turn_id", None)
+                    )
+                    _chart_allowed |= _resolved_charts
+                    _allowed |= _resolved_charts
                 _scope_q = (
                     _scope_question(
                         _units,
@@ -10578,6 +11327,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     _miss: dict[str, Any] = {
                         "error": f"用户点名的章节在报告里找不到：{'、'.join(_unresolved)}",
                         "error_kind": "invalid_args",
+                        "reason_code": "revise_scope_unresolved",
                     }
                     if _resumed:
                         # 续跑轮（用户刚答过一次澄清）不许再问第二次（clarification_ask 会被 resume_guard 拒）——
@@ -10596,7 +11346,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         _miss["suggested_question"] = _scope_q
                     return _miss
                 _all_unit_ids = set().union(*(u.section_ids for u in _units)) if _units else set()
-                if _allowed and len(_units) >= 2 and _all_unit_ids <= _allowed:
+                if _allowed and not _chart_allowed and len(_units) >= 2 and _all_unit_ids <= _allowed:
                     # (Review P2-2: naming the sole addressable unit is not the whole report; other untitled sections remain outside scope.)
                     # 116 dogfood (1.3.43, `t_49b2fb04ec3d`): user asked "把这份报告改成 1-6 月"; Lead first passed mismatching names,
                     # then, after receiving the chapter list, passed all five, treated as only those five: cover KPI/title unchanged and untitled introduction excluded,
@@ -10605,6 +11355,13 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 elif _allowed:
                     _revise_scope_ids = _allowed
                     _scope_titles = _scope_names([u for u in _units if u.section_ids <= _allowed])
+                    _scope_titles.extend(
+                        str((_payload.get("spec") or {}).get("title") or section.id)
+                        for section in _cm_sections
+                        if str(section.id) in _allowed
+                        and getattr(section, "kind", None) == "chart"
+                        and isinstance((_payload := getattr(section, "payload", None)), dict)
+                    )
                     canvas_mode_line += (
                         f"\n- **修订范围**：本轮只许改 {'、'.join(f'「{t}」' for t in _scope_titles)}；范围外的段"
                         "（含文末综合结论这类汇总段）一律不改——outline 里它们是 editable=false，写了也会被拒。"
@@ -10868,6 +11625,15 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "you still cannot access rather than inventing it:\n" + "\n".join(recent)
                 )
                 extra_in = prior_block + ("\n\n" + extra_in if extra_in else "")
+        if _coach_ctx is not None and not (_pending_resume is not None and _pending_resume.material is not None):
+            from bowhead_core.coach_operation_history import context_token_budget, render_history
+
+            _operation_block = render_history(
+                _coach_ctx, max_tokens=context_token_budget(getattr(runner, "router", None), PROFILES[profile].llm_agent_type, _coach_ctx)
+            )
+            if _operation_block:
+                extra_in = (extra_in + "\n\n" + _operation_block) if extra_in else _operation_block
+
         # Peer previous-work memo (2026-09-06, `peer_prior_run.py`): the block above covers only BI queries by earlier peers **in this turn**;
         # add what the same profile did in the previous turn of this session (queries / code / errors / refusal reasons), via the same extra_in (peer tail block).
         # 116: repeated spawns account for 17%; 22% only change query dates, 48% of failures repeat prior errors. Flag 0 restores today's behavior byte-for-byte.
@@ -11031,6 +11797,11 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 _run_kwargs["exact_binding"] = _exact_binding
             if _pending_resume is not None:
                 _run_kwargs["resume_grant"] = _pending_resume
+            _helper_switch_resolution = getattr(ctx, "datarc_helper_switch_resolution", None)
+            if _helper_switch_resolution is not None:
+                _switch_outcome = _helper_switch_resolution.helper_outcome(ctx, call_id=_spawn_call_id, profile=profile, task=task)
+                if _switch_outcome is not None:
+                    _run_kwargs["native_switch_resolution"] = _switch_outcome
             if _reference_primary:
                 # Tool contexts are shallow copies; share only this run-local presentation state.
                 delivery_state = getattr(ctx, "_reference_delivery_state", None)
@@ -11123,6 +11894,22 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     _run_kwargs["parent_ctx"] = isolated
                 result = await runner.run(**_run_kwargs)
             raise_if_terminal_bus_failed(bus)
+            if result.ok and result.document_outcome is not None:
+                from bowhead_core.document_chat_runtime import worker_from_context
+                from bowhead_core.documents.agent_caller import validate_document_agent_outcome
+
+                if _exact_binding is None or ctx.document_turn_state is None:
+                    raise ValueError("document_checkpoint_unavailable")
+                document_path = getattr(runner.team_subagent_store, "db_path", None) or getattr(ctx.artifact_store, "db_path", None)
+                outcome = await validate_document_agent_outcome(
+                    document_path,
+                    worker=worker_from_context(ctx),
+                    result=result.document_outcome,
+                    execution_id=_exact_binding.execution_id,
+                )
+                if ctx.document_turn_state.planning_result not in (None, outcome):
+                    raise ValueError("document_command_conflict")
+                ctx.document_turn_state.planning_result = outcome
             if _reference_primary and result.error == "reference_continuation_unavailable":
                 # The selected Agent asked to pause after dispatch, but this
                 # contract cannot yet resume its effects.  Tell the Lead's
@@ -11142,6 +11929,34 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             reset_current_peer_name(peer_token)
             if isinstance(ctx.collaboration_runtime, CollaborationRuntime):
                 await ctx.collaboration_runtime.notify()
+        # A domain-owned picker stopped this helper before it could answer.
+        # Forward its original sentinel before empty-answer/failure projection,
+        # so Lead pauses immediately and its execution remains resumable. The
+        # legacy picker resumes Lead, not this helper; close that helper as
+        # blocked without claiming an analysis result or a failed Tool call.
+        _context_selection = next(
+            (inv.result for inv in result.tool_invocations if is_tool_context_selection(inv.result)),
+            None,
+        )
+        if result.ok and _context_selection is not None and not _reference_primary:
+            from bowhead_core.agents._lead_context import publish_nested_invocations
+
+            publish_nested_invocations(ctx, list(result.tool_invocations))
+            if _binding_lifecycle_store is not None:
+                await _binding_lifecycle_store.mark_terminal(_exact_binding.execution_id, status="blocked", failure_code="needs_clarification")
+                if isinstance(ctx.collaboration_runtime, CollaborationRuntime):
+                    await ctx.collaboration_runtime.notify()
+            return {
+                **_context_selection,
+                "subagent_id": result.subagent_id,
+                "profile": result.profile,
+                "tokens_input": result.tokens_input,
+                "tokens_output": result.tokens_output,
+                "tokens_cached": result.tokens_cached,
+                "tool_count": len(result.tool_invocations),
+                "duration_ms": result.duration_ms,
+            }
+
         _configuration_receipt = None
         if _configuration_ctx is not None:
             from bowhead_core.configuration_agent import configuration_agent_result
@@ -11359,6 +12174,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             except Exception:  # noqa: S110
                 pass
 
+        _coach_operations = None
+        if _coach_ctx is not None and result.profile == "agent-coach":
+            from bowhead_core.coach_operation_history import receipt_metadata
+
+            _coach_operations = receipt_metadata(result.tool_invocations)
+
         # ── chat-v4 CHANGE-W4.2 — lead.subagent_summary emit ─────────────
         # Emitted per peer subagent_return, BEFORE the spawn handler's return
         # to Lead (which surfaces as the next tool_result). Carries spawn_id
@@ -11470,6 +12291,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         **(
                             {
                                 "stop_reason": result.stop_reason,
+                                **({"step_usage": result.step_usage} if result.step_usage is not None else {}),
                                 "partial_done": _scrub(result.partial_done or "")[:EVENT_SECTION_MAX_CHARS] or None,
                                 "partial_remaining": _scrub(result.partial_remaining or "")[:EVENT_SECTION_MAX_CHARS] or None,
                             }
@@ -11491,6 +12313,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "outcome_message": _outcome_message,
                         "outcome_reason": _outcome_reason,
                         "output_preview": _output_preview,
+                        **({"coach_operations": _coach_operations.model_dump(mode="json")} if _coach_operations is not None else {}),
                         **_agent_attribution_payload(_exact_binding),
                     },
                 )
@@ -11598,10 +12421,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 )
             if _produced_facts:
                 payload["produced"] = _produced_facts
-            if result.profile == "agent-coach":
-                from bowhead_core.coach_operation_reference import operation_receipts
-
-                receipts = operation_receipts(result.tool_invocations)
+            if _coach_operations is not None:
+                receipts = [r.model_dump(mode="json", exclude={"call_id"}, exclude_none=True) for r in _coach_operations.receipts]
                 if receipts:
                     payload["coach_operation_receipts"] = receipts
                     if not payload.get("ok"):
@@ -11621,6 +12442,23 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 payload["canvas_changes"] = _canvas_changes
                 payload["directive"] = ((payload.get("directive") or "") + " " + _cc_directive).strip()
             _attach_available_figures(payload, result.tool_invocations)
+            if not payload.get("ok"):
+                payload["tool_execution"] = _peer_tool_execution_receipt(result.tool_invocations)
+                if result.llm_reason_code is not None:
+                    payload["llm_reason_code"] = result.llm_reason_code
+                    payload["failure_stage"] = "model_request"
+                payload["directive"] = (
+                    (payload.get("directive") or "")
+                    + (
+                        " Report executed Tool counts from tool_execution, not the helper's overall ok flag or model prose. "
+                        "A later model/context failure does not undo earlier successful Tool receipts. "
+                        "Distinguish successful calls, failed calls, expected pauses and unconfirmed outcomes from the unfinished task. "
+                        "These counts cover recorded calls only; they do not prove unrecorded operations never ran or that all task goals were met. "
+                        "Do not claim a successful Tool failed or had no output merely because the helper could not finish its answer. "
+                        "Only quote result values actually available in authorized evidence; do not invent missing values or rerun confirmed effects "
+                        "just to reconstruct a failed closeout."
+                    )
+                ).strip()
             return payload
 
         # Hallucination defense: subagent finished with empty/whitespace-only final_answer; ok=true would lead Lead to
@@ -11850,6 +12688,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             # which **write canvas but intentionally return thin payloads**, as delivered=none (revise explicitly requires only exec_summary),
             # so the final-answer gate downgrades genuine Lead revision claims to no results: another opposite false claim. Any successful canvas write counts as delivery.
             _drew_canvas = any(_canvas_write_succeeded(_i) for _i in (result.tool_invocations or []))
+            _confirmed_chart_edit = any(
+                canonical_tool_name(str(getattr(_i, "tool_name", "") or "")) == "edit_chart" and _canvas_write_succeeded(_i)
+                for _i in (result.tool_invocations or [])
+            )
             _delivered_nothing = not (ins_n or recs_n or kpis_n or _drew_canvas or _native_deck_receipts)
             return _with_facts(
                 {
@@ -11923,6 +12765,11 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         )
                         if _delivered_nothing
                         else (
+                            "The specialist edited a chart. Report only the confirmed edit receipt and, when available, canvas_changes; "
+                            "do not claim a new report or analysis was generated or require new numerical findings."
+                        )
+                        if _confirmed_chart_edit and not (ins_n or recs_n or kpis_n or _native_deck_receipts)
+                        else (
                             "Subagent 已通过 subagent_return 交了结构化报告 payload，"
                             "composer 会自动渲染 canvas. 你的 final_answer 用 2-3 句话点出"
                             "**最关键的发现**（每句带一个本轮的具体数字，例如核心指标的"
@@ -11955,6 +12802,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "ok": False,
                     "completion": "partial",
                     "stop_reason": result.stop_reason,
+                    **({"step_usage": result.step_usage} if result.step_usage is not None else {}),
                     "done": result.partial_done or "",
                     "remaining": result.partial_remaining or "",
                     "tokens_input": result.tokens_input,
@@ -12032,6 +12880,13 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                             "**不要**说「未能完成 / insufficient_data」。"
                         )
                         if _failed_after_write
+                        else (
+                            "Context capacity prevented the next model request. Report the retained Tool receipts separately "
+                            "from this model-request failure and explain which work remains unfinished. "
+                            "Do not infer a fixed character limit from this failure; capacity depends on the complete request. "
+                            "Reduce required input or choose a suitable larger context window before continuing."
+                        )
+                        if result.error == "llm_context_overflow"
                         else (
                             "Subagent 的一次模型调用超过单次时限被中断（时间够时已自动重发过一次）——"
                             "这是**超时**，不是分析路径错了。可以重派**一次**，把任务收窄"
@@ -12125,15 +12980,18 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
     )
     _spawn_required: list[str] = ["profile", "task", *(["canvas_mode"] if _canvas_revise_on() else [])]
     from bowhead_core.configuration_agent import SUPPORTED_FORMS
+    from bowhead_core.configuration_contracts import DOMAINS
 
     _configuration_props: dict[str, Any] = {
         "configuration_form_id": {
             "type": "string",
             "enum": sorted(SUPPORTED_FORMS),
             "description": (
-                "Optional for configuration-agent. Select a known settings form: workspace_i18n for the current Space's "
-                "week start/data language, workspace_metadata for its name/description, space_instructions for the instructions every conversation in it follows, personal_appearance for personal appearance, user_language for answer-language preferences. "
-                "Do not select a form for an ambiguous target or for another Agent's definition; Coach owns Agent authoring."
+                "Optional for configuration-agent. Select the domain matching the requested setting from this catalog:\n"
+                + "\n".join(f"{name}: {DOMAINS[name].description}" for name in sorted(SUPPORTED_FORMS))
+                + "\nDo not guess from a form ID or shared page path. If the domain is uncertain, omit this parameter so the specialist "
+                "can discover the caller's available contracts. A selected settings Canvas retains its original binding. "
+                "Other Agent definitions belong to Coach. This catalog grants no read or write permission."
             ),
         },
         "configuration_intent_quote": {
@@ -12159,7 +13017,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         checkpoint_id = str(args.get("resume_checkpoint_id") or "").strip()
         instruction = str(args.get("task") or "").strip()[:4000]
         db_path = getattr(getattr(ctx, "session_store", None), "db_path", None)
-        if not sr.subagent_resume_enabled() or not isinstance(db_path, str):
+        if not isinstance(db_path, str):
             return {
                 "ok": False,
                 "error_kind": "unavailable",
@@ -12175,7 +13033,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             )
             claimed = True
             try:
-                grant = sr.ResumeGrant(checkpoint=checkpoint, material=await sr.open_material_async(checkpoint), instruction=instruction)
+                grant = sr.ResumeGrant(
+                    checkpoint=checkpoint, material=await sr.open_material_async(checkpoint, db_path=db_path), instruction=instruction
+                )
             except sr.ResumeRefused as exc:
                 grant = sr.ResumeGrant(checkpoint=checkpoint, material=None, instruction=instruction, refused=exc.code)
         except sr.ResumeRefused as exc:

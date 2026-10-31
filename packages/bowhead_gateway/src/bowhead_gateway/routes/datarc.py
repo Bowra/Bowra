@@ -223,12 +223,38 @@ async def guide_questions(
     store: UserStore = Depends(_user_store),
 ) -> GuideQuestionsDTO:
     """Read optional guide questions for the authenticated user's saved data context."""
-    datarc = await _datarc(request, user)
+    from bowhead_core.datarc_selection import DatarcPreferenceScope
+    from bowhead_core.space_governance import SpaceOperation
 
-    umem = getattr(request.app.state, "user_memory_store", None)
-    chosen = await umem.get_tool_context(user.id, "datarc") if umem is not None else None
-    datarc_ws_id = str((chosen or {}).get("id") or "")
+    from bowhead_gateway.access_context import AccessContextError, build_access_context
+    from bowhead_gateway.datarc_context import resolve_team_datarc_binding
+
     canonical_ws_id = workspace_id or ""
+    if not canonical_ws_id:
+        return GuideQuestionsDTO(workspace_id=canonical_ws_id, items=[])
+    try:
+        access = await build_access_context(
+            user_store=store,
+            access_store=getattr(request.app.state, "access_control_store", None),
+            user_id=user.id,
+            workspace_id=canonical_ws_id,
+            operation=SpaceOperation.READ_HISTORY,
+        )
+    except AccessContextError as error:
+        raise HTTPException(status_code=error.status_code, detail={"code": error.code}) from error
+    binding = await resolve_team_datarc_binding(request, access.team_id)
+    umem = getattr(request.app.state, "user_memory_store", None)
+    chosen = (
+        await umem.get_datarc_workspace(user.id, DatarcPreferenceScope(binding.team_id, binding.connection_id))
+        if umem is not None and binding is not None
+        else None
+    )
+    datarc_ws_id = str((chosen or {}).get("id") or "")
+    datarc = binding.client if binding else None
+    if datarc_ws_id and binding:
+        refs = await request.app.state.tool_context_service.accessible_workspaces(datarc, user.id)
+        if datarc_ws_id not in {item.id for item in refs}:
+            return GuideQuestionsDTO(workspace_id=canonical_ws_id, items=[])
     if not datarc_ws_id:
         return GuideQuestionsDTO(workspace_id=canonical_ws_id, items=[])
     try:

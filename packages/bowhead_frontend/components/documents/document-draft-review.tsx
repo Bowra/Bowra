@@ -105,6 +105,7 @@ function DocumentDraftReviewVersion({
   const common = useTranslations("common");
   const pages = useMemo(() => job.draft?.preview.pages ?? [], [job.draft]);
   const changes = useMemo(() => job.draft?.manifest.changes ?? [], [job.draft]);
+  const comparisonAvailable = job.draft?.manifest.comparison !== "unavailable";
   const [acknowledged, setAcknowledged] = useState(false);
   const [page, setPage] = useState(0);
   const [viewed, setViewed] = useState<ReadonlySet<number>>(() => new Set());
@@ -190,7 +191,8 @@ function DocumentDraftReviewVersion({
     changeCount: changeCounts.get(index + 1) ?? 0,
     viewed: viewed.has(index + 1),
   }));
-  const required = requiredReviewPages(reviewPages);
+  const requireAllPages = job.draft?.requires_full_review === true;
+  const required = requiredReviewPages(reviewPages, requireAllPages);
   const requiredLeft = required.filter((item) => !item.viewed);
   const previewFailed = Boolean(currentName && failed.has(currentName));
   const reviewReady = pages.length > 0 && requiredLeft.length === 0;
@@ -221,13 +223,13 @@ function DocumentDraftReviewVersion({
 
   const blocker = !reviewing || !job.can_confirm ? null
     : previewFailed || !pages.length ? t("publish_needs_preview")
-      : requiredLeft.length ? t("publish_changed_left", { count: requiredLeft.length })
+      : requiredLeft.length ? t(requireAllPages ? "publish_pages_left" : "publish_changed_left", { count: requiredLeft.length })
         : !acknowledged ? t("publish_check_first") : null;
 
   return (
     <div className={styles.root} onKeyDown={onKeyDown}>
       {reviewing ? (
-        <ReviewProgress pages={reviewPages} current={page + 1} onSelect={(n) => goTo(n - 1)} onNextChange={nextChange} onThumbsVisible={showThumbs} status={status} />
+        <ReviewProgress pages={reviewPages} current={page + 1} onSelect={(n) => goTo(n - 1)} onNextChange={nextChange} onThumbsVisible={showThumbs} status={status} requireAllPages={requireAllPages} />
       ) : null}
       <div className={styles.preview}>
         <div className={styles.previewFrame}>
@@ -277,20 +279,20 @@ function DocumentDraftReviewVersion({
           <SectionHeading
             id={`${sectionId}-changes`}
             title={showAll ? t("changes_title") : t("changes_on_page")}
-            count={showAll ? changes.length : pageChanges.length}
+            count={comparisonAvailable ? (showAll ? changes.length : pageChanges.length) : undefined}
             action={changes.length > pageChanges.length || showAll ? (
               <Button size="sm" variant="ghost" onClick={() => setShowAll((value) => !value)}>
                 {showAll ? t("changes_on_page") : t("changes_view_all", { count: changes.length })}
               </Button>
             ) : undefined}
           />
-          {shownChanges.length ? <ChangeList changes={shownChanges} clarificationSources={job.clarification_evidence_sources} /> : <p className={styles.plain}>{t("changes_none_on_page")}</p>}
+          {!comparisonAvailable ? <p className={styles.plain}>{t("comparison_unavailable")}</p> : shownChanges.length ? <ChangeList changes={shownChanges} clarificationSources={job.clarification_evidence_sources} /> : <p className={styles.plain}>{t("changes_none_on_page")}</p>}
         </CanvasSection>
       ) : (
         <CanvasSection labelledBy={`${sectionId}-changes`}>
-          <SectionHeading id={`${sectionId}-changes`} title={t("changes_title")} count={changes.length} collapsible open={open.changes}
+          <SectionHeading id={`${sectionId}-changes`} title={t("changes_title")} count={comparisonAvailable ? changes.length : undefined} collapsible open={open.changes}
             controls={`${sectionId}-changes-body`} onToggle={() => setOpen((value) => ({ ...value, changes: !value.changes }))} />
-          {open.changes ? <div id={`${sectionId}-changes-body`}><ChangeList changes={changes} clarificationSources={job.clarification_evidence_sources} /></div> : null}
+          {open.changes ? <div id={`${sectionId}-changes-body`}>{comparisonAvailable ? <ChangeList changes={changes} clarificationSources={job.clarification_evidence_sources} /> : <p className={styles.plain}>{t("comparison_unavailable")}</p>}</div> : null}
         </CanvasSection>
       )}
 

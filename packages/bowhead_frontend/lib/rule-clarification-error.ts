@@ -20,6 +20,8 @@ const SAFE_RULE_CLARIFICATION_CODES = new Set([
   "authz_unavailable",
   "clarification_access_denied",
   "clarification_answer_required",
+  "clarification_context_selection_invalid",
+  "clarification_context_selection_unavailable",
   "clarification_cancel_directive_invalid",
   "clarification_input_rejected",
   "clarification_not_found",

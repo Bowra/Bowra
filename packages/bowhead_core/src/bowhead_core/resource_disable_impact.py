@@ -32,7 +32,10 @@ def _system_agents() -> tuple[_SystemAgent, ...]:
     for name in registry.list_all():
         manifest = registry.get(name)
         plugins = frozenset(ref.removeprefix("builtin:").split("@", 1)[0] for ref in manifest.plugins)
-        allowed = set(manifest.tools.allow)
+        from bowhead_core.system_plugins import resolve_system_plugins
+
+        resolved_tools, _ = resolve_system_plugins(manifest.plugins, manifest.tools.allow, manifest.skill_grants)
+        allowed = set(resolved_tools)
         if name == "lead":
             # Lead's per-run deny list removes these even though the manifest allows them.
             from bowhead_core.agents.lead_orchestrator import _LEAD_TOOL_DENY
@@ -66,7 +69,7 @@ def _affected_system_agents(kind: ImpactKind, ident: str) -> list[str] | None:
     if family == "settings":
         return [agent.name for agent in _system_agents() if ident in agent.plugins]
     # Option C (§7): a system Agent's Tool that belongs to the Plugin counts as coming from it.
-    return [agent.name for agent in _system_agents() if agent.tools & tools]
+    return [agent.name for agent in _system_agents() if ident in agent.plugins or agent.tools & tools]
 
 
 def _selected_builtin_names(definition: dict[str, Any]) -> set[str]:

@@ -198,9 +198,9 @@ async def _commit_tool_context_choice_effect(
     primary: str,
     remember: bool | None,
     strict: bool = False,
-) -> str:
+) -> tuple[str, dict | None]:
     if clarification.kind != "tool_context_select" or _is_skip_value(primary):
-        return primary
+        return primary, None
     candidate = next(
         (item for item in clarification.candidates if item.value == primary),
         None,
@@ -216,25 +216,20 @@ async def _commit_tool_context_choice_effect(
         )
         if strict:
             raise RuntimeError("terminal_connector_context_source_changed")
-        return primary
-    from bowhead_gateway.connector_context_provider import (
-        commit_connector_context_choice,
-    )
+        return primary, None
+    from bowhead_gateway.datarc_switch import commit_picker_selection
 
-    resume_context = clarification.resume_context if isinstance(clarification.resume_context, dict) else {}
-    committed = await commit_connector_context_choice(
-        getattr(request.app.state, "user_memory_store", None),
+    committed = await commit_picker_selection(
+        request.app,
+        clarification,
         user_id=user_id,
-        tool=(clarification.tool or "datarc"),
-        context_id=candidate.value,
-        context_name=candidate.label,
+        identifier=candidate.value,
+        name=candidate.label,
         remember=remember is not False,
-        session_id=str(resume_context.get("session_id") or ""),
-        log=logger,
     )
     if strict and not committed:
         raise RuntimeError("terminal_connector_context_projection_failed")
-    return candidate.value if committed else primary
+    return candidate.value if committed else primary, committed.as_dict() if hasattr(committed, "as_dict") else None
 
 
 async def _require_clarification_lifecycle(
@@ -595,7 +590,7 @@ async def _ordinary_resume_failure(request: Request, store: ClarificationStore, 
     if card is None or card.user_id != _current_user_id(request) or card.status != "resolved" or card.injected_at is not None:
         return None
     try:
-        _, context = ordinary_resume_request_material(card)
+        _, context = ordinary_resume_request_material(card, db_path=store.db_path)
         await _restore_ordinary_question_inputs(
             orchestrator,
             SimpleNamespace(
@@ -765,27 +760,25 @@ async def _recover_web_resolution_work(
         await clarify.set_resume_context(request_id, ctx)
         req.resume_context = ctx
 
+    tool_context_persistence = None
     if req.kind == "tool_context_select" and not skip_resolve:
         candidate = next((c for c in req.candidates if c.value == primary), None) or next(
             (c for c in req.candidates if c.label == primary),
             None,
         )
         if candidate is not None:
-            from bowhead_gateway.connector_context_provider import (
-                commit_connector_context_choice,
-            )
+            from bowhead_gateway.datarc_switch import commit_picker_selection
 
-            rc = req.resume_context if isinstance(req.resume_context, dict) else {}
-            await commit_connector_context_choice(
-                getattr(request.app.state, "user_memory_store", None),
+            committed = await commit_picker_selection(
+                request.app,
+                req,
                 user_id=req.user_id,
-                tool=(req.tool or "datarc"),
-                context_id=candidate.value,
-                context_name=candidate.label,
+                identifier=candidate.value,
+                name=candidate.label,
                 remember=payload.remember is not False,
-                session_id=str(rc.get("session_id") or ""),
-                log=logger,
             )
+            if hasattr(committed, "as_dict"):
+                tool_context_persistence = committed.as_dict()
             primary = candidate.value
             if values:
                 values[0] = primary
@@ -796,6 +789,7 @@ async def _recover_web_resolution_work(
         turn_id=req.turn_id,
         payload={
             "request_id": request_id,
+            **({"tool_context_persistence": tool_context_persistence} if tool_context_persistence is not None else {}),
             "chosen_value": primary,
             "chosen_values": values,
             "answers": [answer.model_dump() for answer in response_answers],
@@ -1320,6 +1314,8 @@ async def resolve_one(
     # tool_context_select label→id is pure normalization, required before source CAS;
     # preference writes are fallible effects, allowed only after durable decision commit.
     if pre.kind == "tool_context_select" and not skip_resolve:
+        if len(values) != 1:
+            raise rule_clarification_http_error(422, "clarification_context_selection_invalid")
         canonical_candidate = next((c for c in pre.candidates if c.value == primary), None) or next(
             (c for c in pre.candidates if c.label == primary),
             None,
@@ -1328,11 +1324,14 @@ async def resolve_one(
             primary = canonical_candidate.value
             values[0] = primary
         else:
-            logger.warning(
-                "clarify.tool_context_choice_unmatched req=%s chosen=%r",
-                request_id,
-                primary,
-            )
+            raise rule_clarification_http_error(422, "clarification_context_selection_invalid")
+        if pre.status == "pending" and (not pre.tool or pre.tool == "datarc"):
+            from bowhead_gateway.datarc_switch import prepare_picker_selection
+
+            try:
+                await prepare_picker_selection(request.app, pre, user_id=cur_uid, identifier=primary, name=canonical_candidate.label)
+            except ValueError as exc:
+                raise rule_clarification_http_error(409, "clarification_context_selection_unavailable") from exc
 
     try:
         normalized = normalize_clarification_resolution(
@@ -1548,9 +1547,10 @@ async def resolve_one(
             if prepared is not None:
                 projection_effects_ok = False
             logger.debug("clarify.answers_context_write_failed req=%s err=%s", request_id, e)
+    tool_context_persistence = None
     if run_projection_effects:
         try:
-            primary = await _commit_tool_context_choice_effect(
+            primary, tool_context_persistence = await _commit_tool_context_choice_effect(
                 request,
                 req,
                 user_id=cur_uid,
@@ -1733,13 +1733,16 @@ async def resolve_one(
         "has_directive": bool(user_directive_payload),
         "edited_subs_count": len(edited_subs_payload or []),
     }
-    if terminal_factory is None:
+    if tool_context_persistence is not None:
+        resolution_event_payload["tool_context_persistence"] = tool_context_persistence
+    if terminal_factory is None or tool_context_persistence is not None:
         resolution_event_payload = await clarify.record_resolution_outcome(
             request_id=request_id,
             turn_id=req.turn_id,
             payload=resolution_event_payload,
-            resolution_owner=resolution_owner,
+            resolution_owner=resolution_owner if terminal_factory is None else None,
         )
+    if terminal_factory is None:
         try:
             await _ensure_clarification_resolved_event(
                 request,
@@ -2191,7 +2194,7 @@ async def resume_turn(
         from bowhead_core.ordinary_lead_continuation import ordinary_resume_request_material
 
         try:
-            ordinary_checkpoint, rc = ordinary_resume_request_material(pre)
+            ordinary_checkpoint, rc = ordinary_resume_request_material(pre, db_path=clarify.db_path)
         except ValueError as exc:
             raise rule_clarification_http_error(
                 409, "clarification_resume_unavailable", clarification_stage="clarification_resume_preflight"
@@ -2323,6 +2326,7 @@ async def resume_turn(
             raise rule_clarification_http_error(409, "clarification_resume_unavailable", clarification_stage="clarification_resume_preflight")
         turn_req.access_context = access_context
     else:
+        from bowhead_gateway.datarc_context import recovered_datarc_source as _recovered_source
         from bowhead_gateway.datarc_context import resolve_datarc_turn_context
 
         # scheduled-recipe-runs S3: did this turn originate from a scheduled job?
@@ -2347,39 +2351,53 @@ async def resume_turn(
         _authoritative_datarc_project = (
             pre.chosen_value if pre.kind == "tool_context_select" and pre.chosen_value and not skipped_clarification else None
         )
-        datarc_ctx = await resolve_datarc_turn_context(
-            request,
-            team_id=team_id,
-            workspace_id=workspace_id,
-            user_id=cur_uid,  # Power BI Scenario ②: per-user UPN impersonation
-            session_id=rc_session_id,  # Batch 2: session-preference scope.
-            # Priority: workspace **explicitly selected in this clarification** > job's creation snapshot > normal ladder.
-            # Explicit selection wins because this answer names the workspace; current intent overrides snapshot. Snapshot fallback
-            # preserves batch 2/c9 decision 10 (routines always query their creation workspace, unaffected by owner preferences).
-            # Falling back to the ladder on resume would let an unrelated answer shift data scope to current personal preferences.
-            pinned_project=(
-                rc.get("active_datarc_project")
-                if ordinary_checkpoint is not None
-                else _authoritative_datarc_project or (getattr(_sched_job, "datarc_workspace_id", None) if _sched_job else None)
-            ),
-            log=logger,
-        )
+        _source_evidence = rc.get("datarc_selection")
+        if _source_evidence is not None:
+            from bowhead_gateway.datarc_context import resolve_datarc_recovery_context
 
-        # Batch 2 (PRD §3.3c, review P0): per-user member_uid must be freshly resolved for the workspace
-        # resolved at resume. resume_context's member_uid snapshot is empty when the original turn had no
-        # workspace (sentinel guidance); member_uid is workspace-scoped, so its snapshot may be invalid for
-        # the just-selected workspace.
-        _resume_member_uid = ""
-        if datarc_ctx.datarc_project_for_calls:
-            from bowhead_gateway.routes.chat import _resolve_optional_datarc_member
-            from bowhead_gateway.ws_authz import ws_membership_enforce_enabled
-
-            datarc_ctx, _resume_member_uid = await _resolve_optional_datarc_member(
+            datarc_ctx, _resume_member_uid = await resolve_datarc_recovery_context(
                 request,
-                datarc_ctx,
-                ws_enforce=ws_membership_enforce_enabled(),
+                team_id=team_id,
+                user_id=cur_uid,
+                workspace_id=workspace_id,
+                session_id=rc_session_id,
+                evidence=_source_evidence,
+                selected_project=_authoritative_datarc_project,
+            )
+        else:
+            datarc_ctx = await resolve_datarc_turn_context(
+                request,
+                team_id=team_id,
+                workspace_id=workspace_id,
+                user_id=cur_uid,  # Power BI Scenario ②: per-user UPN impersonation
+                session_id=rc_session_id,  # Batch 2: session-preference scope.
+                # Priority: workspace **explicitly selected in this clarification** > job's creation snapshot > normal ladder.
+                # Explicit selection wins because this answer names the workspace; current intent overrides snapshot. Snapshot fallback
+                # preserves batch 2/c9 decision 10 (routines always query their creation workspace, unaffected by owner preferences).
+                # Falling back to the ladder on resume would let an unrelated answer shift data scope to current personal preferences.
+                pinned_project=(
+                    rc.get("active_datarc_project")
+                    if ordinary_checkpoint is not None
+                    else _authoritative_datarc_project or (getattr(_sched_job, "datarc_workspace_id", None) if _sched_job else None)
+                ),
                 log=logger,
             )
+
+            # Batch 2 (PRD §3.3c, review P0): per-user member_uid must be freshly resolved for the workspace
+            # resolved at resume. resume_context's member_uid snapshot is empty when the original turn had no
+            # workspace (sentinel guidance); member_uid is workspace-scoped, so its snapshot may be invalid for
+            # the just-selected workspace.
+            _resume_member_uid = ""
+            if datarc_ctx.datarc_project_for_calls:
+                from bowhead_gateway.routes.chat import _resolve_optional_datarc_member
+                from bowhead_gateway.ws_authz import ws_membership_enforce_enabled
+
+                datarc_ctx, _resume_member_uid = await _resolve_optional_datarc_member(
+                    request,
+                    datarc_ctx,
+                    ws_enforce=ws_membership_enforce_enabled(),
+                    log=logger,
+                )
 
         # BUG2 completion (hidden device-reproduced gap): resume tool_switch_context needs the switch commit closure.
         # skipped_clarification / let-the-model-decide makes Lead call tool_switch_context for a relevant workspace,
@@ -2401,6 +2419,8 @@ async def resume_turn(
                 request,
                 cur_uid,
                 rc_session_id,
+                workspace_id=workspace_id,
+                binding=datarc_ctx.connection_binding,
                 ws_enforce=ws_membership_enforce_enabled(),
                 log=logger,
             )
@@ -2476,12 +2496,31 @@ async def resume_turn(
             # none when i18n is off; a default or locale fallback fails restore.
             _resume_language_context = ordinary_checkpoint.language_context()
         from bowhead_core.configuration_settings_target import unrestored_settings_target
+        from bowhead_core.datarc_helper_switch_continuation import DatarcHelperSwitchResolution
+        from bowhead_core.datarc_switch_continuation import DatarcSwitchResolution
+
+        _datarc_switch_resolution = None
+        _datarc_helper_switch_resolution = None
+        if _source_evidence is not None:
+            _outcome = await clarify.get_resolution_outcome(pre.request_id)
+            _persistence = (_outcome or {}).get("tool_context_persistence")
+            _recovered_evidence = _recovered_source(datarc_ctx, cur_uid, team_id, _resume_member_uid)
+            _datarc_switch_resolution = DatarcSwitchResolution.from_card(
+                pre,
+                source=_recovered_evidence,
+                persistence=_persistence,
+            )
+            _datarc_helper_switch_resolution = DatarcHelperSwitchResolution.from_card(pre, source=_recovered_evidence, persistence=_persistence)
 
         turn_req = TurnRequest(
             session_id=rc_session_id,
             configuration_settings_target=unrestored_settings_target(rc),
             workspace_id=workspace_id,
             active_datarc_project=datarc_ctx.active_datarc_project,
+            datarc_binding=datarc_ctx.connection_binding,
+            datarc_source_evidence=(_recovered_source(datarc_ctx, cur_uid, team_id, _resume_member_uid) if _source_evidence is not None else None),
+            datarc_switch_resolution=_datarc_switch_resolution,
+            datarc_helper_switch_resolution=_datarc_helper_switch_resolution,
             # Batch 2/c6 (PRD §3.4): resume also carries switch commit callback; otherwise skip / let-model-decide
             # cannot use tool_switch_context (device-reproduced BUG2 gap fix).
             datarc_context_switcher=_resume_switcher,
