@@ -160,3 +160,16 @@ describe("chart render context", () => {
     }), shape).animate).toBe(false);
   });
 });
+
+
+it("retains declared group identity and its layout space for a single series", () => {
+  const spec: ChartSpec = { kind: "hbar", title: "Hospitals", row_count: 2,
+    columns: [{ key: "decile", header: "Decile", type: "categorical" }, { key: "region", header: "Region", type: "categorical" }, { key: "count", header: "Hospitals", type: "numeric" }],
+    rows: [{ decile: "9", region: "South", count: 14 }, { decile: "10", region: "South", count: 12 }],
+    explicit_presentation: { version: 1, mode: "plot", axes: { x: "decile", y: ["count"], x_scale: "category" }, group_by: ["region"] } };
+  const shape = normalizeChartForRenderingV1(spec).shape;
+  expect(shape.seriesCount).toBe(1);
+  const recipe = resolveChartRenderRecipe(context(), shape, spec.explicit_presentation);
+  expect(recipe.showLegend).toBe(true);
+  expect(recipe.minimumPlotHeightPx).toBeGreaterThan(resolveChartRenderRecipe(context(), shape).minimumPlotHeightPx);
+});

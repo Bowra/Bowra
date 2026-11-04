@@ -23,6 +23,7 @@ from bowhead_core.agent_change_proposal_store import (
 )
 from bowhead_core.agent_eval_points import case_points, validate_drafted_points
 from bowhead_core.agent_eval_store import EvalCaseDraft, _require_suite_manager, _revision_is_complete, _verify_revision_hash
+from bowhead_core.sqlite_domains import domain_database_path
 
 Authorize = Callable[[aiosqlite.Connection], Awaitable[None]]
 
@@ -263,7 +264,7 @@ async def materialize_case_edits_conn(
 
 class AgentEvalCaseProposals:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def create(
         self,

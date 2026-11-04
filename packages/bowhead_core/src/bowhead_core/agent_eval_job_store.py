@@ -17,6 +17,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_usage import EvalAttemptUsage
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 EvalJobStatus = Literal[
     "queued",
@@ -104,7 +105,7 @@ class AgentEvalJobStore:
     """
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def materialize_jobs(
         self,
@@ -359,6 +360,10 @@ class AgentEvalJobStore:
             _identity(value, name=name)
         if not isinstance(user_text, str) or not user_text.strip() or len(user_text.encode("utf-8")) > _MAX_DOCUMENT_BYTES:
             raise ValueError("Agent Eval task text is invalid")
+        if domain_layout_active(self.db_path):
+            return await self._start_split_scratch_turn(
+                job_id=job_id, lease_token=lease_token, session_id=session_id, turn_id=turn_id, user_text=user_text
+            )
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -438,6 +443,103 @@ class AgentEvalJobStore:
                 await db.rollback()
                 raise
         if scratch is None:  # pragma: no cover - committed invariant
+            raise AgentEvalJobStoreError("agent_eval_scratch_turn_create_failed")
+        return _scratch_from_row(scratch)
+
+    async def _start_split_scratch_turn(self, *, job_id: str, lease_token: str, session_id: str, turn_id: str, user_text: str) -> EvalScratchTurn:
+        # Commit execution rows first. An interruption may leave an unlinked scratch
+        # conversation, which grants no Eval execution authority; the same IDs resume.
+        async with open_shared_ctx(self.db_path) as core:
+            core.row_factory = aiosqlite.Row
+            job = await _require_current_lease(core, job_id=job_id, lease_token=lease_token)
+            _require_unexpired_lease(job)
+            existing = await _scratch_row(core, job_id=job_id, lease_generation=int(job["lease_generation"]))
+            if existing is not None:
+                if str(existing["session_id"]) != session_id or str(existing["turn_id"]) != turn_id:
+                    raise AgentEvalJobStoreError("agent_eval_scratch_turn_scope_mismatch")
+                return _scratch_from_row(existing)
+            if str(job["status"]) != "leased":
+                raise AgentEvalJobStoreError("agent_eval_job_state_conflict")
+            run = await _run_row(core, str(job["run_id"]))
+            execution = await _execution_row(core, str(job["run_id"]))
+            if run is None or str(run["status"]) != "running":
+                raise AgentEvalJobStoreError("agent_eval_run_not_running")
+            if execution is None:
+                raise AgentEvalJobStoreError("agent_eval_execution_not_found")
+            job, run, execution = dict(job), dict(run), dict(execution)
+        created_at = _now()
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as source:
+            source.row_factory = aiosqlite.Row
+            await source.execute("BEGIN IMMEDIATE")
+            try:
+                async with source.execute("SELECT workspace_id,user_id,origin,active_turn_id FROM sessions WHERE id=?", (session_id,)) as cursor:
+                    prior_session = await cursor.fetchone()
+                if prior_session is None:
+                    await source.execute(
+                        """INSERT INTO sessions(id,workspace_id,user_id,title,started_at,last_active_at,origin)
+                        VALUES (?,?,?,'Agent Eval',?,?,'agent_eval')""",
+                        (session_id, execution["workspace_id"], run["created_by"], created_at, created_at),
+                    )
+                elif (prior_session["workspace_id"], prior_session["user_id"], prior_session["origin"]) != (
+                    execution["workspace_id"],
+                    run["created_by"],
+                    "agent_eval",
+                ) or prior_session["active_turn_id"] not in {None, turn_id}:
+                    raise AgentEvalJobStoreError("agent_eval_scratch_turn_scope_mismatch")
+                async with source.execute("SELECT session_id,seq,user_text,status FROM turns WHERE id=?", (turn_id,)) as cursor:
+                    prior_turn = await cursor.fetchone()
+                if prior_turn is None:
+                    await source.execute(
+                        "INSERT INTO turns(id,session_id,seq,user_text,started_at) VALUES (?,?,1,?,?)",
+                        (turn_id, session_id, user_text, created_at),
+                    )
+                elif tuple(prior_turn) != (session_id, 1, user_text, "running"):
+                    raise AgentEvalJobStoreError("agent_eval_scratch_turn_scope_mismatch")
+                await source.execute("UPDATE sessions SET active_turn_id=? WHERE id=?", (turn_id, session_id))
+                await source.commit()
+            except BaseException:
+                await source.rollback()
+                raise
+        async with open_shared_ctx(self.db_path) as core:
+            core.row_factory = aiosqlite.Row
+            await core.execute("BEGIN IMMEDIATE")
+            try:
+                current = await _require_current_lease(core, job_id=job_id, lease_token=lease_token, status="leased")
+                _require_unexpired_lease(current)
+                if int(current["lease_generation"]) != int(job["lease_generation"]):
+                    raise AgentEvalJobStoreError("agent_eval_job_lease_fenced")
+                run = await _run_row(core, str(job["run_id"]))
+                if run is None or str(run["status"]) != "running":
+                    raise AgentEvalJobStoreError("agent_eval_run_not_running")
+                await core.execute(
+                    """INSERT INTO agent_eval_scratch_turn(
+                    job_id,lease_generation,run_id,case_revision_id,attempt,team_id,revision_ref,session_id,turn_id,created_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        job_id,
+                        job["lease_generation"],
+                        job["run_id"],
+                        job["case_revision_id"],
+                        job["attempt"],
+                        run["team_id"],
+                        run["revision_ref"],
+                        session_id,
+                        turn_id,
+                        created_at,
+                    ),
+                )
+                await core.execute(
+                    "UPDATE agent_eval_case_job SET status='running',started_at=COALESCE(started_at,?) WHERE id=?", (created_at, job_id)
+                )
+                scratch = await _scratch_row(core, job_id=job_id, lease_generation=int(job["lease_generation"]))
+                await core.commit()
+            except aiosqlite.IntegrityError as error:
+                await core.rollback()
+                raise AgentEvalJobStoreError("agent_eval_scratch_turn_scope_mismatch") from error
+            except BaseException:
+                await core.rollback()
+                raise
+        if scratch is None:
             raise AgentEvalJobStoreError("agent_eval_scratch_turn_create_failed")
         return _scratch_from_row(scratch)
 

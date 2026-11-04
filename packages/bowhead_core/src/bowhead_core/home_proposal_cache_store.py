@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import aiosqlite
 
+from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -48,10 +52,14 @@ class HomeProposalCacheStore:
     """SQLite cache keyed by user, canonical Bowhead space, and locale."""
 
     def __init__(self, path: str | Path) -> None:
-        self._path = str(path)
+        self._path = str(domain_database_path(path, "core"))
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._path) as db:
+        if domain_layout_active(self._path):
+            async with open_shared_ctx(self._path) as db:
+                await require_domain_schema(db, "core")
+            return
+        async with diagnostic_connect(self._path) as db:
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -62,7 +70,7 @@ class HomeProposalCacheStore:
         workspace_id: str,
         locale: str,
     ) -> HomeProposalCacheEntry | None:
-        async with aiosqlite.connect(self._path) as db:
+        async with diagnostic_connect(self._path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM home_proposal_cache WHERE user_id=? AND workspace_id=? AND locale=?",
@@ -100,7 +108,7 @@ class HomeProposalCacheStore:
             separators=(",", ":"),
             sort_keys=True,
         )
-        async with aiosqlite.connect(self._path) as db:
+        async with diagnostic_connect(self._path) as db:
             await db.execute(
                 "INSERT INTO home_proposal_cache "
                 "(user_id, workspace_id, locale, generation_id, generated_at, "

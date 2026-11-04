@@ -39,6 +39,8 @@ from bowhead_core.memory_privacy import (
     ensure_memory_write_allowed,
     is_memory_read_hidden,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +166,7 @@ class MemoryNotesStore:
     """Async sqlite-backed single-segment-per-user notes store."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
         """三步 migration: TABLE → ALTER (legacy DBs) → INDEX.
@@ -172,8 +174,12 @@ class MemoryNotesStore:
         V4 PRD-D-5: 加 verification_anchor + verification_status. 老 DB (PRD-C ship)
         通过 ALTER 加列, 新 DB 在 CREATE TABLE 已有 — try/except OperationalError 区别.
         """
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(_TABLE_SCHEMA)
             # V4 PRD-D-5 ALTER for legacy DBs (PRD-C ship pre V4)
             for stmt in (
@@ -637,7 +643,7 @@ class MemoryNotesStore:
 
     async def is_lock_active(self, *, user_id: str) -> bool:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT editing_locked_until FROM memory_notes WHERE subject_type='user' AND subject_id=?",
                 (user_id,),
@@ -656,7 +662,7 @@ class MemoryNotesStore:
 
     async def get_lock_expiry(self, *, user_id: str) -> str | None:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT editing_locked_until FROM memory_notes WHERE subject_type='user' AND subject_id=?",
                 (user_id,),

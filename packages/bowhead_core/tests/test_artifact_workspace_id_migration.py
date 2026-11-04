@@ -25,6 +25,7 @@ from bowhead_core.artifact_store import (
     ArtifactStore,
     LocalBackend,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -79,8 +80,8 @@ def test_upgrade_adds_nullable_column_keeps_rows_and_is_repeatable(tmp_path: Pat
             ("art_legacy", "old.csv", "text/csv", 12, "bi_fetch_rows", "/tmp/old.csv", "2026-09-01"),
         )
 
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")  # Idempotent: second call must not fail
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)  # Idempotent: second call must not fail
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore ledger to head: later historical revisions (e.g. 0063 table creation, MCP Prompt structural preflight) may not rerun on upgraded databases.
     command.upgrade(config, MIGRATION.revision)  # Replaying the same revision must not fail either
@@ -107,7 +108,7 @@ def test_both_maintenance_paths_agree(tmp_path: Path) -> None:
     （新库的列来自 SCHEMA 的 CREATE TABLE，把 ALTER 整条删掉照样绿）。
     """
     via_alembic = tmp_path / "alembic.db"
-    command.upgrade(_config(via_alembic), "head")
+    command.upgrade(_config(via_alembic), SOURCE_REVISION)
     with sqlite3.connect(via_alembic) as db:
         assert "workspace_id" in {r[1] for r in db.execute("PRAGMA table_info(artifacts)")}
     # initialize must not fail on an already migrated database (ALTER loop must be idempotent).
@@ -135,7 +136,7 @@ def test_both_maintenance_paths_agree(tmp_path: Path) -> None:
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "extracted_rows", "per_row_jobs", "team_templates", "matrix"])
 def test_non_core_target_untouched(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
         assert "artifacts" not in tables, f"{target} 目标不该有 artifacts 表"
@@ -153,7 +154,7 @@ def test_downgrade_refuses_instead_of_silently_dropping(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_put_bytes_resolves_workspace_from_session(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _seed_space(db)
 
@@ -174,7 +175,7 @@ async def test_put_bytes_resolves_workspace_from_session(tmp_path: Path) -> None
 async def test_put_bytes_keeps_null_when_unattributable(tmp_path: Path) -> None:
     """★ 推不出就是 NULL。这条是批4 判据数据的地基，不能被任何兜底值顶掉。"""
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     store = _store(path, tmp_path / "blob")
     await store.initialize()
 
@@ -190,7 +191,7 @@ async def test_put_bytes_keeps_null_when_unattributable(tmp_path: Path) -> None:
 async def test_explicit_workspace_id_overrides_derivation(tmp_path: Path) -> None:
     """显式归属（presign 那类手上就有 ctx 的路）优先于反推。"""
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _seed_space(db)
     store = _store(path, tmp_path / "blob")
@@ -223,7 +224,7 @@ def _backfill(path: Path) -> int:
 
 def test_backfill_ladder_fills_only_what_it_can_prove(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _seed_space(db)
         rows = [
@@ -264,7 +265,7 @@ def test_backfill_ladder_fills_only_what_it_can_prove(tmp_path: Path) -> None:
 def test_backfill_is_idempotent_and_never_overwrites(tmp_path: Path) -> None:
     """可重跑：第二次匹配 0 行；已有归属（写入点落的）不被反推覆盖。"""
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _seed_space(db)
         db.execute(
@@ -290,7 +291,7 @@ def test_missing_session_row_does_not_fall_through_to_a_later_rung(tmp_path: Pat
     **不再回退下一级**。口径不一致的话，回填出的分布和今天的授权推导就不是同一把尺子。
     """
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _seed_space(db)
         # Turn points to a missing session while linked canvas **can** resolve attribution.

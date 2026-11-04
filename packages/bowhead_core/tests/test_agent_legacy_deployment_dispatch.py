@@ -23,7 +23,6 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import AgentAssignmentStore
 from bowhead_core.agent_execution_binding import (
     AgentExecutionBindingError,
@@ -33,6 +32,7 @@ from bowhead_core.agents.plan_admission import list_visible_team_subagents
 from bowhead_core.session_store import SessionStore
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.user_store import TeamSubagent, UserStore
+from core_legacy_database import upgrade
 
 _NOW = "2026-09-06T00:00:00+00:00"
 
@@ -49,7 +49,7 @@ class _Fixture:
 
 async def _setup(tmp_path: Path) -> _Fixture:
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     sessions = SessionStore(db_path)
     await users.initialize()

@@ -50,6 +50,7 @@ from bowhead_core.chart_style_v2 import (
     parse_user_team_chart_style_selection_v2,
     strong_chart_style_etag,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_settings_store import TeamSettingsStore
 from bowhead_core.theme_compiler import canonical_json
 
@@ -272,7 +273,7 @@ class ChartStyleReadService:
     """Read policy, head, and exact revision from one SQLite snapshot."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._effective_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._options_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 

@@ -21,6 +21,7 @@ from bowhead_core.feedback_candidate_store import (
     SuppressedSignature,
     scrub_deep,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -36,7 +37,7 @@ def _migrated_db(tmp_path: Path) -> str:
     )
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return str(path)
 
 

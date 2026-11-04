@@ -22,6 +22,7 @@ from bowhead_core.bi_workspace_continuation import (
 )
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope, _row, _transaction
 from bowhead_core.clarification_store import MAX_DIRECTIVE_CHARS, stamp_resume_context
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from bowhead_core.chat_reference_execution import ReferencePrimaryInput
@@ -38,7 +39,7 @@ def _hash(content: bytes) -> str:
 
 
 async def installed(db: aiosqlite.Connection) -> bool:
-    return await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (TABLE,)) is not None
+    return await readable_table_exists(db, TABLE)
 
 
 def _json(raw: str, expected: type):

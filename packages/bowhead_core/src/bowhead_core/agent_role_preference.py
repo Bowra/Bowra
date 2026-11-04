@@ -25,6 +25,7 @@ from bowhead_core.agent_role_candidates import (
     LeadRoleCandidateRoster,
     new_turn_candidate,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import (
     TeamSubagentAccessDecision,
     TeamSubagentAccessResolver,
@@ -121,7 +122,7 @@ class AgentRolePreferenceStore:
         *,
         catalog: CapabilityCatalog | None = None,
     ) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self._access = TeamSubagentAccessResolver(self.db_path)
         self._catalog = catalog or default_catalog()
 

@@ -21,6 +21,7 @@ from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.export_assets import ExportAssetError
 from bowhead_core.export_snapshot import ExportSnapshotRequest, ExportSnapshotStore
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -43,7 +44,7 @@ async def ctx(tmp_path: Path) -> Context:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     store = ArtifactStore(db_path=path, backend=LocalBackend(tmp_path / "blobs"))
     sessions = SessionStore(path)
     canvases = CanvasStore(path)

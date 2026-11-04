@@ -10,7 +10,9 @@ import pytest
 import respx
 from bowhead_router.errors import (
     ProviderFailureKind,
+    redact_upstream_credentials,
     safe_upstream_param,
+    sanitize_upstream_text,
     upstream_error_fields_from_payload,
 )
 
@@ -166,3 +168,10 @@ async def test_real_adapter_400_reaches_the_projection_with_the_param_name() -> 
     assert failure.upstream_error_param == "temperature"
     assert failure.upstream_error_code == "unsupported_value"
     assert failure.upstream_error_type == "invalid_request_error"
+
+
+@pytest.mark.unit
+def test_response_redaction_preserves_whitespace_while_logs_stay_single_line() -> None:
+    source = " first\n  Bearer opaque-value\nsecond\t "
+    assert redact_upstream_credentials(source) == " first\n  Bearer [REDACTED]\nsecond\t "
+    assert sanitize_upstream_text(source) == "first Bearer [REDACTED] second"

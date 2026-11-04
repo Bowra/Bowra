@@ -18,10 +18,13 @@ import {
   MENU_DESCRIPTION_ATTR,
   MenuFloating,
   MenuKeyHints,
+  MenuSubmenu,
   useMenu,
   useMenuItem,
   type MenuMiddlewareOptions,
 } from "@/components/ui/menu";
+import { LeaveSpaceDialog, SpaceSettingsItems } from "@/components/space-settings-menu";
+import type { WorkspaceDTO } from "@/lib/api";
 import { useSpace } from "@/lib/use-space";
 import { confirmCanvasNavigation } from "@/lib/canvas-navigation-guard";
 import { renderRefreshSvg } from "@/components/icon-refresh";
@@ -84,6 +87,8 @@ function keepTypingInSearch(event: KeyboardEvent<HTMLInputElement>) {
 export function SpacePicker({ compact = true }: Props) {
   const t = useTranslations("workspace");
   const ws = useSpace();
+  const [leaveTarget, setLeaveTarget] = useState<WorkspaceDTO | null>(null);
+  const activeSpace = ws.items.find(item => item.id === ws.activeId);
   const [open, setOpen] = useState(false);
   // U12: filter box for teams with many workspaces (33+ scrolling is painful).
   const [query, setQuery] = useState("");
@@ -216,6 +221,12 @@ export function SpacePicker({ compact = true }: Props) {
               </SpaceMenuItem>
             );
           })}
+          {activeSpace && !ws.loading && !ws.error ? <>
+            <div role="separator" className="ui-row-menu-sep" />
+            <MenuSubmenu label={t("more_settings")} className="app-floating-menu-item">
+              <SpaceSettingsItems key={activeSpace.id} space={activeSpace} onLeave={() => setLeaveTarget(activeSpace)} />
+            </MenuSubmenu>
+          </> : null}
           {listed.length > 0 ? (
             <MenuKeyHints
               hints={[
@@ -227,6 +238,7 @@ export function SpacePicker({ compact = true }: Props) {
           ) : null}
         </div>
       </MenuFloating>
+      {leaveTarget ? <LeaveSpaceDialog space={leaveTarget} onClose={() => setLeaveTarget(null)} /> : null}
     </div>
   );
 }

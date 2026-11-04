@@ -32,7 +32,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-import aiosqlite
 from bowhead_core.agent_change_proposal_store import AgentChangeProposalStore
 from bowhead_core.agent_release_read_store import AgentReleaseReadStore
 from bowhead_core.agent_revision_store import (
@@ -54,6 +53,7 @@ from bowhead_core.feedback_candidate_store import (
 from bowhead_core.feedback_casework_store import FeedbackCaseworkStore
 from bowhead_core.feedback_loop_flags import KEY_TEAM_FEEDBACK_CASEWORK_ENABLED, parse_casework_enabled, team_casework_enabled
 from bowhead_core.prompt_injection_defense import sanitize_for_injection
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.user_store import User, UserStore
 from bowhead_router.usage import usage_context
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -175,7 +175,7 @@ async def _source_spaces(store: UserStore, cand: FeedbackCandidate) -> list[dict
     if not turn_ids:
         return []
     marks = ",".join("?" * len(turn_ids))
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         rows = await (
             await db.execute(
                 f"SELECT t.id, w.id, w.name, s.id FROM turns t JOIN sessions s ON s.id = t.session_id "

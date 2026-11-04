@@ -66,7 +66,7 @@ async def analytical_case(prepared, series=False, raw=None):
     args = {
         "data_artifact_id": data.id,
         "title": "Prepared comparisons",
-        "views": [{"id": "comparison", "title": "Prepared comparison", "force_kind": "line" if series else "table", "series": measures}],
+        "views": [{"id": "comparison", "title": "Prepared comparison", "force_kind": "line" if series else "table"}],
         "column_types": dict.fromkeys(measures, "numeric" if series else "percent_points"),
         "presentation_plan": {
             "version": 3,

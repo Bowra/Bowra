@@ -25,6 +25,8 @@ from typing import Any
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS kb_lifespan_markers (
     marker_key  TEXT PRIMARY KEY,
@@ -45,13 +47,13 @@ class KbLifespanMarkerStore:
         self._db_path = str(db_path)
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
             await db.commit()
 
     async def has_marker(self, marker_key: str) -> bool:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT 1 FROM kb_lifespan_markers WHERE marker_key = ?",
                 (marker_key,),
@@ -60,7 +62,7 @@ class KbLifespanMarkerStore:
             return await cur.fetchone() is not None
 
     async def get(self, marker_key: str) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT value_json FROM kb_lifespan_markers WHERE marker_key = ?",
@@ -76,7 +78,7 @@ class KbLifespanMarkerStore:
 
     async def set(self, marker_key: str, value: dict[str, Any]) -> None:
         """UPSERT marker."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO kb_lifespan_markers (marker_key, value_json, updated_at) "
                 "VALUES (?, ?, ?) "

@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.llm_config_crypto import decrypt_llm_config, encrypt_llm_config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from cryptography.fernet import Fernet
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_core import migrations
 
@@ -50,7 +51,7 @@ def test_runtime_parameter_revision_preserves_all_target_schemas_and_core_cipher
         config.attributes["bowhead_target"] = target
         command.stamp(config, "0166_shared_agent_personal_mcp")
         command.upgrade(config, "0167_model_runtime_parameters")
-        command.stamp(config, migrations.chain_head())
+        command.stamp(config, SQLITE_LEGACY_REVISION)
         upgrade(core_url, target=target)
         with sqlite3.connect(path) as connection:
             assert connection.execute("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").fetchall() == before

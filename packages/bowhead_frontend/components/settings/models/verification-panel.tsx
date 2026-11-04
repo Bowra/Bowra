@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
+
 import { useTranslations } from "next-intl";
 
 import { AlertTriangle, Check, Spinner, XSm } from "@/components/icons";
+import { copyTextWithFallback } from "@/lib/clipboard";
 import type {
+  VerificationDiagnostics,
   VerificationBatch,
   VerificationPlan,
 } from "@/lib/llm-config-v2-api";
@@ -33,6 +37,49 @@ const FAILURE_MESSAGE_KEYS: Readonly<Record<string, string>> = {
   capability_probes_disabled: "failure_probes_disabled",
   runner_interrupted: "failure_runner_interrupted",
 };
+
+function EmptyResponseDetails({ diagnostics }: { diagnostics: VerificationDiagnostics }) {
+  const t = useTranslations("settings.models.v2");
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const summary = diagnostics.response_summary;
+  const limited = summary.stop_reason === "max_tokens" || summary.stop_reason === "max_output_tokens" || summary.stop_reason === "length";
+  const stopLabel = limited ? t("diagnostic_stop_limit")
+    : summary.stop_reason === "stop" || summary.stop_reason === "end_turn" ? t("diagnostic_stop_finished") : null;
+  const contentLabels: Record<string, string> = {
+    text: t("diagnostic_text"), output_text: t("diagnostic_text"),
+    thinking: t("diagnostic_thinking"), reasoning: t("diagnostic_thinking"),
+    tool_use: t("diagnostic_tool"), function_call: t("diagnostic_tool"),
+  };
+
+  return (
+    <details className="verification-response-details" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{t("diagnostic_expand")}</summary>
+      {open ? <div>
+        <p>{t(limited ? "diagnostic_limit_hint" : "diagnostic_hint")}</p>
+        <dl>
+          <dt>{t("diagnostic_model")}</dt><dd>{summary.model || t("diagnostic_not_reported")}</dd>
+          <dt>{t("diagnostic_stop")}</dt><dd>{stopLabel ? `${stopLabel} (${summary.stop_reason})` : summary.stop_reason || t("diagnostic_not_reported")}</dd>
+          <dt>{t("diagnostic_content")}</dt><dd>{[...new Set(summary.content_types.map((kind) => contentLabels[kind] || kind))].join(", ") || t("diagnostic_none")}</dd>
+          <dt>{t("diagnostic_usage")}</dt><dd className="verification-response-usage">{summary.usage ? <pre translate="no">{JSON.stringify(summary.usage, null, 2)}</pre> : t("diagnostic_not_reported")}</dd>
+        </dl>
+        <p>{t("diagnostic_request")}</p>
+        <p>{t("diagnostic_request_hint")}</p>
+        <pre translate="no">{JSON.stringify(diagnostics.request, null, 2)}</pre>
+        <p>{t("diagnostic_response")}</p>
+        <pre translate="no">{diagnostics.response_body}</pre>
+        {diagnostics.response_truncated ? <p>{t("diagnostic_truncated")}</p> : null}
+        <p>{t("diagnostic_keep_details")}</p>
+        <p>{t("diagnostic_privacy")}</p>
+        <button type="button" className="btn ghost sm" onClick={async () => {
+          const bundle = JSON.stringify(diagnostics, null, 2);
+          setCopied(await copyTextWithFallback(bundle, t("diagnostic_copy_fallback"), JSON.stringify(diagnostics)));
+        }}>{t("diagnostic_copy")}</button>
+        <span role="status">{copied ? t("diagnostic_copied") : ""}</span>
+      </div> : null}
+    </details>
+  );
+}
 
 export function VerificationPanel({
   plan,
@@ -132,14 +179,14 @@ export function VerificationPanel({
                       ? <AlertTriangle size={12} />
                       : null}
               </span>
-              <span>
+              <div className="verification-item-main">
                 <b>{item.model_id}</b>
                 <small>
                   {item.provider_display_name} · {capabilityLabel(item.capability)}
                 </small>
                 {state === "not_testable" && (current?.safe_code || item.safe_code) === "parameter_policy_exceeds_probe_limits" ? <small>{t("parameter_probe_limits")}</small> : null}
                 {failureKey ? (
-                  <span className="verification-failure-detail">
+                  <div className="verification-failure-detail">
                     <strong>{t(failureKey)}</strong>
                     <span className="verification-diagnostics">
                       {current?.safe_http_status ? (
@@ -158,9 +205,14 @@ export function VerificationPanel({
                         </span>
                       ) : null}
                     </span>
-                  </span>
+                    {current?.safe_code === "empty_completion" ? (
+                      current.diagnostics
+                        ? <EmptyResponseDetails diagnostics={current.diagnostics} />
+                        : <small>{t("diagnostic_unavailable")}</small>
+                    ) : null}
+                  </div>
                 ) : null}
-              </span>
+              </div>
               <em>{t(`item_state_${state}`)}</em>
             </div>
           );

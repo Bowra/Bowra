@@ -938,6 +938,7 @@ def _make_handler() -> Any:
                         {
                             "ok": False,
                             "error": f"payload schema invalid (R7 after auto-fix): {_fix_res.hard_reject_reason}",
+                            "error_kind": "tool_arguments_invalid",
                             "validation_errors": [_fix_res.hard_reject_reason],
                         },
                     )
@@ -960,7 +961,12 @@ def _make_handler() -> Any:
             err_lines = "\n".join(f"  - {e}" for e in errs[:10])
             return note_ordinary_return_rejection(
                 ctx,
-                {"ok": False, "error": "payload schema invalid:\n" + err_lines, "validation_errors": errs[:10]},
+                {
+                    "ok": False,
+                    "error_kind": "tool_arguments_invalid",
+                    "error": "payload schema invalid:\n" + err_lines,
+                    "validation_errors": errs[:10],
+                },
             )
 
         # ─── report-consistency-gate v3: ground_facts ledger self-reconciliation (flag-gated) ───
@@ -2053,6 +2059,7 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
         ToolSpec(
             schema=schema,
             handler=_make_handler(),
+            terminal_payload_field="payload",
             risk_level="low",
             effect_spec=TOOL_EFFECT_NONE,
         )

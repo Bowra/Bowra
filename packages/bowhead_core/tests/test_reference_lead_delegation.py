@@ -253,6 +253,32 @@ async def test_reference_policy_change_is_a_public_access_failure(lead_case, mon
     assert bus._pi_turn_state["error_kind"] == "access"
 
 
+@pytest.mark.parametrize("typed", [True, False])
+async def test_changed_knowledge_source_has_a_typed_public_recovery(lead_case, monkeypatch, typed):
+    from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+    from bowhead_core.agents import lead_orchestrator
+    from bowhead_core.agents.turn_context import SerializableTurnContext
+
+    async def changed(*_args):
+        raise (KnowledgeAccessError if typed else ValueError)("knowledge_source_changed")
+
+    monkeypatch.setattr(lead_orchestrator, "_lead_loop", changed)
+    bus = TurnEventBus()
+    result = await lead_orchestrator.run_turn(
+        SerializableTurnContext(**lead_case.scope.identity(), turn_id="t_source_changed", role="user"),
+        "Read the selected synthetic source.",
+        runtime=lead_orchestrator.LeadRuntime(router=None, tool_registry=None, parent_bus=bus, parent_ctx=_ctx(lead_case)),
+    )
+    expected = "knowledge_source_changed" if typed else "lead_internal_error"
+    assert result.error == expected
+    terminals = [event.payload for event in bus._events if event.event_type in {"turn_failed", "done"}]
+    assert len(terminals) == 2
+    assert [payload.get("reason_code", payload.get("reason")) for payload in terminals] == [expected, expected]
+    assert bus._pi_turn_state["error_kind"] == ("access" if typed else "internal")
+    if typed:
+        assert all(payload["recovery_action"] == "new_session" for payload in terminals)
+
+
 @pytest.mark.parametrize("dispatch", [True, False])
 async def test_normal_lead_tool_loop_runs_the_exact_selected_primary(lead_case, monkeypatch, dispatch):
     await _normal_lead(lead_case, monkeypatch, dispatch)
@@ -1080,6 +1106,7 @@ async def _normal_lead(
                                     "profile": primary.binding.runtime_profile_name,
                                     "task": "检查实际利润变化",
                                     "delegation_role": role,
+                                    "required_source_urls": [],
                                     **({"language": primary_language} if primary_language else {}),
                                 }
                             ),

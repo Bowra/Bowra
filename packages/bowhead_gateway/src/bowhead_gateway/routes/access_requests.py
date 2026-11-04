@@ -337,6 +337,9 @@ async def request_access(
     outcome: 409 during a cooldown on this resource (the requester already learned from
     the denial that it exists), 429 once their hourly/daily budget is spent, otherwise
     the same ``202 {status, request_id}`` for existing and missing resources."""
+    from bowhead_gateway.sharing_policy import require_sharing_expansion
+
+    require_sharing_expansion(body.kind)
     app = request.app
     acr_store = app.state.access_request_store
     user_store = app.state.user_store
@@ -688,6 +691,10 @@ async def decide_access_request(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "resource not found")
     if not can_decide:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    if body.action == "approve":
+        from bowhead_gateway.sharing_policy import require_sharing_expansion
+
+        require_sharing_expansion(row.kind)
     if body.action == "deny" and body.grant_expires_in_days is not None:
         raise _coded(422, "access_request_decision_invalid")
     if body.action == "approve" and body.stop_requests:

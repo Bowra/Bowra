@@ -386,15 +386,27 @@ def _render_guidance_body(data_peer: str | None, compute_peer: str | None) -> st
     return head + data_line + "\n" + code_line + chart_guidance + _GUIDANCE_POST_STEP2_REST
 
 
-def build_parallel_tools(data_peer: str | None) -> str:
-    """并行工具段。无取数承担者时，"别拆成多个 X" 那条随之无意义，整行去掉。"""
+def build_parallel_tools(data_peer: str | None, *, delegate_knowledge: bool = False) -> str:
+    """Render parallel examples only for the admitted direct retrieval mode."""
+    lines = _PARALLEL_TOOLS_TMPL.splitlines()
+    if delegate_knowledge:
+        lines = [line for line in lines if line != "{kb_parallel}"]
     if data_peer is None:
-        return "\n".join(line for line in _PARALLEL_TOOLS_TMPL.splitlines() if "{data}" not in line)
-    return _PARALLEL_TOOLS_TMPL.format(data=data_peer)
+        lines = [line for line in lines if "{data}" not in line]
+    return "\n".join(lines).format(data=data_peer or _GENERIC_DATA_AGENT, kb_parallel=_DIRECT_KB_PARALLEL)
 
 
-def build_knowledge_boundary(data_peer: str | None) -> str:
-    return _KNOWLEDGE_BOUNDARY_TMPL.format(data=data_peer or _GENERIC_DATA_AGENT)
+def build_knowledge_boundary(data_peer: str | None, *, web_search_available: bool = True, delegate_knowledge: bool = False) -> str:
+    search_guidance = (
+        "**When to call web_search** (chat-v4 W1):\n"
+        "- external / real-time / industry / competitor / outside-company information / latest policy → use `web_search`"
+        if web_search_available
+        else "**External search is not configured for this task**:\n"
+        "- Ask for a supplied source or explain the missing search configuration. Do not claim to have searched, "
+        "invent current facts, or delegate the same unavailable search to another Agent."
+    )
+    kb_route = "delegate document retrieval to kb-analyst" if delegate_knowledge else "use kb_search"
+    return _KNOWLEDGE_BOUNDARY_TMPL.format(data=data_peer or _GENERIC_DATA_AGENT, search_guidance=search_guidance, kb_route=kb_route)
 
 
 def build_few_shot_examples(data_peer: str | None, *, output_language: str = "en-US") -> str:
@@ -548,10 +560,11 @@ When a peer bails with kind=needs_user_input, forward its pre-shaped clarificati
 # (compute.md's sole-BI-entrance section has equivalent discipline; capability moved, never vanished).
 # Lead retains only parallel kb_search + specialist spawning. Release removed the OFF variant teaching
 # bi_query batching.
+_DIRECT_KB_PARALLEL = "- several independent kb_search: emit N tool_calls in the same response"
 _PARALLEL_TOOLS_TMPL = """<parallel_tool_calls>
 Batch only independent operations. If the user requires A to finish before B, or B's task arguments require A's result, emit only A, read its returned result, then issue B in a later response using that evidence. For example, read an attachment first, then pass the actual returned values to the calculation helper. Calls in one response are not an ordered plan; their arguments are already fixed. Never claim a sibling has completed or invent its result while dispatching it.
 Several independent operations → emit N tool_calls in the same response so they run in parallel and cut latency:
-- several independent kb_search: emit N tool_calls in the same response
+{kb_parallel}
 - **Multi-domain due diligence** (pick one specialist per domain from the roster): if each can analyze its domain independently and the user sets no order, emit their `subagent_spawn` calls together. Do not add serial waits to independent work.
 - several lookups on a single topic should **not** be split across several {data} — one {data} coordinates the related queries using its available Tools and their supported batching contract.
 Default to parallel only when there is no prerequisite result or user-required order.
@@ -653,9 +666,8 @@ When asked about a concept that active_facts does not have:
   why a query maps to some record — those require actual inspection/query results or verified supplied source material.
   If you have not looked it up, say so (you may offer to look it up); do not use general knowledge to guess how their data is organized.
 
-**When to call web_search** (chat-v4 W1):
-- external / real-time / industry / competitor / outside-company information / latest policy → use `web_search`
-- data from the selected internal source / KB data in the space → **do not** use web_search (dispatch {data} / use kb_search)
+{search_guidance}
+- data from the selected internal source / KB data in the space → **do not** use web_search (dispatch {data} / {kb_route})
 - web_search results **do not enter authorized_facts**; they are narrative reference only. Cite **only the URLs / titles web_search actually returned**, and **never invent an authoritative source** (such as "according to the X statistics bureau"); with URLs, list them as source links; without, say it comes from a web search
 
 **When to call web_fetch**:
@@ -707,6 +719,7 @@ def build_lead_system_prompt(
     # Default False → empty block filtered → byte-identical existing callers and tests.
     planning_auto: bool = False,
     knowledge_direct_use: bool = False,
+    unconfigured_capability_tools: frozenset[str] = frozenset(),
     output_language: str = "en-US",
 ) -> str:
     """Build Lead orchestrator system prompt (G3 wire #1 + G2 lean).
@@ -803,7 +816,8 @@ def build_lead_system_prompt(
     _blk_no_datarc = _NO_DATARC_NOTICE_BY_REASON.get(no_datarc_reason, _NO_DATARC_NOTICE) if not has_datarc else ""
     _blk_datarc_scope = _DATARC_WORKSPACE_SCOPE if has_datarc else ""
     _blk_tool_guidance = build_tool_use_guidance(planning_auto=planning_auto, data_peer=_data_peer, compute_peer=_compute_peer)
-    if "kb-analyst" in _roster.names and not knowledge_direct_use:
+    delegate_knowledge = "kb-analyst" in _roster.names and not knowledge_direct_use
+    if delegate_knowledge:
         _blk_tool_guidance = _blk_tool_guidance.replace(
             "- KB question → kb_search; table rows / voucher numbers / amount aggregation → kb_query_records (incl. aggregate SUM/AVG/COUNT)",
             "- KB question or document records → delegate directly to kb-analyst. Do not search first or ask a second Agent to repeat the same lookup. "
@@ -813,9 +827,13 @@ def build_lead_system_prompt(
     _blk_team_tools = render_team_tools_block(team_tools, _compute_peer)
     _blk_custom_skills = render_custom_skills_block(custom_skills, _compute_peer)
     _blk_tool_onboard = _TOOL_ONBOARD_GUIDANCE if tool_onboard_proactive else ""
-    _blk_parallel_tools = build_parallel_tools(_data_peer)
+    _blk_parallel_tools = build_parallel_tools(_data_peer, delegate_knowledge=delegate_knowledge)
     _blk_error_handling = build_error_handling(_compute_peer)
-    _blk_knowledge_boundary = build_knowledge_boundary(_data_peer)
+    _blk_knowledge_boundary = build_knowledge_boundary(
+        _data_peer,
+        web_search_available="web_search" not in unconfigured_capability_tools,
+        delegate_knowledge=delegate_knowledge,
+    )
     _blk_few_shot = build_few_shot_examples(_data_peer, output_language=output_language)
 
     # Prior order (`BOWHEAD_CTX_PREFIX_ORDER=0` rollback), byte-identical to before batch 2-b.

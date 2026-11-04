@@ -13,6 +13,7 @@ from alembic import command
 from alembic.config import Config
 from bowhead_core.agent_role_candidates import ExactAgentRoleChoice
 from bowhead_core.plan_store import PlanStore, new_step
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -81,8 +82,8 @@ def test_0056_upgrade_is_repeatable_and_at_head(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
     config = _config(path)
     command.upgrade(config, MIGRATION.down_revision)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     command.stamp(config, MIGRATION.down_revision)
     # Replay this revision only, then restore ledger head; later historical revisions (e.g. 0063 table creation) need not rerun on upgraded DB.
     command.upgrade(config, MIGRATION.revision)
@@ -100,7 +101,7 @@ def test_0056_upgrade_is_repeatable_and_at_head(tmp_path: Path) -> None:
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "matrix"])
 def test_0056_is_noop_for_non_core_targets(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='trg_plan_step_agent_choice_insert_guard'").fetchone() is None
 
@@ -108,7 +109,7 @@ def test_0056_is_noop_for_non_core_targets(tmp_path: Path, target: str) -> None:
 @pytest.mark.parametrize("atomic", [False, True])
 def test_exact_choice_round_trips_and_is_immutable(tmp_path: Path, atomic: bool) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
 
     async def exercise() -> tuple[str, str]:
         store = PlanStore(str(path))

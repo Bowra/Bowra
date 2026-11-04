@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler
 
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
 from bowhead_core.document_chat_continuation import Digest, DocumentPlanningAttemptRef, DocumentPlanningCheckpointRef, DocumentTurnOwner
+from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE
 from bowhead_core.documents.delivery import _execution, _now, _scope
 from bowhead_core.documents.package_io import OfficePackageError
 from bowhead_core.documents.pptx_plan import PlannerProfile, planning_system_prompt
@@ -55,19 +56,19 @@ class DocumentLanguageSnapshot(BaseModel):
 class DocumentRuntimeSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    schema_version: Literal[1, 2]
+    schema_version: Literal[1, 2, 3]
     image_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     model_config_version: int = Field(ge=0)
-    planner_profile: PlannerProfile | Literal["pptx-script-worker-v1"]
+    planner_profile: PlannerProfile | Literal["pptx-script-worker-v1", "docx-script-worker-v1"]
     language: DocumentLanguageSnapshot
     authoring_system: str | None = Field(default=None, min_length=1, max_length=64_000)
     authoring_limits: dict | None = None
 
     @model_validator(mode="after")
     def _version_matches_profile(self):
-        authoring = self.planner_profile == "pptx-script-worker-v1"
+        authoring = self.planner_profile in AUTHORING_PROFILES
         if (
-            (self.schema_version == 2) != authoring
+            self.schema_version != (3 if self.planner_profile == WORD_PROFILE else 2 if authoring else 1)
             or (authoring and (self.authoring_system is None or self.authoring_limits is None))
             or (not authoring and (self.authoring_system is not None or self.authoring_limits is not None))
         ):
@@ -140,7 +141,7 @@ class _CheckpointPayload(BaseModel):
 
 
 class _AuthoringCheckpointPayload(_CheckpointPayload):
-    schema_version: Literal[2]
+    schema_version: Literal[2, 3]
     last_call_no: int = Field(ge=1)
     response: str = Field(min_length=1, max_length=512_000)
 
@@ -305,7 +306,7 @@ def _validated_context(value, instruction: str, *, profile: str) -> dict:
     ):
         raise DocumentRequestError("document_checkpoint_unavailable")
     try:
-        system = profile if profile == "pptx-script-worker-v1" else planning_system_prompt(profile)
+        system = profile if profile in AUTHORING_PROFILES else planning_system_prompt(profile)
         if _digest(system + "\n" + value["payload"]) != value["digest"]:
             raise DocumentRequestError("document_checkpoint_unavailable")
         payload = json.loads(value["payload"])
@@ -451,7 +452,7 @@ async def load_document_checkpoint_in_tx(
     ):
         raise DocumentRequestError("document_checkpoint_unavailable")
     try:
-        payload_type = _AuthoringCheckpointPayload if runtime.schema_version == 2 else _CheckpointPayload
+        payload_type = _AuthoringCheckpointPayload if runtime.schema_version in {2, 3} else _CheckpointPayload
         payload = payload_type.model_validate_json(attempt["checkpoint_json"]).model_dump()
         context = _validated_context(json.loads(attempt["context_json"]), attempt["instruction"], profile=runtime.planner_profile)
     except (ValueError, TypeError) as exc:
@@ -678,7 +679,7 @@ async def consume_document_attempt_in_tx(
     initial = await document_instruction_in_tx(connection, worker=creation, job_id=checkpoint.job_id)
     if initial.text != previous["instruction"]:
         raise DocumentRequestError("document_checkpoint_unavailable")
-    if material.runtime_snapshot.schema_version == 2:
+    if material.runtime_snapshot.schema_version in {2, 3}:
         from bowhead_core.documents.authoring_context import prepare_authoring_answer_context
 
         prepare_answer_context = prepare_authoring_answer_context

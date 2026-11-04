@@ -27,7 +27,17 @@ async def chart(tmp_path, monkeypatch):
             return True
 
     ctx.parent_bus = Bus()
-    result = await _add_chart({"data_artifact_id": artifact.id, "title": "Values", "force_kind": "line", "column_types": {"date": "date"}}, ctx)
+    result = await _add_chart(
+        {
+            "data_artifact_id": artifact.id,
+            "title": "Values",
+            "force_kind": "line",
+            "axes": {"x": "date", "y": ["value"], "x_scale": "category"},
+            "group_by": [],
+            "column_types": {"date": "date"},
+        },
+        ctx,
+    )
     assert "error" not in result
 
     async def project(section):
@@ -44,7 +54,7 @@ async def test_read_edit_and_reload_preserve_data_and_source(chart):
     read = await read_chart({"section_id": section_id}, ctx)
     assert read["views"][0]["sample"][0] == {"date": "2026-10-28", "value": 12}
     assert read["views"][0]["display_receipt"]["horizontal_axis"]["elapsed_time_proportional"] is False
-    assert read["views"][0]["display_receipt"]["value_display"]["actual_axis_unit"] == "not_available_in_tool_receipt"
+    assert read["views"][0]["display_receipt"]["value_display"]["axis_magnitude"] == "renderer_selected_may_change"
     changed = await edit_chart(
         {
             "section_id": section_id,
@@ -401,8 +411,12 @@ async def test_percent_and_currency_precision_preserve_source_semantics(chart):
     assert rejected["path"] == "/changes/formats/ratio"
 
 
-async def test_simple_kind_edits_reuse_the_existing_chart_and_data(chart):
+async def test_historical_kind_edits_preserve_existing_chart_and_source(chart):
     store, ctx, result = chart
+    section = (await store.list_sections(result["canvas_id"]))[0]
+    historical = copy.deepcopy(section.payload["spec"])
+    historical.pop("explicit_presentation")
+    await store.patch_section(section_id=section.id, patch={"spec": historical}, by_turn_id=ctx.turn_id)
     before = (await store.list_sections(result["canvas_id"]))[0]
     read = await read_chart({"section_id": before.id}, ctx)
     assert read["supported_kinds"] == ["line", "bar", "hbar", "table"]
@@ -499,8 +513,8 @@ async def test_layout_edit_preserves_all_composed_views(chart):
             "title": "Combined",
             "column_types": {"date": "date"},
             "views": [
-                {"id": "trend", "title": "Trend", "force_kind": "line", "series": ["value"]},
-                {"id": "values", "title": "Values", "force_kind": "table", "series": ["value"]},
+                {"id": "trend", "title": "Trend", "force_kind": "line", "axes": {"x": "date", "y": ["value"], "x_scale": "category"}, "group_by": []},
+                {"id": "values", "title": "Values", "force_kind": "table"},
             ],
         },
         ctx,

@@ -810,9 +810,11 @@ function EditColumnPanel({
     extraction_hint?: string;
     options?: string[] | null;
     cross_verify?: boolean;
+    navigation_role?: "none" | "description" | "topics";
   }) => void;
 }) {
   const t = useTranslations("kbMatrix");
+  const [navigationRole, setNavigationRole] = useState<"none" | "description" | "topics">(col.navigationRole ?? "none");
   const [name, setName] = useState(col.name);
   const [question, setQuestion] = useState(col.question ?? "");
   const [hint, setHint] = useState(col.extractionHint ?? "");
@@ -854,6 +856,8 @@ function EditColumnPanel({
             {t("cv_toggle")}
           </label>
         )}
+        <label className="mx-label">{t("navigation_role")}<select value={navigationRole} disabled={busy} onChange={(event) => setNavigationRole(event.target.value as "none" | "description" | "topics")}><option value="none">{t("navigation_none")}</option><option value="description">{t("navigation_description")}</option><option value="topics">{t("navigation_topics")}</option></select></label>
+        <div className="mx-fallback">{t("navigation_hint")}</div>
         <div className="mx-fallback" style={{ marginTop: 10 }}>{t("editcol_stale_note")}</div>
       </div>
       <div className="mx-panel-foot">
@@ -868,6 +872,7 @@ function EditColumnPanel({
               ...(hint.trim() !== (col.extractionHint ?? "") ? { extraction_hint: hint.trim() } : {}),
               ...(showOpts && optionsChanged ? { options } : {}),
               ...(cv !== !!col.crossVerify ? { cross_verify: cv } : {}),
+              ...(navigationRole !== (col.navigationRole ?? "none") ? { navigation_role: navigationRole } : {}),
             })
           }
         >

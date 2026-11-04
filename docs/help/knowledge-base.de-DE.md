@@ -2,6 +2,16 @@
 
 Nachdem Sie Material zur Wissensdatenbank hinzugefügt haben, sucht Bowra bei Fragen im Chat nach relevanten Inhalten. Dateien, die Sie nur speichern möchten, ohne sie in Chats durchsuchen zu lassen, gehören in **Bibliothek → Dateien**. Sie können sie später zur Wissensdatenbank hinzufügen.
 
+## Beschreibungen und Kategorien zur Quellennavigation
+
+Öffnen Sie die Details einer fertigen Datei. Berechtigte Dateiverantwortliche können eine manuelle Beschreibung und bis zu acht Kategorien pflegen; Kategorien haben höchstens zwei Ebenen. Die Kategoriesuche findet Einträge außerhalb der ersten Liste. Beschreibungen helfen bei der Suche und ersetzen keine Originalbelege.
+
+Manuelle Beschreibungen haben Vorrang. Leeren und Speichern stellt eine noch gültige automatische Beschreibung wieder her. Nach einer Quellenänderung muss eine veraltete manuelle Beschreibung geprüft und neu eingegeben werden. Statusaktualisierungen überschreiben keine ungespeicherten Entwürfe.
+
+Automatische Beschreibungen sind standardmäßig deaktiviert. Teaminhaber oder Administratoren wählen unter **Teameinstellungen → Modelle → Zuweisungen** das Modell **Quellenbeschreibungen**. Neue durchsuchbare Versionen können dann Beschreibungen aus begrenzten Auszügen erzeugen; Speichern verarbeitet keine älteren Dateien. Dateiverantwortliche können eine Beschreibung ausdrücklich generieren; dies verbraucht Modellguthaben. Fehler beeinträchtigen die bestehende Suche nicht. Vor erneutem Versuch aktualisieren, besonders bei unbekanntem Ausgang einer Modellanfrage.
+
+Im ursprünglichen Matrix-Spalteneditor kann der Zweck **Beschreibung** oder **Themen** gewählt werden. Nur passende vorhandene, unveränderte Ergebnisse werden im ursprünglichen Berechtigungsumfang verwendet. Dies startet keine Extraktion und veröffentlicht keine dateiweite Beschreibung. Agents erhalten ein kleines berechtigtes Quellenverzeichnis, können weitere Quellen suchen und lesen bei Bedarf Originalbelege. Fehlende Treffer beweisen keine Abwesenheit.
+
 ## Seitenaufbau
 
 Die Seite der Wissensdatenbank hat vier Inhaltsbereiche. Wählen Sie einen aus, um zu wechseln. Sie stehen als Tabs über dem Inhalt; in schmalen Fenstern werden sie zu einer seitlich wischbaren Reihe von Schaltflächen.
@@ -126,4 +136,4 @@ Im Upload-Dialog steht, warum eine Datei nicht hochgeladen wurde. Der Dialog ble
 - **„Upload wurde während der Übertragung abgebrochen“**: Die Verbindung wurde während der Übertragung unterbrochen, meist weil das Netzwerkgateway Ihres Unternehmens die Upload-Größe begrenzt. Wenn kleine Dateien funktionieren, große aber wiederholt fehlschlagen, bitten Sie die für die Bereitstellung zuständige Administration, das Limit zu erhöhen. Trat der Fehler nur einmal auf, wählen Sie **Erneut versuchen**, um dieselbe Datei noch einmal hochzuladen.
 - **„Netzwerkverbindung fehlgeschlagen“**: Der Upload scheiterte, bevor Daten übertragen wurden. Prüfen Sie Ihre Netzwerkverbindung und wählen Sie **Erneut versuchen**.
 
-Mit **Upload abbrechen** können Sie eine laufende Übertragung stoppen.
+Mit **Upload abbrechen** können Sie eine laufende Übertragung stoppen. Nach dem Aktualisieren oder Wiedergeben des Chats wird derselbe Status der Quellenänderung angezeigt.

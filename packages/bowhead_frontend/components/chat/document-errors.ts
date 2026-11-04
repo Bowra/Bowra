@@ -1,5 +1,10 @@
 /** Only reviewed, localized advice crosses the document error boundary. */
 const errors: Record<string, string> = {
+  document_word_unavailable: "error_word_unavailable",
+  document_word_method_unavailable: "error_word_method",
+  word_candidate_format_changed: "error_word_preservation",
+  word_candidate_structure_changed: "error_word_preservation",
+  word_candidate_target_unsupported: "error_word_preservation",
   document_canvas_unavailable: "error_canvas_source",
   document_canvas_source_unavailable: "error_canvas_source",
   document_canvas_input_unavailable: "error_canvas_source",

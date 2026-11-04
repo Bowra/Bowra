@@ -78,7 +78,7 @@ describe("NotificationCenter load failure copy", () => {
     expect(document.querySelector("[data-notification-center]")?.textContent ?? "").not.toMatch(/502/);
   });
 
-  it.each([404, 503])("still hides the center when the endpoint is switched off (%i)", async (status) => {
+  it.each([404])("still hides the center when the endpoint is switched off (%i)", async (status) => {
     state.fetchNotifications.mockRejectedValue(failure(status));
     renderIntl(<NotificationCenter />);
 

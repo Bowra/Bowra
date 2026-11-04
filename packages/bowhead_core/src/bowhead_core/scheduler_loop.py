@@ -34,6 +34,8 @@ from bowhead_core.scheduled_store import (
     ScheduledJobStore,
     ScheduledRunSourceError,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +366,7 @@ class SchedulerLoop:
     async def _list_active_due(self, *, now_iso: str) -> list[ScheduledJob]:
         import aiosqlite
 
-        async with aiosqlite.connect(self.store._db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.store._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_jobs "
@@ -385,11 +387,10 @@ class SchedulerLoop:
 
     async def _bump_failure_count(self, job: ScheduledJob) -> bool:
         """Increment failure_count; auto-pause at 3. Returns True if this run tripped the pause."""
-        import aiosqlite
 
         new_count = job.failure_count + 1
         new_status = "paused" if new_count >= 3 else job.status
-        async with aiosqlite.connect(self.store._db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.store._db_path, "execution")) as db:
             await db.execute(
                 "UPDATE scheduled_jobs SET failure_count = ?, status = ?, updated_at = ? WHERE id = ?",
                 (new_count, new_status, datetime.now(tz=UTC).isoformat(), job.id),
@@ -407,9 +408,8 @@ class SchedulerLoop:
     async def _reset_failure_count(self, job: ScheduledJob) -> None:
         if job.failure_count == 0:
             return
-        import aiosqlite
 
-        async with aiosqlite.connect(self.store._db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.store._db_path, "execution")) as db:
             await db.execute(
                 "UPDATE scheduled_jobs SET failure_count = 0, updated_at = ? WHERE id = ?",
                 (datetime.now(tz=UTC).isoformat(), job.id),

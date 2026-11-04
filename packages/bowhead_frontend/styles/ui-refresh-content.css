@@ -228,7 +228,7 @@
   line-height: 1.5;
 }
 /* Body 14 / 1.7 body colour (was 14.5 / 1.72 --c-ink-2); model output gets text-autospace */
-:root:root .canvas-report-article p:not(.v2-report-deck) {
+:root:root .canvas-report-article p:not(.v2-report-deck):not([data-chart-unit-note]) {
   color: var(--c-ink);
   font-size: var(--fs-content-body);
   line-height: var(--lh-content-body);

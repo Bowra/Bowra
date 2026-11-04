@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.release_skill_versions import skill_updates_conn
 from bowhead_core.skill_upload import bundle_sha256
 from bowhead_core.user_store import TeamSkill, UserStore
+from core_legacy_database import upgrade
 
 from bowhead_skill.catalog import builtin_catalog_dir
 
@@ -24,7 +24,7 @@ def _grant(kind: str, skill_id: str, name: str, revision: str) -> dict[str, obje
 @pytest.mark.asyncio
 async def test_skill_updates_list_skills_whose_approved_revision_changed(tmp_path):
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="Team", max_seats=2)

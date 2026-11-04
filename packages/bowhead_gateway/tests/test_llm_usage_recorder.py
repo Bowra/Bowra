@@ -181,6 +181,29 @@ async def test_empty_flush_is_noop(store: UserStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_drains_active_usage_after_a_filtered_batch() -> None:
+    class PrivacyFilteredStore:
+        def __init__(self) -> None:
+            self.saved: list[dict[str, object]] = []
+
+        async def record_llm_usage_events(self, rows: list[dict[str, object]]) -> int:
+            accepted = [row for row in rows if row.get("user_id") != "retired"]
+            self.saved.extend(accepted)
+            return len(accepted)
+
+    filtered = PrivacyFilteredStore()
+    recorder = LLMUsageRecorder(filtered)  # type: ignore[arg-type]
+    recorder._flush_batch = 1
+    recorder.sink(_record(user_id="retired"))
+    recorder.sink(_record(user_id="active"))
+    recorder.start()
+    await asyncio.sleep(0)
+    await recorder.stop()
+    assert [row["user_id"] for row in filtered.saved] == ["active"]
+    assert recorder.stats == {"buffered": 0, "written": 1, "dropped": 0}
+
+
+@pytest.mark.asyncio
 async def test_failed_flush_at_full_buffer_counts_the_displaced_records(store: UserStore) -> None:
     """★ 落库失败后 requeue：缓冲已满时 extendleft 会从右端挤掉最新记录，必须计入 dropped。
 

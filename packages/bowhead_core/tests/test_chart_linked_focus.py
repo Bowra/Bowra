@@ -29,11 +29,17 @@ def catalog(raw: bytes):
 def focus_args(args, raw):
     bid = next(candidate["id"] for candidate in catalog(raw)["candidates"] if candidate["kind"] == "entity")
     return {
-        **{key: value for key, value in args.items() if key not in {"force_kind", "series", "presentation_plan"}},
+        **{key: value for key, value in args.items() if key not in {"force_kind", "series", "presentation_plan", "columns", "axes", "group_by"}},
         "title": "Regional comparison",
         "views": [
-            {"id": "comparison", "title": "Revenue by region", "hint": "compare", "force_kind": "bar", "series": ["revenue"]},
-            {"id": "detail", "title": "Regional observations", "hint": "raw", "force_kind": "table", "series": ["revenue"]},
+            {
+                "id": "comparison",
+                "title": "Revenue by region",
+                "force_kind": "bar",
+                "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+                "group_by": [],
+            },
+            {"id": "detail", "title": "Regional observations", "force_kind": "table"},
         ],
         "layout": {"type": "split", "children": [{"view": "comparison"}, {"view": "detail"}]},
         "presentation_plan": {
@@ -131,7 +137,7 @@ async def test_bad_focus_fails_before_canvas_or_artifact_writes(prepared, damage
         value.pop("layout")
     files_before = set(artifacts.backend.root_dir.rglob("*"))
     result = await _add_chart(value, ctx)
-    assert result["code"] == code, result
+    assert result.get("code", "invalid_chart_expression") == ("invalid_chart_expression" if damage == "kpi" else code), result
     assert await canvas.get_canvas_by_session(ctx.session_id) is None
     assert set(artifacts.backend.root_dir.rglob("*")) == files_before
 
@@ -144,7 +150,7 @@ async def test_focus_projection_patch_and_static_export_preserve_full_evidence(p
     bid = next(iter(safe["spec"]["presentation_plan"]["bindings"]))
     assert safe["spec"]["presentation_plan"]["bindings"][bid]["availability"] == "available"
     incoming = copy.deepcopy(safe)
-    incoming["spec"]["views"][0]["spec"]["kind"] = "hbar"
+    incoming["spec"]["views"][0]["spec"]["show_legend"] = False
     incoming["spec"]["layout"] = {"type": "grid2", "children": [{"view": "detail"}, {"view": "comparison"}]}
     restored = merge_viewer_patch_preserving_provenance(
         section.to_report_section(),

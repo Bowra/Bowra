@@ -21,6 +21,7 @@ def test_upgrade_creates_all_targets_at_current_head(tmp_path) -> None:
             assert revision == (HEAD_REVISION,), target
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'users'").fetchone() == (1,)
+    with sqlite3.connect(tmp_path / TARGET_FILES["execution"]) as connection:
         decision_columns = {row[1] for row in connection.execute("PRAGMA table_info(turn_control_decisions)").fetchall()}
         assert {
             "requester_ref",
@@ -49,3 +50,12 @@ def test_upgrade_is_idempotent_for_existing_schema(tmp_path) -> None:
     upgrade(url)
 
     assert upgrade(url) == tuple(TARGET_FILES)
+
+
+def test_custom_core_filename_is_rejected_before_creating_another_database(tmp_path) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="migration-managed bowhead.db"):
+        upgrade(f"sqlite+aiosqlite:///{tmp_path / 'custom.db'}")
+    assert not (tmp_path / "bowhead.db").exists()
+    assert not (tmp_path / "custom.db").exists()

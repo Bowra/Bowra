@@ -27,9 +27,27 @@ In a follow-up, state the new question and which files to use. An Agent selected
 
 - After you send a message, the progress box above the answer shows the same information as before: the first line gives the current stage, the step number, and elapsed time; the next two lines show the steps just finished; the last line shows what's being done now. The box now has a lighter, thin border, the text uses the interface font, finished steps have a gray check, and steps with issues are marked in a warning color. Select the first line to see the full process; select it again to collapse it.
 - To stop an answer, select **Stop** at the bottom right of the composer (a gray button, so it's easy to tell apart from Send). The button changes to **Stopping…** until the task has actually ended.
-- When the answer is done, the progress collapses into one line, "N steps done". Select it to see the process again. If the task couldn't finish, the progress collapses into one line, "Not finished · steps done · time taken" ("3 of 5 steps" when the plan length is known); select it to see the whole process, and find the reason and any recovery action on the failure card below it.
+- When the answer is done, the progress collapses into one neutral line, "Execution ended", with the elapsed time. Select it to see the process again. If the task couldn't finish, the progress collapses into one line, "Not finished · steps done · time taken" ("3 of 5 steps" when the plan length is known); select it to see the whole process, and find the reason and any recovery action on the failure card below it.
 
-A failed step stays in the process history even if the task later finishes. The issue count shows steps that failed or partly completed; it does not count retries. When the turn finished and those issues did not affect the answer, the collapsed line says in grey "N steps were handled automatically and didn't affect the answer". A highlighted note appears only when unfinished steps may affect the answer; check the data the answer relies on.
+Expand the existing process to see business queries, reads, computations and result actions in their original order. Internal result packing and closeout corrections do not appear as separate finished steps. A batch lists its individual query outcomes once, while keeping successful results available. When these outcomes already explain the batch failure, it adds no duplicate generic error or diagnostic block; specific access/input problems and uncertain outcomes retain their original explanation. The execution-ended line does not claim every requested result was delivered: the answer explains actual missing work, uncertain results or required permissions/materials. A verified recovery needs no additional warning merely because an earlier attempt failed; an unrelated later success does not establish recovery.
+
+Step errors distinguish invalid inputs, unavailable resources, script failures, timeouts and unknown execution outcomes. When safe details are available, expand the error to see the affected field or missing script key, then follow the suggested action. An unknown outcome requires checking the original operation before repeating a write.
+
+When several data queries run together, a failure of every query marks the query
+step as failed. Mixed successful and failed queries mark it as partly completed;
+successful results remain available. An empty successful query is not a failure.
+Check which requested data is still missing before continuing; an optional query
+failure does not by itself mean the whole task failed.
+
+For the full script output, use the log download attached to its step. Internal logs do not appear as delivered work in Results.
+
+If a requested rejection test succeeds as expected and the remaining requested work is verified complete, the earlier failed attempt does not by itself mean the answer is incomplete. The original attempt can remain visible in the process.
+
+A finished run can still contain unfinished requested work. Delivery review is enabled by default. When active, the answer identifies work that remains unfulfilled or unverified while keeping confirmed results. A failed optional chart may be covered by an equivalent table; a different successful chart does not by itself establish that coverage.
+
+A partial result does not necessarily mean a run limit was reached. Read the recorded cause, outstanding work and next steps before continuing.
+
+If you explicitly ask to verify that an invalid operation fails, that observed failure can satisfy the test. It remains visible in the run history and does not count as successful delivery of other requested work.
 
 If the turn couldn't finish, the failure card explains the recorded cause. When the stage or cause is unknown, it says so. Follow the action shown: **Retry** attempts the same question again, while **Edit and send** restores it to the composer for a new request. An older failure may only restore the question for review. **Copy diagnostic information** helps an administrator investigate access, credit or configuration problems. **New session** stages the question in a new session. **Resume Plan**, when available, continues the same plan after checking its current version and Space; if that check fails, edit the request instead. A credit error identifies whose allowance needs attention; ask your administrator to check it before another attempt.
 
@@ -73,6 +91,10 @@ Web references in AI answers use a page title or source name when available. Lin
 Numbered citation markers in answers keep their position, number, and source. Sources you can't access, or that are no longer available, show an outlined marker with a strikethrough.
 
 When asking about code or a message format, paste the complete example and put it in a code block or inline backticks. When the answer quotes your example, its code formatting is preserved. Only an actual question card asks you to submit a clarification.
+
+An incorrectly formatted question may be corrected automatically before a card appears. If the conversation reports that a Tool was not executed, follow the displayed recovery action; text resembling a question card does not mean your answer was requested or saved.
+
+An operation request shown as text does not mean the operation ran. If the task reports that a required operation was not executed, the task is unfinished. Send a follow-up asking to continue the unfinished work; already completed results remain available.
 
 ## Cards that need your answer or approval
 
@@ -121,7 +143,9 @@ When an Agent has read your attached Word or PowerPoint file and asks a question
 - On a computer, the divider between the conversation and the results shows a handle when you hover over it; drag it to change the widths.
 - When the results area is enlarged, a narrow bar stays on the left; select it to return to the conversation. When the results area is closed, the narrow bar on the right reopens it.
 - On a phone, use **Chat / Results** at the top of the page to switch between the two. Results include data tables and files as well as reports.
-- In a file preview, **Full view** fills the browser content area on computers and phones. Select **Close** or press Esc to return; keyboard focus returns to **Full view**. For HTML, environments with interactive preview offer **Interactive / Reading**. Interactive supports offline page controls such as filtering, tabs, calculations, charts and games. External connections, submissions and dependencies are blocked. Reading shows available static content. Switching views or reloading restarts the page; Full view keeps its current state. If a script fails or a dependency is blocked, switch to Reading or download the unchanged original file.
+- In a file preview, **Full view** fills the browser content area on computers and phones. Select **Close** or press Esc to return; keyboard focus returns to **Full view**. For HTML, environments with interactive preview offer **Interactive / Reading**. Interactive supports offline page controls such as filtering, tabs, calculations, charts and games. External connections, submissions and dependencies are blocked. Reading shows available static content. Report contents links jump within the current preview, including in Full view. HTML file-delivery results can include basic structure findings; these do not prove that filtering, sorting or other interactions have been tested. Ask the Agent to fix reported issues and explain which interactions it actually verified. Switching views or reloading restarts the page; Full view keeps its current state. If a script fails or a dependency is blocked, switch to Reading or download the unchanged original file.
+
+HTML previews also offer **Stop interaction** and **Restart interaction**. Restarting resets local page state. If a page exceeds preview complexity or preparation limits, simplify it or download the original. Preview isolation does not impose a hard CPU or memory limit on your browser. Downloaded original HTML retains its scripts and can run outside preview restrictions when opened locally.
 
 Dragging files into the conversation, resizing and enlarging from the keyboard, and the dot for new results are described in [Drag and drop, shortcuts, and hints on the conversation page](conversation-workbench-actions.en-US.md).
 
@@ -175,7 +199,9 @@ Agent drafts save automatically, so closing the tab does not ask. Only while a s
 
 On desktop, open the report toolbar’s **More actions** menu and choose **Use narrower margins and wider text** to give the report more room. Choose **Restore standard margins and text width** to return to the default. This reading preference stays in the current browser and does not change the saved report or its exports. The divider between the conversation and Results can also be dragged to adjust their relative widths.
 
-Tables in chart answers, reports and browser exports use the same open reading surface without an outer frame. Choose Table through the existing chart-type button. Chart settings fit narrow screens and scroll when needed.
+New Tables show every source column in its original order unless you request exact columns and their order. Numeric labels such as Decile and constant fields stay included. For a plot, specify its type, axis fields and grouping, including no grouping when intended. Missing or mismatched fields require correction; the display does not silently substitute fields or reduce the selected data. An enabled legend retains an explicitly requested group even when there is only one group; you can still hide it.
+
+Tables in chart answers, reports and browser exports use the same open reading surface without an outer frame. Chart settings fit narrow screens and scroll when needed.
 
 Regional time-series figures can link the same period or original row across lines, scatter and Table. Narrowing the period keeps the saved series names and order; missing observations remain blank rather than showing zero. Ask about selected observations carries their complete original keys and exact values.
 
@@ -207,6 +233,7 @@ Regional time-series figures can link the same period or original row across lin
 - Dates already supplied as eight digits, such as `20261028`, can also be displayed with separators. Hover keeps the available source value and unit; a Table with otherwise indistinguishable unit columns keeps their original units.
 - You can also ask for a different number of decimal places on a chart or Table. For a percentage or currency, the Agent uses the known source meaning; changing display precision does not change the original values or units.
 - For a complete standalone chart with one measure, you can ask the Agent to switch between a line, bar, horizontal bar and Table. Some complex or incomplete figures cannot be switched through this edit and retain their current view.
+- A chart keeps the explicitly selected dataset. If the selected data cannot support the requested chart, the Agent must correct the chart or choose another source explicitly; the service does not silently substitute a different dataset.
 - If a chart edit cannot be completed, the Agent can retry it or explain the problem. During the same live turn, the report is protected from a replacement or rewrite used as a fallback; you can separately request a replacement in a new message.
 - If an AI-generated arrangement cannot be used, all valid charts appear vertically in order, retaining their measures, original values and sources. An unverifiable source or measure still needs correction; guessed values are not substituted.
 - In a linked figure, click or tap a point/bar or a Table row to highlight the same observation in its linked views. Focus the plot and use arrow keys to select, or press Enter/Space on a Table row. **Clear selection** or Esc clears focus. Selection stays local and does not save or run a query; reload or a data/revision change clears it. A selected observation outside another view's displayed range is indicated instead of invented. Report downloads keep the saved full scope.
@@ -247,3 +274,9 @@ Regional time-series figures can link the same period or original row across lin
 Prepared comparisons can show a range with independent current/reference points beside aligned data columns, or several series panels with shared scales. Click a row or point for exact original values and source details; keyboard users can press Enter on a row. Missing bounds do not become zeros. Scenario labels and result summaries describe supplied assumptions, not a forecast calculated by the chart. These views keep the familiar controls but prevent type changes or Top-N operations that would discard their meaning. Long interval tables and facets continue in reading order in document exports; an individual image states its displayed row scope.
 
 An available Agent may still need an optional Team service for a particular task. If image generation is not configured, you can continue editing or exporting an existing design. For a new poster needing a background, ask a Team administrator to configure image generation or supply a background image. The answer should explain the missing service; it does not mean the Agent is disabled.
+
+## Notifications and follow-ups
+
+The bell shows a number for items that need your action and a dot when there are only unread updates. Reading an unresolved action does not resolve it. Open the original item to answer or decide; archive hides its notification for you.
+
+If notification counts or the list cannot load, open the bell and select **Retry**. Previously confirmed counts may remain visible while the failure is shown. A failed read/archive or **Mark all read** leaves its previous state available for retry. Switching categories keeps the selected category's results together.

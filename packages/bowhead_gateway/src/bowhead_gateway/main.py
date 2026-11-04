@@ -17,12 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-import aiosqlite
 import anyio
 import structlog
 from bowhead_core.datarc_connection_store import DatarcConnectionStore
 from bowhead_core.env_utils import env_float
 from bowhead_core.skill_bridge import build_default_skill_stack, register_skill_tools
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -268,8 +268,22 @@ def _resolve_artifact_fetch_secret() -> str:
     return keys[0][1]
 
 
+def _sqlite_database_path(db_url: str) -> str:
+    return db_url.split("///", 1)[-1] if db_url.startswith("sqlite") else str(Path(".data/sqlite/bowhead.db").resolve())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from bowhead_core.sqlite_upgrade import runtime_shared_lease
+
+    directory = Path(_sqlite_database_path(get_settings().db_url)).resolve().parent
+    with runtime_shared_lease(directory):
+        async with _application_lifespan(app):
+            yield
+
+
+@asynccontextmanager
+async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     _configure_logging(settings.log_level, settings.log_format)
     log = structlog.get_logger()
@@ -343,7 +357,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ─── User Memory + Session Store（SQLite） ──────────────
     db_url = settings.db_url
     # Extract file paths from URLs such as sqlite+aiosqlite:////app/.data/sqlite/bowhead.db.
-    db_path = db_url.split("///", 1)[-1] if db_url.startswith("sqlite") else str(Path(".data/sqlite/bowhead.db").resolve())
+    db_path = _sqlite_database_path(db_url)
 
     from bowhead_core.installation import preflight_installation, read_installation
 
@@ -570,6 +584,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                                 count=len(recovered_after_cleanup),
                             )
                 await plan_store.recover_orphans()
+                lifecycle = getattr(app.state, "session_lifecycle_coordinator", None)
+                if lifecycle is not None:
+                    await lifecycle.resume_pending_canvas_deletions(limit=100)
                 await session_store.cleanup_chat_submission_protocol()
                 await session_store.cleanup_composer_telemetry_dedupe()
             except Exception as exc:
@@ -628,6 +645,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as _e:
         log.warning("session_store.composer_telemetry_cleanup_failed", error=str(_e))
     await canvas_store.initialize()
+    if app.state.session_lifecycle_coordinator is not None:
+        await app.state.session_lifecycle_coordinator.resume_pending_canvas_deletions(limit=100)
     # Canvas export reliability W1-E: immutable ExportSnapshot schema/store.
     # Candidate serialization happens outside writer locks; W1-F adds asset
     # metadata pins to the same validate-and-freeze transaction.
@@ -986,6 +1005,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     memory_candidate_store = MemoryCandidateStore(
         db_path=db_path,
         fingerprint_key=(_privacy_ledger_key or _artifact_fetch_secret),
+        connect_factory=diagnostic_connect,
     )
     await memory_candidate_store.initialize()
     personal_memory_governance_store = PersonalMemoryGovernanceStore(
@@ -1306,6 +1326,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from bowhead_core.agents.clarification_tool import register_clarification_tool
 
     register_clarification_tool(tool_registry)
+    from bowhead_core.agents.clarification_dismiss_tool import register_clarification_dismiss_tool
+
+    from bowhead_gateway.clarification_actions import GatewayClarificationActions
+
+    register_clarification_dismiss_tool(tool_registry, service=lambda: GatewayClarificationActions(app))
     from bowhead_core.agents.plan_propose_tool import register_plan_propose_tool
 
     register_plan_propose_tool(tool_registry)
@@ -1677,6 +1702,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # loudly. Assembly routers' declared identity (§3.2) actually blocks new bypasses; field removal supports this structurally.
     # Tests may still setattr independently (as poison doubles do).
     app.state.orchestrator = orchestrator
+    orchestrator._gateway_turn_tasks = {}
+    orchestrator._gateway_turns_stopping = False
     orchestrator.plan_store = plan_store  # type: ignore[attr-defined]  # planning-mode M1 (block 4)
     from bowhead_gateway.feishu.bridge import FeishuTurnBridge
     from bowhead_gateway.feishu.client import FeishuClient
@@ -2071,6 +2098,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     _team_kb_ingestion_gate = _TeamKbIngestionGate()
     app.state.team_kb_ingestion_gate = _team_kb_ingestion_gate
+    from bowhead_gateway.kb_source_navigation import current_description_assignment, description_loop
+
+    async def _description_assignment(team_id: str):
+        return await current_description_assignment(app, team_id)
+
     _team_kb_runtime_registry = _TeamKbRuntimeRegistry(
         persist_dir=_kb_chromadb_dir,
         files_store=_kb_files_store,
@@ -2085,6 +2117,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         active_per_row_tasks_ref=app.state.kb_per_row_tasks_by_file_id,
         ingestion_gate=_team_kb_ingestion_gate,
         ingestion_authorizer=ingestion_authorizer(app),
+        description_assignment_resolver=_description_assignment,
     )
     await _team_kb_runtime_registry.start_background()
     app.state.team_kb_runtime_registry = _team_kb_runtime_registry
@@ -2116,7 +2149,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         while await adopt_deleted_accounts(user_store):
             pass
     else:
-        async with aiosqlite.connect(db_path) as account_db:
+        async with diagnostic_connect(db_path) as account_db:
             async with account_db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_deletions'") as cursor:
                 has_account_deletions = await cursor.fetchone() is not None
             if has_account_deletions:
@@ -2446,7 +2479,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.access_control_store = access_control_store
     from bowhead_gateway.kb_authorization import kb_file_authorizer
 
-    _kb_authorizer = kb_file_authorizer(user_store, access_control_store)
+    _kb_authorizer = kb_file_authorizer(user_store, access_control_store, _kb_matrix_store)
     from bowhead_gateway.knowledge_management import KnowledgeManagementAccess
 
     orchestrator.knowledge_management_access = KnowledgeManagementAccess(app)
@@ -2515,6 +2548,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await KbMaintenanceStore(_kb_files_store._db_path).pause_interrupted()
     _kb_maintenance_task = asyncio.create_task(maintenance_loop(app), name="kb_source_maintenance")
+    _kb_description_task = asyncio.create_task(description_loop(app), name="kb_source_descriptions")
     app.state.kb_parse_recovery_task = asyncio.create_task(
         _kb_recover_unfinished_parses(),
         name="kb_parse_recovery",
@@ -3538,6 +3572,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        orchestrator._gateway_turns_stopping = True
         document_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await document_task
@@ -3582,6 +3617,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "terminal_writer.worker_drain_complete",
                 drained=workers_drained,
             )
+        from bowhead_gateway.turn_service import shutdown_turn_workers
+
+        await shutdown_turn_workers(orchestrator)
         log.info("gateway.stopping")
         _chat_submission_maintenance_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
@@ -3596,6 +3634,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _clarification_invalidation_publisher_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await _clarification_invalidation_publisher_task
+        _kb_description_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await _kb_description_task
         await ordered_turn_log_sink.drain()
         await app.state.llm_verification_runner.close()
         subagent_compatibility_task.cancel()
@@ -3819,7 +3860,7 @@ def create_app() -> FastAPI:
     # Starlette inserts each new user middleware at the front. Register from
     # inner to outer so the effective stack is:
     # RequestId → ConditionalHeaderCanonicalization → CORS → PublicEntry →
-    # PublicSlashRedirect → CommunitySetup → MemoryMutation → ExceptionMiddleware.
+    # CookieRequestSecurity → PublicSlashRedirect → CommunitySetup → MemoryMutation → ExceptionMiddleware.
     from bowhead_gateway.memory_mutation_context import (
         MemoryMutationContextMiddleware,
     )
@@ -3831,6 +3872,9 @@ def create_app() -> FastAPI:
     from bowhead_gateway.public_redirects import PublicSlashRedirectMiddleware
 
     app.add_middleware(PublicSlashRedirectMiddleware)
+    from bowhead_gateway.cookie_request_security import CookieRequestSecurityMiddleware
+
+    app.add_middleware(CookieRequestSecurityMiddleware)
     from bowhead_gateway.public_entry_context import PublicEntryContextMiddleware
 
     app.add_middleware(PublicEntryContextMiddleware)
@@ -4084,16 +4128,13 @@ def create_app() -> FastAPI:
     from bowhead_gateway.routes import access_control as access_control_routes
 
     app.include_router(access_control_routes.router, prefix="/api/v1", tags=["access-control"])
-    # content-permissions wave 1 — user-initiated Share API. The flag (default ON)
-    # gates the whole route group; per-kind the capability assets additionally
-    # follow their creation flags inside the adapter (tech-design §3/§5.1).
+    # Keep report grant inspection/revocation available while sharing is disabled.
     from bowhead_core.share_service import content_sharing_enabled
 
-    if content_sharing_enabled():
-        from bowhead_gateway.routes import shares as shares_routes
+    from bowhead_gateway.routes import shares as shares_routes
 
-        app.include_router(shares_routes.router, prefix="/api/v1/shares", tags=["sharing"])
-        # S6 principal picker (minimal member-readable directory), same lifecycle as shares.
+    app.include_router(shares_routes.router, prefix="/api/v1/shares", tags=["sharing"])
+    if content_sharing_enabled():
         app.include_router(shares_routes.directory_router, prefix="/api/v1/team", tags=["sharing"])
     # credential-readiness D5: capability contacts (minimal set of who can enable); no flag, always mounted.
     from bowhead_gateway.routes import team_capability_contacts as _capability_contacts_routes

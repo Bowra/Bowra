@@ -93,7 +93,7 @@ class TeamModelSettings(BaseModel):
     kb: dict[str, JsonValue] = Field(
         default_factory=dict,
         json_schema_extra=capability_config_schema("kb"),
-        description="Knowledge models, active embedding/rerank assignments and retrieval_top_k. Changing embeddings requires original reindex review. Index status is server-owned.",
+        description="Knowledge models, active embedding/rerank assignments and retrieval_top_k. Explicitly disabled optional assignments stay off during automatic assignment maintenance; source descriptions default to off. Changing embeddings requires original reindex review. Index status is server-owned.",
     )
     media: dict[str, JsonValue] = Field(
         default_factory=dict,
@@ -151,7 +151,7 @@ def project_config(config: dict[str, Any]) -> dict[str, Any]:
             ]
         providers[key] = item
     result = {"providers": providers, **{key: copy.deepcopy(config.get(key) or {}) for key in TeamModelSettings.model_fields if key != "providers"}}
-    result["kb"] = {key: value for key, value in result["kb"].items() if key in {"models", "active", "retrieval_top_k"}}
+    result["kb"] = {key: value for key, value in result["kb"].items() if key in {"models", "active", "retrieval_top_k", "auto_assign_disabled"}}
     # The original editor materializes empty assignment collections on load. They
     # describe the same setting and must not make an unchanged proposal look edited.
     for section in ("kb", "media", "search"):
@@ -193,10 +193,14 @@ def merge_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, An
         if key == "providers":
             continue
         if key == "kb":
-            if set(value) - {"models", "active", "retrieval_top_k"}:
+            if set(value) - {"models", "active", "retrieval_top_k", "auto_assign_disabled"}:
                 raise ValueError("Knowledge index state is server-owned.")
             result[key] = {
-                **{name: val for name, val in (current.get(key) or {}).items() if name not in {"models", "active", "retrieval_top_k"}},
+                **{
+                    name: val
+                    for name, val in (current.get(key) or {}).items()
+                    if name not in {"models", "active", "retrieval_top_k", "auto_assign_disabled"}
+                },
                 **copy.deepcopy(value),
             }
         else:
@@ -221,10 +225,15 @@ async def model_materialize(ctx: FormContext, patch: dict[str, Any]) -> Material
         candidate = merge_config(config, patch)
         if not runtime_parameter_changes_admitted(config, candidate):
             raise ValueError("Model runtime parameter editing is currently disabled.")
+        from bowhead_gateway.team_llm_assignment_service import prepare_assignment_changes
+
+        candidate, _ = await prepare_assignment_changes(db_path=ctx.deps["user_store"].db_path, team_id=ctx.team_id, current=config, draft=candidate)
         validate_v2_config(candidate, allow_unassigned_tiers=True)
     except (ValueError, TeamLlmConfigError) as exc:
         return MaterializeResult(normalized={}, issues=[FieldIssue("_root", "invalid_model_configuration", str(exc))])
-    return MaterializeResult(normalized=patch)
+    projected = project_config(candidate)
+    previous = project_config(config)
+    return MaterializeResult(normalized={key: value for key, value in projected.items() if key in patch or value != previous.get(key)})
 
 
 async def model_apply(ctx: FormContext, rows: list[dict[str, Any]], op: str):

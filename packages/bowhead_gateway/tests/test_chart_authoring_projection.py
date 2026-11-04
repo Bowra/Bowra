@@ -2,16 +2,34 @@
 
 from types import SimpleNamespace
 
+import jwt
+import pytest
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_gateway.chart_authoring_projection import project_chart_for_authoring
+
+TEST_JWT_SECRET = "synthetic-chart-projection-jwt-secret"
+
+
+@pytest.fixture(autouse=True)
+def viewer_signing_key(monkeypatch):
+    monkeypatch.setenv("BOWHEAD_JWT_SECRET", TEST_JWT_SECRET)
+
+
+def viewer_request(store, artifacts):
+    token = jwt.encode({"sub": "user"}, TEST_JWT_SECRET, algorithm="HS256")
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(canvas_store=store, artifact_store=artifacts, artifact_fetch_secret="secret")),
+        headers={"Authorization": "Bearer " + token},
+        cookies={},
+    )
 
 
 class ArtifactStore:
     def __init__(self):
         self.available = True
 
-    async def get_many(self, ids):
-        return [SimpleNamespace(id=item, status="ready") for item in ids] if self.available else []
+    async def get_many(self, ids, *, include_deleted=False):
+        return [SimpleNamespace(id=item, status="ready", created_by="user", workspace_id=None) for item in ids] if self.available else []
 
 
 async def test_current_projection_denies_missing_source_and_stale_section(tmp_path, monkeypatch):
@@ -40,9 +58,7 @@ async def test_current_projection_denies_missing_source_and_stale_section(tmp_pa
         },
     )
     artifacts = ArtifactStore()
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(canvas_store=store, artifact_store=artifacts, artifact_fetch_secret="secret"))
-    )
+    request = viewer_request(store, artifacts)
     authorized = await project_chart_for_authoring(request, "session", section)
     assert authorized and authorized["spec"]["rows"] == [{"amount": 42}]
     artifacts.available = False
@@ -74,9 +90,7 @@ async def test_python_artifact_with_datarc_workspace_context_keeps_source_access
     context = {"tool": "datarc", "context_id": "1", "context_name": "Example"}
     section = await store.append_section(canvas_id=canvas.id, kind="chart", payload={"spec": spec, "data_source": context})
     artifacts = ArtifactStore()
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(canvas_store=store, artifact_store=artifacts, artifact_fetch_secret="secret"))
-    )
+    request = viewer_request(store, artifacts)
     authorized = await project_chart_for_authoring(request, "session", section)
     assert authorized and authorized["spec"]["rows"] == [{"amount": 42}]
     assert authorized["data_source"]["access_state"] == "linked_unavailable"
@@ -127,15 +141,15 @@ async def test_calculated_chart_requires_both_original_and_derived_artifacts(tmp
         parent = original
         producer = "chart_calculation"
 
-        async def get_many(self, ids):
+        async def get_many(self, ids, *, include_deleted=False):
             return [
-                SimpleNamespace(id=item, status="ready", source=self.producer, derived_from=self.parent) for item in ids if item in self.available
+                SimpleNamespace(id=item, status="ready", source=self.producer, derived_from=self.parent, created_by="user", workspace_id=None)
+                for item in ids
+                if item in self.available
             ]
 
     artifacts = DerivedStore()
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(canvas_store=store, artifact_store=artifacts, artifact_fetch_secret="secret"))
-    )
+    request = viewer_request(store, artifacts)
     assert (await project_chart_for_authoring(request, "session", section))["spec"]["rows"] == [{"amount": 90000}]
     artifacts.available = {original}
     assert await project_chart_for_authoring(request, "session", section) is None

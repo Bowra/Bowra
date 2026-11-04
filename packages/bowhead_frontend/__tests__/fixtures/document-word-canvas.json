@@ -1,0 +1,423 @@
+{
+  "provenance": "Synthetic original service/SQL/blob reader projections; fixed scripts and explicitly stubbed rendering, not 116 or native-image acceptance.",
+  "source": {
+    "context": {
+      "userId": "u_doc",
+      "teamId": "team_doc",
+      "workspaceId": "ws_doc",
+      "authSessionGeneration": "word-test-auth",
+      "sessionId": "s_doc",
+      "jobId": "djob_f2d61f3038ea42788e7816b87ddaf9a4",
+      "instanceId": "word-test-view"
+    },
+    "review": {
+      "id": "djob_f2d61f3038ea42788e7816b87ddaf9a4",
+      "state": "review",
+      "origin_turn_id": "t_doc",
+      "request_text": "这是模板，保持格式替换本季度文字，仅生成Word源文档。",
+      "can_confirm": true,
+      "can_revise": true,
+      "usage": {
+        "settled_credits": 2,
+        "pending": false,
+        "settlement_pending": false
+      },
+      "error_code": null,
+      "question": null,
+      "draft_digest": "22dcbfa45c1992e50108624cdfccba96a080a86df88fc52ef6c0a4924e2b7751",
+      "updated_at": "2026-10-31T04:29:58.182750+00:00",
+      "draft": {
+        "code_sha256": "37bb0412bfb90bb7bec3f652471cde718c5aa961dc6d7e898ed437b2096f36ee",
+        "control_sha256": "a095a6d0072709cce994b4ccf0ab526b9e5604e707ea6b2f6cbc82873e1abc7b",
+        "descriptor": {
+          "format": "docx",
+          "pdf_name": "candidate.pdf",
+          "published_outputs": [
+            "source"
+          ],
+          "source_name": "candidate.docx"
+        },
+        "execution_run_id": "6bb23e79ae9db95e91ee4617b6d135dc8f48f14d301fe8dcb8e1d20134bd6551",
+        "files": {
+          "candidate.docx": {
+            "artifact_id": "art_41314bebf3bd438880da542510a2b1f5",
+            "sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad"
+          },
+          "candidate.pdf": {
+            "artifact_id": "art_1d319c2b96f54995b397f29131c4b591",
+            "sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85"
+          },
+          "page-1.png": {
+            "artifact_id": "art_02951e858fbe4d41a4c482a37188ac48",
+            "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+          }
+        },
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "authoring_draft",
+        "manifest": {
+          "candidate_block_count": 12,
+          "candidate_page_count": 1,
+          "candidate_sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad",
+          "changes": [
+            {
+              "after": "Northstar / 2030 Q4 / unchanged",
+              "before": "Acme / 2030 Q4 / unchanged",
+              "evidence": [],
+              "location": {
+                "block_id": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686:word/document.xml#paragraph:0",
+                "block_index": 0,
+                "column": null,
+                "kind": "word_block",
+                "part": "word/document.xml",
+                "row": null,
+                "sections": [],
+                "story": "body",
+                "table_id": null
+              }
+            }
+          ],
+          "comparison": "source_preserving_word_text",
+          "limitations": [
+            "Text changes are observed facts, not approval of business relevance or values.",
+            "Source block positions are not rendered page numbers; Word text may reflow."
+          ],
+          "retained_unsupported_text": [],
+          "schema_version": 3,
+          "source_block_count": 12,
+          "source_sha256": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686"
+        },
+        "output_stem": "report - Updated",
+        "parent_sha256": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686",
+        "preview": {
+          "declared_font_fallbacks": [],
+          "native_word_certified": false,
+          "page_count": 1,
+          "pages": [
+            {
+              "name": "page-1.png",
+              "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+            }
+          ],
+          "pdf_sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85",
+          "profile": "ordinary-docx-preview-v1",
+          "source_sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad",
+          "text_and_geometry": "visible_page_bounds_and_body_character_coverage"
+        },
+        "profile": "docx-script-worker-v1",
+        "requires_full_review": true,
+        "semantic_status": "unapproved"
+      },
+      "draft_version": 1
+    },
+    "published": {
+      "id": "djob_f2d61f3038ea42788e7816b87ddaf9a4",
+      "state": "published",
+      "origin_turn_id": "t_doc",
+      "request_text": "这是模板，保持格式替换本季度文字，仅生成Word源文档。",
+      "can_confirm": true,
+      "can_revise": false,
+      "usage": {
+        "settled_credits": 2,
+        "pending": false,
+        "settlement_pending": false
+      },
+      "error_code": null,
+      "question": null,
+      "draft_digest": "22dcbfa45c1992e50108624cdfccba96a080a86df88fc52ef6c0a4924e2b7751",
+      "updated_at": "2026-10-31T04:29:58.232260+00:00",
+      "draft": {
+        "code_sha256": "37bb0412bfb90bb7bec3f652471cde718c5aa961dc6d7e898ed437b2096f36ee",
+        "control_sha256": "a095a6d0072709cce994b4ccf0ab526b9e5604e707ea6b2f6cbc82873e1abc7b",
+        "descriptor": {
+          "format": "docx",
+          "pdf_name": "candidate.pdf",
+          "published_outputs": [
+            "source"
+          ],
+          "source_name": "candidate.docx"
+        },
+        "execution_run_id": "6bb23e79ae9db95e91ee4617b6d135dc8f48f14d301fe8dcb8e1d20134bd6551",
+        "files": {
+          "candidate.docx": {
+            "artifact_id": "art_41314bebf3bd438880da542510a2b1f5",
+            "sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad"
+          },
+          "candidate.pdf": {
+            "artifact_id": "art_1d319c2b96f54995b397f29131c4b591",
+            "sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85"
+          },
+          "page-1.png": {
+            "artifact_id": "art_02951e858fbe4d41a4c482a37188ac48",
+            "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+          }
+        },
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "authoring_draft",
+        "manifest": {
+          "candidate_block_count": 12,
+          "candidate_page_count": 1,
+          "candidate_sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad",
+          "changes": [
+            {
+              "after": "Northstar / 2030 Q4 / unchanged",
+              "before": "Acme / 2030 Q4 / unchanged",
+              "evidence": [],
+              "location": {
+                "block_id": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686:word/document.xml#paragraph:0",
+                "block_index": 0,
+                "column": null,
+                "kind": "word_block",
+                "part": "word/document.xml",
+                "row": null,
+                "sections": [],
+                "story": "body",
+                "table_id": null
+              }
+            }
+          ],
+          "comparison": "source_preserving_word_text",
+          "limitations": [
+            "Text changes are observed facts, not approval of business relevance or values.",
+            "Source block positions are not rendered page numbers; Word text may reflow."
+          ],
+          "retained_unsupported_text": [],
+          "schema_version": 3,
+          "source_block_count": 12,
+          "source_sha256": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686"
+        },
+        "output_stem": "report - Updated",
+        "parent_sha256": "a3f258971cd6c5a645f38cb573732607ac44a16ff87ab17649333a78f9b42686",
+        "preview": {
+          "declared_font_fallbacks": [],
+          "native_word_certified": false,
+          "page_count": 1,
+          "pages": [
+            {
+              "name": "page-1.png",
+              "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+            }
+          ],
+          "pdf_sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85",
+          "profile": "ordinary-docx-preview-v1",
+          "source_sha256": "558203d32c451b4dcb04b9bff4f776ead5f7be0943138209fbeed6e399bae2ad",
+          "text_and_geometry": "visible_page_bounds_and_body_character_coverage"
+        },
+        "profile": "docx-script-worker-v1",
+        "requires_full_review": true,
+        "semantic_status": "unapproved"
+      },
+      "draft_version": 1
+    }
+  },
+  "source_pdf": {
+    "context": {
+      "userId": "u_doc",
+      "teamId": "team_doc",
+      "workspaceId": "ws_doc",
+      "authSessionGeneration": "word-test-auth",
+      "sessionId": "s_doc",
+      "jobId": "djob_0a8ab221232d4cfc99c8a72c3bae3f25",
+      "instanceId": "word-test-view"
+    },
+    "review": {
+      "id": "djob_0a8ab221232d4cfc99c8a72c3bae3f25",
+      "state": "review",
+      "origin_turn_id": "t_doc",
+      "request_text": "这是模板，保持格式替换本季度文字，并给我Word源文档和PDF。",
+      "can_confirm": true,
+      "can_revise": true,
+      "usage": {
+        "settled_credits": 2,
+        "pending": false,
+        "settlement_pending": false
+      },
+      "error_code": null,
+      "question": null,
+      "draft_digest": "9b87b3612b0fcb06d9df3e6e03b823ce305f88acce41439791341f991a1c0bc3",
+      "updated_at": "2026-10-31T04:29:59.644834+00:00",
+      "draft": {
+        "code_sha256": "99833c34e55ecbcfc790a000cd1c6140f1c1867e53a434c7b4309e315062735b",
+        "control_sha256": "dbeafe1bf71b5b8f3669754151c2ba04eef7de1850f6dad92bcb3f510d6f3533",
+        "descriptor": {
+          "format": "docx",
+          "pdf_name": "candidate.pdf",
+          "published_outputs": [
+            "source",
+            "pdf"
+          ],
+          "source_name": "candidate.docx"
+        },
+        "execution_run_id": "124472f7a3cd8ca7c2bf8942ca4900a298ce233b8b86189ddae280066ef22564",
+        "files": {
+          "candidate.docx": {
+            "artifact_id": "art_bbc4b1b86c4142978cf7dabc7f5e7c8b",
+            "sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0"
+          },
+          "candidate.pdf": {
+            "artifact_id": "art_8f922e3d23004df6aa7530f37e94647b",
+            "sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85"
+          },
+          "page-1.png": {
+            "artifact_id": "art_3bbd78cea1e54f0e8db68ddf47514419",
+            "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+          }
+        },
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "authoring_draft",
+        "manifest": {
+          "candidate_block_count": 12,
+          "candidate_page_count": 1,
+          "candidate_sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0",
+          "changes": [
+            {
+              "after": "Northstar / 2030 Q4 / unchanged",
+              "before": "Acme / 2030 Q4 / unchanged",
+              "evidence": [],
+              "location": {
+                "block_id": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8:word/document.xml#paragraph:0",
+                "block_index": 0,
+                "column": null,
+                "kind": "word_block",
+                "part": "word/document.xml",
+                "row": null,
+                "sections": [],
+                "story": "body",
+                "table_id": null
+              }
+            }
+          ],
+          "comparison": "source_preserving_word_text",
+          "limitations": [
+            "Text changes are observed facts, not approval of business relevance or values.",
+            "Source block positions are not rendered page numbers; Word text may reflow."
+          ],
+          "retained_unsupported_text": [],
+          "schema_version": 3,
+          "source_block_count": 12,
+          "source_sha256": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8"
+        },
+        "output_stem": "report - Updated",
+        "parent_sha256": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8",
+        "preview": {
+          "declared_font_fallbacks": [],
+          "native_word_certified": false,
+          "page_count": 1,
+          "pages": [
+            {
+              "name": "page-1.png",
+              "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+            }
+          ],
+          "pdf_sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85",
+          "profile": "ordinary-docx-preview-v1",
+          "source_sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0",
+          "text_and_geometry": "visible_page_bounds_and_body_character_coverage"
+        },
+        "profile": "docx-script-worker-v1",
+        "requires_full_review": true,
+        "semantic_status": "unapproved"
+      },
+      "draft_version": 1
+    },
+    "published": {
+      "id": "djob_0a8ab221232d4cfc99c8a72c3bae3f25",
+      "state": "published",
+      "origin_turn_id": "t_doc",
+      "request_text": "这是模板，保持格式替换本季度文字，并给我Word源文档和PDF。",
+      "can_confirm": true,
+      "can_revise": false,
+      "usage": {
+        "settled_credits": 2,
+        "pending": false,
+        "settlement_pending": false
+      },
+      "error_code": null,
+      "question": null,
+      "draft_digest": "9b87b3612b0fcb06d9df3e6e03b823ce305f88acce41439791341f991a1c0bc3",
+      "updated_at": "2026-10-31T04:29:59.694246+00:00",
+      "draft": {
+        "code_sha256": "99833c34e55ecbcfc790a000cd1c6140f1c1867e53a434c7b4309e315062735b",
+        "control_sha256": "dbeafe1bf71b5b8f3669754151c2ba04eef7de1850f6dad92bcb3f510d6f3533",
+        "descriptor": {
+          "format": "docx",
+          "pdf_name": "candidate.pdf",
+          "published_outputs": [
+            "source",
+            "pdf"
+          ],
+          "source_name": "candidate.docx"
+        },
+        "execution_run_id": "124472f7a3cd8ca7c2bf8942ca4900a298ce233b8b86189ddae280066ef22564",
+        "files": {
+          "candidate.docx": {
+            "artifact_id": "art_bbc4b1b86c4142978cf7dabc7f5e7c8b",
+            "sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0"
+          },
+          "candidate.pdf": {
+            "artifact_id": "art_8f922e3d23004df6aa7530f37e94647b",
+            "sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85"
+          },
+          "page-1.png": {
+            "artifact_id": "art_3bbd78cea1e54f0e8db68ddf47514419",
+            "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+          }
+        },
+        "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "authoring_draft",
+        "manifest": {
+          "candidate_block_count": 12,
+          "candidate_page_count": 1,
+          "candidate_sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0",
+          "changes": [
+            {
+              "after": "Northstar / 2030 Q4 / unchanged",
+              "before": "Acme / 2030 Q4 / unchanged",
+              "evidence": [],
+              "location": {
+                "block_id": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8:word/document.xml#paragraph:0",
+                "block_index": 0,
+                "column": null,
+                "kind": "word_block",
+                "part": "word/document.xml",
+                "row": null,
+                "sections": [],
+                "story": "body",
+                "table_id": null
+              }
+            }
+          ],
+          "comparison": "source_preserving_word_text",
+          "limitations": [
+            "Text changes are observed facts, not approval of business relevance or values.",
+            "Source block positions are not rendered page numbers; Word text may reflow."
+          ],
+          "retained_unsupported_text": [],
+          "schema_version": 3,
+          "source_block_count": 12,
+          "source_sha256": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8"
+        },
+        "output_stem": "report - Updated",
+        "parent_sha256": "a96cc142e6dc7a1dc0b83b61f53f35d7cc074dee376663c7f7241ac6218908f8",
+        "preview": {
+          "declared_font_fallbacks": [],
+          "native_word_certified": false,
+          "page_count": 1,
+          "pages": [
+            {
+              "name": "page-1.png",
+              "sha256": "f3f7bdb0930a97b2fc37f53eca6bdb485cf86795f3b93c4643d210d195149e65"
+            }
+          ],
+          "pdf_sha256": "0b44fd1e41a2d5e57855d810aa742119a5d6eaf6445c82b08be033e2a86f9b85",
+          "profile": "ordinary-docx-preview-v1",
+          "source_sha256": "277de12c7f8d32d43b4541c72877858e0009f7f4ff1b994c571dacc0fed0bda0",
+          "text_and_geometry": "visible_page_bounds_and_body_character_coverage"
+        },
+        "profile": "docx-script-worker-v1",
+        "requires_full_review": true,
+        "semantic_status": "unapproved"
+      },
+      "draft_version": 1
+    }
+  }
+}

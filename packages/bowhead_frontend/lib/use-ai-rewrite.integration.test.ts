@@ -13,6 +13,7 @@ import type { ReportSection } from "./types";
 import { useDebouncedSync } from "./use-debounced-sync";
 import { AiRewriteDecorationsExtension } from "./canvas-pm-adapter/extensions/ai-rewrite-decorations";
 import { useAIRewrite } from "./use-ai-rewrite";
+import { blockRewriteScopes } from "./ai-rewrite-scope";
 
 vi.mock("./metrics", () => ({ trackInteraction: vi.fn() }));
 vi.mock("./canvas-pm-adapter/canvas-patch", () => ({
@@ -320,6 +321,44 @@ it("refuses cross-section and embedded chart selections before sending a request
   expect(result.current.state.error).toBe("invalid_request");
   expect(fetchMock).not.toHaveBeenCalled();
   expect(editor.getJSON()).toEqual(withFigure);
+});
+
+it("reports admission immediately and preserves the same preview and acceptance lifecycle", async () => {
+  const { editor, result } = setup(frame("done", { final_text: "Updated" }));
+  let admitted = false;
+  act(() => { admitted = result.current.tryStart("custom", "Explain", { from: 7, to: 15 }); });
+  expect(admitted).toBe(true);
+  await waitFor(() => expect(result.current.state.reviewing).toBe(true));
+  expect(editor.getText()).toBe("Alpha selected omega");
+  act(() => { expect(result.current.tryStart("custom", "Explain", { from: 7, to: 15 })).toBe(false); });
+  act(() => result.current.accept());
+  expect(editor.getText()).toBe("Alpha Updated omega");
+});
+
+it.each(["First item", "Nested item", "Quoted prose"])("accepts the %s scope without flattening its structure or figure", async (text) => {
+  const editor = canvasEditor();
+  const source: ReportSection[] = [
+    { id: "sec_edit", kind: "narrative", markdown: "[figure:sec_chart]\n\n- First item\n  - Nested item\n\n> Quoted prose", rev: 1 },
+    { id: "sec_keep", kind: "narrative", markdown: "Keep this section.", rev: 1 },
+  ];
+  editor.commands.setContent(canvasToPMDoc(source));
+  const original = editor.getJSON();
+  const scope = blockRewriteScopes(editor, "sec_edit").scopes.find((entry) => entry.text === text)!;
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(frame("done", { final_text: "Updated passage" }), { status: 200 })));
+  const { result } = renderHook(() => useAIRewrite({ editor, canvasId: "cv_nested", useMock: false }));
+  await act(async () => { await result.current.start("custom", "Explain", scope); });
+  expect(result.current.state.reviewing).toBe(true);
+  expect(editor.getJSON()).toEqual(original);
+  act(() => result.current.accept());
+  const accepted = editor.getJSON();
+  expect(accepted.content![0].content![0]).toEqual(original.content![0].content![0]);
+  expect(accepted.content![1]).toEqual(original.content![1]);
+  const patches = pmDocToSections(accepted, source);
+  expect(patches.find((patch) => patch.sectionId === "sec_edit")).toMatchObject({ changed: true, patch: { markdown: expect.stringContaining("Updated passage") } });
+  expect(editor.state.doc.child(0).child(1).type.name).toBe("bulletList");
+  expect(editor.state.doc.child(0).child(2).type.name).toBe("blockquote");
+  act(() => { editor.commands.undo(); });
+  expect(editor.getJSON()).toEqual(original);
 });
 
 it("parses split UTF-8 and CRLF frames without changing literal output", async () => {

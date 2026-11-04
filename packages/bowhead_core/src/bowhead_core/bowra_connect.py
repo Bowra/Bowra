@@ -9,11 +9,12 @@ from typing import Any
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.llm_config_crypto import decrypt_llm_config, encrypt_llm_config
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 class BowraConnectStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def put(self, *, team_id: str, user_id: str, kind: str, payload: dict[str, Any]) -> str:
         sealed = encrypt_llm_config(payload)

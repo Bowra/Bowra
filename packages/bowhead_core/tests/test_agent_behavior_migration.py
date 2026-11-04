@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 
 from bowhead_core import migrations
 
@@ -25,7 +26,7 @@ def _upgrade_to(db_path: Path, revision: str) -> None:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, revision)
+    command.upgrade(config, SQLITE_LEGACY_REVISION if revision == "head" else revision)
 
 
 def _insert_revision_fixtures(connection: sqlite3.Connection) -> None:
@@ -109,7 +110,7 @@ def test_0050_adds_empty_immutable_behavior_sidecars(tmp_path: Path) -> None:
         }
         assert connection.execute("SELECT count(*) FROM team_subagent_revision_behavior").fetchone() == (0,)
         assert connection.execute("SELECT count(*) FROM system_agent_revision_behavior").fetchone() == (0,)
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (SQLITE_LEGACY_REVISION,)
 
     assert {"team_subagent_revision_behavior", "system_agent_revision_behavior"} <= tables
     assert {

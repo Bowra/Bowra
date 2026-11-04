@@ -25,6 +25,7 @@ import { countStepIssues, isRecoverableStepFailure } from "./self-healing";
 import { getCurrentLocale } from "@/lib/locale";
 import { TOOL_CATALOG_KEYS, getToolMeta, writingDisplayKey } from "./tool-catalog";
 import type { StepView } from "./types";
+import { isInternalCloseoutStep } from "./step-view";
 
 /** Total band rows (2 historical + 1 current), the three in always three rows. */
 export const BAND_ROWS = 3;
@@ -834,7 +835,7 @@ export function buildBandModel({
   );
 
   // Count observed failed/partial steps, including hard failures; no retry receipt is inferred.
-  const issueCount = countStepIssues(steps);
+  const issueCount = countStepIssues(steps.filter((step) => !isInternalCloseoutStep(step)));
   // Independent terminal rows are **omitted** for successful peers with child steps (already represented by green steps),
   // or success carried by rewritten spawn. Failures always receive rows.
   const ownedPeerIds = new Set(
@@ -939,7 +940,7 @@ export function buildBandModel({
     }
     return rowOf(st);
   };
-  const tail = mergeTimeline(others, peerRows)
+  const tail = mergeTimeline(others.filter((step) => step.state === "active" || !isInternalCloseoutStep(step)), peerRows)
     .slice(-HISTORY_ROWS)
     .map((it) => (it.kind === "step" ? rowForStep(it.step) : it.row));
   const history: BandRow[] = [];

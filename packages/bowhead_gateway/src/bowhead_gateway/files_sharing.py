@@ -8,8 +8,7 @@
   · **只读共享**：被分享方能看能下载，不能删/改分类/加知识库。
   · **运行数据与知识库文件不参与**：前者是 agent 副产物（共享只有噪音），
     后者有自己的 scope 体系（`kb_files.scope`），两套语义不能纠缠。
-  · **无 feature flag**：本系统用户基数小（单机 prod），灰度放量无从谈起；
-    本实现无 schema 变更，镜像 revert 即完全回退，flag 的边际价值不抵其分叉成本。
+  Deployment sharing policy gates grant-derived reads; owner reads are separate.
 """
 
 from __future__ import annotations
@@ -70,7 +69,9 @@ async def shared_artifact_ids(
     单次批量查询（`granted_resource_ids` 一条 SQL），不做 per-row 判定——
     列表是热路径。缺 store / 缺上下文时返回空集（零开销）。
     """
-    if access_store is None or not team_id or not user_id:
+    from bowhead_core.share_service import content_sharing_enabled
+
+    if not content_sharing_enabled() or access_store is None or not team_id or not user_id:
         return frozenset()
     try:
         return await access_store.granted_resource_ids(

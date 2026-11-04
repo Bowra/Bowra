@@ -1,12 +1,16 @@
-# Instructions de l’espace
+# Consignes de travail de l’IA
 
-Les instructions de l’espace sont un court texte que suit chaque conversation de l’espace. Utilisez-les pour ce que chacun devrait sinon répéter : à qui s’adressent les réponses, quelles comparaisons montrer par défaut, le ton ou la longueur souhaités, ou le contexte du travail de l’espace. Elles s’appliquent à tous les membres de l’espace et à tous les Agents qui y travaillent, y compris les Agents intégrés et les Agents d’équipe.
+Les consignes de travail de l’ia sont un court texte que suit chaque conversation de l’espace. Utilisez-les pour ce que chacun devrait sinon répéter : à qui s’adressent les réponses, quelles comparaisons montrer par défaut, le ton ou la longueur souhaités, ou le contexte du travail de l’espace. Elles s’appliquent à tous les membres de l’espace et à tous les Agents qui y travaillent, y compris les Agents intégrés et les Agents d’équipe.
+
+## Usage et périmètre
+
+La **description** dans Général présente l’usage de l’espace. Les **consignes de travail de l’IA** définissent les exigences par défaut : définitions métier, public visé, comparaisons et style de rédaction. Elles concernent tous les membres et Agents IA travaillant dans cet espace, sans modifier les autres espaces. Les changements prennent effet au prochain message ; une réponse déjà en cours conserve sa version initiale. Les demandes précises de la conversation en cours sont prioritaires.
 
 ## Rédiger ou modifier les instructions
 
 Les administrateurs d’espace et les administrateurs d’équipe peuvent modifier les instructions. Un administrateur d’équipe n’a pas besoin de rejoindre l’espace.
 
-1. En tant qu’administrateur d’espace, ouvrez l’espace et choisissez **Paramètres de l’espace → Instructions**. En tant qu’administrateur d’équipe, ouvrez **Paramètres de l’équipe → Espaces**, ouvrez le menu **Autres actions** de l’espace et choisissez **Instructions**.
+1. En tant qu’administrateur d’espace, ouvrez l’espace et choisissez **Paramètres de l’espace → Consignes de travail de l’IA**. En tant qu’administrateur d’équipe, ouvrez **Paramètres de l’équipe → Espaces**, ouvrez le menu **Autres actions** de l’espace et choisissez **Consignes de travail de l’IA**.
 2. Rédigez les instructions en langage courant, par exemple : « Les réponses s’adressent aux responsables commerciaux régionaux. Comparer par défaut avec le même mois de l’année précédente et garder des synthèses courtes. »
 3. Sélectionnez **Enregistrer**.
 
@@ -22,9 +26,9 @@ Chaque enregistrement est conservé comme une version. Dans **Historique des ver
 
 ## Bon à savoir
 
-- La demande d’un membre dans une conversation et sa mémoire personnelle priment, pour ce membre, sur les instructions de l’espace.
+- La demande d’un membre dans une conversation et sa mémoire personnelle priment, pour ce membre, sur les consignes de travail de l’ia.
 - La limite est de 6 000 caractères. Un texte plus long ne peut pas être enregistré ; la page affiche la longueur actuelle.
 - Si un autre administrateur enregistre pendant votre modification, votre enregistrement est arrêté pour que sa modification ne soit pas écrasée sans que vous le sachiez. Votre texte reste dans l’éditeur et l’historique des versions affiche sa modification ; vérifiez-la, puis enregistrez à nouveau si votre texte doit la remplacer.
 - Les instructions d’un espace archivé ne peuvent pas être modifiées avant la restauration de l’espace.
-- Les évaluations de versions d’Agent n’utilisent pas les instructions de l’espace ; leurs résultats montrent donc le comportement propre de l’Agent.
+- Les évaluations de versions d’Agent n’utilisent pas les consignes de travail de l’ia ; leurs résultats montrent donc le comportement propre de l’Agent.
 - Les membres qui ne sont pas administrateurs de l’espace ne peuvent pas modifier les instructions. Si quelque chose doit changer, contactez un administrateur de l’espace ou proposez-le dans une conversation pour qu’il arrive dans la boîte à suggestions.

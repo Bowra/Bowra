@@ -18,11 +18,13 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.artifact_store import ArtifactStore
+from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE, draft_source_name, source_mime, source_name, word_descriptor
 from bowhead_core.documents.executor import WorkerResult
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.retention import INTERNAL_PRODUCER
 from bowhead_core.documents.store import _authorize, _command_id, _digest, _json
 from bowhead_core.rate_card import RATE_CARD_VERSION
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 ACTIVE = ("preparing", "planning", "rendering")
 PUBLIC_PRODUCER = "template_document_v1"
@@ -36,7 +38,7 @@ async def _scope(db, scope: DocumentScope, job_id: str, *, write: bool):
     await _authorize(db, scope, write=write)
     db.row_factory = aiosqlite.Row
     async with db.execute(
-        """SELECT j.*,COALESCE(dc.instruction,u.user_text) AS request_text,w.status AS space_status,wm.role AS space_role FROM document_jobs j JOIN sessions s ON s.id=j.session_id
+        """SELECT j.*,dc.job_id AS continuation_job_id,COALESCE(dc.instruction,u.user_text) AS request_text,w.status AS space_status,wm.role AS space_role FROM document_jobs j JOIN sessions s ON s.id=j.session_id
         JOIN chat_turn_user_sources u ON u.turn_id=j.origin_turn_id JOIN workspaces w ON w.id=j.workspace_id
         JOIN workspace_members wm ON wm.workspace_id=j.workspace_id AND wm.user_id=j.requested_by
         LEFT JOIN document_continuations dc ON dc.job_id=j.id
@@ -47,6 +49,11 @@ async def _scope(db, scope: DocumentScope, job_id: str, *, write: bool):
         row = await cursor.fetchone()
     if row is None:
         raise DocumentRequestError("document_not_found")
+    from bowhead_core.documents.task_sources import job_task_source_in_tx
+
+    material = await job_task_source_in_tx(db, job=row)
+    if material and row["continuation_job_id"] is None:
+        return dict(row) | {"request_text": material[2].user_text + "\n\n" + material[1].user_text}
     return row
 
 
@@ -164,7 +171,7 @@ def _projection(job, execution) -> dict:
 class DocumentDeliveryStore:
     def __init__(self, artifacts: ArtifactStore):
         self.artifacts = artifacts
-        self.path = artifacts.db_path
+        self.path = domain_database_path(artifacts.db_path, "execution")
 
     async def claim(self, *, scope: DocumentScope, job_id: str) -> str | None:
         async with open_shared_ctx(self.path) as db:
@@ -225,7 +232,7 @@ class DocumentDeliveryStore:
                 WHERE f.cleanup_after<=? AND julianday(e.updated_at)<julianday('now','-1 day') AND (
                   e.state IN ('failed','cancelled') OR (e.state='published' AND f.name LIKE 'page-%.png'
                     AND NOT EXISTS(SELECT 1 FROM document_draft_files p JOIN artifacts a ON a.id=p.artifact_id
-                      WHERE p.job_id=f.job_id AND p.name='candidate.pptx')))
+                      WHERE p.job_id=f.job_id AND p.name=CASE (SELECT profile FROM document_dispatches WHERE job_id=f.job_id) WHEN 'docx-script-worker-v1' THEN 'candidate.docx' ELSE 'candidate.pptx' END)))
                 AND NOT EXISTS(SELECT 1 FROM document_revision_inputs i JOIN document_jobs j ON j.id=i.job_id
                   WHERE i.artifact_id=f.artifact_id AND j.status='queued')
                 ORDER BY f.cleanup_after,f.artifact_id LIMIT 100""",
@@ -234,8 +241,15 @@ class DocumentDeliveryStore:
                 files = await cursor.fetchall()
             for artifact_id, _ in files:
                 await db.execute("UPDATE document_draft_files SET cleanup_after=? WHERE artifact_id=?", (now + 86400, artifact_id))
-                await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (_now(), artifact_id))
+                if not domain_layout_active(self.path):
+                    await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (_now(), artifact_id))
             await db.commit()
+        if files and domain_layout_active(self.path):
+            async with open_shared_ctx(self.artifacts.db_path) as content_db:
+                await content_db.executemany(
+                    "UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL", [(_now(), artifact_id) for artifact_id, _ in files]
+                )
+                await content_db.commit()
         for artifact_id, path in files:
             await purge_artifacts(str(self.path), self.artifacts.backend, [artifact_id], user_id=None)
             async with (
@@ -281,23 +295,53 @@ class DocumentDeliveryStore:
             await db.commit()
 
     async def save_draft(self, *, scope: DocumentScope, job_id: str, owner: str, result: WorkerResult) -> None:
-        if result.record.get("kind") not in {"draft", "authoring_draft"} or not {"candidate.pptx", "candidate.pdf"} <= set(result.files):
+        if result.record.get("kind") not in {"draft", "authoring_draft"}:
             raise DocumentRequestError("document_draft_invalid")
+        prepared_files = {}
+        if domain_layout_active(self.path):
+            async with open_shared_ctx(self.path) as preflight:
+                await preflight.execute("BEGIN")
+                await _fence(preflight, scope, job_id, owner)
+                async with preflight.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
+                    profile = await cursor.fetchone()
+                profile = profile[0] if profile else "ordinary-pptx-worker-v1"
+            async with open_shared_ctx(self.artifacts.db_path) as content_db:
+                for name, content in result.files.items():
+                    artifact_id = "art_" + uuid.uuid4().hex
+                    path = self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)
+                    mime = "image/png" if name.endswith(".png") else ("application/pdf" if name.endswith(".pdf") else source_mime(profile))
+                    sha = hashlib.sha256(content).hexdigest()
+                    await content_db.execute(
+                        "INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id) "
+                        "VALUES (?,?,?,?,'template_document',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)",
+                        (artifact_id, name, mime, len(content), path, scope.user_id, _now(), INTERNAL_PRODUCER, scope.workspace_id),
+                    )
+                    prepared_files[name] = (artifact_id, path, mime, sha)
+                await content_db.commit()
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             execution = await _fence(db, scope, job_id, owner)
             async with db.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
                 dispatch_row = await cursor.fetchone()
-            dispatch = dispatch_row[0] if dispatch_row else None
+            dispatch = dispatch_row[0] if dispatch_row else "ordinary-pptx-worker-v1"
+            if dispatch not in {*AUTHORING_PROFILES, "ordinary-pptx-worker-v1"}:
+                raise DocumentRequestError("document_draft_invalid")
+            candidate_name = source_name(dispatch)
+            if not {candidate_name, "candidate.pdf"} <= set(result.files) or (dispatch != WORD_PROFILE and "descriptor" in result.record):
+                raise DocumentRequestError("document_draft_invalid")
+            descriptor = None
+            if dispatch == WORD_PROFILE:
+                job = await _scope(db, scope, job_id, write=True)
+                descriptor = word_descriptor(tuple(json.loads(job["request_json"])["proposal"]["requested_outputs"]))
             if result.record.get("kind") == "authoring_draft" and (
-                dispatch != "pptx-script-worker-v1"
+                dispatch not in AUTHORING_PROFILES
                 or result.record.get("profile") != dispatch
                 or result.record.get("semantic_status") != "unapproved"
                 or result.record.get("requires_full_review") is not True
-                or result.record.get("manifest", {}).get("schema_version") != 2
+                or result.record.get("manifest", {}).get("schema_version") != (3 if dispatch == WORD_PROFILE else 2)
             ):
                 raise DocumentRequestError("document_draft_invalid")
-            if result.record.get("kind") == "draft" and dispatch == "pptx-script-worker-v1":
+            if result.record.get("kind") == "draft" and dispatch in AUTHORING_PROFILES:
                 raise DocumentRequestError("document_draft_invalid")
             if execution["state"] != "rendering" or execution["image_id"] != result.image_id:
                 raise DocumentRequestError("document_execution_fenced")
@@ -310,19 +354,18 @@ class DocumentDeliveryStore:
             output_stem = "".join(char for char in stem if char.isprintable() and char not in "/\\")[:120] + " - Updated"
             files = []
             for name, content in result.files.items():
-                artifact_id = "art_" + uuid.uuid4().hex
-                path = self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)
-                mime = (
-                    "image/png"
-                    if name.endswith(".png")
-                    else ("application/pdf" if name.endswith(".pdf") else "application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                )
-                sha = hashlib.sha256(content).hexdigest()
-                await db.execute(
-                    """INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id)
-                    VALUES (?,?,?,?,'template_document',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)""",
-                    (artifact_id, name, mime, len(content), path, scope.user_id, _now(), INTERNAL_PRODUCER, scope.workspace_id),
-                )
+                if prepared_files:
+                    artifact_id, path, mime, sha = prepared_files[name]
+                else:
+                    artifact_id = "art_" + uuid.uuid4().hex
+                    path = self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)
+                    mime = "image/png" if name.endswith(".png") else ("application/pdf" if name.endswith(".pdf") else source_mime(dispatch))
+                    sha = hashlib.sha256(content).hexdigest()
+                    await db.execute(
+                        """INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id)
+                        VALUES (?,?,?,?,'template_document',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)""",
+                        (artifact_id, name, mime, len(content), path, scope.user_id, _now(), INTERNAL_PRODUCER, scope.workspace_id),
+                    )
                 await db.execute(
                     "INSERT INTO document_draft_files(job_id,name,artifact_id,path,sha256,size_bytes) VALUES (?,?,?,?,?,?)",
                     (job_id, name, artifact_id, path, sha, len(content)),
@@ -338,10 +381,16 @@ class DocumentDeliveryStore:
                 await db.execute("BEGIN IMMEDIATE")
                 await _fence(db, scope, job_id, owner)
                 await db.execute("UPDATE document_draft_files SET verified_at=? WHERE job_id=? AND name=?", (_now(), job_id, name))
-                await db.execute("UPDATE artifacts SET status='ready' WHERE id=?", (artifact_id,))
+                if not domain_layout_active(self.path):
+                    await db.execute("UPDATE artifacts SET status='ready' WHERE id=?", (artifact_id,))
                 await db.commit()
+            if domain_layout_active(self.path):
+                async with open_shared_ctx(self.artifacts.db_path) as content_db:
+                    await content_db.execute("UPDATE artifacts SET status='ready' WHERE id=?", (artifact_id,))
+                    await content_db.commit()
         payload = {
             **result.record,
+            **({"descriptor": descriptor} if descriptor is not None else {}),
             "output_stem": output_stem,
             "image_id": result.image_id,
             "files": {name: {"artifact_id": aid, "sha256": sha} for name, aid, _, _, sha in files},
@@ -399,14 +448,19 @@ class DocumentDeliveryStore:
             execution = await _execution(db, job_id)
             if not await _allows_file_read_in_tx(db, job=job, execution=execution, preview=preview) or (preview and not name.endswith(".png")):
                 raise DocumentRequestError("document_not_found")
+            candidate_name = draft_source_name(json.loads(execution["draft_json"]))
+            if not preview and name == "candidate.pdf" and execution["state"] == "published":
+                descriptor = json.loads(execution["draft_json"]).get("descriptor")
+                if descriptor is not None and "pdf" not in descriptor["published_outputs"]:
+                    raise DocumentRequestError("document_not_found")
             async with db.execute(
                 """SELECT f.*,a.mime FROM document_draft_files f JOIN artifacts a ON a.id=f.artifact_id
                 WHERE f.job_id=? AND f.name=? AND f.verified_at IS NOT NULL AND a.status='ready' AND a.deleted_at IS NULL
                 AND NOT EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=a.id)
                 AND EXISTS(SELECT 1 FROM document_draft_files parent JOIN artifacts source ON source.id=parent.artifact_id
-                  WHERE parent.job_id=f.job_id AND parent.name='candidate.pptx' AND source.deleted_at IS NULL AND source.status='ready'
+                  WHERE parent.job_id=f.job_id AND parent.name=? AND source.deleted_at IS NULL AND source.status='ready'
                   AND NOT EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=source.id))""",
-                (job_id, name),
+                (job_id, name, candidate_name),
             ) as cursor:
                 file = await cursor.fetchone()
             if file is None:
@@ -425,15 +479,137 @@ class DocumentDeliveryStore:
                 raise DocumentRequestError("document_not_found")
             async with db.execute(
                 """SELECT count(*) FROM document_draft_files f JOIN artifacts a ON a.id=f.artifact_id
-                WHERE f.job_id=? AND f.name IN (?, 'candidate.pptx') AND a.status='ready' AND a.deleted_at IS NULL
+                WHERE f.job_id=? AND f.name IN (?, ?) AND a.status='ready' AND a.deleted_at IS NULL
                   AND NOT EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=a.id)""",
-                (job_id, name),
+                (job_id, name, candidate_name),
             ) as cursor:
-                if (await cursor.fetchone())[0] != (1 if name == "candidate.pptx" else 2):
+                if (await cursor.fetchone())[0] != (1 if name == candidate_name else 2):
                     raise DocumentRequestError("document_not_found")
         return content, file["mime"]
 
     async def confirm(self, *, scope: DocumentScope, job_id: str, command_id: str, draft_digest: str) -> dict:
+        result = await self._confirm_execution(scope=scope, job_id=job_id, command_id=command_id, draft_digest=draft_digest)
+        if domain_layout_active(self.path):
+            await self._publish_confirmed_artifacts(scope=scope, job_id=job_id, draft_digest=draft_digest)
+            return await self.get(scope=scope, job_id=job_id)
+        return result
+
+    async def repair_confirmed_publications(self, *, limit: int = 25) -> int:
+        """Repair bounded approved publications without invoking a model or renderer."""
+        if not domain_layout_active(self.path):
+            return 0
+        if not 1 <= limit <= 100:
+            raise ValueError("Publication repair limit must be between 1 and 100")
+        async with (
+            open_shared_ctx(self.path) as db,
+            db.execute(
+                """WITH outputs AS (
+                  SELECT f.job_id,f.artifact_id FROM document_draft_files f JOIN document_executions e ON e.job_id=f.job_id
+                  WHERE f.name=COALESCE(json_extract(e.draft_json,'$.descriptor.source_name'),'candidate.pptx')
+                    OR (f.name='candidate.pdf' AND (json_extract(e.draft_json,'$.descriptor') IS NULL
+                      OR EXISTS(SELECT 1 FROM json_each(e.draft_json,'$.descriptor.published_outputs') WHERE value='pdf'))))
+                SELECT j.id,j.team_id,j.workspace_id,j.requested_by,e.draft_digest
+                FROM document_jobs j JOIN document_executions e ON e.job_id=j.id
+                JOIN document_confirmations c ON c.job_id=j.id AND c.draft_digest=e.draft_digest
+                JOIN sessions s ON s.id=j.session_id AND s.deleted_at IS NULL
+                JOIN chat_turn_user_sources origin ON origin.turn_id=j.origin_turn_id
+                JOIN users u ON u.id=j.requested_by AND u.status='active'
+                JOIN teams t ON t.id=j.team_id AND t.status='active'
+                JOIN workspaces w ON w.id=j.workspace_id AND w.status='active'
+                JOIN team_members tm ON tm.team_id=j.team_id AND tm.user_id=j.requested_by AND tm.status='active'
+                JOIN workspace_members wm ON wm.workspace_id=j.workspace_id AND wm.user_id=j.requested_by
+                  AND wm.status='active' AND lower(trim(wm.role)) IN ('admin','ws_admin','owner','workspace_admin','member')
+                WHERE e.state='published'
+                  AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=j.requested_by)
+                  AND NOT EXISTS(SELECT 1 FROM outputs o LEFT JOIN artifacts a ON a.id=o.artifact_id
+                    WHERE o.job_id=j.id AND (a.id IS NULL OR a.status!='ready' OR a.deleted_at IS NOT NULL
+                      OR EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=o.artifact_id)))
+                  AND EXISTS(SELECT 1 FROM outputs o JOIN artifacts a ON a.id=o.artifact_id
+                    WHERE o.job_id=j.id AND (a.producer_kind!=? OR NOT EXISTS(
+                      SELECT 1 FROM session_attachments sa WHERE sa.session_id=j.session_id AND sa.artifact_id=o.artifact_id)))
+                ORDER BY e.updated_at,j.id LIMIT ?""",
+                (PUBLIC_PRODUCER, limit),
+            ) as cursor,
+        ):
+            jobs = list(await cursor.fetchall())
+        repaired = 0
+        for job_id, team_id, workspace_id, user_id, draft_digest in jobs:
+            try:
+                await self._publish_confirmed_artifacts(
+                    scope=DocumentScope(team_id=team_id, workspace_id=workspace_id, user_id=user_id),
+                    job_id=job_id,
+                    draft_digest=draft_digest,
+                    repair=True,
+                )
+                repaired += 1
+            except Exception as exc:
+                import structlog
+
+                structlog.get_logger(__name__).warning("document.publication_retry_failed", job_id=job_id, error_type=type(exc).__name__)
+        return repaired
+
+    async def _publish_confirmed_artifacts(self, *, scope: DocumentScope, job_id: str, draft_digest: str, repair: bool = False) -> None:
+        # The committed execution confirmation is the approval authority. A
+        # replay repairs content promotion after a crash between these commits.
+        async with open_shared_ctx(self.artifacts.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            job = await _scope(db, scope, job_id, write=True)
+            execution = await _execution(db, job_id)
+            if execution is None or execution["state"] != "published" or execution["draft_digest"] != draft_digest:
+                raise DocumentRequestError("document_revision_conflict")
+            draft = json.loads(execution["draft_json"])
+            candidate_name = draft_source_name(draft)
+            published_names = {candidate_name}
+            if draft.get("descriptor") is None or "pdf" in draft["descriptor"]["published_outputs"]:
+                published_names.add("candidate.pdf")
+            async with db.execute("SELECT * FROM document_draft_files WHERE job_id=?", (job_id,)) as cursor:
+                files = list(await cursor.fetchall())
+            source_id = next(file["artifact_id"] for file in files if file["name"] == candidate_name)
+            for file in files:
+                if file["name"] not in published_names:
+                    continue
+                if repair:
+                    async with db.execute("SELECT producer_kind,status,deleted_at FROM artifacts WHERE id=?", (file["artifact_id"],)) as cursor:
+                        published = await cursor.fetchone()
+                    if published is not None and tuple(published) == (PUBLIC_PRODUCER, "ready", None):
+                        # Later user metadata edits are independent of the
+                        # already committed publication; repair only the pin.
+                        continue
+                cursor = await db.execute(
+                    "UPDATE artifacts SET producer_kind=?,kind='deliverable',scope='session',inject='stub',trust='trusted',"
+                    "created_by_turn=?,derived_from=?,filename=? WHERE id=? AND status='ready' AND deleted_at IS NULL",
+                    (
+                        PUBLIC_PRODUCER,
+                        job["origin_turn_id"],
+                        source_id if file["name"].endswith(".pdf") else None,
+                        draft["output_stem"] + PurePosixPath(file["name"]).suffix,
+                        file["artifact_id"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DocumentRequestError("document_draft_unavailable")
+            await db.commit()
+
+        async with open_shared_ctx(self.path) as execution_db:
+            await execution_db.execute("BEGIN IMMEDIATE")
+            await _scope(execution_db, scope, job_id, write=True)
+            current = await _execution(execution_db, job_id)
+            if current is None or current["state"] != "published" or current["draft_digest"] != draft_digest:
+                raise DocumentRequestError("document_revision_conflict")
+            for file in files:
+                if file["name"] in published_names:
+                    await execution_db.execute(
+                        "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES (?,?,?,NULL) "
+                        + (
+                            "ON CONFLICT(session_id,artifact_id) DO NOTHING"
+                            if repair
+                            else "ON CONFLICT(session_id,artifact_id) DO UPDATE SET detached_at=NULL"
+                        ),
+                        (job["session_id"], file["artifact_id"], _now()),
+                    )
+            await execution_db.commit()
+
+    async def _confirm_execution(self, *, scope: DocumentScope, job_id: str, command_id: str, draft_digest: str) -> dict:
         _command_id(command_id)
         async with open_shared_ctx(self.path) as db:
             await db.execute("BEGIN")
@@ -492,24 +668,31 @@ class DocumentDeliveryStore:
                 (job_id, *scope.sql_params(), command_id, draft_digest, _now()),
             )
             await db.execute("UPDATE document_executions SET state='published',updated_at=? WHERE job_id=?", (_now(), job_id))
-            source_id = next(file["artifact_id"] for file in files if file["name"] == "candidate.pptx")
+            draft = json.loads(execution["draft_json"])
+            candidate_name = draft_source_name(draft)
+            published_names = {candidate_name}
+            if draft.get("descriptor") is None or "pdf" in draft["descriptor"]["published_outputs"]:
+                published_names.add("candidate.pdf")
+            source_id = next(file["artifact_id"] for file in files if file["name"] == candidate_name)
             for file in files:
-                if file["name"] not in {"candidate.pptx", "candidate.pdf"}:
+                if file["name"] not in published_names:
                     continue
-                await db.execute(
-                    """UPDATE artifacts SET producer_kind=?,kind='deliverable',scope='session',inject='stub',trust='trusted',
-                    created_by_turn=?,derived_from=?,filename=? WHERE id=? AND status='ready' AND deleted_at IS NULL""",
-                    (
-                        PUBLIC_PRODUCER,
-                        job["origin_turn_id"],
-                        source_id if file["name"].endswith(".pdf") else None,
-                        json.loads(execution["draft_json"])["output_stem"] + (".pdf" if file["name"].endswith(".pdf") else ".pptx"),
-                        file["artifact_id"],
-                    ),
-                )
-                await db.execute(
-                    "INSERT INTO session_attachments(session_id,artifact_id,pinned_at) VALUES (?,?,?)",
-                    (job["session_id"], file["artifact_id"], _now()),
-                )
+                if not domain_layout_active(self.path):
+                    await db.execute(
+                        """UPDATE artifacts SET producer_kind=?,kind='deliverable',scope='session',inject='stub',trust='trusted',
+                        created_by_turn=?,derived_from=?,filename=? WHERE id=? AND status='ready' AND deleted_at IS NULL""",
+                        (
+                            PUBLIC_PRODUCER,
+                            job["origin_turn_id"],
+                            source_id if file["name"].endswith(".pdf") else None,
+                            draft["output_stem"] + PurePosixPath(file["name"]).suffix,
+                            file["artifact_id"],
+                        ),
+                    )
+                if not domain_layout_active(self.path):
+                    await db.execute(
+                        "INSERT INTO session_attachments(session_id,artifact_id,pinned_at) VALUES (?,?,?)",
+                        (job["session_id"], file["artifact_id"], _now()),
+                    )
             await db.commit()
         return await self.get(scope=scope, job_id=job_id)

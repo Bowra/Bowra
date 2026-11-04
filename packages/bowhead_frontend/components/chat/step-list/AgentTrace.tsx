@@ -34,6 +34,8 @@ import { extractWritingContent } from "@/lib/extract-writing-content";
 import { SKILL_UNAVAILABLE_CODE_PREFIX } from "@/lib/sse-events";
 import type { PeerTerminal } from "@/lib/turn-store";
 import { FailureAckCard } from "./FailureAckCard";
+import { ErrorDiagnosticsDisclosure } from "@/components/error-notice";
+import { isInternalCloseoutStep } from "./step-view";
 import { Step } from "./Step";
 import {
   buildAgentGrouping,
@@ -170,6 +172,7 @@ export function stepErrorMessage(
   tStep: ReturnType<typeof useTranslations<"step_list">>,
   tReasons: ReturnType<typeof useTranslations<"error_messages.reasons">>,
 ): string {
+  if (error.code === "tool_execution_failed" && error.message === "non_query_text") return tStep("query_not_executed");
   if (error.code === "agent_admission_blocked") return tStep("agent_admission_blocked");
   const skillDenial = skillDenialMessage(error, tStep);
   if (skillDenial !== null) return skillDenial;
@@ -245,7 +248,7 @@ function renderStepDetail(
         rows={s.subSteps.map((ss) => ({
           sql: ss.label,
           meta: ss.summary,
-          status: stepStateToStatus(ss.status ?? "done"),
+          status: stepStateToStatus(ss.status ?? "pending"),
           code: ss.code,
         }))}
       />
@@ -374,6 +377,22 @@ function StepFromView({ s }: StepFromViewProps) {
       {s.outputArtifacts.map((artifact, index) => {
         const filename = artifact.filename || `${tResults("evidence")} ${index + 1}`;
         const displayName = artifact.title && artifact.title !== filename ? `${artifact.title} · ${filename}` : filename;
+        if (artifact.dataRole === "stdout") {
+          const downloadLabel = tResults("download_object", { filename: displayName });
+          return (
+            <a
+              key={artifact.artifactId}
+              className="stp-output-artifact"
+              href={appPath(`/api/v1/files/${encodeURIComponent(artifact.artifactId)}`)}
+              download={filename}
+              aria-label={downloadLabel}
+              title={artifact.description || downloadLabel}
+            >
+              <span aria-hidden><CharIcon ch="↓" aria-hidden /></span>
+              <span>{displayName}</span>
+            </a>
+          );
+        }
         const openLabel = tResults("open_object", { filename: displayName });
         return (
           <button
@@ -395,8 +414,17 @@ function StepFromView({ s }: StepFromViewProps) {
   ) : null;
   // Per-step failure UI: no buttons (O5 removed fake retry/skip; Feishu 07.06 #2 removed dead "知道了").
   // The card reads current task activity separately from the original step outcome.
+  const settledBatchFailure = s.toolName === "bi_query" && !!s.subSteps?.length
+    && s.subSteps.some((child) => child.status === "failed")
+    && s.subSteps.every((child) => child.status === "done" || child.status === "failed");
+  // Settled lanes already describe an aggregate failure. Specific or unknown errors still need their original feedback.
+  const redundantBatchFeedback = settledBatchFailure && (!s.error || (
+    s.error.code === "tool_execution_failed"
+    && (s.error.kind === "transient" || s.error.kind === "permanent")
+    && (!s.error.diagnostics?.code || s.error.diagnostics.code === s.error.code)
+  ));
   const ack =
-    s.state === "failed" && s.error ? (
+    redundantBatchFeedback ? null : s.state === "failed" && s.error ? (
       <FailureAckCard
         kind={s.error.uiKind ?? (s.error.kind === "permanent" ? "permanent" : "transient")}
         message={stepErrorMessage(s.error, tStep, tReasons)}
@@ -404,7 +432,7 @@ function StepFromView({ s }: StepFromViewProps) {
         retryable={s.error.retryable}
         inset
       />
-    ) : s.state === "partial" ? (
+    ) : s.state === "partial" && !s.subSteps?.length ? (
       // Only explicit completed substeps count as successes; absent outcomes stay unknown.
       <FailureAckCard
         kind={s.error?.uiKind ?? (s.error?.kind === "permanent" ? "permanent" : "transient")}
@@ -415,6 +443,8 @@ function StepFromView({ s }: StepFromViewProps) {
         retryable={s.error?.retryable}
         inset
       />
+    ) : s.state === "partial" && s.error?.diagnostics ? (
+      <ErrorDiagnosticsDisclosure diagnostics={s.error.diagnostics} surface="chat" />
     ) : null;
   const body =
     detail || outputArtifacts || ack ? (
@@ -436,7 +466,8 @@ function StepFromView({ s }: StepFromViewProps) {
     recoverableFailure && s.state === "failed" ? "part" : stepStateToStatus(s.state);
   // Recoverable failures do not seize focus while the task runs. Nonretryable
   // failures stay expanded; ended/archived tasks expose the original explanation.
-  const forceOpen = ack ? !(turnRunning && recoverableFailure) : false;
+  const partialBatch = s.state === "partial" && !!s.subSteps?.length;
+  const forceOpen = ack || partialBatch ? !(turnRunning && recoverableFailure) : false;
   return (
     <Step
       toolName={stepDisplayToolName(s.stepType, s.toolName)}
@@ -453,7 +484,9 @@ function StepFromView({ s }: StepFromViewProps) {
 }
 
 function statusOf(steps: StepView[]): StepStatus {
-  const states = steps.map((s) => s.state);
+  // Known control refusals do not make a business trace fail. Real partial
+  // closeout and active work still determine the Agent's factual status.
+  const states = steps.filter((s) => !isInternalCloseoutStep(s) || s.state === "partial" || s.state === "active").map((s) => s.state);
   if (states.some((x) => x === "active")) return "run";
   // a failed step is handled per-step (FailureAckCard) → the block reads "part",
   // not "fail" (block-level fail/bail needs an explicit peer-death signal).
@@ -470,7 +503,7 @@ const PEER_PARTIAL_REASONS = new Set([
   "agent_stalled",
 ]);
 
-/** Copy for a peer that stopped at an agent run limit; unknown reasons use the generic line. */
+/** Explain recorded partial outcomes; unknown causes use the generic retained-work message. */
 function peerPartialMessageKey(stopReason: string): `peer_partial.${string}` {
   return PEER_PARTIAL_REASONS.has(stopReason)
     ? `peer_partial.${stopReason}`
@@ -516,7 +549,7 @@ function PeerBlockView({ block }: PeerBlockViewProps) {
       outcomeDiagnostics={block.failureDiagnostics ?? undefined}
       open={block.status === "run"}
     >
-      {block.steps.map((s) => (
+      {block.steps.filter((s) => !isInternalCloseoutStep(s)).map((s) => (
         <StepFromView
           key={s.stepId}
           s={s}
@@ -572,13 +605,13 @@ export function AgentTrace({
 
   return (
     <div className="ag-trace">
-      {(leadSteps.length > 0 || leadContext.length > 0) && (
+      {(leadSteps.some((s) => !isInternalCloseoutStep(s)) || leadContext.length > 0) && (
         <AgentBlock
           agent="lead"
           status={turnRunning && leadContext.some((activity) => activity.phase === "running") ? "run" : statusOf(leadSteps)}
           open
         >
-          {leadSteps.map((s) => (
+          {leadSteps.filter((s) => !isInternalCloseoutStep(s)).map((s) => (
             <StepFromView
               key={s.stepId}
               s={s}

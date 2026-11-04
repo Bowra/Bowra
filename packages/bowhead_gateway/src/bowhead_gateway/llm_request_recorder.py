@@ -15,9 +15,16 @@ import os
 import time
 from datetime import UTC, datetime
 
+import anyio
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_reference_storage import ReferenceCipher
-from bowhead_core.llm_request_record import purge_expired_request_records, write_request_records
+from bowhead_core.llm_request_record import (
+    prepare_request_records,
+    purge_expired_request_records,
+    read_request_record_sessions,
+    write_prepared_request_records,
+)
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_router.request_record import RequestRecordEntry, set_request_recorder
 
 from bowhead_gateway.buffered_flush import BufferedFlushLoop
@@ -39,7 +46,7 @@ class LLMRequestRecorder(BufferedFlushLoop[RequestRecordEntry]):
 
     def __init__(self, db_path: str, cipher: ReferenceCipher, *, interval_s: float = _DEFAULT_INTERVAL_S, max_buffer: int = _DEFAULT_MAX_BUFFER):
         super().__init__(interval_s=interval_s, max_buffer=max_buffer, flush_batch=_FLUSH_BATCH)
-        self._db_path = db_path
+        self._db_path = str(domain_database_path(db_path, "observability"))
         self._cipher = cipher
         self._next_purge_at = 0.0
 
@@ -90,9 +97,14 @@ class LLMRequestRecorder(BufferedFlushLoop[RequestRecordEntry]):
 
     async def _write_batch(self, batch: list[RequestRecordEntry]) -> int:
         async with open_shared_ctx(self._db_path) as db:
+            sessions = await read_request_record_sessions(db, batch)
+        prepared = await anyio.to_thread.run_sync(prepare_request_records, self._cipher, batch, sessions)
+        if not prepared:
+            return 0
+        async with open_shared_ctx(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
-                written = await write_request_records(db, self._cipher, batch)
+                written = await write_prepared_request_records(db, prepared)
                 await db.commit()
             except BaseException:
                 await db.rollback()

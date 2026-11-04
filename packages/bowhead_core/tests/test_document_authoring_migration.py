@@ -4,7 +4,7 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from core_legacy_database import TARGET_FILES
 from sqlalchemy import create_engine
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_document_planning_continuation import planning

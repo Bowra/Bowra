@@ -4,7 +4,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -47,7 +48,7 @@ def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_the_column(t
         path = tmp_path / name
         if start is not None:
             _upgrade(path, start)
-        _upgrade(path, "head")
+        _upgrade(path, SQLITE_LEGACY_REVISION)
         assert "plugin_versions_json" in _columns(path)
         with sqlite3.connect(path) as db:
             assert db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?", (TRIGGER,)).fetchone() == (1,)

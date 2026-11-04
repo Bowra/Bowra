@@ -449,31 +449,19 @@ def validate_v2_config(
     if not is_v2_config(config):
         raise TeamLlmConfigError("team LLM config must use schema_version=2")
     providers = config.get("providers")
-    if not isinstance(providers, dict) or not providers:
+    if not isinstance(providers, dict) or (not providers and not allow_unassigned_tiers):
         raise TeamLlmConfigError("providers must be a non-empty object")
     for name, spec in providers.items():
         _validate_provider(str(name), spec, ssrf_resolver=ssrf_resolver)
     _validate_retry(config.get("retry"))
     # Tier-shaped configuration: expand agents from AGENT_TIER_MAP at build time; persist only the tiers section.
     if is_tier_config(config):
-        # Management may persist connections before any production assignment.
-        # Runtime callers keep the strict default and cannot construct a Router.
-        tiers = config.get("tiers")
-        unassigned = (
-            isinstance(tiers, dict)
-            and not tiers.get("primary")
-            and all(value in (None, [], {"follow": "primary"}, {"auto": True}) for value in tiers.values())
-        )
-        if allow_unassigned_tiers and unassigned and not (config.get("kb") or {}).get("active"):
-            _validate_kb(config.get("kb") or {}, providers)
-            _validate_media(config.get("media") or {}, providers)
-            _validate_search(config.get("search") or {}, providers)
-            return
         try:
             validate_tiers(
                 config.get("tiers"),
                 providers,
                 allow_legacy_duplicate_fallbacks=(allow_legacy_duplicate_fallbacks),
+                allow_unassigned_primary=allow_unassigned_tiers,
             )
         except TierConfigError as e:
             raise TeamLlmConfigError(str(e)) from e
@@ -985,7 +973,12 @@ def capability_config_schema(domain: str) -> dict[str, Any]:
                 "properties": {
                     cap: {
                         "type": "string",
-                        "description": "Select a declared model key with this capability. Use the original assignment workflow to clear or change it.",
+                        "description": (
+                            "Optional source descriptions and topic suggestions. Disabled by absence; generation uses only this exact Team model. "
+                            "Newly published sources and explicit single-file generation may incur bounded model costs; reads and configuration saves never generate descriptions."
+                            if cap == "source_description"
+                            else "Select a declared model key with this capability. Use the original assignment workflow to clear or change it."
+                        ),
                     }
                     for cap in sorted(capabilities)
                 },
@@ -994,6 +987,12 @@ def capability_config_schema(domain: str) -> dict[str, Any]:
     }
     if domain == "kb":
         result["properties"]["retrieval_top_k"] = retrieval_top_k_schema()
+        result["properties"]["auto_assign_disabled"] = {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "string", "enum": ["rerank", "vision", "row_extractor", "source_description"]},
+            "description": "Optional assignments explicitly turned off. Connection changes and verification must not enable them. Source descriptions remain off by default even when absent here.",
+        }
     return result
 
 
@@ -1008,6 +1007,15 @@ def _validate_kb(kb: Any, providers: dict[str, Any]) -> None:  # noqa: PLR0912
         retrieval_top_k(kb)
     except ValueError as exc:
         raise TeamLlmConfigError(str(exc)) from exc
+    disabled = kb.get("auto_assign_disabled", [])
+    if (
+        not isinstance(disabled, list)
+        or any(not isinstance(cap, str) or cap not in {"rerank", "vision", "row_extractor", "source_description"} for cap in disabled)
+        or len(set(disabled)) != len(disabled)
+    ):
+        raise TeamLlmConfigError("kb.auto_assign_disabled must contain unique optional capability names")
+    if any(cap in (kb.get("active") or {}) for cap in disabled):
+        raise TeamLlmConfigError("kb.auto_assign_disabled conflicts with an active assignment")
     models = kb.get("models") or {}
     if not isinstance(models, dict):
         raise TeamLlmConfigError("kb.models must be an object")
@@ -1041,6 +1049,10 @@ def _validate_kb(kb: Any, providers: dict[str, Any]) -> None:  # noqa: PLR0912
                 raise TeamLlmConfigError(
                     f"kb.models.{name} requires provider model {real_id!r} with capability {capability!r}",
                 )
+        if capability == "source_description":
+            declared = next((model for model in provider_spec.get("models") or [] if isinstance(model, dict) and model.get("id") == real_id), None)
+            if declared is None or "chat" not in (declared.get("capabilities") or []):
+                raise TeamLlmConfigError(f"kb.models.{name} requires a declared chat-capable provider model")
         if capability == "embed":
             try:
                 dim = int(spec.get("dim"))
@@ -1054,7 +1066,7 @@ def _validate_kb(kb: Any, providers: dict[str, Any]) -> None:  # noqa: PLR0912
     for capability, model_name in active.items():
         if capability not in SUPPORTED_KB_CAPABILITIES:
             raise TeamLlmConfigError(f"kb.active.{capability} unsupported")
-        if model_name not in models:
+        if not isinstance(model_name, str) or not model_name or model_name not in models:
             raise TeamLlmConfigError(f"kb.active.{capability} references unknown model {model_name!r}")
         if models[model_name].get("capability") != capability:
             raise TeamLlmConfigError(

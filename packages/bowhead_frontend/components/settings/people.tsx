@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useAppRouter } from "@/lib/use-app-router";
+import { teamSettingsPath } from "@/lib/team-settings-paths";
 import { useTranslations } from "next-intl";
 
 import { useEditionMemberDetails } from "@/edition/member-details";
@@ -68,6 +71,10 @@ function parseBatchEmails(raw: string) {
 
 export function SettingsPeople() {
   const t = useTranslations("settings.people");
+  const router = useAppRouter();
+  const searchParams = useSearchParams();
+  const requestedMemberId = searchParams?.get("member") ?? null;
+  const requestedTeamId = searchParams?.get("team") ?? null;
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [data, setData] = useState<AdminMembersListResp | null>(null);
   const [invites, setInvites] = useState<TeamInviteRow[]>([]);
@@ -75,6 +82,7 @@ export function SettingsPeople() {
   const [invitesError, setInvitesError] = useState(false);
   const [invitesLoading, setInvitesLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [currentTeamId, setCurrentTeamId] = useState("");
   const [identityError, setIdentityError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -267,6 +275,7 @@ export function SettingsPeople() {
       if (cancelled) return;
       if (meResult.status === "fulfilled") {
         setCurrentUserId(meResult.value.id);
+        setCurrentTeamId(meResult.value.team_id);
         setSpaceAdminV2(meResult.value.capabilities?.space_admin_v2 === true);
         setCanViewCredits(meResult.value.credit_capabilities?.credits_read === true);
       } else {
@@ -322,6 +331,26 @@ export function SettingsPeople() {
   const canViewWorkspaceGrants =
     Boolean(data) && !error && identityVerified && userRoleCanViewWorkspaceGrants;
   const canManageWorkspaceGrants = canManageMembers;
+
+  const requestedTeamMismatch = Boolean(requestedTeamId && currentTeamId && requestedTeamId !== currentTeamId);
+
+  useEffect(() => {
+    if (requestedTeamMismatch) {
+      setWorkspaceTarget(null);
+    } else if (canViewWorkspaceGrants && requestedMemberId) {
+      setWorkspaceTarget({ user_id: requestedMemberId, display_name: "", email: "" });
+    }
+  }, [canViewWorkspaceGrants, requestedMemberId, requestedTeamMismatch]);
+
+  function closeWorkspaceGrants() {
+    setWorkspaceTarget(null);
+    if (requestedMemberId) {
+      const params = new URLSearchParams(window.location.search);
+      params.delete("member");
+      params.delete("team");
+      router.replace(`${teamSettingsPath("people")}${params.size ? `?${params}` : ""}`);
+    }
+  }
   const directCreateAvailable = authCapabilities?.deployment_mode === "local";
   const invitationCreationAvailable = authCapabilities?.deployment_mode === "saas";
   const showInvites = invitationCreationAvailable || invites.length > 0 || invitesError
@@ -644,6 +673,7 @@ export function SettingsPeople() {
 
   return (
     <div className="settings-people-page">
+      {requestedMemberId && requestedTeamMismatch ? <Notice tone="error">{t("workspace_notification_team_mismatch")}</Notice> : null}
       <header className="settings-people-hero">
         <div className="settings-people-hero__main">
           <div className="settings-people-hero__eyebrow">
@@ -1035,10 +1065,11 @@ export function SettingsPeople() {
 
       {workspaceTarget ? (
         <WorkspaceGrantsDialog
+          key={workspaceTarget.user_id}
           member={workspaceTarget}
           canManage={canManageWorkspaceGrants}
           formatActionError={formatActionError}
-          onClose={() => setWorkspaceTarget(null)}
+          onClose={closeWorkspaceGrants}
         />
       ) : null}
 
@@ -1330,6 +1361,7 @@ function WorkspaceGrantsDialog({
   const t = useTranslations("settings.people");
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [items, setItems] = useState<WorkspaceGrantRow[]>([]);
+  const [memberLabel, setMemberLabel] = useState(member.display_name || member.email || member.user_id);
   const [grantDrafts, setGrantDrafts] = useState<Record<string, "admin" | "member" | "viewer">>({});
   const [grantedSearch, setGrantedSearch] = useState("");
   const [availableSearch, setAvailableSearch] = useState("");
@@ -1346,12 +1378,13 @@ function WorkspaceGrantsDialog({
     try {
       const body = await fetchMemberWorkspaceGrants(member.user_id);
       setItems(body.items);
+      setMemberLabel(body.display_name || body.email || member.display_name || member.email || member.user_id);
     } catch (e) {
       setError(formatActionError(e));
     } finally {
       setLoading(false);
     }
-  }, [formatActionError, member.user_id]);
+  }, [formatActionError, member.user_id, member.display_name, member.email]);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -1420,7 +1453,7 @@ function WorkspaceGrantsDialog({
 
   return (
     <>
-    <Dialog title={t("workspace_dialog_title", { name: member.display_name || member.email })} onClose={closeWithGuard}
+    <Dialog title={t("workspace_dialog_title", { name: memberLabel })} onClose={closeWithGuard}
       width={720} busy={Boolean(busyKey)} footer={<Button onClick={closeWithGuard} disabled={Boolean(busyKey)}>{t("workspace_close")}</Button>}>
       {!canManage ? <Notice tone="muted">{t("workspace_read_only")}</Notice> : null}
       {error ? <Notice tone="error">{t("workspace_action_failed", { err: error })}</Notice> : null}

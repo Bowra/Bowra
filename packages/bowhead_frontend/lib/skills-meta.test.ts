@@ -22,8 +22,8 @@ describe("document catalog presentation groups", () => {
 
 describe("built-in display names", () => {
   it.each([
-    ["en-US", "Create New Presentation", "Edit Existing Presentation"],
-    ["zh-CN", "创建新演示稿", "编辑已有 PPT"],
+    ["en-US", "Create New Presentation", "Edit Template Document"],
+    ["zh-CN", "创建新演示稿", "编辑模板文档"],
   ])("distinguishes new decks from private edits across %s display surfaces", (locale, createLabel, editLabel) => {
     document.documentElement.lang = locale;
     for (const [name, label] of [["render_deck", createLabel], ["template_document_submit", editLabel]]) {

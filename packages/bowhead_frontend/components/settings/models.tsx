@@ -2,7 +2,7 @@
 
 
 import { ConfigurationFieldHelp, ConfigurationFieldProvider } from "@/components/settings/configuration-field-help";
-import { modelExternalCapabilitiesPath } from "@/lib/team-settings-paths";
+import { modelExternalCapabilitiesPath, modelSettingsOverviewPath, teamSettingsPath } from "@/lib/team-settings-paths";
 
 /**
  * Team model settings: overview and scoped connection, assignment, and external pages.
@@ -44,6 +44,8 @@ import { DialogShell } from "@/components/ui/dialog";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
 import {
   ModelSettingsOverview,
+  roleTranslationKey,
+  type AssignmentSummaryRow,
   type ModelSettingsOverviewProvider,
 } from "@/components/settings/models/model-settings-overview";
 import { ReadinessReview } from "@/components/settings/models/readiness-review";
@@ -55,7 +57,7 @@ import {
   type VerificationCandidate,
 } from "@/components/settings/models/verification-selector";
 import {
-  discoverDraftProviderModels, discoverProviderModels, fetchAdminLlmConfig, llmMaxRetriesFromConfig, saveAdminLlmConfig, validateAdminLlmConfig, verifyDraftProviderCapability, verifyProviderCapability,
+  discoverDraftProviderModels, discoverProviderModels, fetchAdminLlmConfig, reconcileVerifiedAssignments, llmMaxRetriesFromConfig, saveAdminLlmConfig, validateAdminLlmConfig, verifyDraftProviderCapability, verifyProviderCapability,
   type AdminLlmConfigResp, type LlmConfigValidationIssue, type LlmReadinessRow, type LlmConfigValidationResp, type LlmVerificationEntry, type VerifyProviderCode, type VerifyProviderStep,
 } from "@/lib/llm-config-api";
 import {
@@ -90,6 +92,7 @@ import { useCopilotFields } from "@/lib/use-copilot-fields";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { SaveBar } from "@/components/ui/save-bar";
+import { Button } from "@/components/ui/button";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { randomUuid } from "@/lib/random-id";
 
@@ -1178,6 +1181,42 @@ function normConfig(raw: Record<string, unknown> | undefined): TeamConfig {
   };
 }
 
+function assignmentSummaryRows(cfg: TeamConfig, maintenance: boolean): AssignmentSummaryRow[] {
+  const primaryRef = refPair(cfg.tiers.primary);
+  const primary = primaryRef?.provider && primaryRef.model ? { provider: primaryRef.provider, model: primaryRef.model } : null;
+  const chat = Object.entries(cfg.providers).flatMap(([providerKey, spec]) =>
+    normModels(spec).filter((model) => model.caps.includes("chat")).map((model) => ({ providerKey, id: model.id })));
+  const fast = refPair(cfg.tiers.fast);
+  const judge = refPair(cfg.tiers.judge);
+  const providerLabel = (key: string) => {
+    const name = cfg.providers[key]?.display_name || key;
+    const ambiguous = Object.entries(cfg.providers).some(([otherKey, provider]) =>
+      otherKey !== key && (provider.display_name || otherKey) === name);
+    return ambiguous ? `${name} (${key})` : name;
+  };
+  const tierRow = (role: string, pair: Pair | null, mode: AssignmentSummaryRow["mode"], position?: number): AssignmentSummaryRow => ({
+    role, mode, providerKey: pair?.provider, modelId: pair?.model,
+    target: pair?.provider && pair.model ? `${position === undefined ? "" : `${position + 1}. `}${providerLabel(pair.provider)} · ${pair.model}` : "",
+  });
+  const fallbacks = cfg.tiers.primary_fallback || [];
+  const rows = [
+    tierRow("tier.primary", primary, primary ? "specified" : "missing"),
+    ...(fallbacks.length ? fallbacks.map((pair, index) => tierRow(`tier.primary_fallback.${index}`, pair, "specified", index))
+      : [tierRow("tier.primary_fallback", null, "off")]),
+    tierRow("tier.fast", fast || primary, fast ? "specified" : "follow"),
+    tierRow("tier.judge", judge || autoJudgeModel(chat, primary) || primary, judge ? "specified" : "automatic"),
+  ];
+  for (const capability of ["embed", "rerank", "vision", "row_extractor", "source_description"]) {
+    const model = cfg.kb.models[cfg.kb.active[capability] || ""];
+    const automatic = maintenance && capability !== "embed" && capability !== "source_description"
+      && !(cfg.kb.auto_assign_disabled as string[] || []).includes(capability);
+    rows.push({ role: `kb.${capability}`, target: model ? `${providerLabel(model.provider || "")} · ${model.real_id}` : "",
+      providerKey: model?.provider, modelId: model?.real_id,
+      mode: model ? "specified" : capability === "embed" ? "missing" : automatic ? "automatic" : "off" });
+  }
+  return rows;
+}
+
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === "object") {
@@ -1344,6 +1383,7 @@ export function DraftIssueList({
 function validateDraftLocally(
   cfg: TeamConfig,
   t: ReturnType<typeof useTranslations>,
+  allowUnassigned = false,
 ): DraftIssue[] {
   const issues: DraftIssue[] = [];
   const models = new Map<string, Set<string>>();
@@ -1352,10 +1392,10 @@ function validateDraftLocally(
   }
   const pairExists = (pair?: Pair): boolean =>
     Boolean(pair?.provider && pair?.model && models.get(pair.provider)?.has(pair.model));
-  if (models.size === 0) {
+  if (models.size === 0 && !allowUnassigned) {
     issues.push({ path: "providers", message: t("v4.invalid_providers") });
   }
-  if (!pairExists(cfg.tiers.primary)) {
+  if (!pairExists(cfg.tiers.primary) && !(allowUnassigned && !cfg.tiers.primary)) {
     issues.push({ path: "tiers.primary", message: t("v4.invalid_primary") });
   }
   const primaryKey = cfg.tiers.primary?.provider && cfg.tiers.primary?.model
@@ -1562,6 +1602,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const bowraImportRequest = useRef<Promise<BowraImport> | null>(null);
   const bowraImportLoaded = useRef(false);
   const [bowraImported, setBowraImported] = useState(false);
+  const [bowraProviderKey, setBowraProviderKey] = useState<string | null>(null);
+  const bowraPlanPrepared = useRef(false);
   const loadedProposal = useRef<string | null>(null);
   const draftDirtyRef = useRef(false);
   const [configurationSource, setConfigurationSource] = useState<{ id: string; fingerprint: string } | null>(null);
@@ -1595,7 +1637,18 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     ? "/knowledge/?tab=files"
     : section === "image" || section === "search"
       ? modelExternalCapabilitiesPath()
-      : "/team/settings/models/";
+      : section === "assignments" ? modelSettingsOverviewPath("assignments") : teamSettingsPath("llm");
+  useEffect(() => {
+    if (section !== "overview") return;
+    const syncTab = () => {
+      const hash = window.location.hash;
+      if (hash === "#assignments" || hash === "#mset-overview-evidence") setOverviewTab("assignments");
+      else if (!hash || hash === "#connections") setOverviewTab("connections");
+    };
+    syncTab();
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, [section]);
   const [baseConfig, setBaseConfig] = useState<TeamConfig>(EMPTY_CONFIG);
   const [config, setConfig] = useState<TeamConfig>(EMPTY_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -1641,7 +1694,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const recoveredPollingStartedRef = useRef<{ batchId: string; at: number } | null>(null);
   const recoveredPollingFailuresRef = useRef(0);
   const sectionsEnabled = true;
-  const scoped = section !== "overview";
+  const connectionEditor = section === "connection" || bowraImported;
+  const scoped = section !== "overview" || bowraImported;
+  const assignmentMaintenance = Boolean(data?.features?.model_assignment_reconciliation);
 
   const v2Enabled = Boolean(data?.features?.model_discovery_v2);
   const recoveredBatchFinished = recoveredBatch?.state === "completed";
@@ -1754,9 +1809,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         const snapshots = scoped
           ? await Promise.all(eligible.map((batch) => fetchVerificationBatch(batch.batch_id)))
           : [await fetchVerificationBatch(eligible[0].batch_id)];
-        const providerId = scoped && section === "connection" ? new URLSearchParams(window.location.search).get("id") : null;
+        const providerId = scoped && connectionEditor ? new URLSearchParams(window.location.search).get("id") : null;
         const snapshot = snapshots.find((batch) => !scoped || batch.items.some((item) =>
-          section === "connection" ? item.provider_id === providerId : (overviewValidation?.readiness?.rows || []).some((row) =>
+          connectionEditor ? item.provider_id === providerId : (overviewValidation?.readiness?.rows || []).some((row) =>
             row.provider_id === item.provider_id && row.model_id === item.model_id && row.capability === item.capability)));
         if (!cancelled && snapshot) setRecoveredBatch(snapshot);
       })
@@ -1832,10 +1887,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       setVerificationBatch(null);
       setVerificationDrafts(null);
     }
-    void fetchAdminLlmConfig()
+    void (assignmentMaintenance ? reconcileVerifiedAssignments() : fetchAdminLlmConfig())
       .then((response) => {
-        if (pageMode !== "overview") {
-          setData((current) => current ? { ...current, verification: response.verification } : current);
+        if (pageMode !== "overview" && draftDirtyRef.current) {
+          setData((current) => current ? { ...current, verification: response.verification, assignment_changes: response.assignment_changes } : current);
           void refreshOverviewReadiness(config, response.version, Boolean(response.features?.model_discovery_v2));
           return;
         }
@@ -1850,10 +1905,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           Boolean(response.features?.model_discovery_v2),
         );
       })
-      .catch(() => {
-        // Batch results remain visible; the evidence projection can refresh later.
+      .catch((cause) => {
+        if (assignmentMaintenance) setError(userFacingError(cause));
       });
-  }, [config, pageMode, refreshOverviewReadiness, verificationBatch]);
+  }, [config, pageMode, assignmentMaintenance, refreshOverviewReadiness, verificationBatch, userFacingError]);
 
   useEffect(() => {
     const batch = recoveredBatch;
@@ -1903,7 +1958,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       || evidenceRefreshBatchRef.current === batch.batch_id
     ) return;
     evidenceRefreshBatchRef.current = batch.batch_id;
-    void fetchAdminLlmConfig()
+    void (assignmentMaintenance ? reconcileVerifiedAssignments() : fetchAdminLlmConfig())
       .then((response) => {
         if (pageMode !== "overview") return;
         const normalized = normConfig(response.config);
@@ -1917,10 +1972,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           Boolean(response.features?.model_discovery_v2),
         );
       })
-      .catch(() => {
-        // Keep the terminal batch summary; readiness can be refreshed manually.
+      .catch((cause) => {
+        if (assignmentMaintenance) setError(userFacingError(cause));
       });
-  }, [pageMode, recoveredBatch, refreshOverviewReadiness]);
+  }, [pageMode, recoveredBatch, assignmentMaintenance, refreshOverviewReadiness, userFacingError]);
 
   const persist = useCallback(async (next: TeamConfig, confirmReindex = false): Promise<boolean> => {
     if (LLM_SETTINGS_V4_ENABLED) {
@@ -1948,9 +2003,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     () => retryIndexRequested || stableJson(configForWrite(config)) !== stableJson(configForWrite(baseConfig)),
     [baseConfig, config, retryIndexRequested],
   );
-  const localIssues = useMemo(() => validateDraftLocally(config, t).filter((issue) =>
-    !(scoped && section !== "assignments" && !config.tiers.primary?.provider && issue.path === "tiers.primary")),
-  [config, scoped, section, t]);
+  const localIssues = useMemo(() => validateDraftLocally(config, t, assignmentMaintenance).filter((issue) =>
+    !(scoped && section !== "assignments" && ((!config.tiers.primary?.provider && issue.path === "tiers.primary") || (assignmentMaintenance && !issue.path.startsWith("providers"))))),
+  [config, scoped, section, assignmentMaintenance, t]);
   const connectionDirty = Boolean(connect && connectionBaselineRef.current !== null && connectionBaselineRef.current !== stableJson({ ...connect, test: undefined, testing: false, providerId: undefined }));
   draftDirtyRef.current = isDirty || connectionDirty;
   useEffect(() => {
@@ -2025,13 +2080,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           // Intended uses are declarations, never successful verification evidence.
           models: result.models.map((id) => ({ id, capabilities: ["chat", "tool"] })),
         } },
-        tiers: !config.tiers.primary?.provider && result.models.length === 1
-          ? { ...config.tiers, primary: { provider: key, model: result.models[0] } }
-          : config.tiers,
+        tiers: config.tiers,
       };
       setConfig(draft);
       setPageMode("edit");
       setBowraImported(true);
+      setBowraProviderKey(key);
       setValidation(null);
       setError(null);
     }).catch(() => {
@@ -2124,6 +2178,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const discardDraft = useCallback(() => {
     setConfigurationSource(null);
     setBowraImported(false);
+    setBowraProviderKey(null);
     setConfig(baseConfig);
     if (scoped) { connectionInitializedRef.current = false; connectionBaselineRef.current = null; }
     setValidation(null);
@@ -2144,10 +2199,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   }, [baseConfig, data?.provider_identities, scoped]);
 
   const exitEditMode = useCallback(async () => {
-    if (isDirty && !(await confirmLeave())) return;
+    if ((isDirty || connectionDirty) && !(await confirmLeave())) return;
     discardDraft();
-    setPageMode(scoped ? "edit" : "overview");
-  }, [discardDraft, isDirty, scoped, confirmLeave]);
+    setPageMode(section !== "overview" ? "edit" : "overview");
+  }, [discardDraft, isDirty, connectionDirty, section, confirmLeave]);
 
   const reviewDraft = useCallback(async () => {
     setReviewOpen(true);
@@ -2218,14 +2273,15 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       setAcceptedRiskTokens(new Set());
       setMigrationAccepted(false);
       setProviderTests({});
-      if (scoped && section === "connection") {
+      if (scoped && connectionEditor) {
         connectionBaselineRef.current = null;
         connectionInitializedRef.current = true;
         setConnect(null);
         setNavigateAfterConnectionSave(true);
       }
       setDraftProviderIds(resp.provider_identities || {});
-      setPageMode(scoped && section !== "connection" ? "edit" : "overview");
+      if (section === "assignments") setAssignmentsSaved(true);
+      setPageMode(scoped && !connectionEditor ? "edit" : "overview");
       void refreshOverviewReadiness(
         normalized,
         resp.version,
@@ -2255,8 +2311,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           setMigrationAccepted(false);
           setProviderTests({});
           setDraftProviderIds(latest.provider_identities || {});
+          if (section === "assignments") setAssignmentsSaved(true);
           setPageMode(scoped ? "edit" : "overview");
-          if (scoped && section === "connection") {
+          if (scoped && connectionEditor) {
             connectionBaselineRef.current = null;
             setConnect(null);
             setNavigateAfterConnectionSave(true);
@@ -2365,14 +2422,14 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   // Candidate vector/rerank models = provider models tagged embed/rerank, UNION the models
   // already registered in kb.models (embedding models are often carried there with a real_id
   // rather than listed as a provider chat model — so the currently-active one still shows).
-  const kbCandidates = useCallback((cap: "embed" | "rerank" | "vision" | "row_extractor"): FlatModel[] => {
+  const kbCandidates = useCallback((cap: "embed" | "rerank" | "vision" | "row_extractor" | "source_description"): FlatModel[] => {
     // row_extractor is a chat-completion task; models lack a "row_extractor" capability bit → use tool-capable chat models as candidates.
-    const modelCap = cap === "row_extractor" ? "tool" : cap;
+    const modelCap = cap === "row_extractor" ? "tool" : cap === "source_description" ? "chat" : cap;
     const map = new Map<string, FlatModel>();
     for (const m of flatModels) {
       const declarativeKbCapabilitySupported = (
         !["azure_openai", "custom_http"].includes(m.providerType)
-        || !["rerank", "vision", "row_extractor"].includes(cap)
+        || !["rerank", "vision", "row_extractor", "source_description"].includes(cap)
       );
       if (m.caps.includes(modelCap) && declarativeKbCapabilitySupported) {
         map.set(`${m.providerKey}::${m.id}`, m);
@@ -2384,7 +2441,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         const providerType = config.providers[prov].type || "openai_compatible";
         if (
           ["azure_openai", "custom_http"].includes(providerType)
-          && ["rerank", "vision", "row_extractor"].includes(cap)
+          && ["rerank", "vision", "row_extractor", "source_description"].includes(cap)
         ) {
           continue;
         }
@@ -2405,6 +2462,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   const embedModels = useMemo(() => kbCandidates("embed"), [kbCandidates]);
   const rerankModels = useMemo(() => kbCandidates("rerank"), [kbCandidates]);
   const visionModels = useMemo(() => kbCandidates("vision"), [kbCandidates]);
+  const sourceDescriptionModels = useMemo(() => kbCandidates("source_description"), [kbCandidates]);
+  const activeSourceName = config.kb.active.source_description;
+  const activeSource = activeSourceName ? config.kb.models[activeSourceName] : undefined;
   const rowExtractorModels = useMemo(() => kbCandidates("row_extractor"), [kbCandidates]);
 
   // ─── ② Derived tiers (primary / fallback / lightweight / judge) ───────────
@@ -2430,6 +2490,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     [chatModels, primaryModel?.provider, primaryModel?.model],
   );
   const evalSameAsPrimary = Boolean(judgePinned && primaryModel && judgePinned.provider === primaryModel.provider && judgePinned.model === primaryModel.model);
+  const [assignmentsSaved, setAssignmentsSaved] = useState(false);
   const [advOpen, setAdvOpen] = useState(false);
 
   const activeEmbedName = config.kb.active.embed;
@@ -2515,6 +2576,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         .filter((model) => model.provider === runtimeKey).length;
       return {
         runtimeKey,
+        providerId: draftProviderIds[runtimeKey],
         displayName: spec.display_name || runtimeKey,
         type: spec.type || "openai_compatible",
         endpoint: spec.endpoint
@@ -2523,11 +2585,18 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           || spec.transports?.embed?.request?.url_template
           || "",
         modelCount: normModels(spec).length + mediaCount + searchCount,
+        models: normModels(spec).map((model) => ({
+          id: model.id,
+          capabilities: model.caps.filter((capability) => VERIFIABLE_CAPABILITIES.has(capability as ModelCapability)).map((capability) => ({
+            capability,
+            state: data?.verification?.entries.find((entry) => entry.provider_id === draftProviderIds[runtimeKey] && entry.model_id === model.id && entry.capability === capability)?.fact_state || "unknown",
+          })),
+        })),
         fingerprint: fingerprints[runtimeKey] || spec.fingerprint || null,
         authType: spec.auth?.type,
       };
     })
-  ), [baseConfig, fingerprints]);
+  ), [baseConfig, fingerprints, data?.verification?.entries, draftProviderIds]);
   const verificationCandidates = useMemo<VerificationCandidate[]>(() => {
     const readinessRows = overviewValidation?.readiness?.rows || [];
     const candidates = Object.entries(baseConfig.providers).flatMap(([runtimeKey, spec]) => {
@@ -2630,8 +2699,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         }
       }
     }
-    return { hardBlock: hardBlock || (scoped && refs.length > 0), refs };
-  }, [scoped, del, activeEmbed, activeImage, activeSearch, config.kb.models, config.media?.models, config.search?.models, config.tiers, t]);
+    return { hardBlock: hardBlock || (scoped && !assignmentMaintenance && refs.length > 0), refs };
+  }, [scoped, assignmentMaintenance, del, activeEmbed, activeImage, activeSearch, config.kb.models, config.media?.models, config.search?.models, config.tiers, t]);
 
   const confirmDelete = useCallback(() => {
     if (!del || !delInfo || delInfo.hardBlock) return;
@@ -2662,8 +2731,11 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
 
   const onPickRerank = useCallback((value: string) => {
     const kb: KbConfig = { ...config.kb, models: { ...config.kb.models }, active: { ...config.kb.active } };
-    if (!value) {
+    if (!value || value === AUTO_VALUE) {
       delete kb.active.rerank;
+      kb.auto_assign_disabled = value === AUTO_VALUE
+        ? (config.kb.auto_assign_disabled as string[] || []).filter((cap) => cap !== "rerank")
+        : [...new Set([...(config.kb.auto_assign_disabled as string[] || []), "rerank"])];
     } else {
       const [provider, ...rest] = value.split("::");
       const id = rest.join("::");
@@ -2678,24 +2750,29 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         protocol: candidate?.protocol || DEFAULT_RERANK_PROTOCOL,
       };
       kb.active = { ...kb.active, rerank: name };
+      kb.auto_assign_disabled = (config.kb.auto_assign_disabled as string[] || []).filter((cap) => cap !== "rerank");
     }
     void persist({ ...config, kb });
-  }, [config, persist, rerankModels]);
+  }, [config, persist, rerankModels, assignmentMaintenance]);
 
   // P1.5: optional KB capabilities (vision document-image recognition / row_extractor row extraction) — like rerank, do not trigger index rebuilding.
-  const onPickKbOptional = useCallback((cap: "vision" | "row_extractor", prefix: string, value: string) => {
+  const onPickKbOptional = useCallback((cap: "vision" | "row_extractor" | "source_description", prefix: string, value: string) => {
     const kb: KbConfig = { ...config.kb, models: { ...config.kb.models }, active: { ...config.kb.active } };
-    if (!value) {
+    if (!value || value === AUTO_VALUE) {
       delete kb.active[cap];
+      kb.auto_assign_disabled = value === AUTO_VALUE
+        ? (config.kb.auto_assign_disabled as string[] || []).filter((item) => item !== cap)
+        : [...new Set([...(config.kb.auto_assign_disabled as string[] || []), cap])];
     } else {
       const [provider, ...rest] = value.split("::");
       const id = rest.join("::");
       const name = `${prefix}__${provider}__${id}`;
       kb.models[name] = { provider, real_id: id, capability: cap };
       kb.active = { ...kb.active, [cap]: name };
+      kb.auto_assign_disabled = (config.kb.auto_assign_disabled as string[] || []).filter((item) => item !== cap);
     }
     void persist({ ...config, kb });
-  }, [config, persist]);
+  }, [config, persist, assignmentMaintenance]);
 
   // ④: select active image_gen (value = logical name in media.models; empty = disabled). Image models themselves
   // are added/deleted in the ① connection panel (select "图像生成" + call protocol) — this only switches the active model.
@@ -2912,8 +2989,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   ]);
 
   useEffect(() => {
-    if (!scoped || pageMode !== "edit" || section !== "connection" || loading || !data || verificationWorkflowOpen || connectionInitializedRef.current) return;
+    if (!scoped || pageMode !== "edit" || !connectionEditor || loading || !data || verificationWorkflowOpen || connectionInitializedRef.current) return;
     connectionInitializedRef.current = true;
+    if (bowraImported && bowraProviderKey) { openEdit(bowraProviderKey); return; }
     if (newConnection) openAdd();
     else {
       const providerId = new URLSearchParams(window.location.search).get("id");
@@ -2921,7 +2999,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       if (key) openEdit(key);
       else setError(t("sections.connection_missing"));
     }
-  }, [scoped, pageMode, section, loading, data, newConnection, config.providers, draftProviderIds, verificationWorkflowOpen, openAdd, openEdit, t]);
+  }, [scoped, pageMode, section, connectionEditor, bowraImported, bowraProviderKey, loading, data, newConnection, config.providers, draftProviderIds, verificationWorkflowOpen, openAdd, openEdit, t]);
 
   useEffect(() => {
     if (connect && connectionBaselineRef.current === null) {
@@ -3148,6 +3226,12 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     userFacingError,
     v2Enabled,
   ]);
+
+  useEffect(() => {
+    if (!bowraImported || !connect || bowraPlanPrepared.current) return;
+    bowraPlanPrepared.current = true;
+    void runTest();
+  }, [bowraImported, connect, runTest]);
 
   const autoFillModels = useCallback(async () => {
     // Clicking "自动发现模型" yields a real model list — without kept markers, the next "智能填写"
@@ -3680,7 +3764,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       && previousModels[0].id !== chatRows[0].id
       ? { oldId: previousModels[0].id, newId: chatRows[0].id }
       : null;
-    if (replacement) {
+    if (replacement && !assignmentMaintenance) {
       const replacePair = (pair: Pair): Pair => pair.provider === key && pair.model === replacement.oldId
         ? { ...pair, model: replacement.newId }
         : pair;
@@ -3723,7 +3807,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         } : undefined,
       };
     }
-    if (scoped) {
+    if (scoped && !assignmentMaintenance) {
       const requirements: Array<{ model: string; capabilities: string[] }> = [];
       const addRequirement = (pair: Pair | null | undefined, capabilities: string[]) => {
         if (pair?.provider === key && pair.model) requirements.push({ model: pair.model, capabilities });
@@ -3734,7 +3818,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       addRequirement(refPair(nextCfg.tiers.judge), ["chat"]);
       for (const [capability, name] of Object.entries(nextCfg.kb.active)) {
         const model = nextCfg.kb.models[name];
-        if (model?.provider === key && model.real_id && normModels(spec).some((item) => item.id === model.real_id)) requirements.push({ model: model.real_id, capabilities: capability === "row_extractor" ? ["chat", "tool"] : [capability] });
+        if (model?.provider === key && model.real_id && normModels(spec).some((item) => item.id === model.real_id)) requirements.push({ model: model.real_id, capabilities: capability === "row_extractor" ? ["chat", "tool"] : capability === "source_description" ? ["chat"] : [capability] });
       }
       const missing = requirements.filter((requirement) => !chatRows.some((model) => model.id === requirement.model && requirement.capabilities.every((cap) => model.caps.includes(cap))));
       if (missing.length) {
@@ -3778,6 +3862,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             setVerificationPlan(null);
             setVerificationBatch(null);
             setVerificationDrafts(null);
+            setBowraImported(false);
+            setPageMode("overview");
             setNavigateAfterConnectionSave(true);
           };
           if (stableJson(outgoing) === stableJson(configForWrite(baseConfig))) {
@@ -3842,6 +3928,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   }, [
     scoped,
     overviewValidation?.readiness?.rows,
+    assignmentMaintenance,
     t,
     connect,
     config,
@@ -4002,13 +4089,24 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     !readiness?.migration_acceptance || migrationAccepted,
   );
 
+  const assignmentRows = assignmentSummaryRows(config, assignmentMaintenance);
+  const previousAssignmentRows = assignmentSummaryRows(baseConfig, assignmentMaintenance);
+  const assignmentEdits = assignmentRows.filter((row) => {
+    if (row.role === "tier.primary_fallback") return false;
+    const previous = previousAssignmentRows.find((item) => item.role === row.role);
+    return !previous || previous.providerKey !== row.providerKey || previous.modelId !== row.modelId || previous.mode !== row.mode;
+  });
+  for (const previous of previousAssignmentRows) {
+    if (previous.role !== "tier.primary_fallback" && !assignmentRows.some((row) => row.role === previous.role)) assignmentEdits.push({ ...previous, target: "", mode: "off" });
+  }
   const showOverview = LLM_SETTINGS_V4_ENABLED
-    && ((!scoped && pageMode === "overview") || (scoped && (section === "assignments" || section === "index" || section === "external")));
+    && ((!scoped && pageMode === "overview") || (scoped && (section === "index" || section === "external")));
   const modelOverview = showOverview ? (
     <ModelSettingsOverview
       onVerifyItem={verifySingleRow}
       verifyingRowKey={verifyingRowKey}
       version={data?.version ?? 0}
+      assignments={!scoped && overviewTab === "assignments" ? assignmentRows : undefined}
       providers={overviewProviders}
       readiness={overviewValidation?.readiness || null}
       readinessLoading={overviewReadinessLoading}
@@ -4016,7 +4114,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       reindexState={reindexFailed ? "failed" : reindexing ? "running" : "idle"}
       imageConfigured={Boolean(config.media?.active?.image_gen)}
       searchConfigured={Boolean(config.search?.active?.web_search)}
-      section={scoped ? section === "assignments" ? "assignments" : section === "external" ? "external" : "index" : overviewTab}
+      section={scoped ? section === "external" ? "external" : "index" : overviewTab}
       onEdit={scoped ? undefined : () => router.push("/team/settings/models/assignments/")}
       onConfigureImage={() => router.push(modelExternalCapabilitiesPath("image"))}
       onConfigureSearch={() => router.push(modelExternalCapabilitiesPath("search"))}
@@ -4029,6 +4127,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       retryIndexDisabled={busy || isDirty}
       onAddProvider={() => router.push("/team/settings/models/connections/new/")}
       onConnectBowra={data?.features?.bowra_connect ? () => void connectBowra() : undefined}
+      onVerifyProvider={(runtimeKey) => {
+        void planSelectedVerification(verificationCandidates.filter((candidate) => candidate.providerId === draftProviderIds[runtimeKey]));
+      }}
       onEditProvider={(key) => router.push(`/team/settings/models/connections/edit/?id=${encodeURIComponent(draftProviderIds[key] || "")}`)}
       onRetryReadiness={() => void refreshOverviewReadiness(baseConfig, data?.version ?? 0, v2Enabled)}
       onVerify={() => setVerificationSelectionOpen(true)}
@@ -4067,19 +4168,22 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         v4={LLM_SETTINGS_V4_ENABLED}
         mode={scoped ? "edit" : pageMode}
         isDirty={isDirty || connectionDirty}
-        titleKey={sectionsEnabled ? `sections.title_${section}` : undefined}
-        subtitleKey={scoped ? `sections.body_${section}` : undefined}
+        titleKey={sectionsEnabled ? `sections.title_${connectionEditor ? "connection" : section}` : undefined}
+        subtitleKey={scoped ? `sections.body_${connectionEditor ? "connection" : section}` : undefined}
         // A section page opened from the overview has no draft until something changes; after Apply or a reload
         // it must not keep saying "Editing draft".
         showDraftNote={section !== "external" && (!scoped || isDirty || connectionDirty)}
         backLabelKey={section === "index" ? "sections.back_to_knowledge" : undefined}
         eyebrowKey={section === "index" ? "sections.index_eyebrow" : undefined}
-        onBack={scoped ? () => router.push(overviewReturnPath) : exitEditMode}
+        onBack={scoped && !bowraImported ? () => router.push(overviewReturnPath) : exitEditMode}
         actionsDisabled={verificationWorkflowOpen}
         backDisabled={verificationBatchRunning}
       />
+      {data?.assignment_changes?.length ? <AssignmentChanges changes={data.assignment_changes} /> : null}
+      {data?.assignment_review_required ? <p role="status">{t("sections.assignment_review_required")} <button type="button" className="btn sec sm" onClick={() => router.push("/team/settings/models/assignments/")}>{t("overview.edit_assignments")}</button></p> : null}
+      {assignmentMaintenance && !config.tiers.primary?.provider && !connect ? <p role="status">{t("sections.no_primary")}</p> : null}
       {bowraImported ? <p role="status">{t("bowra.imported")}</p> : null}
-      {scoped && section === "connection" && pageMode === "overview" ? <p role="status">{t("sections.saved")}</p> : null}
+      {scoped && connectionEditor && pageMode === "overview" ? <p role="status">{t("sections.saved")}</p> : null}
       {error ? (
         <div className="test-result err" role="alert"><span className="ti"><AlertTriangle size={15} /></span><div>{error}</div></div>
       ) : null}
@@ -4087,7 +4191,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       {showOverview && !scoped ? (
         <Tabs value={overviewTab} onValueChange={(value) => {
           if (value === "external") router.push(modelExternalCapabilitiesPath());
-          else setOverviewTab(value);
+          else if (value === "connections" || value === "assignments") {
+            setOverviewTab(value);
+            router.replace(modelSettingsOverviewPath(value), { scroll: false });
+          }
         }} idBase="model-settings">
           <TabList appearance="underline" className="team-openapi-tabs" aria-label={t("sections.overview_tabs_label")}>
             <Tab value="connections" className={overviewTab === "connections" ? "is-active" : undefined}>{t("sections.tab_connections")}</Tab>
@@ -4116,7 +4223,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           </TabPanel>
           <TabPanel value="external" className="team-openapi-panel">{modelOverview}</TabPanel>
         </Tabs>
-      ) : modelOverview}
+      ) : section === "assignments" ? null : modelOverview}
 
       {v2Enabled && verificationPlan && !verificationSelectionOpen && (pageMode === "overview" || !connect) ? (
         <VerificationPanel
@@ -4182,9 +4289,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       ) : null}
 
       {pageMode === "edit" ? (
-        <div className={`model-editor${!scoped || section === "connection" ? " model-editor-connection" : ""}`} data-testid="model-settings-editor">
+        <div className={`model-editor${!scoped || connectionEditor ? " model-editor-connection" : ""}`} data-testid="model-settings-editor">
       {/* ① Your model sources */}
-      {(!scoped || section === "connection") ? <section className="block">
+      {(!scoped || connectionEditor) ? <section className="block">
         <div className="block-head">
           <span className="block-n">①</span>
           <h3 className="block-title">{t("sources.title")}</h3>
@@ -4192,7 +4299,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         </div>
         <DraftIssueList issues={localIssues} prefixes={scoped ? ["providers"] : ["providers", "kb", "media", "search"]} />
 
-        {scoped && connect?.mode === "edit" && connect.origKey ? <button type="button" className="btn ghost sm" disabled={verificationWorkflowOpen} onClick={(e) => { delReturnFocusRef.current = e.currentTarget; setDel(connect.origKey || null); }}><Trash size={14} /> {t("sections.delete_connection")}</button> : null}
+        {scoped && connect?.mode === "edit" && connect.origKey && baseConfig.providers[connect.origKey] ? <button type="button" className="btn ghost sm" disabled={verificationWorkflowOpen} onClick={(e) => { delReturnFocusRef.current = e.currentTarget; setDel(connect.origKey || null); }}><Trash size={14} /> {t("sections.delete_connection")}</button> : null}
         {providerEntries.length === 0 && !connect ? (
           <div className="empty big">
             <span className="ei"><Plug size={20} /></span>
@@ -4347,6 +4454,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               adaptations={outboundAdaptations}
               caps={connectCaps}
               busy={busy || verificationBusy || verificationBatchRunning}
+              dirty={connectionDirty || isDirty}
               saveEnabled={saveEnabled} saveBlocked={saveBlocked} testEnabled={testEnabled}
               deploymentMode={data?.features?.deployment_mode}
               parameterProfiles={data?.features?.model_runtime_parameters ? data.parameter_profiles : undefined}
@@ -4356,6 +4464,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               onTouch={touchProviderField} onTest={runTest} onAutoFill={autoFillModels} discoveringModels={discoveringModels}
               onSave={saveConnect}
               onCancel={() => {
+                if (bowraImported) { void exitEditMode(); return; }
                 if (scoped) { router.push(overviewReturnPath); return; }
                 setConnect(null);
                 setDiscovery(null);
@@ -4395,28 +4504,30 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         ) : null}
       </section> : null}
 
-      {scoped && section === "connection" && isDirty ? <p>{t("sections.connection_staged")}</p> : null}
+      {scoped && connectionEditor && isDirty ? <p>{t("sections.connection_staged")}</p> : null}
       {(!scoped || section === "assignments") ? <>
       {/* ② Model allocation (tiers: primary + advanced [lightweight/judge]) */}
       <section className="block">
         <div className="block-head">
-          <span className="block-n">②</span>
+          {!scoped ? <span className="block-n">②</span> : null}
           <h3 className="block-title">{t("tier.title")}</h3>
           <div className="block-sub">{t("tier.sub")}</div>
         </div>
         <p className="block-desc">{t("tier.desc")}</p>
         <DraftIssueList issues={localIssues} prefixes={["tiers"]} />
+        {section === "assignments" ? <p className="overview-quiet">{t("overview.edit_boundary")}</p> : null}
         {toolModels.length === 0 ? (
           <div className="empty big">
             <span className="ei"><Bot size={20} /></span>
             <span className="et">{t("tier.empty_title")}</span>
             <span className="es">{t("tier.empty_body")}</span>
+            <button type="button" className="btn sec sm" onClick={() => router.push("/team/settings/models/")}>{t("overview.go_connections")}</button>
           </div>
         ) : (
           <div className="default-sel">
             {/* Primary model */}
             <div className="tier-row">
-              <div className="tier-label"><span className="tdot" /> {t("tier.primary_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.primary" label={t("tier.primary_label")} /></div>
+              <div className="tier-label"><span className="tdot" /> {t("tier.primary_label")} <small>{t("tier.primary_required")}</small><ConfigurationFieldHelp includeChildren field="team_model_config.tiers.primary" label={t("tier.primary_label")} /></div>
               <span className="tier-hint">{t("default.tool_only")}</span>
             </div>
             <div className="selbox">
@@ -4498,8 +4609,8 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
               })()}
             </div>
             {/* Advanced disclosure: lightweight + judge (all follow the primary model by default) */}
-            <div className={`tier-adv${advOpen ? " open" : ""}`}>
-              <button type="button" className="tier-adv-head" onClick={() => setAdvOpen((v) => !v)} aria-expanded={advOpen}>
+            <div className={`tier-adv${advOpen || localIssues.some((issue) => /^tiers\.(fast|judge)/.test(issue.path)) ? " open" : ""}`}>
+              <button type="button" className="tier-adv-head" onClick={() => setAdvOpen((v) => !v)} aria-expanded={advOpen || localIssues.some((issue) => /^tiers\.(fast|judge)/.test(issue.path))} aria-controls="assignment-advanced">
                 <span className="tchev"><ChevronRight size={15} /></span>
                 <span className="tlab">{t("tier.adv_label")}</span>
                 <span className="tsum">{
@@ -4516,7 +4627,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                       })
                 }</span>
               </button>
-              <div className="tier-adv-body">
+              <div id="assignment-advanced" className="tier-adv-body" hidden={!advOpen && !localIssues.some((issue) => /^tiers\.(fast|judge)/.test(issue.path))}>
                 {/* Lightweight model */}
                 <div className="tier-item">
                   <div className="tier-row"><div className="tier-label"><span className="tdot soft" /> {t("tier.fast_label")}<ConfigurationFieldHelp includeChildren field="team_model_config.tiers.fast" label={t("tier.fast_label")} /></div></div>
@@ -4569,7 +4680,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                     judgeAuto ? (
                       <div className="sel-effect follow">{t("tier.judge_auto_effect")} <span className="k">{`${judgeAuto.provider}·${judgeAuto.model}`}</span></div>
                     ) : primaryModel ? (
-                      <div className="warn-inline"><AlertTriangle size={13} /> {t("tier.judge_auto_none", { model: primaryModel.model })}</div>
+                      <div className="warn-inline"><AlertTriangle size={13} /> <span>{t("tier.judge_auto_none", { model: primaryModel.model })} <button type="button" className="btn ghost sm" onClick={() => router.push("/team/settings/models/")}>{t("overview.go_connections")}</button></span></div>
                     ) : (
                       <div className="sel-effect follow">{t("tier.judge_auto_no_primary")}</div>
                     )
@@ -4584,10 +4695,103 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       {/* ③ Knowledge-base models */}
       <section className="block">
         <div className="block-head">
-          <span className="block-n">③</span>
+          {!scoped ? <span className="block-n">③</span> : null}
           <h3 className="block-title">{t("kb.title")}</h3>
         </div>
         <p className="block-desc">{t("kb.desc")}</p>
+        <DraftIssueList issues={localIssues} prefixes={["kb"]} />
+        {embedModels.length === 0 ? (
+          <div className="empty big">
+            <span className="ei"><Database size={20} /></span>
+            <span className="et">{t("kb.empty_title")}</span>
+            <span className="es">{t("kb.empty_body")}</span>
+            <button type="button" className="btn sec sm" onClick={() => router.push("/team/settings/models/")}>{t("overview.go_connections")}</button>
+          </div>
+        ) : null}
+          <div className={`kb-sel${!activeEmbed ? " required" : ""}`}>
+            <div className="kb-row">
+              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vector")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.embed" label={t("kb.vector")} /></div>
+                <div className={activeEmbed ? "opt" : "req"}>{activeEmbed ? t("kb.embedding") : t("kb.required_unset")}</div></div>
+              <div className="selbox">
+                <select
+                  name="embedding_model"
+                  aria-label={t("kb.vector")}
+                  value={activeEmbed ? `${activeEmbed.provider}::${activeEmbed.real_id}` : ""}
+                  onChange={(e) => { const [p, ...r] = e.target.value.split("::"); if (p) openRebuild(p, r.join("::")); }} disabled={busy || reindexing || embedModels.length === 0}>
+                  {!activeEmbed ? <option value="">{t("kb.vector_placeholder")}</option> : null}
+                  {embedModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
+                </select>
+                <span className="chev"><ChevronDown size={15} /></span>
+              </div>
+            </div>
+            {!activeEmbed ? (
+              <div className="guard hard legacy-mset-guard-tight"><span className="gi"><AlertTriangle size={15} /></span>
+                <div className="gt"><b>{t("kb.required_guard_title")}</b> — {t("kb.required_guard_body")}</div></div>
+            ) : null}
+            {reindexFailed ? (
+              <div className="guard hard"><span className="gi"><AlertTriangle size={15} /></span><div className="gt">{t("errors.err_reindex_failed")}</div></div>
+            ) : reindexing ? (
+              <div className="kb-inflight"><span className="spin" /><span>{t("kb.inflight")}</span><span className="bar" /></div>
+            ) : null}
+            <details className="assignment-options" open={localIssues.some((issue) => /^kb\.(?!active.embed)/.test(issue.path)) || undefined}>
+              <summary>{t("overview.kb_options")}<span>{assignmentRows.filter((row) => row.role.startsWith("kb.") && row.role !== "kb.embed").map((row) => `${t(`overview.${roleTranslationKey(row.role)}`)}: ${row.target || t(`overview.selection_${row.mode}`)}`).join(" · ")}</span></summary>
+            <div className="kb-row">
+              <div className="kbl"><div className="n"><Layers size={14} /> {t("kb.rerank")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.rerank" label={t("kb.rerank")} /></div><div className="opt">{t("kb.rerank_opt")}</div></div>
+              <div className="selbox">
+                <select
+                  name="rerank_model"
+                  aria-label={t("kb.rerank")}
+                  value={activeRerank ? `${activeRerank.provider}::${activeRerank.real_id}` : assignmentMaintenance && !(config.kb.auto_assign_disabled as string[] || []).includes("rerank") ? AUTO_VALUE : ""}
+                  onChange={(e) => onPickRerank(e.target.value)} disabled={busy}>
+                  {assignmentMaintenance ? <option value={AUTO_VALUE}>{t("sections.automatic_assignment")}</option> : null}
+                  <option value="">{t("kb.rerank_none")}</option>
+                  {rerankModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
+                </select>
+                <span className="chev"><ChevronDown size={15} /></span>
+              </div>
+            </div>
+            {/* P1.5: document-image recognition (vision) + row extraction (row_extractor) — optional, do not trigger index rebuilding. */}
+            <div className="kb-row">
+              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vision")}<ConfigurationFieldHelp field="team_model_config.kb.active.vision" label={t("kb.vision")} /></div><div className="opt">{t("kb.vision_opt")}</div></div>
+              <div className="selbox">
+                <select
+                  name="vision_model"
+                  aria-label={t("kb.vision")}
+                  value={activeVision ? `${activeVision.provider}::${activeVision.real_id}` : assignmentMaintenance && !(config.kb.auto_assign_disabled as string[] || []).includes("vision") ? AUTO_VALUE : ""}
+                  onChange={(e) => onPickKbOptional("vision", "vis", e.target.value)} disabled={busy}>
+                  {assignmentMaintenance ? <option value={AUTO_VALUE}>{t("sections.automatic_assignment")}</option> : null}
+                  <option value="">{t("kb.optional_none")}</option>
+                  {visionModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
+                </select>
+                <span className="chev"><ChevronDown size={15} /></span>
+              </div>
+            </div>
+            <div className="kb-row">
+              <div className="kbl"><div className="n"><Bot size={14} /> {t("kb.row_extractor")}<ConfigurationFieldHelp field="team_model_config.kb.active.row_extractor" label={t("kb.row_extractor")} /></div><div className="opt">{t("kb.row_extractor_opt")}</div></div>
+              <div className="selbox">
+                <select
+                  name="row_extractor_model"
+                  aria-label={t("kb.row_extractor")}
+                  value={activeRow ? `${activeRow.provider}::${activeRow.real_id}` : assignmentMaintenance && !(config.kb.auto_assign_disabled as string[] || []).includes("row_extractor") ? AUTO_VALUE : ""}
+                  onChange={(e) => onPickKbOptional("row_extractor", "row", e.target.value)} disabled={busy}>
+                  {assignmentMaintenance ? <option value={AUTO_VALUE}>{t("sections.automatic_assignment")}</option> : null}
+                  <option value="">{t("kb.optional_none")}</option>
+                  {rowExtractorModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
+                </select>
+                <span className="chev"><ChevronDown size={15} /></span>
+              </div>
+            </div>
+            <div className="kb-row">
+              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.source_description")}<ConfigurationFieldHelp field="team_model_config.kb.active.source_description" label={t("kb.source_description")} /></div><div className="opt">{t("kb.source_description_opt")}</div></div>
+              <div className="selbox">
+                <select name="source_description_model" aria-label={t("kb.source_description")} value={activeSource ? `${activeSource.provider}::${activeSource.real_id}` : ""} onChange={(event) => onPickKbOptional("source_description", "src", event.target.value)} disabled={busy}>
+                  <option value="">{t("kb.optional_none")}</option>
+                  {sourceDescriptionModels.map((model) => <option key={`${model.providerKey}::${model.id}`} value={`${model.providerKey}::${model.id}`}>{modelLabel({ providerKey: model.providerKey, id: model.id })}</option>)}
+                </select><span className="chev"><ChevronDown size={15} /></span>
+              </div>
+            </div>
+            </details>
+            <details className="assignment-options"><summary>{t("kb.retrieval_count")}</summary>
         <div className="kb-sel">
           <div className="kb-row kb-retrieval-row">
             <div className="kbl">
@@ -4615,83 +4819,9 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             </div>
           </div>
         </div>
-        {embedModels.length === 0 ? (
-          <div className="empty big">
-            <span className="ei"><Database size={20} /></span>
-            <span className="et">{t("kb.empty_title")}</span>
-            <span className="es">{t("kb.empty_body")}</span>
+            </details>
           </div>
-        ) : (
-          <div className={`kb-sel${!activeEmbed ? " required" : ""}`}>
-            <div className="kb-row">
-              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vector")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.embed" label={t("kb.vector")} /></div>
-                <div className={activeEmbed ? "opt" : "req"}>{activeEmbed ? t("kb.embedding") : t("kb.required_unset")}</div></div>
-              <div className="selbox">
-                <select
-                  name="embedding_model"
-                  aria-label={t("kb.vector")}
-                  value={activeEmbed ? `${activeEmbed.provider}::${activeEmbed.real_id}` : ""}
-                  onChange={(e) => { const [p, ...r] = e.target.value.split("::"); if (p) openRebuild(p, r.join("::")); }} disabled={busy || reindexing}>
-                  {!activeEmbed ? <option value="">{t("kb.vector_placeholder")}</option> : null}
-                  {embedModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
-                </select>
-                <span className="chev"><ChevronDown size={15} /></span>
-              </div>
-            </div>
-            {!activeEmbed ? (
-              <div className="guard hard legacy-mset-guard-tight"><span className="gi"><AlertTriangle size={15} /></span>
-                <div className="gt"><b>{t("kb.required_guard_title")}</b> — {t("kb.required_guard_body")}</div></div>
-            ) : null}
-            {reindexFailed ? (
-              <div className="guard hard"><span className="gi"><AlertTriangle size={15} /></span><div className="gt">{t("errors.err_reindex_failed")}</div></div>
-            ) : reindexing ? (
-              <div className="kb-inflight"><span className="spin" /><span>{t("kb.inflight")}</span><span className="bar" /></div>
-            ) : null}
-            <div className="kb-row">
-              <div className="kbl"><div className="n"><Layers size={14} /> {t("kb.rerank")}<ConfigurationFieldHelp includeChildren field="team_model_config.kb.active.rerank" label={t("kb.rerank")} /></div><div className="opt">{t("kb.rerank_opt")}</div></div>
-              <div className="selbox">
-                <select
-                  name="rerank_model"
-                  aria-label={t("kb.rerank")}
-                  value={activeRerank ? `${activeRerank.provider}::${activeRerank.real_id}` : ""}
-                  onChange={(e) => onPickRerank(e.target.value)} disabled={busy}>
-                  <option value="">{t("kb.rerank_none")}</option>
-                  {rerankModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
-                </select>
-                <span className="chev"><ChevronDown size={15} /></span>
-              </div>
-            </div>
-            {/* P1.5: document-image recognition (vision) + row extraction (row_extractor) — optional, do not trigger index rebuilding. */}
-            <div className="kb-row">
-              <div className="kbl"><div className="n"><Database size={14} /> {t("kb.vision")}<ConfigurationFieldHelp field="team_model_config.kb.active.vision" label={t("kb.vision")} /></div><div className="opt">{t("kb.vision_opt")}</div></div>
-              <div className="selbox">
-                <select
-                  name="vision_model"
-                  aria-label={t("kb.vision")}
-                  value={activeVision ? `${activeVision.provider}::${activeVision.real_id}` : ""}
-                  onChange={(e) => onPickKbOptional("vision", "vis", e.target.value)} disabled={busy}>
-                  <option value="">{t("kb.optional_none")}</option>
-                  {visionModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
-                </select>
-                <span className="chev"><ChevronDown size={15} /></span>
-              </div>
-            </div>
-            <div className="kb-row">
-              <div className="kbl"><div className="n"><Bot size={14} /> {t("kb.row_extractor")}<ConfigurationFieldHelp field="team_model_config.kb.active.row_extractor" label={t("kb.row_extractor")} /></div><div className="opt">{t("kb.row_extractor_opt")}</div></div>
-              <div className="selbox">
-                <select
-                  name="row_extractor_model"
-                  aria-label={t("kb.row_extractor")}
-                  value={activeRow ? `${activeRow.provider}::${activeRow.real_id}` : ""}
-                  onChange={(e) => onPickKbOptional("row_extractor", "row", e.target.value)} disabled={busy}>
-                  <option value="">{t("kb.optional_none")}</option>
-                  {rowExtractorModels.map((m) => <option key={`${m.providerKey}::${m.id}`} value={`${m.providerKey}::${m.id}`}>{modelLabel({ providerKey: m.providerKey, id: m.id })}</option>)}
-                </select>
-                <span className="chev"><ChevronDown size={15} /></span>
-              </div>
-            </div>
-          </div>
-        )}
+
       </section>
 
       </> : null}
@@ -4787,8 +4917,24 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
         </div>
       ) : null}
 
+      {section === "assignments" && assignmentsSaved && !isDirty ? <p role="status">{t("overview.assignments_saved")}</p> : null}
+      {section === "assignments" && isDirty ? <section className="overview-section">
+        <p className="overview-quiet" role="status">{t("overview.draft_evidence_boundary")}</p>
+        {v2Enabled ? <>
+          <p id="assignment-draft-verification-hint" className="overview-quiet">{t("overview.verification_boundary")}</p>
+          {overviewReadinessError ? <p className="overview-quiet is-error" role="alert">
+            {overviewReadinessError}
+            <button type="button" className="btn sec sm" disabled={busy || verificationWorkflowOpen || overviewReadinessLoading}
+              onClick={() => void refreshOverviewReadiness(config, data.version, v2Enabled)}>{t("overview.retry")}</button>
+          </p> : null}
+          <button type="button" className="btn sec sm" aria-describedby="assignment-draft-verification-hint"
+            disabled={busy || verificationWorkflowOpen || overviewReadinessLoading || verificationCandidates.length === 0}
+            onClick={() => setVerificationSelectionOpen(true)}>{t("overview.verify_draft_assignments")}</button>
+        </> : null}
+      </section> : null}
+
       {/* Unified save bar for dirty drafts (tradeoff 17); "检查并应用" retains the original review flow, with this page's leave confirmation. */}
-      {LLM_SETTINGS_V4_ENABLED ? <SaveBar dirty={pageMode === "edit" && isDirty && !reviewOpen} guard={false}
+      {LLM_SETTINGS_V4_ENABLED ? <SaveBar dirty={pageMode === "edit" && isDirty && !connect && !reviewOpen} guard={false}
         message={<>{t("v4.draft_title")}<span className="ui-savebar-meta"> · {t("v4.draft_sections", { count: changedSections.length })}</span></>}
         saveLabel={t("v4.review")} onDiscard={discardDraft} onSave={() => void reviewDraft()} /> : null}
 
@@ -4840,7 +4986,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             <>
               <p id="mset-del-body" className="modal-body">{
                 delInfo.refs.length > 0
-                  ? (LLM_SETTINGS_V4_ENABLED ? t("v4.delete_ref_body", { count: delInfo.refs.length }) : t("del.soft_body", { count: delInfo.refs.length }))
+                  ? (assignmentMaintenance ? t("sections.delete_repair", { count: delInfo.refs.length }) : LLM_SETTINGS_V4_ENABLED ? t("v4.delete_ref_body", { count: delInfo.refs.length }) : t("del.soft_body", { count: delInfo.refs.length }))
                   : t("del.clean_body")
               }</p>
               {delInfo.refs.length > 0 ? (
@@ -4893,6 +5039,17 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 {changedSections.map((section) => <span key={section}>{t(`v4.section_${section}`)}</span>)}
               </div>
             </section>
+            {section === "assignments" && assignmentEdits.length ? <section className="review-section">
+              <h3>{t("overview.assignment_changes")}</h3>
+              {assignmentEdits.map((row) => {
+                const before = previousAssignmentRows.find((item) => item.role === row.role);
+                return <div className="assignment-review-row" key={row.role}>
+                  <b>{t(`overview.${roleTranslationKey(row.role)}`)}</b>
+                  <span>{before?.target || "—"} · {before ? t(`overview.selection_${before.mode}`) : "—"}</span>
+                  <span aria-hidden="true">→</span><span>{row.target || "—"} · {t(`overview.selection_${row.mode}`)}</span>
+                </div>;
+              })}
+            </section> : null}
             <section className="review-section" aria-live="polite">
               <h3>{t("v4.validation")}</h3>
               {busy && !validation ? (
@@ -4918,6 +5075,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 </div>
               ) : null}
             </section>
+            {validation?.assignment_changes?.length ? <AssignmentChanges changes={validation.assignment_changes} /> : null}
             {v2Enabled && readiness ? (
               <ReadinessReview
                 readiness={readiness}
@@ -4935,10 +5093,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
                 disabled={Boolean(reviewStale)}
               />
             ) : null}
-            {(!scoped || section === "connection") ? <section className="review-section">
+            {(!scoped || connectionEditor) ? <section className="review-section">
               <h3>{v2Enabled ? t("v2.evidence_title") : t("v4.connection_evidence")}</h3>
               <div className="evidence-list">
-                {providerEntries.filter(([key]) => !scoped || section === "connection" && key === (connect?.origKey || connect?.name.trim())).map(([key, spec]) => {
+                {providerEntries.filter(([key]) => !scoped || connectionEditor && key === (connect?.origKey || connect?.name.trim())).map(([key, spec]) => {
                   const evidence = providerTests[key];
                   const providerId = draftProviderIds[key];
                   const projectedEvidence = (data?.verification?.entries || []).filter(
@@ -5190,6 +5348,7 @@ export function ConnectPanel(props: {
   modelsOptional?: boolean;
   caps: readonly string[];
   busy: boolean;
+  dirty?: boolean;
   saveEnabled: boolean;
   /** Outbound URL policy (`local` / `saas`). When unknown, URL hints omit format guidance — wrong guesses mislead users. */
   deploymentMode?: "local" | "saas";
@@ -5232,6 +5391,7 @@ export function ConnectPanel(props: {
     caps,
     adaptations,
     busy,
+    dirty = false,
     saveEnabled,
     deploymentMode,
     saveBlocked,
@@ -5816,6 +5976,21 @@ export function ConnectPanel(props: {
                       deployment-path logic is the opposite of Responses throughout; other protocols omit it rather than
                       disable it (design S4 negative control). Default state has no noisy hints; switching to responses shows
                       the hint (design S1/S3). */}
+                  <div className="medit-caps">
+                    <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.capabilities" label={t("v2.capability_required_title")} />{caps.map((c) => {
+                      const state = modelCapabilityTestState(m.id, m.caps, c, draft.testing, testResult?.steps);
+                      const status = state === "verified" ? t("connect.verified")
+                        : state === "degraded" ? t("connect.degraded")
+                        : state === "failed" ? t("connect.verification_failed")
+                          : state === "testing" ? t("connect.verifying")
+                            : state === "unverified" ? t("connect.unverified")
+                              : "";
+                      return <button type="button" key={c} className={`captoggle ${state}`} onClick={() => { touch("models"); onToggleCap(idx, c); }}><span className="tk" />{capLabel(c)}{status ? ` · ${status}` : ""}</button>;
+                    })}
+                  </div>
+                  <button type="button" className="medit-x" title={t("common.remove")} aria-label={`${t("common.remove")} ${m.id || idx + 1}`} onClick={() => removeRow(idx)}><XSm size={14} /></button>
+                  <details className="model-advanced" open={Boolean(m.parameterError || !creditRatesValid(m.creditRates) || !outboundParamsValid(m.outboundParams) || !runtimeParametersValid(m.runtimeParameters) || !contextPolicyValid(m.contextPolicy) || !modelRequestBodyOverridesValid(m.requestBodyOverrides || "{}", m.caps))}>
+                    <summary>{t("sections.advanced_model")}</summary>
                   {draft.protocol === "openai_compatible" && m.caps.some((c) => ["chat", "tool", "vision"].includes(c)) ? (
                     <div className="medit-proto medit-setting-row">
                       <span className="configuration-field-label"><label className="mp-lab" htmlFor={`mset-model-api-surface-${idx}`}>{t("connect.api_surface_label")}</label><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.api_surface" label={t("connect.api_surface_label")} /></span>
@@ -5959,19 +6134,7 @@ export function ConnectPanel(props: {
                       ) : null}
                     />
                   ) : null}
-                  <div className="medit-caps">
-                    <ConfigurationFieldHelp field="team_model_config.providers.*.models.*.capabilities" label={t("v2.capability_required_title")} />{caps.map((c) => {
-                      const state = modelCapabilityTestState(m.id, m.caps, c, draft.testing, testResult?.steps);
-                      const status = state === "verified" ? t("connect.verified")
-                        : state === "degraded" ? t("connect.degraded")
-                        : state === "failed" ? t("connect.verification_failed")
-                          : state === "testing" ? t("connect.verifying")
-                            : state === "unverified" ? t("connect.unverified")
-                              : "";
-                      return <button type="button" key={c} className={`captoggle ${state}`} onClick={() => { touch("models"); onToggleCap(idx, c); }}><span className="tk" />{capLabel(c)}{status ? ` · ${status}` : ""}</button>;
-                    })}
-                  </div>
-                  <button type="button" className="medit-x" title={t("common.remove")} aria-label={`${t("common.remove")} ${m.id || idx + 1}`} onClick={() => removeRow(idx)}><XSm size={14} /></button>
+                  </details>
                   {m.caps.includes(IMAGE_CAP) ? (
                     <div className="medit-proto">
                       <span className="configuration-field-label"><span className="mp-lab">{t("connect.protocol_label")}</span><ConfigurationFieldHelp field="team_model_config.providers.*.models.*.protocol" label={t("connect.protocol_label")} /></span>
@@ -6058,9 +6221,9 @@ export function ConnectPanel(props: {
         ))}
       </fieldset>
       {verification}
-      <div className="connect-foot">
-        <div className="test"><button type="button" className={`btn sec sm${testEnabled ? "" : " dis"}${draft.testing ? " loading" : ""}`} disabled={busy || !testEnabled || draft.testing} onClick={onTest}><Bolt size={13} /> {v2 ? t("v2.plan_verification") : t("connect.test")}</button></div>
-        {saveBlocked ? (
+      <SaveBar
+        dirty={dirty} guard={false} saving={busy}
+        message={<>        {saveBlocked ? (
           <span className="save-blocked" id="connect-save-blocked" role="status">
             {saveBlocked === "name_missing"
               // The field is "来源标识" in v2, "名称" in v1 — reasons must use the same name as the field,
@@ -6071,19 +6234,36 @@ export function ConnectPanel(props: {
               : t(`connect.blocked_${saveBlocked}`)}
           </span>
         ) : null}
-        <button type="button" className="btn ghost sm" disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
-        <button
-          type="button"
-          className={`btn pri sm${saveEnabled ? "" : " dis"}`}
-          disabled={!saveEnabled || busy}
-          aria-describedby={saveBlocked ? "connect-save-blocked" : undefined}
-          onClick={onSave}
-        >
-          {t("common.save")}
-        </button>
-      </div>
+{!saveBlocked ? t("sections.connection_actions") : null}</>}
+        saveDisabled={!saveEnabled}
+        saveLabel={t("common.save")} discardLabel={t("common.cancel")}
+        onSave={onSave} onDiscard={onCancel}
+        actions={<Button type="button" disabled={busy || !testEnabled || draft.testing} onClick={onTest}>
+          <Bolt size={13} /> {v2 ? t("overview.verify_one") : t("connect.test")}
+        </Button>}
+      />
     </div>
   );
+}
+
+function AssignmentChanges({ changes }: { changes: NonNullable<AdminLlmConfigResp["assignment_changes"]> }) {
+  const t = useTranslations("settings.models");
+  const roleKeys: Record<string, string> = {
+    "tiers.primary": "tier.primary_label", "tiers.fast": "tier.fast_label", "tiers.judge": "tier.judge_label",
+    "tiers.primary_fallback": "tier.fallback_ref", "kb.active.embed": "kb.embedding", "kb.active.rerank": "kb.rerank",
+    "kb.active.vision": "kb.vision", "kb.active.row_extractor": "kb.row_extractor", "kb.active.source_description": "kb.source_description",
+    "media.active.image_gen": "overview.external_media_image_generation", "search.active.web_search": "overview.external_web_search",
+  };
+  return <section className="assignment-changes" role="status">
+    <b>{t("sections.assignment_changes")}</b>
+    <ul>{changes.map((change, index) => <li key={`${change.path}:${index}`}>
+      {t(roleKeys[change.path] || "overview.role_other")}：{Array.isArray(change.selected)
+        ? t("sections.fallback_updated")
+        : change.selected?.follow ? t("tier.fast_follow_option")
+        : change.selected?.auto ? t("tier.judge_auto_option")
+        : change.selected ? `${change.selected.provider} · ${change.selected.model || change.selected.real_id}` : t("sections.assignment_cleared")}
+    </li>)}</ul>
+  </section>;
 }
 
 // ─── small utils ────────────────────────────────────────────────────

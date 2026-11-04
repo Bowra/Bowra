@@ -34,6 +34,7 @@ tools:
   default_enabled: false
   allow:
     # KB retrieval (core responsibility and factual foundation for research).
+    - kb_list_sources
     - kb_search
     - kb_list_tables
     - kb_query_records

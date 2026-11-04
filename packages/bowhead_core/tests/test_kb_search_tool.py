@@ -56,8 +56,8 @@ def _make_ctx(kb_retriever=None, **overrides) -> ToolExecutionContext:
 
 
 @pytest.mark.asyncio
-async def test_kb_search_handler_no_retriever_returns_soft_empty() -> None:
-    """[Day 16 graceful] ctx.kb_retriever None → soft empty result + note."""
+async def test_kb_search_handler_reports_unavailable_evidence_without_claiming_no_matches() -> None:
+    """A missing service is distinct from an authorized search with no matches."""
     reg = build_default_registry()
     handler = reg._specs["kb_search"].handler
 
@@ -66,11 +66,9 @@ async def test_kb_search_handler_no_retriever_returns_soft_empty() -> None:
 
     assert result["chunks"] == []
     assert result["total_candidates"] == 0
-    assert "note" in result
-    # 0.40.2: refreshed note — KB is yaml-driven now; the legacy
-    # "ALIYUN_DASHSCOPE_API_KEY 未设" message was misleading (Bug 3 surface)
-    # because the actual cause is usually missing _peer_ctx wire.
-    assert "not wired" in result["note"] or "_peer_ctx" in result["note"]
+    assert result["error_kind"] == "service_unavailable"
+    assert result["reason_code"] == "knowledge_retrieval_unavailable"
+    assert "absent" in result["hint"]
 
 
 @pytest.mark.asyncio

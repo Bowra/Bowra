@@ -25,6 +25,7 @@ vi.mock("@/lib/api", () => ({
       actions: [],
       metadata: { createdCount: 2 },
       state: "open",
+      actionRequired: true,
       recipientRole: "owner",
       deliveredAt: "2026-10-01T08:00:00Z",
       readAt: "2026-10-01T09:00:00Z",

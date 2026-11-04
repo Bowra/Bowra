@@ -6,7 +6,6 @@ from copy import deepcopy
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
 from bowhead_core.documents.routing import DocumentRoutingSnapshot
@@ -18,6 +17,7 @@ from bowhead_core.ordinary_lead_continuation import (
     read_ordinary_card_in_tx,
     reopen_ordinary_checkpoint,
 )
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_document_store import ctx as ctx
 from test_document_store import migrated_db as migrated_db

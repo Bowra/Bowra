@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import TARGET_FILES
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
+from core_legacy_database import TARGET_FILES
 
 from bowhead_core import migrations
 
@@ -43,13 +44,13 @@ def copy_core(previous_core, tmp_path):
 
 def test_previous_revision_upgrades_without_backfill_and_repeat_upgrade_is_safe(previous_core, tmp_path):
     path = copy_core(previous_core, tmp_path)
-    command.upgrade(config(path), "head")
-    command.upgrade(config(path), "head")
+    command.upgrade(config(path), SOURCE_REVISION)
+    command.upgrade(config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT name FROM teams WHERE id='team_prior'").fetchone() == ("Existing team",)
         for name in ("turn", "participant", "operation"):
             assert db.execute(f"SELECT COUNT(*) FROM agent_collaboration_{name}").fetchone() == (0,)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
@@ -68,8 +69,8 @@ def test_failed_upgrade_rolls_back_all_new_tables_and_keeps_existing_data(previo
 @pytest.mark.parametrize("target", tuple(TARGET_FILES))
 def test_all_targets_advance_and_only_core_receives_collaboration_tables(tmp_path, target):
     path = tmp_path / "database.db"
-    command.upgrade(config(path, target), "head")
+    command.upgrade(config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         names = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'agent_collaboration_%'").fetchall()
         assert len(names) == (3 if target == "core" else 0)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)

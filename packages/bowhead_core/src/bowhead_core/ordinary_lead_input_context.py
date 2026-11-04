@@ -12,6 +12,7 @@ from bowhead_core.chat_reference_attachment_snapshot import (
 )
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
 from bowhead_core.ordinary_lead_material import _artifact_metadata_hash
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -90,12 +91,14 @@ def validate_shape(proof: Context, context: Context) -> None:
 
 
 async def _artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str) -> tuple[Artifact, str]:
-    # Final consumption holds this same database's writer lock; the existing
-    # read-only ArtifactStore readers therefore cannot race an authority write.
+    # Read through the caller so its content-authority lease protects final consumption.
     store = ctx.artifact_store
-    if store is None or Path(store.db_path).resolve() != Path(ctx.session_store.db_path).resolve():
+    if (
+        store is None
+        or Path(domain_database_path(store.db_path, "core")).resolve() != Path(domain_database_path(ctx.session_store.db_path, "core")).resolve()
+    ):
         raise OrdinaryContinuationUnavailable()
-    matches = await store.list_for_session(session_id=ctx.session_id, user_id=ctx.user_id, artifact_id=identity, limit=1)
+    matches = await store.list_for_session(session_id=ctx.session_id, user_id=ctx.user_id, artifact_id=identity, limit=1, connection=db)
     if len(matches) != 1:
         raise OrdinaryContinuationUnavailable()
     art = matches[0]
@@ -109,7 +112,7 @@ async def _artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identit
         if await cursor.fetchone() is not None:
             raise OrdinaryContinuationUnavailable()
     if art.kind == "user_upload":
-        ready = await store.get_ready_uploads_for_chat([identity], user_id=ctx.user_id, workspace_id=ctx.workspace_id)
+        ready = await store.get_ready_uploads_for_chat([identity], user_id=ctx.user_id, workspace_id=ctx.workspace_id, connection=db)
         if identity not in ready:
             raise OrdinaryContinuationUnavailable()
         provenance = "upload"

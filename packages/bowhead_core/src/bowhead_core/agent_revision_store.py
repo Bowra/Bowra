@@ -72,6 +72,7 @@ from bowhead_core.resource_dependency_projection import (
 )
 from bowhead_core.scrubber import scrub_with_count
 from bowhead_core.secret_redaction import extract_secrets
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.subagent_authoring_catalog import APPROVAL_EXECUTOR_UNAVAILABLE, SubagentAuthoringCatalogService
 from bowhead_core.subagent_write_boundary import _issue_team_subagent_transaction_token
 from bowhead_core.team_plugin_store import TeamPluginError, expand_plugins_conn, selected_plugin_ids
@@ -906,7 +907,7 @@ class AgentRevisionStore:
         behavior_materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
         self._knowledge_source_validator = knowledge_source_validator
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._validator = validator
         self._eval_gate = eval_gate
         self._clock = clock or _SystemClock()
@@ -2509,6 +2510,12 @@ class AgentRevisionStore:
             except BaseException:
                 await db.rollback()
                 raise
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as schedules:
+                paused_count = await self._pause_agent_schedules_conn(
+                    schedules, team_id=team_id, agent_id=agent_id, routing_name=str(aggregate["name"]), timestamp=timestamp, apply_split=True
+                )
+                await schedules.commit()
         return AgentLifecycleResult(
             state="archived",
             agent_id=agent_id,
@@ -3564,12 +3571,13 @@ class AgentRevisionStore:
         agent_id: str,
         routing_name: str,
         timestamp: str,
+        apply_split: bool = False,
     ) -> int:
         async with db.execute("PRAGMA table_info(scheduled_jobs)") as cursor:
             columns = {str(row[1]) for row in await cursor.fetchall()}
         if "recipe_ref" not in columns or "pause_reason" not in columns:
             return 0
-        updated = await db.execute(
+        statement = (
             """
             UPDATE scheduled_jobs
             SET status='paused',pause_reason='agent_archived',updated_at=?
@@ -3584,6 +3592,14 @@ class AgentRevisionStore:
             """,
             (timestamp, team_id, agent_id, routing_name),
         )
+        sql, parameters = statement
+        if domain_layout_active(self.db_path) and not apply_split:
+            # Count the reviewed impact while the core authority transaction is live;
+            # the independent execution write occurs only after core commit.
+            where = sql[sql.index("WHERE status=") :]
+            async with db.execute("SELECT count(*) FROM scheduled_jobs " + where, parameters[1:]) as cursor:
+                return int((await cursor.fetchone())[0])
+        updated = await db.execute(sql, parameters)
         return max(updated.rowcount, 0)
 
     async def _refresh_assignment_access_conn(

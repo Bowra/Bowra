@@ -25,6 +25,7 @@ from bowhead_router.invocation import canonical_transport_bytes
 from bowhead_router.request_record import RequestRecordEntry
 
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
+from bowhead_core.sqlite_domains import domain_layout_active
 
 RETENTION = timedelta(days=14)
 OMIT_CHUNK_BYTES = 256 * 1024
@@ -104,71 +105,129 @@ async def purge_expired_request_records(db: aiosqlite.Connection, now: datetime,
     return len(expired)
 
 
-async def write_request_records(db: aiosqlite.Connection, cipher: ReferenceCipher, entries: Iterable[RequestRecordEntry]) -> int:
-    """Insert records, their new chunks and change records in the caller's transaction.
+@dataclass(frozen=True, slots=True)
+class PreparedRequestRecord:
+    """Encrypted database values prepared before acquiring the diagnostic writer."""
 
-    Entries whose Turn no longer exists (deleted before the flush) are skipped.
-    Returns the number of records written.
-    """
-    sessions: dict[str, str | None] = {}
-    written = 0
+    turn_id: str
+    session_id: str
+    record: tuple[object, ...]
+    chunks: tuple[tuple[object, ...], ...]
+    changes: tuple[tuple[object, ...], ...]
+
+
+async def read_request_record_sessions(db: aiosqlite.Connection, entries: Iterable[RequestRecordEntry]) -> dict[str, str]:
+    """Resolve source identity without opening a write transaction."""
+    sessions: dict[str, str] = {}
+    for turn_id in dict.fromkeys(entry.usage.turn_id for entry in entries if entry.usage.turn_id is not None):
+        async with db.execute("SELECT session_id FROM turns WHERE id=?", (turn_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is not None:
+            sessions[turn_id] = row[0]
+    return sessions
+
+
+def prepare_request_records(
+    cipher: ReferenceCipher, entries: Iterable[RequestRecordEntry], sessions: dict[str, str]
+) -> tuple[PreparedRequestRecord, ...]:
+    """Split, serialize and encrypt outside the write transaction and event loop."""
+    prepared: list[PreparedRequestRecord] = []
     for entry in entries:
         usage = entry.usage
         turn_id = usage.turn_id
         if turn_id is None or usage.team_id is None or usage.user_id is None or usage.workspace_id is None:
             continue
-        if turn_id not in sessions:
-            async with db.execute("SELECT session_id FROM turns WHERE id=?", (turn_id,)) as cursor:
-                row = await cursor.fetchone()
-            sessions[turn_id] = row[0] if row is not None else None
-        session_id = sessions[turn_id]
+        session_id = sessions.get(turn_id)
         if session_id is None:
             continue
         scope = ReferenceScope(team_id=usage.team_id, user_id=usage.user_id, workspace_id=usage.workspace_id, session_id=session_id, policy_epoch=0)
         created_at = entry.created_at.isoformat()
         chunk_refs: list[dict[str, str]] = []
+        chunks: list[tuple[object, ...]] = []
         for chunk in split_body(entry.canonical_body):
             digest = chunk.digest
             chunk_refs.append({"f": chunk.field, "h": digest})
             omitted = len(chunk.data) > OMIT_CHUNK_BYTES
             ciphertext = None if omitted else cipher.seal(scope=scope, purpose=CHUNK_PURPOSE, identity=f"{turn_id}:{digest}", content=chunk.data)
-            await db.execute(
-                "INSERT OR IGNORE INTO llm_request_chunks(turn_id,chunk_hash,ciphertext,byte_size,omitted,created_at) VALUES(?,?,?,?,?,?)",
-                (turn_id, digest, ciphertext, len(chunk.data), int(omitted), created_at),
-            )
+            chunks.append((turn_id, digest, ciphertext, len(chunk.data), int(omitted), created_at))
         record_id = "lrq_" + uuid4().hex
-        await db.execute(
-            "INSERT INTO llm_request_records(id,turn_id,session_id,team_id,user_id,workspace_id,reason,usage_event_id,subagent_id,"
-            "provider,model,family,mode,request_digest,chunk_hashes_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                record_id,
-                turn_id,
-                session_id,
-                usage.team_id,
-                usage.user_id,
-                usage.workspace_id,
-                usage.reason,
-                entry.usage_event_id,
-                entry.subagent_id,
-                entry.provider,
-                entry.model,
-                entry.family,
-                entry.mode,
-                entry.request_digest,
-                json.dumps(chunk_refs, separators=(",", ":")),
-                created_at,
-                (entry.created_at + RETENTION).isoformat(),
-            ),
+        record = (
+            record_id,
+            turn_id,
+            session_id,
+            usage.team_id,
+            usage.user_id,
+            usage.workspace_id,
+            usage.reason,
+            entry.usage_event_id,
+            entry.subagent_id,
+            entry.provider,
+            entry.model,
+            entry.family,
+            entry.mode,
+            entry.request_digest,
+            json.dumps(chunk_refs, separators=(",", ":")),
+            created_at,
+            (entry.created_at + RETENTION).isoformat(),
         )
+        changes: list[tuple[object, ...]] = []
         for change in entry.changes:
             change_id = "lrc_" + uuid4().hex
             detail = canonical_transport_bytes(dict(change.detail))
-            await db.execute(
-                "INSERT INTO llm_request_changes(id,record_id,kind,detail_ciphertext,created_at) VALUES(?,?,?,?,?)",
-                (change_id, record_id, change.kind, cipher.seal(scope=scope, purpose=CHANGE_PURPOSE, identity=change_id, content=detail), created_at),
+            changes.append(
+                (change_id, record_id, change.kind, cipher.seal(scope=scope, purpose=CHANGE_PURPOSE, identity=change_id, content=detail), created_at)
             )
+        prepared.append(PreparedRequestRecord(turn_id, session_id, record, tuple(chunks), tuple(changes)))
+    return tuple(prepared)
+
+
+async def write_prepared_request_records(db: aiosqlite.Connection, entries: Iterable[PreparedRequestRecord]) -> int:
+    """Recheck current source identity and atomically store prepared diagnostic rows."""
+    async with db.execute("PRAGMA database_list") as cursor:
+        split = any(row[1] == "main" and row[2] and domain_layout_active(row[2]) for row in await cursor.fetchall())
+    sessions: dict[tuple[object, ...], str | None] = {}
+    written = 0
+    for entry in entries:
+        identity = (entry.turn_id, *entry.record[3:6])
+        if identity not in sessions:
+            if split:
+                async with db.execute(
+                    "SELECT t.session_id FROM turns t JOIN sessions s ON s.id=t.session_id "
+                    "JOIN users u ON u.id=s.user_id JOIN workspaces w ON w.id=s.workspace_id "
+                    "WHERE t.id=? AND w.team_id=? AND s.user_id=? AND s.workspace_id=? "
+                    "AND u.status='active' AND s.deleted_at IS NULL "
+                    "AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=u.id)",
+                    identity,
+                ) as cursor:
+                    row = await cursor.fetchone()
+            else:
+                async with db.execute("SELECT session_id FROM turns WHERE id=?", (entry.turn_id,)) as cursor:
+                    row = await cursor.fetchone()
+            sessions[identity] = row[0] if row is not None else None
+        if sessions[identity] != entry.session_id:
+            continue
+        await db.execute(
+            "INSERT INTO llm_request_records(id,turn_id,session_id,team_id,user_id,workspace_id,reason,usage_event_id,subagent_id,"
+            "provider,model,family,mode,request_digest,chunk_hashes_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            entry.record,
+        )
+        await db.executemany(
+            "INSERT OR IGNORE INTO llm_request_chunks(turn_id,chunk_hash,ciphertext,byte_size,omitted,created_at) VALUES(?,?,?,?,?,?)",
+            entry.chunks,
+        )
+        await db.executemany(
+            "INSERT INTO llm_request_changes(id,record_id,kind,detail_ciphertext,created_at) VALUES(?,?,?,?,?)",
+            entry.changes,
+        )
         written += 1
     return written
+
+
+async def write_request_records(db: aiosqlite.Connection, cipher: ReferenceCipher, entries: Iterable[RequestRecordEntry]) -> int:
+    """Compatibility writer for explicit operator/test transactions; Gateway prepares separately."""
+    entries = tuple(entries)
+    sessions = await read_request_record_sessions(db, entries)
+    return await write_prepared_request_records(db, prepare_request_records(cipher, entries, sessions))
 
 
 @dataclass(frozen=True, slots=True)

@@ -65,6 +65,7 @@ CANVAS_ADD_SPEC_BLOCK = "canvas_add_spec_block"
 CANVAS_CREATE_DESIGN = "canvas_create_design"
 CANVAS_FLATTEN_DESIGN = "canvas_flatten_design"
 CANVAS_UPDATE_DESIGN_TEXT = "canvas_update_design_text"
+CLARIFICATION_DISMISS = "clarification_dismiss"
 CONFIGURATION_APPLY = "configuration_apply"
 CONFIGURATION_LIST = "configuration_list"
 CONFIGURATION_OPEN = "configuration_open"
@@ -80,6 +81,7 @@ GOOGLE_SLIDES_WRITE = "google_slides_write"
 IMAGE_GENERATE = "image_generate"
 KB_ADD_FILE = "kb_add_file"
 KB_GET_RECORD = "kb_get_record"
+KB_LIST_SOURCES = "kb_list_sources"
 KB_LIST_TABLES = "kb_list_tables"
 KB_OPERATION_STATUS = "kb_operation_status"
 KB_QUERY_RECORDS = "kb_query_records"
@@ -173,6 +175,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "canvas_create_design",
     "canvas_flatten_design",
     "canvas_update_design_text",
+    "clarification_dismiss",
     "configuration_apply",
     "configuration_list",
     "configuration_open",
@@ -188,6 +191,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "image_generate",
     "kb_add_file",
     "kb_get_record",
+    "kb_list_sources",
     "kb_list_tables",
     "kb_operation_status",
     "kb_query_records",

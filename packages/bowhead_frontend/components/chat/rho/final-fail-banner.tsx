@@ -87,6 +87,7 @@ const FAILURE_GROUPS = {
   team_pool_exhausted: "team_pool_exhausted",
   clarification_resume_unavailable: "clarification_resume_unavailable",
   session_deleted: "session_deleted",
+  knowledge_source_changed: "knowledge_source_changed",
   reference_policy_changed: "reference_policy",
   service_interrupted: "service_interrupted",
   terminal_projection_not_committed: "terminal_projection_not_committed",

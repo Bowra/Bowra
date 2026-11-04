@@ -21,6 +21,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.agent_capability_composition import ImplementationExecutionPlan
@@ -137,7 +138,7 @@ class CapabilityExecutionStore:
     """Persist and transition exact Capability attempts."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "execution"))
 
     async def select(
         self,
@@ -150,7 +151,7 @@ class CapabilityExecutionStore:
 
         if _HASH_RE.fullmatch(expected_agent_capability_fingerprint) is None:
             raise ValueError("Agent Capability fingerprint is invalid")
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -187,7 +188,7 @@ class CapabilityExecutionStore:
         )
 
     async def read(self, execution_id: str) -> ExactCapabilityExecution | None:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             row = await _execution_by_id(db, execution_id)
         return _execution_from_row(row) if row is not None else None
@@ -196,7 +197,7 @@ class CapabilityExecutionStore:
         self,
         agent_execution_id: str,
     ) -> tuple[ExactCapabilityExecution, ...]:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -217,7 +218,7 @@ class CapabilityExecutionStore:
         failure_code: str | None = None,
     ) -> None:
         timestamp = _now()
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:

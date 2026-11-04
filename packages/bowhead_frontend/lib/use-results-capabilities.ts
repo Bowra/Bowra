@@ -15,6 +15,8 @@ export type ResultsCapabilities = {
   completeList: boolean;
   scaleNav: boolean;
   interactiveHtml?: boolean;
+  contentSharing?: boolean;
+  sharingDisabled?: boolean;
   resolved: boolean;
   error: "unavailable" | "timeout" | "auth" | null;
 };
@@ -24,6 +26,8 @@ const DISABLED_SNAPSHOT: ResultsCapabilities = {
   completeList: false,
   scaleNav: false,
   interactiveHtml: false,
+  contentSharing: false,
+  sharingDisabled: false,
   resolved: false,
   error: null,
 };
@@ -59,6 +63,8 @@ function publish(next: ResultsCapabilities): void {
     && snapshot.completeList === next.completeList
     && snapshot.scaleNav === next.scaleNav
     && snapshot.interactiveHtml === next.interactiveHtml
+    && snapshot.contentSharing === next.contentSharing
+    && snapshot.sharingDisabled === next.sharingDisabled
     && snapshot.resolved === next.resolved
     && snapshot.error === next.error
   ) return;
@@ -76,7 +82,11 @@ function parseCapabilities(value: unknown): ResultsCapabilities | null {
     || typeof dto.scale_nav !== "boolean"
     || dto.max_page_size !== 50
   ) return null;
+  const sharing = typeof dto.content_sharing === "object" && dto.content_sharing !== null && !Array.isArray(dto.content_sharing)
+    ? dto.content_sharing as Record<string, unknown> : null;
   return {
+    contentSharing: sharing?.enabled === true && sharing.reason === null,
+    sharingDisabled: sharing?.enabled === false && sharing.reason === "deployment_disabled",
     workspace: dto.workspace,
     completeList: dto.workspace && dto.complete_list,
     scaleNav: dto.workspace && dto.complete_list && dto.scale_nav,
@@ -139,6 +149,10 @@ function cancelLoad(): void {
 function publishFailure(error: NonNullable<ResultsCapabilities["error"]>): void {
   if (error === "auth" || !snapshot.resolved) {
     publish({ ...DISABLED_SNAPSHOT, error });
+  } else {
+    // Retain the Results shell on transient failures, but do not retain
+    // permission to expand sharing without current capability evidence.
+    publish({ ...snapshot, contentSharing: false, sharingDisabled: false });
   }
 }
 

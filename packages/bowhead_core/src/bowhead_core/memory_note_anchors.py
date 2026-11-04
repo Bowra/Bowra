@@ -34,6 +34,8 @@ from bowhead_core.memory_privacy import (
     ensure_memory_write_allowed,
     is_memory_read_hidden,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +122,13 @@ class MemoryNoteAnchorsStore:
     """Per-bullet anchor sidecar to memory_notes."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self._db_path) as db:
             await db.executescript(_TABLE_SCHEMA)
@@ -288,7 +294,7 @@ class MemoryNoteAnchorsStore:
         Mismatch → mark stale, reason='payload_changed'. Returns count invalidated.
         """
         new_hash = canonical_payload_hash(new_payload or {})
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE memory_note_anchors "
                 "SET status='stale', invalidated_at=?, invalidation_reason='payload_changed' "
@@ -339,7 +345,7 @@ class MemoryNoteAnchorsStore:
         max_age_days: int = 180,
     ) -> int:
         """Cron TTL: delete invalidated rows > max_age_days. Spike #19 datetime() normalize."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "DELETE FROM memory_note_anchors WHERE invalidated_at IS NOT NULL   AND datetime(invalidated_at) < datetime('now', ?)",
                 (f"-{int(max_age_days)} days",),
@@ -361,7 +367,7 @@ class MemoryNoteAnchorsStore:
         from bowhead_core.memory_notes import parse_notes_to_lines
 
         marked = 0
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT DISTINCT user_id FROM memory_note_anchors WHERE status='valid'",
@@ -379,7 +385,7 @@ class MemoryNoteAnchorsStore:
             anchors = await self.list_for_user(uid)
             for a in anchors:
                 if a.status == "valid" and a.bullet_text_norm not in present_norms:
-                    async with aiosqlite.connect(self._db_path) as db:
+                    async with diagnostic_connect(self._db_path) as db:
                         cur = await db.execute(
                             "UPDATE memory_note_anchors "
                             "SET status='stale', invalidated_at=?, "

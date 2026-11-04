@@ -26,6 +26,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.skill_package_material import _manifest_name
 from bowhead_core.skill_read_material import _bundle_hash, _capture, prepare_skill_read_files
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 REFRESH_INTERVAL_SECONDS = 15
@@ -177,7 +178,7 @@ async def build_uploaded_skill_metadata(db_path: str | Path) -> UploadedSkillMet
 
 class UploadedSkillMetadataCache:
     def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self._index: UploadedSkillMetadataIndex | None = None
         self._expires_at = 0.0
         self._lock = anyio.Lock()

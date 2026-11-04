@@ -25,6 +25,7 @@ from bowhead_core.agent_revision_store import (
     AgentPublicationBlockedError,
 )
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domains import domain_database_path
 
 RegressionStatus = Literal["pending", "leased", "delivered", "skipped"]
 RegressionChangeKind = Literal[
@@ -93,7 +94,7 @@ class AgentEvalProductStore:
     """Permissioned read models and durable trigger consumption."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self.eval_store = AgentEvalStore(self.db_path)
 
     async def resolve_team_subject(

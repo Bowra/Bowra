@@ -24,6 +24,8 @@ from bowhead_memory.privacy_guard import (
 )
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +187,9 @@ class PrivacyDeletionLedger:
             raise PrivacyDeletionNotReadyError("privacy deletion ledger key mismatch")
 
     async def _initialize_once(self) -> bool:
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA secure_delete=ON")
+        async with diagnostic_connect(self._path) as db:
+            await db.execute("PRAGMA main.journal_mode=WAL")
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.executescript(_LEDGER_SCHEMA)
             key_fingerprint = hmac.new(
                 self._key,
@@ -236,7 +238,7 @@ class PrivacyDeletionLedger:
     async def healthcheck(self) -> bool:
         try:
             async with (
-                aiosqlite.connect(self._path) as db,
+                diagnostic_connect(self._path) as db,
                 db.execute(
                     "SELECT COUNT(*) FROM privacy_deletion_receipts",
                 ) as cursor,
@@ -258,8 +260,8 @@ class PrivacyDeletionLedger:
         receipt_id = _receipt_id(operation_id, "full_user")
         retain_until = (datetime.now(tz=UTC) + timedelta(days=210)).isoformat(timespec="seconds")
         subject_hmac = self.subject_hmac(user_id)
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA secure_delete=ON")
+        async with diagnostic_connect(self._path) as db:
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await db.execute(
@@ -339,8 +341,8 @@ class PrivacyDeletionLedger:
             )
             for item in manifest
         ]
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA secure_delete=ON")
+        async with diagnostic_connect(self._path) as db:
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 for receipt_id, item in zip(
@@ -412,8 +414,8 @@ class PrivacyDeletionLedger:
         manifest_digest: str,
     ) -> list[str]:
         now = _now()
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("PRAGMA secure_delete=ON")
+        async with diagnostic_connect(self._path) as db:
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(
@@ -450,7 +452,7 @@ class PrivacyDeletionLedger:
         return [str(row[0]) for row in rows]
 
     async def list_committed_receipts(self) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self._path) as db:
+        async with diagnostic_connect(self._path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -482,7 +484,7 @@ class MemoryDestructiveOperationStore:
         fingerprint_key: str | bytes,
         require_secure_delete_baseline: bool = True,
     ) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
         self._ledger = ledger
         self._fingerprint_key = fingerprint_key.encode() if isinstance(fingerprint_key, str) else fingerprint_key
         self._require_secure_delete_baseline = require_secure_delete_baseline
@@ -526,7 +528,7 @@ class MemoryDestructiveOperationStore:
         """Offline maintenance: rewrite historical free pages before enablement."""
 
         async with open_shared_ctx(self._db_path) as db:
-            async with db.execute("PRAGMA wal_checkpoint(TRUNCATE)") as cursor:
+            async with db.execute("PRAGMA main.wal_checkpoint(TRUNCATE)") as cursor:
                 checkpoint = await cursor.fetchone()
             if checkpoint is None or int(checkpoint[0]) != 0:
                 raise PrivacyDeletionNotReadyError(
@@ -569,6 +571,9 @@ class MemoryDestructiveOperationStore:
                 already_applied = {str(row[0]) for row in await cursor.fetchall()}
             pending_receipts = [receipt for receipt in receipts if str(receipt["receipt_id"]) not in already_applied]
             user_ids = await _all_personal_memory_user_ids(db)
+            if domain_layout_active(self._db_path) and await _table_exists(db, "users"):
+                async with db.execute("SELECT id FROM users") as cursor:
+                    user_ids.update(str(row[0]) for row in await cursor.fetchall())
             user_by_hmac = {self._ledger.subject_hmac(user_id): user_id for user_id in user_ids}
             by_subject: dict[str, list[dict[str, Any]]] = {}
             for receipt in pending_receipts:
@@ -653,7 +658,15 @@ class MemoryDestructiveOperationStore:
             except BaseException:
                 await db.rollback()
                 raise
-        if scrubbed:
+        notification_subjects = {
+            str(receipt["subject_hmac"])
+            for receipt in receipts
+            if receipt["delete_scope"] == "full_user" or str(receipt.get("resource_type") or "") not in {"memory_pack_snapshot", "note_anchor"}
+        }
+        for notification_user in {user_by_hmac.get(subject) for subject in notification_subjects}:
+            if notification_user is not None:
+                await self._resolve_split_notifications(user_id=notification_user, now=_now())
+        if scrubbed or (receipts and domain_layout_active(self._db_path)):
             await self._physical_purge()
         return {
             "receipts_seen": len(receipts),
@@ -1508,6 +1521,7 @@ class MemoryDestructiveOperationStore:
         return counts
 
     async def _assert_full_user_residue_zero(self, *, user_id: str) -> None:
+        await self._resolve_split_notifications(user_id=user_id, now=_now())
         async with open_shared_ctx(self._db_path) as db:
             checks = (
                 ("memory_entries", "subject_type='user' AND subject_id=?"),
@@ -1767,6 +1781,8 @@ class MemoryDestructiveOperationStore:
         user_id: str,
         manifest: list[dict[str, Any]],
     ) -> None:
+        if any(str(item["resource_type"]) not in {"memory_pack_snapshot", "note_anchor"} for item in manifest):
+            await self._resolve_split_notifications(user_id=user_id, now=_now())
         async with open_shared_ctx(self._db_path) as db:
             for item in manifest:
                 resource_type = str(item["resource_type"])
@@ -1889,23 +1905,25 @@ class MemoryDestructiveOperationStore:
                 await db.rollback()
                 raise
 
+    async def _resolve_split_notifications(self, *, user_id: str, now: str) -> None:
+        if not domain_layout_active(self._db_path):
+            return
+        async with open_shared_ctx(domain_database_path(self._db_path, "notifications")) as db:
+            await _resolve_memory_notifications(db, user_id=user_id, now=now)
+            await db.commit()
+
     async def _physical_purge(self) -> None:
-        async with (
-            open_shared_ctx(self._db_path) as db,
-            db.execute(
-                "PRAGMA wal_checkpoint(TRUNCATE)",
-            ) as cursor,
-        ):
-            row = await cursor.fetchone()
-        if row is None or int(row[0]) != 0:
-            raise PrivacyDeletionNotReadyError(
-                "shared DB WAL checkpoint is busy",
-            )
-        wal_path = Path(f"{self._db_path}-wal")
-        if wal_path.exists() and wal_path.stat().st_size != 0:
-            raise PrivacyDeletionNotReadyError(
-                "shared DB WAL was not truncated",
-            )
+        paths = [Path(self._db_path)]
+        if domain_layout_active(self._db_path):
+            paths.append(Path(domain_database_path(self._db_path, "notifications")))
+        for path in paths:
+            async with open_shared_ctx(path) as db, db.execute("PRAGMA main.wal_checkpoint(TRUNCATE)") as cursor:
+                row = await cursor.fetchone()
+            if row is None or int(row[0]) != 0:
+                raise PrivacyDeletionNotReadyError(f"{path.name} WAL checkpoint is busy")
+            wal_path = Path(f"{path}-wal")
+            if wal_path.exists() and wal_path.stat().st_size != 0:
+                raise PrivacyDeletionNotReadyError(f"{path.name} WAL was not truncated")
 
     async def _finalize_full_delete(
         self,

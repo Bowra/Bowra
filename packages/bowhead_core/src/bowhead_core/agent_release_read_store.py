@@ -26,12 +26,13 @@ from bowhead_core.audit_actions import AuditAction
 from bowhead_core.catalog_localization import SERVER_DERIVED_AGENT_LISTING_KEYS
 from bowhead_core.release_plugin_versions import plugin_updates_conn
 from bowhead_core.release_skill_versions import skill_updates_conn
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 
 class AgentReleaseReadStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def owned_agent_ids(self, *, team_id: str, actor_user_id: str) -> set[str]:
         """调用者名下（owner，缺省为 creator）的 agent id 集合。

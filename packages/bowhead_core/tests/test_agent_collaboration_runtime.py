@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from bowhead_core._db import open_shared_ctx
@@ -351,8 +352,6 @@ async def test_context_keeps_exact_owner_handle_and_bounded_messages(collab):
     for index in range(2):
         await collab.ask(identity=collab.identity(step=f"long-{index}"), body="Policy " + "p" * 8100)
     context = await adapter.context(collab.recipient)
-    import json
-
     assert len(json.dumps(context, ensure_ascii=False).encode()) <= 16 * 1024
     assert len(context["items"]) == 1
     assert any(card["is_owner"] and card["execution_id"] == collab.lead for card in context["roster"])
@@ -361,6 +360,58 @@ async def test_context_keeps_exact_owner_handle_and_bounded_messages(collab):
     adapter.acknowledge_context(collab.recipient, revision=context["revision"])
     later = await adapter.context(collab.recipient)
     assert later["items"][0]["operation_id"] != context["items"][0]["operation_id"]
+
+
+@pytest.mark.parametrize(
+    ("text", "preview", "excerpted"),
+    [
+        pytest.param("a" * 512, "a" * 512, False, id="ascii-at-limit"),
+        pytest.param("a" * 513, "a" * 512, True, id="ascii-over-limit"),
+        pytest.param("\N{LATIN SMALL LETTER E WITH ACUTE}" * 256, "\N{LATIN SMALL LETTER E WITH ACUTE}" * 256, False, id="utf8-at-limit"),
+        pytest.param("\N{SNOWMAN}" * 171, "\N{SNOWMAN}" * 170, True, id="utf8-split-boundary"),
+    ],
+)
+async def test_partial_roster_preserves_owner_inbox_and_original_assignments(collab, text, preview, excerpted):
+    adapter = runtime(collab)
+    worker = collab.worker
+    peers = set()
+    for index in range(10):
+        binding = await collab.bindings.admit_system_execution(
+            team_id=worker.team_id,
+            user_id=worker.user_id,
+            turn_id=worker.turn_id,
+            profile_name="compute",
+            dispatch_key=f"call:roster-{index}",
+            definition=collab.executions[collab.requester].definition,
+            manifest_fingerprint="sha256:" + "1" * 64,
+            override_version=None,
+            system_required=True,
+            enforce_current_override=False,
+        )
+        await collab.bindings.mark_running(binding.execution_id)
+        await collab.store.join(worker, execution_id=binding.execution_id, assignment=text, expected_output=text, assistance_boundary=text)
+        peers.add(binding.execution_id)
+    questions = [await collab.ask(identity=collab.identity(step=f"roster-question-{index}"), body="Policy " + "p" * 8100) for index in range(2)]
+    original = await collab.store.roster(worker, execution_id=collab.recipient, authorize=collab.authorize)
+    context = await adapter.context(collab.recipient)
+    cards = {card["execution_id"]: card for card in context["roster"]}
+    assert len(json.dumps(context, ensure_ascii=False).encode()) <= 16 * 1024
+    assert cards[collab.lead]["is_owner"] and collab.recipient in cards
+    assert not cards[collab.lead].get("excerpted", False)
+    assert context["omitted_participants"] == len(original) - len(cards) > 0
+    assert peers & cards.keys(), "Retain usable peer excerpts alongside the owner and incoming question"
+    for execution_id in peers & cards.keys():
+        card = cards[execution_id]
+        assert card.get("excerpted", False) is excerpted
+        for field in ("assignment", "expected_output", "assistance_boundary"):
+            assert card[field] == preview and len(card[field].encode()) <= 512
+    assert [item["operation_id"] for item in context["items"]] == [questions[0]["operation_id"]]
+    assert await adapter.context(collab.recipient) == context, "Reading an incomplete roster does not consume input"
+    assert await collab.store.roster(worker, execution_id=collab.recipient, authorize=collab.authorize) == original
+    adapter.acknowledge_context(collab.recipient, revision=context["revision"])
+    later = await adapter.context(collab.recipient)
+    assert [item["operation_id"] for item in later["items"]] == [questions[1]["operation_id"]]
+    assert await collab.count() == 2, "Omission guidance does not itself create clarification questions or other operations"
 
 
 async def test_native_wait_retry_retains_original_cursor_after_input_advanced(collab):

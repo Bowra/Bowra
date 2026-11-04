@@ -8,7 +8,6 @@ from pathlib import Path
 
 import anyio
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.terminal_finalizer import FinalizeRequest, TerminalFinalizer
 from bowhead_core.terminal_protocol import (
@@ -46,6 +45,7 @@ from bowhead_core.terminal_reconciler import TerminalReconciler
 from bowhead_core.terminal_runtime_factory import (
     terminal_auth_resolve_context_values,
 )
+from core_legacy_database import upgrade
 
 _NOW = datetime(2026, 8, 3, 4, 5, 6, tzinfo=UTC)
 _AUTH_DIGEST = "e92e1245ede88788736b176f5dc073b6c08b5e9222228a33b497a64ac2d1d0ce"
@@ -56,7 +56,7 @@ def _create_db(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(path) as connection:
         connection.execute("INSERT INTO teams(id,name,status,created_at) VALUES ('team_1','Team','active','t')")
         connection.execute(

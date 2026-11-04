@@ -1246,6 +1246,7 @@ function _shapeKinds(spec: ChartSpec): ChartSpec["kind"][] {
 }
 
 function _compatibleKinds(spec: ChartSpec): ChartSpec["kind"][] {
+  if (spec.explicit_presentation) return [spec.kind];
   const kinds = _shapeKinds(spec);
   // Batch 3 4.3 (P1-6) fallback: current kind always in switcher, otherwise cannot return after switching.
   if (!kinds.includes(spec.kind) && _SUPPORTED_KINDS.has(spec.kind)) kinds.unshift(spec.kind);
@@ -1436,8 +1437,8 @@ function ChartJsBlock({
   ]);
   const normalizedShape = useMemo(() => normalizeChartForRenderingV1(spec, { scopeSource: focus?.scopeSource }).shape, [spec, focus?.scopeSource]);
   const contextRecipe = useMemo(
-    () => resolveChartRenderRecipe(renderContext, normalizedShape),
-    [normalizedShape, renderContext],
+    () => resolveChartRenderRecipe(renderContext, normalizedShape, spec.explicit_presentation),
+    [normalizedShape, renderContext, spec.explicit_presentation],
   );
   // ⑦: ask whether this data supports selected kind before build.
   //

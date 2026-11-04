@@ -118,7 +118,7 @@ describe("content type scale (P2 Icons & Type Spec)", () => {
       "font-size": "var(--fs-content-subsection)",
       "font-weight": "600",
     });
-    expect(rule(".canvas-report-article p:not(.v2-report-deck)")).toMatchObject({
+    expect(rule(".canvas-report-article p:not(.v2-report-deck):not([data-chart-unit-note])")).toMatchObject({
       color: "var(--c-ink)",
       "font-size": "var(--fs-content-body)",
       "line-height": "var(--lh-content-body)",

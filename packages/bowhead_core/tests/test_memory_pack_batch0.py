@@ -145,9 +145,9 @@ async def _run_one_turn(tmp_path, *, canonical: bool):
     )
 
     db = tmp_path / "bowhead.db"
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     memory = UserMemoryStore(db)
     await memory.initialize()
     remembered = await memory.upsert_product_memory(

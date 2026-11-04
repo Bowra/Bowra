@@ -27,6 +27,7 @@ from bowhead_core.kb.parse_recovery import (
     stuck_cutoff,
 )
 from bowhead_core.kb.schemas import KbFileDTO, KbTruncatedRows
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +197,7 @@ def _row_to_dto(row: aiosqlite.Row) -> KbFileDTO:
         parse_attempts=row["parse_attempts"] if "parse_attempts" in keys else 0,
         soft_deleted_at=row["soft_deleted_at"],
         ingestion_action_id=row["ingestion_action_id"] if "ingestion_action_id" in keys else None,
+        membership_revision=int(row["membership_revision"]) if "membership_revision" in keys else 1,
         # Routes fill can_delete/can_change_scope from caller permissions; DTO defaults False.
         can_delete=False,
         can_change_scope=False,
@@ -220,7 +222,7 @@ class KbFilesStore:
         could time out under operational overlap. 30s is conservative.
         """
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path, timeout=30.0) as db:
+        async with diagnostic_connect(self._db_path, timeout=30.0) as db:
             await db.executescript(_TABLE_SCHEMA)
             await db.executescript(_INDEX_SCHEMA)
             await self._migrate_parse_status_check(db)
@@ -420,7 +422,7 @@ class KbFilesStore:
             )
         file_id = f"kbf_{uuid4().hex[:12]}"
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 """INSERT INTO kb_files
                 (file_id, artifact_id, filename, mime_type, size_bytes,
@@ -450,7 +452,7 @@ class KbFilesStore:
         return file_id
 
     async def get(self, file_id: str) -> KbFileDTO | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_files WHERE file_id = ?",
@@ -462,7 +464,7 @@ class KbFilesStore:
     async def find_active_by_artifact(self, artifact_id: str) -> str | None:
         """给 artifact_id 找活跃的 kb file_id（晋升幂等用）。"""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT file_id FROM kb_files WHERE artifact_id = ? AND soft_deleted_at IS NULL LIMIT 1",
                 (artifact_id,),
@@ -486,7 +488,7 @@ class KbFilesStore:
             return set()
         ph = ",".join("?" for _ in ids)
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 f"SELECT DISTINCT artifact_id FROM kb_files "  # noqa: S608 - placeholders only
                 f"WHERE artifact_id IN ({ph}) AND soft_deleted_at IS NULL",
@@ -506,7 +508,7 @@ class KbFilesStore:
         if not ids:
             return []
         ph = ",".join("?" for _ in ids)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM kb_files WHERE artifact_id IN ({ph}) "  # noqa: S608 - placeholders only
@@ -533,7 +535,7 @@ class KbFilesStore:
             "filename asc": "filename ASC",
         }
         order_by = ALLOWED_SORTS.get(sort, "uploaded_at DESC")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM kb_files WHERE workspace_id = ? AND soft_deleted_at IS NULL ORDER BY {order_by} LIMIT ?",
@@ -560,7 +562,7 @@ class KbFilesStore:
             "filename asc": "filename ASC",
         }
         order_by = ALLOWED_SORTS.get(sort, "uploaded_at DESC")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM kb_files WHERE workspace_id = ? "
@@ -574,7 +576,7 @@ class KbFilesStore:
     async def count_for_ws_shared(self, ws_id: str) -> int:
         """[V7 kb-agentic-fix §2.8] count workspace + team scope only."""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM kb_files WHERE workspace_id = ? AND scope IN ('space', 'workspace', 'team') AND soft_deleted_at IS NULL",
                 (ws_id,),
@@ -592,7 +594,7 @@ class KbFilesStore:
 
     async def list_for_user(self, user_id: str) -> list[KbFileDTO]:
         """List user 自己 personal scope files."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_files WHERE scope = 'personal' AND scope_id = ? AND soft_deleted_at IS NULL ORDER BY uploaded_at DESC",
@@ -611,7 +613,7 @@ class KbFilesStore:
         `kb_ws_{sanitize_id('')}` (== `kb_ws_000` per 0.40.3 Bug 7 fix) and
         must be reachable too. Skips soft-deleted rows.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT DISTINCT COALESCE(workspace_id, '') AS workspace_id "
@@ -630,7 +632,7 @@ class KbFilesStore:
         Used by lifespan catalog-seed backfill (per PRD r2 Phase A — fire-and-forget
         background task iterates all ws to seed catalog idempotently).
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT DISTINCT COALESCE(workspace_id, '') AS workspace_id FROM kb_files WHERE soft_deleted_at IS NULL",
@@ -639,7 +641,7 @@ class KbFilesStore:
         return [r["workspace_id"] for r in rows]
 
     async def list_for_team(self, team_id: str) -> list[KbFileDTO]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_files WHERE scope = 'team' AND scope_id = ? AND soft_deleted_at IS NULL ORDER BY uploaded_at DESC",
@@ -649,7 +651,7 @@ class KbFilesStore:
         return [_row_to_dto(r) for r in rows]
 
     # Whitelist for list_for_scope_filtered ORDER BY (column-name injection guard).
-    _FILTER_ORDER_COLS = {"uploaded_at", "filename", "size_bytes"}
+    _FILTER_ORDER_COLS = {"uploaded_at", "filename", "size_bytes", "file_id"}
 
     async def list_for_scope_filtered(
         self,
@@ -731,6 +733,7 @@ class KbFilesStore:
         order_dir: str = "desc",
         candidate_limit: int | None = None,
         allowed_file_ids: tuple[str, ...] | None = None,
+        after_file_id: str | None = None,
     ) -> list[KbFileDTO]:
         """Cross-scope listing: the union of the single-scope branches of
         :meth:`list_for_scope_filtered` in one query.
@@ -768,6 +771,11 @@ class KbFilesStore:
         if allowed_file_ids is not None:
             where.append("file_id IN ({})".format(",".join("?" for _ in allowed_file_ids)))
             params.extend(allowed_file_ids)
+        if after_file_id is not None:
+            if order_by != "file_id" or order_dir != "asc":
+                raise ValueError("Source continuation requires ascending file identity order")
+            where.append("file_id > ?")
+            params.append(after_file_id)
         return await self._list_filtered(
             where,
             params,
@@ -829,11 +837,22 @@ class KbFilesStore:
         if candidate_limit is not None:
             sql += " LIMIT ?"
             params.append(candidate_limit)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
         return [_row_to_dto(r) for r in rows]
+
+    async def get_many(self, file_ids: list[str]) -> list[KbFileDTO]:
+        """Read one bounded authority snapshot without repeated connections."""
+        if not file_ids:
+            return []
+        if len(file_ids) > 256:
+            raise ValueError("Too many source identities")
+        async with diagnostic_connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (await db.execute("SELECT * FROM kb_files WHERE file_id IN (" + ",".join("?" for _ in file_ids) + ")", file_ids)).fetchall()
+        return [_row_to_dto(row) for row in rows]
 
     async def list_active_for_team_all_scopes(self, team_id: str) -> list[KbFileDTO]:
         """List all active files belonging to an team across every KB scope.
@@ -842,7 +861,7 @@ class KbFilesStore:
         ``team_id`` rather than scope/scope_id so personal, workspace, and team
         files all rebuild into the target embedding namespace.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_files WHERE team_id = ? AND soft_deleted_at IS NULL ORDER BY uploaded_at DESC",
@@ -854,7 +873,7 @@ class KbFilesStore:
     async def readiness_stats_for_team(self, team_id: str) -> KbReadinessStats:
         """Return bounded content signals without loading filenames or errors."""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*), "
                 "COALESCE(SUM(CASE WHEN mime_type LIKE 'image/%' THEN 1 ELSE 0 END), 0), "
@@ -873,7 +892,7 @@ class KbFilesStore:
 
     async def list_all_active(self) -> list[KbFileDTO]:
         """All non-soft-deleted files (audit script 用)."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_files WHERE soft_deleted_at IS NULL",
@@ -884,7 +903,7 @@ class KbFilesStore:
     async def list_soft_deleted_before(self, cutoff: datetime) -> list[KbFileDTO]:
         """P1-N3 90 day grace cron: list soft-deleted files older than cutoff."""
         cutoff_iso = cutoff.isoformat(timespec="seconds")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_retention_holds'") as cur:
                 has_account_holds = await cur.fetchone() is not None
@@ -929,7 +948,7 @@ class KbFilesStore:
         if parse_owner is not None:
             guard = " AND version=? AND parse_attempts=? AND soft_deleted_at IS NULL"
             values.extend(parse_owner)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 f"UPDATE kb_files SET {set_clause} WHERE file_id = ?{guard}",
                 values,
@@ -944,7 +963,7 @@ class KbFilesStore:
         version 落后 kb_files 1（今天无消费者, 首个消费者是矩阵 stale 派生且只读
         kb_files.version）。
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET version = version + 1 WHERE file_id = ?",
                 (file_id,),
@@ -960,7 +979,7 @@ class KbFilesStore:
         team_id: str,
     ) -> None:
         """[P0-P2] scope change 更新 4 个 routing 字段."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET scope = ?, scope_id = ?, workspace_id = ?, team_id = ? WHERE file_id = ?",
                 (scope, scope_id, workspace_id, team_id, file_id),
@@ -987,7 +1006,7 @@ class KbFilesStore:
         ``doc_type_id=None`` is a valid value (used by extract-failure cleanup
         to undo a poisoned auto-classification).
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_files SET auto_classified_doc_type_id = ? WHERE file_id = ? AND workspace_id = ? AND soft_deleted_at IS NULL",
                 (doc_type_id, file_id, expected_workspace_id),
@@ -1008,7 +1027,7 @@ class KbFilesStore:
         if expected_file is not None:
             guard = " AND version=? AND scope=? AND scope_id=? AND workspace_id=? AND team_id=?"
             params.extend([expected_file.version, expected_file.scope, expected_file.scope_id, expected_file.workspace_id, expected_file.team_id])
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 f"""UPDATE kb_files
                 SET parse_status='queued', parse_error=NULL, parse_progress_pct=0,
@@ -1025,7 +1044,7 @@ class KbFilesStore:
     async def mark_parse_failed(self, file_id: str, parse_error: str | None = None) -> None:
         """[kb-management REQ-2.1] Roll a file back to 'failed' (used when the
         worker turns out to be unavailable right after requeue_for_reparse)."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET parse_status='failed', parse_error=?, parse_progress_pct=NULL, parse_heartbeat_at=? WHERE file_id=?",
                 (parse_error, heartbeat_iso(), file_id),
@@ -1034,7 +1053,7 @@ class KbFilesStore:
 
     async def fail_unstarted_ingestion(self, file: KbFileDTO, *, reason: str) -> None:
         """Report revoked/unavailable admission without touching a running parse."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET parse_status='failed',parse_error=?,parse_heartbeat_at=? "
                 "WHERE file_id=? AND version=? AND parse_attempts=? AND soft_deleted_at IS NULL "
@@ -1050,7 +1069,7 @@ class KbFilesStore:
         不会产生并行解析。``allow_terminal`` 仅给「对已完成文件强制重解析」的显式路径。
         """
         claimable = ("pending", "queued", "done", "failed") if allow_terminal else ("pending", "queued")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 f"""UPDATE kb_files
                 SET parse_status='parsing', parse_progress_pct=20, parse_error=NULL,
@@ -1064,7 +1083,7 @@ class KbFilesStore:
     async def list_unfinished_parses(self, *, heartbeat_before: str) -> list[KbFileDTO]:
         """FR1 启动恢复候选：未完成且心跳早于 ``heartbeat_before``（不含 awaiting_upload，
         那归 presign sweeper）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"""SELECT * FROM kb_files
@@ -1093,7 +1112,7 @@ class KbFilesStore:
                   AND parse_status IN ({_in_clause(UNFINISHED_PARSE_STATUSES)})
                   AND (parse_heartbeat_at IS NULL OR parse_heartbeat_at < ?)"""
         now = heartbeat_iso()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 f"""UPDATE kb_files
                 SET parse_status='failed', parse_progress_pct=NULL, parse_heartbeat_at=?,
@@ -1115,7 +1134,7 @@ class KbFilesStore:
 
     async def fail_unfinished_parse(self, file_id: str, *, parse_error: str, heartbeat_before: str) -> bool:
         """FR1 启动恢复：团队解析运行时不可用时直接收敛为 failed，留给用户稍后重试。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 f"""UPDATE kb_files
                 SET parse_status='failed', parse_progress_pct=NULL, parse_error=?, parse_heartbeat_at=?
@@ -1143,7 +1162,7 @@ class KbFilesStore:
         NOTE: this only sets the binding; it does NOT trigger row extraction —
         extraction is the rate-limited per-row subsystem (kb_admin trigger_extract_rows).
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_files SET doc_type_id = ? WHERE file_id = ? AND workspace_id = ? AND soft_deleted_at IS NULL",
                 (doc_type_id, file_id, expected_workspace_id),
@@ -1169,7 +1188,7 @@ class KbFilesStore:
         VALID = ("na", "queued", "running", "succeeded", "failed", "cancelled")
         if status not in VALID:
             raise ValueError(f"extracted_rows_status must be one of {VALID}, got {status!r}")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             if expected_workspace_id is not None:
                 cur = await db.execute(
                     "UPDATE kb_files SET extracted_rows_status = ? WHERE file_id = ? AND workspace_id = ? AND soft_deleted_at IS NULL",
@@ -1185,7 +1204,7 @@ class KbFilesStore:
 
     async def update_chunks_count(self, file_id: str, count: int) -> None:
         """[P1-Q2] scope change cross-coll 迁移后刷 chunks_count."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET chunks_count = ? WHERE file_id = ?",
                 (count, file_id),
@@ -1194,7 +1213,7 @@ class KbFilesStore:
 
     async def soft_delete(self, file_id: str) -> None:
         """Soft delete: set soft_deleted_at = now. 90 day grace 后 cron hard delete."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET soft_deleted_at = ? WHERE file_id = ?",
                 (_now(), file_id),
@@ -1203,14 +1222,14 @@ class KbFilesStore:
 
     async def hard_delete(self, file_id: str) -> None:
         """[P1-N3] Real DELETE row. cron 90 day grace 走."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("DELETE FROM kb_files WHERE file_id = ?", (file_id,))
             await db.commit()
 
     async def count_for_ws(self, ws_id: str) -> int:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM kb_files WHERE workspace_id = ? AND soft_deleted_at IS NULL",
                 (ws_id,),
@@ -1226,7 +1245,7 @@ class KbFilesStore:
 
     async def increment_cite_count(self, file_id: str) -> None:
         """Cite popover 触发时刷新 cite_count + last_cited_at."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_files SET cite_count = cite_count + 1, last_cited_at = ? WHERE file_id = ?",
                 (_now(), file_id),
@@ -1250,7 +1269,7 @@ class KbFilesStore:
         action_key = canonical_hash({"actor": action.actor_user_id, "team": action.team_id, "action": "add", "ref": action.action_ref})
         operation_id = f"kbo_{uuid4().hex}"
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("BEGIN IMMEDIATE")
@@ -1354,7 +1373,7 @@ class KbFilesStore:
 
         action.require(user_id=action.actor_user_id, team_id=action.team_id, addition=False)
         key = canonical_hash({"actor": action.actor_user_id, "team": action.team_id, "action": "remove", "ref": action.action_ref})
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute("SELECT * FROM kb_files WHERE file_id=? AND team_id=?", (file_id, action.team_id)) as cursor:
@@ -1400,14 +1419,14 @@ class KbFilesStore:
 
     async def get_operation(self, operation_id: str) -> dict[str, Any] | None:
         """Read a receipt; the caller must reauthorize its member/file before projection."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM kb_membership_operations WHERE id=?", (operation_id,)) as cursor:
                 row = await cursor.fetchone()
         return dict(row) if row else None
 
     async def find_operation_by_key(self, key: str) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM kb_membership_operations WHERE action_key=?", (key,)) as cursor:
                 row = await cursor.fetchone()

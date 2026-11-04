@@ -20,9 +20,8 @@ import os
 import time
 from pathlib import Path  # noqa: TC003 (runtime-used as `str | Path` arg, kept import-time)
 
-import aiosqlite
-
 from bowhead_core.kb.telemetry import emit_audit
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,7 @@ async def migrate_kb_doc_types_add_columns(db_path: str | Path) -> None:
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             async with db.execute(
                 "SELECT name FROM pragma_table_info('kb_doc_types')",
             ) as cur:
@@ -144,7 +143,7 @@ async def migrate_kb_files_add_auto_classified(db_path: str | Path) -> None:
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             async with db.execute(
                 "SELECT name FROM pragma_table_info('kb_files')",
             ) as cur:
@@ -209,7 +208,7 @@ async def migrate_kb_doc_types_add_sprint25_columns(db_path: str | Path) -> None
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             async with db.execute(
                 "SELECT name FROM pragma_table_info('kb_doc_types')",
             ) as cur:
@@ -279,7 +278,7 @@ async def migrate_kb_doc_types_add_m4_columns(db_path: str | Path) -> None:
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             async with db.execute(
                 "SELECT name FROM pragma_table_info('kb_doc_types')",
             ) as cur:
@@ -354,7 +353,7 @@ async def migrate_kb_doc_types_add_sharing_columns(db_path: str | Path) -> None:
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             async with db.execute(
                 "SELECT name FROM pragma_table_info('kb_doc_types')",
             ) as cur:

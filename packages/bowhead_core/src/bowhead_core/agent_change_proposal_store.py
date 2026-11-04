@@ -32,6 +32,7 @@ from bowhead_core.agent_revision_store import (
     working_copy_content_hash,
 )
 from bowhead_core.resource_dependency_projection import invalidate_working_copy_projection_conn
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.agent_coach_generation import CoachGenerationClaim
@@ -171,7 +172,7 @@ LEFT JOIN team_openapi_keys origin_key
 
 class AgentChangeProposalStore:
     def __init__(self, db_path: str, *, revision_store: AgentRevisionStore | None = None) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
         self._revision_store = revision_store
         self._behavior_authoring = revision_store._behavior_authoring if revision_store is not None else default_agent_behavior_authoring_service()
 

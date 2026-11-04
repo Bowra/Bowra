@@ -38,6 +38,7 @@ from bowhead_core.catalog_localization import (
     ResolvedLocalizedListing,
     resolve_agent_listing,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.subagent_authoring_catalog import AuthoringTool, runtime_tool_ref
 from bowhead_core.tool_name_canon import TOOL_RENAMES
 
@@ -342,7 +343,7 @@ class AgentCatalogStore:
     """Build and persist finite consumer projections from current Agent rows."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
 
     async def list_team_sources(self, *, team_id: str) -> tuple[AgentCatalogSource, ...]:
         async with open_shared_ctx(self.db_path) as db:

@@ -8,11 +8,11 @@ from importlib import import_module
 
 import pytest
 from alembic import command
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_execution_binding import _resolved_team_definition_json
 from bowhead_core.team_plugin_store import TeamPluginError, TeamPluginStore, expand_plugins_conn
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 from test_artifact_workspace_cutover_migration import _config
 
 MIGRATION = import_module("bowhead_core.migrations.versions.0123_team_capability_bundles")
@@ -35,7 +35,7 @@ def test_team_plugin_migration_is_scoped_and_repeatable(tmp_path, target):
 @pytest.mark.asyncio
 async def test_plugin_latest_revision_and_team_boundary(tmp_path):
     path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(path)
     await users.initialize()
     first_team = await users.create_team(name="First", max_seats=2)
@@ -114,7 +114,7 @@ async def test_plugin_latest_revision_and_team_boundary(tmp_path):
 @pytest.mark.asyncio
 async def test_delete_plugin_cleans_drafts_and_resources_but_keeps_published_history(tmp_path):
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="First", max_seats=2)
@@ -192,7 +192,7 @@ async def test_disabled_plugin_expands_for_run_admission_and_records_its_frozen_
     from bowhead_core.resource_disable import team_plugin_provenance
 
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="Team", max_seats=2)
@@ -222,7 +222,7 @@ async def test_builtin_plugins_expand_at_run_admission(tmp_path):
     from bowhead_core.resource_disable import DisableState, compute_turn_resources, team_plugin_provenance
 
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     authored = {"tool_refs": ["web_search", "bi_query"], "skill_grants": [], "builtin_plugin_ids": ["builtin:data-analysis"]}
     snapshot = {"definition_json": json.dumps(authored)}
     async with open_shared_ctx(str(path)) as db:
@@ -235,7 +235,7 @@ async def test_builtin_plugins_expand_at_run_admission(tmp_path):
     turn = compute_turn_resources(provenance, DisableState(team_builtin_plugins=frozenset({"data-analysis"})))
     assert turn.tools == {"web_search", "bi_query"}
     with pytest.raises(AgentPublicationBlockedError, match="builtin_plugin_not_selectable"):
-        _expand_builtin_plugins_for_publication({**authored, "builtin_plugin_ids": ["builtin:email"]})
+        _expand_builtin_plugins_for_publication({**authored, "builtin_plugin_ids": ["builtin:settings-space-instructions"]})
 
 
 def _team_skill_grant(revision: str, permissions: list[str] | None = None) -> dict:
@@ -251,7 +251,7 @@ def _team_skill_grant(revision: str, permissions: list[str] | None = None) -> di
 async def test_skill_revision_differences_do_not_conflict_on_expansion_or_run_admission(tmp_path):
     """A frozen Agent keeps its direct grant's revision; the Plugin was saved with a later one."""
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="Team", max_seats=2)

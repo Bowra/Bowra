@@ -24,6 +24,21 @@ const card = () => screen.getByTestId("final-fail");
 const primaryButtons = () => card().querySelectorAll(".settings-button--primary");
 
 describe("FinalFailBanner", () => {
+  it.each([
+    ["en-US", "The required operation was not executed", "Edit and send"],
+    ["zh-CN", "所需操作未执行", "编辑后发送"],
+  ] as const)("explains unfinished Tool work in live and saved views (%s)", (locale, message, action) => {
+    const onEditAndResend = vi.fn();
+    for (const live of ["assertive", "off"] as const) {
+      const rendered = renderIntl(<FinalFailBanner kind="tool_call_not_executed" live={live} recoveryAction="edit_and_resend" onEditAndResend={onEditAndResend} />, { locale });
+      expect(card()).toHaveTextContent(message);
+      expect(card()).not.toHaveTextContent("tool_call_not_executed");
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      rendered.unmount();
+    }
+    expect(onEditAndResend).toHaveBeenCalledTimes(2);
+  });
+
   it("shows a finite agent ceiling and its admitted decision count without offering blind retry", () => {
     renderIntl(<FinalFailBanner kind="agent_step_limit" diagnostics={{
       schemaVersion: 1, disclosure: "authenticated", code: "agent_step_limit", diagnosticCode: "chat_turn_failed", stepUsage: { used: 14, limit: 14 },
@@ -222,6 +237,7 @@ describe("FinalFailBanner", () => {
     ["hop_cap_exceeded", "本轮已达到执行步骤上限", "请拆分剩余工作后重新发送。"],
     ["llm_context_overflow", "对话内容超过了模型能处理的上限", "整理上下文或选择上下文容量更大的模型后重发"],
     ["llm_provider_auth_failed", "模型服务认证失败", "请联系团队管理员核对模型连接的 API 密钥和访问权限，并提供诊断信息；修正后再发送。"],
+    ["knowledge_source_changed", "知识来源已变化", "请新建会话，基于当前可用资料和权限重新提问。"],
     ["reference_policy_changed", "团队权限变了，这次引用没有执行", "重新选择智能体和技能后再发送。"],
     ["service_interrupted", "服务执行中断，本轮未完成", "请先核对已显示的步骤和结果"],
     ["terminal_projection_not_committed", "本轮结果未能完整保存", "请先核对已显示的结果"],

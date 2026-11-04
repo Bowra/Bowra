@@ -11,7 +11,6 @@ from pathlib import Path
 import aiosqlite
 import bowhead_core.session_store as session_store_module
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.chat_turn_source import ReferenceExecutionUnavailableError
 from bowhead_core.events import (
     EventBusRegistry,
@@ -22,23 +21,14 @@ from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.plan_store import PlanStatus, PlanStore
 from bowhead_core.session_store import SessionProtocolManagedError, SessionStore
 from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
+from core_legacy_database import upgrade
 
 
 def _chain_head() -> str:
-    """共享 revision 链当前的 head（从脚本目录读，不写死号）。
+    """The admitted legacy revision for single-file historical fixtures."""
+    from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
-    与 `test_local_oidc_store._chain_head` 同源——那条测试先撞的同一颗雷。
-    """
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    from bowhead_core import migrations
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    heads = ScriptDirectory.from_config(config).get_heads()
-    assert len(heads) == 1, f"revision 链分叉了，heads={heads}——按迁移规范应以 merge revision 合并"
-    return heads[0]
+    return SOURCE_REVISION
 
 
 def _finalize_args(common: dict[str, object]) -> dict[str, object]:
@@ -144,7 +134,7 @@ def db_path(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     now = datetime.now(tz=UTC).isoformat()
     with sqlite3.connect(path) as connection:
         connection.executemany(

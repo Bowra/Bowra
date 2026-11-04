@@ -10,7 +10,7 @@ import { CanvasObjectFooter } from "@/components/canvas/object/footer";
 import { useCanvasObjectFooter, useReportCanvasSave } from "@/components/canvas/object/surface";
 
 /**
- * Save bar appears only after changes (appearance decision 17; Page Layout Spec “保存模型分两种”).
+ * Save bar appears after changes, or while related connection actions are available.
  *
  * Unsaved text changes (`dirty`) place it at the content area's bottom, sticky,
  * showing “有未保存的更改”, with “放弃” and “保存” on the right. Immediately applied switches/radios bypass it.
@@ -34,6 +34,7 @@ export function SaveBar({
   discardLabel,
   message,
   failed = false,
+  actions,
 }: {
   dirty: boolean;
   saving?: boolean;
@@ -48,12 +49,14 @@ export function SaveBar({
   message?: ReactNode;
   /** The last save failed; edits are kept (Canvas footer shows “Couldn’t save” and “Retry save”). */
   failed?: boolean;
+  /** Related actions shown beside Save, such as verifying a connection draft. */
+  actions?: ReactNode;
 }) {
   const slot = useContext(SaveBarSlotContext);
   const canvasFooter = useCanvasObjectFooter();
   const t = useTranslations("common");
   const tCanvas = useTranslations("canvas_object");
-  const visible = dirty || saving;
+  const visible = dirty || saving || Boolean(actions);
   // Inside a Canvas object surface the bar is the object footer (C9 save variant) and reports its state
   // to the object tab marker.
   useReportCanvasSave({ dirty, saving, failed: failed && dirty }, canvasFooter !== null);
@@ -129,16 +132,17 @@ export function SaveBar({
   const barNode = (
     <div
       ref={setBar}
-      className={`ui-savebar${slot ? "" : " is-inline"}`}
+      className={`ui-savebar${slot ? "" : " is-inline"}${actions ? " has-related-actions" : ""}`}
       role="region"
-      aria-label={t("unsaved_changes")}
+      aria-label={t(dirty ? "unsaved_changes" : "save")}
       style={slot ? ({ "--savebar-keyboard-inset": `${keyboardInset}px` } as CSSProperties) : undefined}
     >
-      <span className="ui-savebar-dot" aria-hidden="true" />
+      {dirty || saving ? <span className="ui-savebar-dot" aria-hidden="true" /> : null}
       <span className="ui-savebar-text" role="status">
-        {message ?? t("unsaved_changes")}
+        {message ?? t(dirty ? "unsaved_changes" : "save")}
       </span>
       <span className="ui-savebar-actions">
+        {actions}
         <Button type="button" onClick={onDiscard} disabled={saving}>
           {discardLabel ?? t("discard")}
         </Button>

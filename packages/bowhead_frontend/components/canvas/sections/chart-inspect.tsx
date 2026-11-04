@@ -442,7 +442,7 @@ function InspectDataTable({ spec }: { spec: ChartSpec }) {
       <thead>
         <tr>
           {(spec.columns ?? []).map((c) => (
-            <th key={c.key} className={c.type === "numeric" ? "is-num" : undefined} style={{ color: theme.inkSoft }}>
+            <th key={c.key} className={c.type === "numeric" ? "is-num" : undefined} style={{ color: theme.inkSoft, borderColor: theme.grid }}>
               {columnDisplays.get(c.key)?.header ?? c.header}
             </th>
           ))}
@@ -458,7 +458,7 @@ function InspectDataTable({ spec }: { spec: ChartSpec }) {
                 ? columnDisplays.get(c.key)!.formatValue(v)
                 : String(v ?? "—");
               return (
-                <td key={c.key} className={numeric ? "is-num" : undefined} style={{ color: theme.ink }}>
+                <td key={c.key} className={numeric ? "is-num" : undefined} style={{ color: theme.ink, borderColor: theme.gridSoft }}>
                   {display}
                 </td>
               );

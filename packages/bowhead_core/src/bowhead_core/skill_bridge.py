@@ -309,6 +309,7 @@ def register_skill_tools(
 
         return await check_skill_execution(ctx, catalog=catalog, skill_name=skill_name, permission="invoke")
 
+    from bowhead_core.html_static_check import HTML_STATIC_CHECK_GUIDANCE
     from bowhead_core.ordinary_lead_material import OrdinarySkillObserver
 
     observer = OrdinarySkillObserver(catalog)
@@ -378,7 +379,7 @@ def register_skill_tools(
             ToolSpec(
                 schema=ToolSchema(
                     name=d.name,
-                    description=d.description,
+                    description=d.description + (" " + HTML_STATIC_CHECK_GUIDANCE if d.name in (FLAT_SANDBOX_TOOL, SKILL_INVOKE_TOOL) else ""),
                     input_schema=d.input_schema,
                 ),
                 handler=handler,

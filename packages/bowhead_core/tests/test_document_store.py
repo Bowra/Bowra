@@ -24,6 +24,7 @@ from bowhead_core.documents.request import DocumentProposal, DocumentRequestErro
 from bowhead_core.documents.store import DocumentStore
 from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
 from bowhead_core.session_store import SessionStore, _insert_chat_turn_user_source_in_tx
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.terminal_protocol_store import TerminalProtocolStore
 
 from bowhead_core import migrations
@@ -54,7 +55,7 @@ def migrated_db(tmp_path_factory) -> Path:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return path
 
 

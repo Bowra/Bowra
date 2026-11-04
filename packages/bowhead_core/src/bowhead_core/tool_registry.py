@@ -50,9 +50,28 @@ from bowhead_core.terminal_effect_contract import (
     ToolEffectSpec,
 )
 from bowhead_core.tool_call_policy import TOOL_CALL_POLICIES, PolicyDenial, PolicyStage, ToolCallRequest
+from bowhead_core.tool_outcome import classify_tool_outcome
 from bowhead_core.types import ToolAnnotations, ToolInvocation, utc_now_iso
 
 logger = logging.getLogger(__name__)
+
+
+def _aggregate_bi_query_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Project declared native child outcomes without discarding their data."""
+    outcomes = [classify_tool_outcome(result) for result in results]
+    if any(outcome.code == "tool_execution_unknown" for outcome in outcomes):
+        return {"ok": False, "error_kind": "tool_outcome_unknown", "results": results}
+    if outcomes and all(outcome.state == "failure" for outcome in outcomes):
+        return {
+            "ok": False,
+            "error_kind": "bi_query_batch_failed",
+            "error_message": "All queries failed. Inspect the individual results for their causes.",
+            "results": results,
+        }
+    result: dict[str, Any] = {"ok": True, "results": results}
+    if any(outcome.state != "success" for outcome in outcomes):
+        result["completion"] = "partial"
+    return result
 
 
 class AmbiguousToolEffectOutcomeError(RuntimeError):
@@ -978,6 +997,9 @@ class ToolExecutionContext:
     knowledge_readable_file_ids: tuple[str, ...] | None = None
     knowledge_source_uses: dict[str, Any] = field(default_factory=dict)
     knowledge_source_ancestors: tuple[dict[str, Any], ...] = ()
+    knowledge_navigation_uses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    knowledge_navigation_ancestors: tuple[dict[str, dict[str, Any]], ...] = ()
+    knowledge_navigation_pending: dict[str, dict[str, Any]] = field(default_factory=dict)
     ordinary_call_identity: tuple[str, str] | None = field(default=None, repr=False)
     # Server-owned collaboration adapter and exact retained Tool identity.
     # A copied context does not admit a participant or grant source access.
@@ -1124,6 +1146,7 @@ class ToolExecutionContext:
     # Attach it to ctx so `answer_style.resolve_answer_style` can read it at prompt assembly.
     user_profile: dict[str, str] | None = None
     # Chat model picker preference. Router applies this only to lead/composer.
+    required_web_sources: tuple[str, ...] = ()
     preferred_provider: str | None = None
     preferred_model: str | None = None
     # M158 paradigm v2: role-based tool whitelist enforcement
@@ -1258,6 +1281,8 @@ class ToolExecutionContext:
     datarc_run_state: DatarcRunState | None = field(default=None, repr=False, compare=False)
     datarc_execution_scope: DatarcExecutionScope | None = field(default=None, repr=False, compare=False)
     datarc_batch_refusal: dict | None = field(default=None, repr=False, compare=False)
+    # A terminal review must observe all sibling outcomes before closeout.
+    terminal_batch_conflict: bool = field(default=False, repr=False, compare=False)
     datarc_source_evidence: dict | None = field(default=None, repr=False, compare=False)
     # Batch 2/c6: same-turn idempotency for ambiguous-switch clarification (prevent injection-driven card spam, review P2).
     _switch_clar_emitted: bool = field(default=False, repr=False, compare=False)
@@ -1421,6 +1446,8 @@ class ToolSpec:
     # dispatch identity, not MCP self-declared metadata or a permission grant.
     team_tool_binding: TeamToolExecutionBinding | None = None
     personal_mcp_label: str | None = None
+    # Trusted registration only; MCP annotations cannot authorize terminal handling.
+    terminal_payload_field: str | None = None
 
 
 def _opened_to_role(name: str, role: str) -> bool:
@@ -1881,7 +1908,14 @@ class ToolRegistry:
         from bowhead_core.kb.management_tools import available
 
         names = whitelist or list(self._specs)
-        return [self._specs[n].schema for n in names if n in self._specs and self._specs[n].visible_to_llm and available(n)]
+        from bowhead_core.tool_delivery_review import terminal_review_schema
+
+        schemas = []
+        for name in names:
+            if name in self._specs and self._specs[name].visible_to_llm and available(name):
+                spec = self._specs[name]
+                schemas.append(terminal_review_schema(spec.schema, spec.terminal_payload_field) if spec.terminal_payload_field else spec.schema)
+        return schemas
 
     async def admit(
         self,
@@ -2106,6 +2140,12 @@ class ToolRegistry:
             handler_ctx = await prepare_source_read(handler_ctx, name)
             result = await spec.handler(arguments, handler_ctx)
             result = await finish_source_read(handler_ctx, name, result)
+            from bowhead_core.tool_delivery_review import delivery_review_enabled
+
+            if delivery_review_enabled() and spec.terminal_payload_field and isinstance(result, dict) and result.get("ok") is True:
+                terminal_payload = arguments.get(spec.terminal_payload_field)
+                if isinstance(terminal_payload, dict) and terminal_payload.get("completion") == "partial":
+                    result = {**result, "completion": "partial"}
             handler_completed = True
             durable_classified = tool_attempt is not None and isinstance(
                 result,
@@ -3103,8 +3143,8 @@ def build_default_registry() -> ToolRegistry:
         error_kind = sub.get("error_kind") or sub.get("error_code")
         error_message = sub.get("error_message") or sub.get("error")
 
-        # ok detection: explicit ok=False wins; else absence of error_kind/code means OK.
-        ok = bool(sub.get("ok")) and error_kind is None if "ok" in sub else error_kind is None
+        # Classify the declared native result before the model-facing field projection.
+        ok = classify_tool_outcome({**sub, "error_kind": error_kind}).state != "failure"
 
         artifact_id = sub.get("artifact_id")  # only slow-path _fetch_rows has this
 
@@ -3141,7 +3181,15 @@ def build_default_registry() -> ToolRegistry:
                     wrapped["_rows_truncated"] = True
         # Actual query specification reported by datarc: each batch subquery has its own; without forwarding it, batching returns the model
         # to guessing what it queried from row data. Not whitelisted = discarded (existing wrapper semantics).
-        for key in ("query_explain", "query_explain_text", "columns", "_partial_data", "_rows_limited_by_query", "_withheld_fallback_measures"):
+        for key in (
+            "completion",
+            "query_explain",
+            "query_explain_text",
+            "columns",
+            "_partial_data",
+            "_rows_limited_by_query",
+            "_withheld_fallback_measures",
+        ):
             if key in sub:
                 wrapped[key] = sub[key]
         # Fast-path specific: surface metrics + url so LLM/frontend can render.
@@ -3335,7 +3383,7 @@ def build_default_registry() -> ToolRegistry:
             for i, q, e in sanity_errors:
                 results.append(await _one(i, q, e))
 
-        return {"results": results}
+        return _aggregate_bi_query_results(results)
 
     reg.register(
         ToolSpec(
@@ -3721,21 +3769,75 @@ def build_default_registry() -> ToolRegistry:
     # Retain approval infrastructure (ApprovalGate / ApprovalStore / approval_executor / notification center);
     # add to approval_gate.SUPPORTED_NATIVE_WRITE_TOOLS when genuinely executable write tools exist.
 
+    async def _kb_list_sources(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
+        from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
+        from bowhead_core.kb.source_navigation import list_sources
+
+        try:
+            page = await list_sources(
+                ctx, query=args.get("query", ""), category_id=args.get("category_id"), cursor=args.get("cursor"), limit=args.get("limit", 20)
+            )
+        except KnowledgeAccessError as exc:
+            return {
+                "ok": False,
+                "error_kind": "service_unavailable",
+                "reason_code": str(exc),
+                "hint": "The source directory could not be checked. This does not establish that sources are absent. Ask an administrator to check source access and service configuration, then retry.",
+            }
+        except ValueError:
+            return {
+                "ok": False,
+                "error": "knowledge_catalog_input_invalid",
+                "hint": "Use a valid cursor from the same query, a short query and limit 1-50.",
+            }
+        ctx.knowledge_navigation_pending = page.dependencies
+        ctx.knowledge_readable_file_ids = tuple(page.dependencies)
+        ctx.knowledge_source_generations = {identity: proof["generation_id"] for identity, proof in page.dependencies.items()}
+        return page.payload()
+
+    reg.register(
+        ToolSpec(
+            schema=ToolSchema(
+                name="kb_list_sources",
+                description="List current authorized KB documents, coverage descriptions and categories. Use this for source-directory and category questions or when source coverage is unclear. This is paginated metadata, not original evidence. Follow next_cursor with the same filters; partial or missing matches do not prove absence. Use kb_search or original structured reads for facts. This Tool never generates descriptions or changes KB membership.",
+                input_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": "Optional case-insensitive substring across source names, descriptions, topics and category names. Query a category name to discover its sources and id.",
+                        },
+                        "category_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "description": "Use a category id returned by this directory, or unclassified for sources without assigned categories.",
+                        },
+                        "cursor": {"type": "string", "maxLength": 1024},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    },
+                },
+            ),
+            handler=_kb_list_sources,
+        )
+    )
+
     # ─── kb_search (V7 KB sprint Day 16) ─────────────────────
     async def _kb_search(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
-        """KB 4-stage retrieval pipeline. ctx.kb_retriever None → soft empty (KB unconfigured)."""
+        """Retrieve evidence or report an unavailable service without claiming an empty library."""
         from bowhead_core.knowledge_source_runtime import require_prepared_read
 
         require_prepared_read(ctx)
         if ctx.kb_retriever is None:
-            # KB runtime is built only from team model settings. Most common cause now is missing
-            # _peer_ctx wire (Bug 3 fix at turn_runner.py kb_retriever= wire).
             return {
                 "chunks": [],
                 "total_candidates": 0,
                 "rerank_used": False,
                 "latency_ms": 0,
-                "note": "KB retriever not wired into tool context (check turn_runner _peer_ctx + app.state.kb_retriever)",
+                "error_kind": "service_unavailable",
+                "reason_code": "knowledge_retrieval_unavailable",
+                "hint": "Original knowledge evidence cannot be retrieved right now. This does not establish that matching sources are absent. Ask a Team administrator to check knowledge model settings, then retry.",
             }
         from bowhead_core.kb.permission import ScopeContext, drop_chunks_of_deleted_files, resolve_extra_personal_workspaces
 

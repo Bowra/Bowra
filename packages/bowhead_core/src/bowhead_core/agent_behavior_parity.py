@@ -37,6 +37,17 @@ AGENT_BEHAVIOR_PARITY_SUITES: dict[str, AgentBehaviorParitySuite] = {
         implementation_ref="capi_template_document_native@1",
         assertion_ids=("canonical_request_required", "exact_admission_atomic", "no_publication_from_receipt", "feature_off_fenced"),
     ),
+    "document-word-admission-parity-v2": AgentBehaviorParitySuite(
+        id="document-word-admission-parity-v2",
+        implementation_ref="capi_template_document_native@2",
+        assertion_ids=(
+            "canonical_request_required",
+            "exact_word_method_required",
+            "source_only_publication",
+            "same_source_pdf",
+            "feature_off_fenced",
+        ),
+    ),
 }
 
 

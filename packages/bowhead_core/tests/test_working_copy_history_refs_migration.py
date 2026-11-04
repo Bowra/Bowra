@@ -7,7 +7,7 @@ from importlib import import_module
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from core_legacy_database import TARGET_FILES
 from test_agent_eval_policy_plan_store import _Clock, _comparison_context, _ready_candidate, _seed
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot

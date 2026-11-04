@@ -98,7 +98,8 @@ from bowhead_core.events import (
     emit_required_tool_result,
     raise_if_terminal_bus_failed,
 )
-from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS, SHARED_KNOWLEDGE_GUIDANCE, KnowledgeReadState
+from bowhead_core.kb_search_budget import CURRENT_KNOWLEDGE_READ_TOOLS as KNOWLEDGE_READ_TOOLS
+from bowhead_core.kb_search_budget import SHARED_KNOWLEDGE_GUIDANCE, KnowledgeReadState
 from bowhead_core.llm_failure import (
     ORCHESTRATOR_DEADLINE_PROVIDER,
     LLMDeliveryFailedError,
@@ -117,7 +118,21 @@ from bowhead_core.subagent_resume import ResumeGrant
 from bowhead_core.terminal_effect_contract import TOOL_EFFECT_NONE
 from bowhead_core.text_tool_call_salvage import apply_text_tool_call_salvage
 from bowhead_core.tool_category import is_canvas_add_tool, is_canvas_tool
+from bowhead_core.tool_delivery_review import DeliveryReviewRefusal
 from bowhead_core.tool_name_canon import canonicalize_tool_calls, canonicalize_tool_refs
+from bowhead_core.tool_outcome import (
+    EXPECTED_OUTCOME_ERROR_KINDS as EXPECTED_OUTCOME_ERROR_KINDS,
+)
+from bowhead_core.tool_outcome import (
+    _extract_result_error as _extract_result_error,
+)
+from bowhead_core.tool_outcome import (
+    _extract_result_ok as _extract_result_ok,
+)
+from bowhead_core.tool_outcome import (
+    _is_non_failure_result as _is_non_failure_result,
+)
+from bowhead_core.tool_outcome import classify_tool_outcome, invocation_result
 from bowhead_core.tool_registry import (
     ToolExecutionContext,
     ToolRegistry,
@@ -1627,6 +1642,14 @@ PROFILES: dict[str, SubagentProfile] = {
 # ─────────────────────────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True)
+class FinalAnswerCorrection:
+    """Trusted gate guidance with an optional private history projection."""
+
+    instruction: str
+    assistant_history_name: str | None = None
+
+
 @dataclass
 class SubagentResult:
     profile: str
@@ -1661,6 +1684,8 @@ class SubagentResult:
         default=None,
         repr=False,
     )
+    # Current native review only; checkpoint readers never restore this result-local hint.
+    reviewed_delivery_complete: bool = field(default=False, repr=False, kw_only=True)
     # Agent run limits: a run stopped at a limit returns its
     # partial work. "partial" keeps ok=False (the task did not finish) and carries the
     # stop reason plus the wrap-up call's Done/Remaining text when that call succeeded.
@@ -1810,6 +1835,15 @@ async def _capture_resume_checkpoint(
     from bowhead_core.datarc_selection import current_datarc_selection
     from bowhead_core.subagent_resume import capture
 
+    if (
+        knowledge_read is None
+        and getattr(parent_ctx, "knowledge_direct_use", False)
+        and (
+            getattr(parent_ctx, "knowledge_navigation_uses", {})
+            or any(call.name == "kb_list_sources" for message in messages for call in message.tool_calls or [])
+        )
+    ):
+        knowledge_read = KnowledgeReadState()
     store = getattr(parent_ctx, "session_store", None)
     session_id = str(getattr(parent_ctx, "session_id", "") or "")
     user_id = str(getattr(parent_ctx, "user_id", "") or "")
@@ -1852,6 +1886,10 @@ async def _capture_resume_checkpoint(
             knowledge_read=knowledge_read,
             knowledge_scope=retained_knowledge_scope(parent_ctx),
             knowledge_sources=parent_ctx.knowledge_source_uses,
+            knowledge_navigation=dict(parent_ctx.knowledge_navigation_uses)
+            if parent_ctx.knowledge_navigation_uses
+            or any(call.name == "kb_list_sources" for message in messages for call in message.tool_calls or [])
+            else None,
             datarc_selection=source,
             segmented=True,
         )
@@ -1863,18 +1901,6 @@ async def _capture_resume_checkpoint(
 
         _m.inc("bowhead_subagent_resume_checkpoints_total", labels={"profile": profile_name, "completion": completion})
     return checkpoint_id
-
-
-_SOURCE_URL_RE = re.compile(r"https?://[^\s<>\"'）\])}，。；：！？、]+", re.IGNORECASE)
-_SOURCE_TASK_RE = re.compile(r"(?i)url|网址|网页|链接|核对|公告|link|web\s?page|verify|check\s?(?:the\s?)?source")
-
-
-def _source_urls_for_task(task: str, user_text: str) -> frozenset[str]:
-    """Find explicit URL inputs for a delegated page-reading task."""
-    urls = _SOURCE_URL_RE.findall(task)
-    if not urls and _SOURCE_TASK_RE.search(task):
-        urls = _SOURCE_URL_RE.findall(user_text)
-    return frozenset(url.rstrip(".,;!?，。/") for url in urls)
 
 
 class _TurnRetryObserver:
@@ -1984,6 +2010,8 @@ def _unasked_resolve_question(payload: Any, invocations: list[ToolInvocation]) -
 
 def _successful_web_fetch_urls(invocations: list[ToolInvocation]) -> frozenset[str]:
     """本轮真正读到正文的页面 URL：web_fetch 成功的请求 URL，加上 web_extract 返回了正文的页面。"""
+    from bowhead_core.source_obligations import source_url_identity
+
     urls: set[str] = set()
     for invocation in invocations:
         if canonical_tool_name(invocation.tool_name) == "web_extract" and not invocation.error:
@@ -1992,7 +2020,7 @@ def _successful_web_fetch_urls(invocations: list[ToolInvocation]) -> frozenset[s
                 if isinstance(page, dict) and str(page.get("content") or "").strip():
                     page_url = str(page.get("url") or "").strip()
                     if urlsplit(page_url).scheme in {"http", "https"}:
-                        urls.add(page_url.rstrip("/"))
+                        urls.add(source_url_identity(page_url))
             continue
         if canonical_tool_name(invocation.tool_name) != "web_fetch" or invocation.error:
             continue
@@ -2001,7 +2029,7 @@ def _successful_web_fetch_urls(invocations: list[ToolInvocation]) -> frozenset[s
             continue
         requested = str(invocation.arguments.get("url") or "").strip()
         if requested and urlsplit(requested).scheme in {"http", "https"}:
-            urls.add(requested.rstrip("/"))
+            urls.add(source_url_identity(requested))
     return frozenset(urls)
 
 
@@ -3383,6 +3411,9 @@ class SubagentRunner:
             )
             parent_ctx.knowledge_source_ancestors = (*parent_ctx.knowledge_source_ancestors, parent_ctx.knowledge_source_uses)
             parent_ctx.knowledge_source_uses = {}
+            parent_ctx.knowledge_navigation_ancestors = (*parent_ctx.knowledge_navigation_ancestors, parent_ctx.knowledge_navigation_uses)
+            parent_ctx.knowledge_navigation_uses = {}
+            parent_ctx.knowledge_navigation_pending = {}
 
         # lead-analyst-logic batch 1: apply hard tool_deny gate to a profile copy, synchronously narrowing
         # all three tool_whitelist consumers: advertisement/per-call gate/include_tool.
@@ -3479,7 +3510,13 @@ class SubagentRunner:
             parent_ctx.tool_view = (parent_ctx.tool_view or self.tool_registry).clone_with_spec_override(
                 replace(collaboration_tool_spec(), visible_to_llm=False)
             )
+        from bowhead_core.tool_delivery_review import LeadDeliveryReview, delivery_review_enabled
+
         effective = parent_ctx.tool_view or self.tool_registry
+        if effective.has(LeadDeliveryReview.name):
+            effective = effective.clone_without(frozenset({LeadDeliveryReview.name}))
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.tool_view = effective
         # cca P3: thread the profile's team_tool_bundle so a P3 team subagent sees
         # ONLY its declared teammcp.* subset (bundle=None for built-ins → full union,
         # byte-identical). Covers BOTH gates — the schema-filter below AND the
@@ -3497,7 +3534,7 @@ class SubagentRunner:
             and profile.name == "lead"
             and any(peer.name == "kb-analyst" for peer in (getattr(parent_ctx, "_actor_scoped_prompt_peers", ()) or ()))
         )
-        _delegated_kb_tools = {"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"} if _delegate_kb else set()
+        _delegated_kb_tools = {"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record", "kb_list_sources"} if _delegate_kb else set()
         effective_whitelist -= _delegated_kb_tools
 
         # Sprint chat-v4 W3.2 — caller can pre-mint subagent_id so the spawn
@@ -3609,6 +3646,17 @@ class SubagentRunner:
             # Legacy config Tool copy names the configuration specialist only when this Turn's roster holds it.
             filtered_schemas = roster_scoped_tool_schemas(filtered_schemas, parent_ctx)
         filtered_schemas = [schema for schema in filtered_schemas if schema.name not in _delegated_kb_tools]
+        delivery_review_carrier = None
+        terminal_review_advertised = any(effective.get(schema.name).terminal_payload_field for schema in filtered_schemas)
+        if profile.name == "lead" and delivery_review_enabled() and LeadDeliveryReview.name not in _run_tool_deny and not terminal_review_advertised:
+            delivery_review_carrier = LeadDeliveryReview(reader_available=any(schema.name == "present_artifacts" for schema in filtered_schemas))
+            review_spec = delivery_review_carrier.tool_spec()
+            effective = effective.clone_with_spec_override(review_spec)
+            parent_ctx = copy.copy(parent_ctx)
+            parent_ctx.tool_view = effective
+            profile = replace(profile, tool_whitelist=(*profile.tool_whitelist, review_spec.schema.name))
+            effective_whitelist.add(review_spec.schema.name)
+            filtered_schemas.append(review_spec.schema)
         if not filtered_schemas:
             logger.warning("subagent.no_tools_whitelisted profile=%s", profile.name)
 
@@ -3655,6 +3703,11 @@ class SubagentRunner:
             parent_ctx.knowledge_scope = retained_scope
             from bowhead_core.knowledge_source_runtime import validate_retained_sources
 
+            if resume_grant.material.knowledge_navigation is not None:
+                from bowhead_core.kb.source_navigation import record_navigation_uses, validate_navigation_dependencies
+
+                await validate_navigation_dependencies(parent_ctx, resume_grant.material.knowledge_navigation)
+                record_navigation_uses(parent_ctx, resume_grant.material.knowledge_navigation)
             await validate_retained_sources(parent_ctx, resume_grant.material.knowledge_sources or {})
             parent_ctx.knowledge_source_uses = dict(resume_grant.material.knowledge_sources or {})
             if _resume_refused is not None:
@@ -3729,14 +3782,17 @@ class SubagentRunner:
             ):
                 raise OrdinaryContinuationUnavailable()
 
-        # A delegated task that names a page cannot claim to have inspected it
-        # just because a web-capable profile answered from model memory. This
-        # also covers older Agents configured with web_search alone.
-        source_urls = (
-            _source_urls_for_task(task, str(getattr(parent_ctx, "user_text", "") or ""))
-            if profile.name != "lead" and {"web_fetch", "web_search", "web_extract"} & set(effective_whitelist)
-            else frozenset()
+        from bowhead_core.source_obligations import required_source_urls, retained_sources, task_envelope
+
+        source_urls = required_source_urls(parent_ctx.required_web_sources) if profile.name != "lead" else frozenset()
+        retained = (
+            resume_grant.material.messages
+            if resume_grant is not None and resume_grant.material is not None
+            else ordinary_checkpoint.messages()
+            if ordinary_checkpoint is not None
+            else _continued_messages or []
         )
+        source_urls = source_urls | retained_sources(retained) if profile.name != "lead" else source_urls
         source_fetch_advertised = any(schema.name == "web_fetch" for schema in filtered_schemas)
 
         system = profile.system_prompt
@@ -3889,6 +3945,19 @@ class SubagentRunner:
         if profile.capability_protocol_block:
             _blk_capability = render_capability_protocols(tuple(schema.name for schema in filtered_schemas))
 
+        if any(schema.name == "add_chart" and "axes" in schema.input_schema.get("properties", {}) for schema in filtered_schemas):
+            _blk_capability += (
+                "\n\nThis execution uses explicit native presentation. Follow the advertised add_chart schema. "
+                "Tables omit columns or use columns='all' for every "
+                "original field. Narrow a Table only when the user requests a subset; supply every requested exact "
+                "key in order, including constants. Plots declare "
+                "force_kind, exact axes with x_scale and group_by (use [] for no split); KPI uses y only. Never "
+                "send series/hint/limit/sort_by, infer an axis from a title, or turn a numeric category into a measure. "
+                "Prepare aggregation, ranking and sampling upstream. Specialized analytical views retain their "
+                "existing exact profile bindings without redundant ordinary axes. Saved column types describe value formatting, not business roles. Read the returned display_receipt "
+                "and account for missing fields or unavailable targets before claiming a repair is complete."
+            )
+
         if _shared_kb and KNOWLEDGE_READ_TOOLS.intersection(schema.name for schema in filtered_schemas):
             _blk_capability += "\n\n" + SHARED_KNOWLEDGE_GUIDANCE
 
@@ -3937,7 +4006,13 @@ class SubagentRunner:
                 role="user",
                 # Some providers combine adjacent user messages. Keep the
                 # original request explicitly delimited even after coalescing.
-                content=json.dumps({"original_request": task}, ensure_ascii=False) if resume_answers else task,
+                content=(
+                    task_envelope(task, source_urls)
+                    if profile.name != "lead"
+                    else json.dumps({"original_request": task}, ensure_ascii=False)
+                    if resume_answers
+                    else task
+                ),
                 images=list(message_images) if message_images is not None else _lead_message_images(parent_ctx) if profile.name == "lead" else [],
             ),
         ]
@@ -4046,6 +4121,7 @@ class SubagentRunner:
             "ordinary-lead-loop.v11",
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
+            "ordinary-lead-loop.v14",
         }:
             from bowhead_core._ref_allowlist import RefAllowlist
 
@@ -4166,6 +4242,7 @@ class SubagentRunner:
         _kb_closeout_calls = 0
         _empty_lead_retry_attempted = False
         _empty_lead_retry_iteration: int | None = None
+        _delivery_text_reviewed = False
         _empty_peer_closeout_attempted = False
         # Settings have their own admitted terminal Tool; never substitute a
         # generic payload return for their original submission/receipt checks.
@@ -5144,10 +5221,16 @@ class SubagentRunner:
 
                 try:
                     await validate_retained_sources(parent_ctx, _source_hint[1])
+                    from bowhead_core.kb.source_navigation import validate_navigation_dependencies
+
+                    await validate_navigation_dependencies(parent_ctx, parent_ctx.knowledge_navigation_pending)
                 except Exception:  # A failed final source check omits metadata; no broad fallback.
                     _source_hint = None
                 if _source_hint is not None:
                     record_source_uses(parent_ctx, _source_hint[1])
+                    from bowhead_core.kb.source_navigation import record_navigation_uses
+
+                    record_navigation_uses(parent_ctx, parent_ctx.knowledge_navigation_pending)
                     _hint_message = Message(role="user", content=_source_hint[0])
                     # Preserve final user instructions without splitting a native
                     # assistant Tool-call batch from its required Tool responses.
@@ -5924,9 +6007,23 @@ class SubagentRunner:
                         except Exception:  # noqa: BLE001 — gate itself must never fail a turn
                             logger.warning("subagent.final_answer_gate_failed profile=%s", profile.name, exc_info=True)
                             _bounce = None
+                    from bowhead_core.tool_delivery_review import delivery_review_enabled, failed_calls, review_guidance
+
+                    if (
+                        _bounce is None
+                        and delivery_review_enabled()
+                        and failed_calls(invocations)
+                        and not _delivery_text_reviewed
+                        and can_decide(iteration)
+                        and (profile.name != "lead" or delivery_review_carrier is not None or terminal_review_advertised)
+                        and (delivery_review_carrier is None or await delivery_review_carrier.current(invocations, parent_ctx) is None)
+                    ):
+                        _delivery_text_reviewed = True
+                        _bounce = review_guidance(invocations, review_tool=delivery_review_carrier.name if delivery_review_carrier else None)
                     if _bounce:
-                        messages.append(Message(role="assistant", content=resp.content or ""))
-                        messages.append(Message(role="user", content=_bounce))
+                        correction = _bounce if isinstance(_bounce, FinalAnswerCorrection) else FinalAnswerCorrection(_bounce)
+                        messages.append(Message(role="assistant", content=resp.content or "", name=correction.assistant_history_name))
+                        messages.append(Message(role="user", content=correction.instruction))
                         _bounce_pending = True
                         logger.warning("subagent.final_answer_bounced profile=%s iteration=%d", profile.name, iteration)
                         continue
@@ -6223,6 +6320,7 @@ class SubagentRunner:
             # Snapshot after profile/schema and batch policy metadata are finalized.
             # Handlers retain the active return contract and accepted Datarc source.
             batch_ctx = copy.copy(parent_ctx)
+            batch_ctx.terminal_batch_conflict = len(survived_tcs) > 1
             project_datarc_scope(batch_ctx, ensure_datarc_run(parent_ctx).current)
             batch_ctx.datarc_batch_refusal = (
                 {
@@ -6348,7 +6446,8 @@ class SubagentRunner:
                     # (capped + degrades in the handler) → don't count it toward circuit-break.
                     # A collaboration barrier is guidance (wait, resolve or report), not a Tool fault.
                     _is_retry_signal = (
-                        _is_ν_ref_retry
+                        isinstance(invocation_result(inv), DeliveryReviewRefusal)
+                        or _is_ν_ref_retry
                         or bool(_inv_result_dict.get("_schema_retry"))
                         or bool(_inv_result_dict.get("_ledger_retry"))
                         or _inv_result_dict.get("error") == "collaboration_unresolved"
@@ -6503,7 +6602,8 @@ class SubagentRunner:
                     # (capped + degrades in the handler) → don't count it toward circuit-break.
                     # A collaboration barrier is guidance (wait, resolve or report), not a Tool fault.
                     _is_retry_signal = (
-                        _is_ν_ref_retry
+                        isinstance(invocation_result(inv), DeliveryReviewRefusal)
+                        or _is_ν_ref_retry
                         or bool(_inv_result_dict.get("_schema_retry"))
                         or bool(_inv_result_dict.get("_ledger_retry"))
                         or _inv_result_dict.get("error") == "collaboration_unresolved"
@@ -7292,7 +7392,13 @@ class SubagentRunner:
                     duration_ms=dur,
                 )
         _checkpoint_id = None
-        if _subagent_return_succeeded and collaboration is None and _bi_continuation is None and _read_question is None:
+        if (
+            _subagent_return_succeeded
+            and collaboration is None
+            and _bi_continuation is None
+            and _read_question is None
+            and (returned_payload or {}).get("completion") != "partial"
+        ):
             _checkpoint_id = await _capture_resume_checkpoint(
                 parent_ctx,
                 turn_id=parent_turn_id,
@@ -7400,6 +7506,30 @@ class SubagentRunner:
             if balanced_boundaries(messages)[-1] == len(messages):
                 parent_bus._context_publication = await context_view.conversation_publication(messages)
 
+        from bowhead_core.tool_delivery_review import delivery_review_enabled, failed_calls
+
+        accepted_delivery_review = await delivery_review_carrier.current(invocations, parent_ctx) if delivery_review_carrier else None
+        _delivery_partial = delivery_review_enabled() and (
+            isinstance(returned_payload, dict)
+            and returned_payload.get("completion") == "partial"
+            or returned_payload is None
+            and not collaboration_paused
+            and (bool(failed_calls(invocations)) or accepted_delivery_review is not None)
+            and (accepted_delivery_review is None or accepted_delivery_review.get("completion") != "complete")
+        )
+        if accepted_delivery_review is not None and final_answer.strip():
+            for caveat in accepted_delivery_review.get("caveats", []):
+                if caveat and caveat not in final_answer:
+                    final_answer += "\n\n" + caveat
+        if _delivery_partial and returned_payload is None and final_answer.strip():
+            from bowhead_core.report_chrome_text import chrome_text
+
+            delivery_notice = chrome_text(
+                "delivery_unverified", effective_output_language(bus=parent_bus, language_context=getattr(parent_ctx, "language_context", None))
+            )
+            if accepted_delivery_review is None or delivery_notice not in final_answer:
+                final_answer += "\n\n" + delivery_notice
+
         return SubagentResult(
             profile=profile.name,
             subagent_id=subagent_id,
@@ -7413,6 +7543,10 @@ class SubagentRunner:
             model_turn_count=iteration + 1,
             model_turn_limit=profile.max_iterations + 1,
             payload=returned_payload,
+            completion="partial" if _delivery_partial else "complete",
+            reviewed_delivery_complete=not collaboration_paused
+            and accepted_delivery_review is not None
+            and accepted_delivery_review.get("completion") == "complete",
             chat_direct_delivered=_chat_direct_delivered,
             bi_workspace_continuation=_bi_continuation,
             # Return the Lead's child checkpoint through the existing result.
@@ -8748,6 +8882,24 @@ class SubagentRunner:
 
             _coach_receipt_meta = receipt_metadata([inv])
 
+        # Classify once from the complete result before either model or UI caps.
+        # Both existing event carriers publish the same bounded diagnostic.
+        from bowhead_core.published_diagnostics import publish_tool_failure
+
+        _tool_outcome = classify_tool_outcome(inv.result, inv.error)
+        _tool_diagnostic = publish_tool_failure(_tool_outcome)
+        _normalized_tool_error = None
+        if _tool_diagnostic is not None:
+            _normalized_tool_error = {
+                "type": "tool_exception" if inv.error is not None else _extract_result_error(inv.result)[0] or "tool_returned_error",
+                "code": _tool_outcome.code,
+                "message_zh": "non_query_text"
+                if inv.error is None and _extract_result_error(inv.result)[0] == "non_query_text" and _tool_outcome.code == "tool_execution_failed"
+                else _tool_outcome.code,
+                "is_transient": _tool_outcome.retryable,
+                "diagnostics": _tool_diagnostic.to_wire(occurrence_id=uuid4().hex, turn_id=parent_turn_id),
+            }
+
         # Sprint ψ-B: per-tool result token cap, drain-side.
         # Snapshot full result FIRST so SSE / drawer / artifact path can still
         # access the original (P0-4 fix from Eng/CTO review). Then mutate
@@ -8829,7 +8981,7 @@ class SubagentRunner:
 
         # A rejected attempt is not success merely because the model can retry.
         # Expected pauses retain the shared live/persist/replay classification.
-        _evt_ok = inv.error is None and (_extract_result_ok(inv.result) is not False or _is_non_failure_result(inv.result))
+        _evt_ok = _tool_outcome.state != "failure"
         _result_event = OrchestratorEvent(
             event_type="tool_result",
             turn_id=parent_turn_id,
@@ -8839,7 +8991,9 @@ class SubagentRunner:
                 "call_id": tc.id,
                 "ok": _evt_ok,
                 "duration_ms": inv.duration_ms,
-                "error": public_error,
+                "error": _tool_outcome.code if _normalized_tool_error is not None else public_error,
+                "diagnostics": _normalized_tool_error["diagnostics"] if _normalized_tool_error is not None else None,
+                "failure_code": _tool_outcome.code,
                 "result_preview": _preview(public_result),
                 "result_token_count": _result_token_count,  # r3.1 §2.15 A.1.1
                 "result_meta": _event_result_meta,
@@ -8869,13 +9023,7 @@ class SubagentRunner:
             # Expected pauses do not fail the step. Argument rejection does;
             # a later corrected call has its own independently successful step.
             _non_failure = inv.error is None and _is_non_failure_result(inv.result)
-            _step_state = (
-                "partial"
-                if inv.error is None and isinstance(inv.result, dict) and inv.result.get("completion") == "partial"
-                else "failure"
-                if inv.error is not None or (_result_ok is False and not _non_failure)
-                else "success"
-            )
+            _step_state = _tool_outcome.state
             # E-fix 2026-05-25 (canvas-empty bug E1): human-friendly output_preview
             # per-tool. FE StepRow rightSummary now reads concise summary instead
             # of 500-char raw JSON dump (was crushing step.label visibility).
@@ -8974,6 +9122,8 @@ class SubagentRunner:
                                 "code": _error_code,
                                 "diagnostics": _published.to_wire(),
                             }
+            if _normalized_tool_error is not None and not (_step_payload.get("error") or {}).get("code"):
+                _step_payload["error"] = _normalized_tool_error
             # A denied Skill call fails the step whether the denial was raised
             # before dispatch (inv.error set) or returned by the handler; both
             # carry the same decided result, so the step shows its reason.
@@ -8989,17 +9139,10 @@ class SubagentRunner:
             _sub = _build_bi_query_sub_steps(tc, inv)
             if _sub:
                 _step_payload["sub_steps"] = _sub
-                # CTO review P1 (Phase 2 review 2026-05-26): parent state must
-                # reflect "partial" when sub-queries mix success/failure —
-                # _extract_result_ok above only inspects top-level `ok`, which
-                # batch bi_query envelope omits ({results: [...]} with no outer
-                # ok). Without this override the parent step row shows ✓ while
-                # one sub-row shows ⚠ — contradicts events.StepDonePayload
-                # state docstring + misleads users. Override only when mixed;
-                # all-success and all-failure already correct via the upstream
-                # branches (success default / _result_ok is False).
+                # Legacy mixed batches may add partial presentation, but cannot
+                # override an authoritative failure, including an unknown outcome.
                 _sub_states = {s["state"] for s in _sub}
-                if "success" in _sub_states and "failure" in _sub_states:
+                if _tool_outcome.state != "failure" and "success" in _sub_states and "failure" in _sub_states:
                     _step_payload["state"] = "partial"
                     _step_payload["ok"] = False
             await bus.emit(
@@ -9287,6 +9430,10 @@ def _prettify_input_preview(tool_name: str, args: Any) -> str:  # noqa: C901
     if args is None:
         return ""
 
+    if tool_name in {"subagent_return", "review_delivery"}:
+        # Native packing arguments and parser repair instructions are model-only.
+        return ""
+
     _zh = _is_zh_ui(None)
 
     def _t(zh: str, en: str) -> str:
@@ -9490,56 +9637,6 @@ def _peer_tool_execution_receipt(invocations: list[ToolInvocation]) -> dict[str,
     return {"recorded": len(invocations), **counts, "by_tool": by_tool}
 
 
-def _extract_result_ok(result: Any) -> bool | None:
-    """Sprint chat-polish-r2 G1 (2026-05-26): inspect tool result for ok signal.
-
-    Used to determine step.state when no Python exception fired. Many tools
-    return cleanly with ok=False payload (python_sandbox docker fail, skill_*
-    not found, bi_query reject) — these should surface as failure rows, not
-    silent ✓.
-
-    Returns:
-        True / False if signal found; None if no determination (caller falls
-        back to exception-based logic = treat as success).
-    """
-    if not isinstance(result, dict):
-        return None
-    # Explicit `ok` field — most idiomatic signal (used by python_sandbox,
-    # subagent_return, skill_invoke).
-    if "ok" in result:
-        val = result["ok"]
-        if isinstance(val, bool):
-            return val
-    # Explicit error_kind (used by bi_query, datarc_compute, canvas_op_failed).
-    if result.get("error_kind"):
-        return False
-    # Top-level `error` field non-empty (skill_read / skill_list errors).
-    err = result.get("error")
-    if err and isinstance(err, (str, dict)):
-        return False
-    return None
-
-
-def _extract_result_error(result: Any) -> tuple[str | None, str | None]:
-    """Sprint chat-polish-r2 G1: pull (error_kind, error_message) from result.
-
-    Surfaced into step_done.error payload so FE renders ⚠ row with context.
-    """
-    if not isinstance(result, dict):
-        return (None, None)
-    kind = result.get("error_kind")
-    if not isinstance(kind, str):
-        kind = None
-    msg = result.get("error_message") or result.get("error") or result.get("message")
-    if isinstance(msg, dict):
-        msg = msg.get("message") or msg.get("detail") or str(msg)[:200]
-    if msg and not isinstance(msg, str):
-        msg = str(msg)
-    if msg:
-        msg = _scrub(msg)[:500]  # ④f: chokepoint for all result-dict errors → SSE step_done.error
-    return (kind, msg)
-
-
 _SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
@@ -9571,29 +9668,6 @@ def _skill_unavailable_step_error(result: Any) -> dict[str, Any] | None:
     return error
 
 
-def _is_self_correctable_code_error(result: Any) -> bool:
-    """dogfood s_3e854 ②: a sandbox / code-execution result where the script RAN but raised
-    at the end (exit_code == 1) yet still produced real output (stdout) → the agent
-    self-corrects by re-running different code (prod: seq❌ exit 1 with full analysis stdout,
-    next seq ✅). This is NOT an infra failure (sandbox not-ready / OOM / timeout = exit
-    125 / 137 / 124 with EMPTY stdout). Treat it like a self-correcting invalid_args: render a
-    clean non-blocking step instead of the alarming FailureAckCard + 重试 — the traceback
-    still reaches the LLM via the tool result so it self-fixes.
-
-    SAFETY: gated on exit_code == 1 AND substantial stdout, so a genuine infra failure (no
-    stdout) is NEVER de-alarmed. Result-shape based (not failed→success matching, which
-    false-positived in the reverted attempt) → works whether python_sandbox is called
-    directly or via skill_invoke."""
-    if not isinstance(result, dict):
-        return False
-    if result.get("ok") is not False:
-        return False
-    if result.get("exit_code") != 1:
-        return False
-    stdout = result.get("stdout")
-    return isinstance(stdout, str) and len(stdout.strip()) >= 20
-
-
 # feedback-0713 #1/#2: allowlist of expected outcomes: tools cleanly return ok=False but semantically
 # are not failures: HITL clarification sentinels (no per-user default workspace → tool_context_select card,
 # emitted by tool_registry's dependency gate), expected query misses (tool_switch_context finds no such name →
@@ -9602,90 +9676,6 @@ def _is_self_correctable_code_error(result: Any) -> bool:
 # must be managed centrally here: four consumers (tool_result.ok / step_done.state and its
 # sub_steps / turn_runner trace kind / subagent_graph bridge tool_result.ok) automatically
 # stay synchronized through _is_non_failure_result.
-EXPECTED_OUTCOME_ERROR_KINDS: frozenset[str] = frozenset(
-    {
-        # HITL clarification sentinel: must actually include a clarification structure (see _is_non_failure_result's
-        # dict validation, aligned with the is_clarification_sentinel predicate).
-        "needs_clarification",
-        # ⚠ Semantic contract: this kind **may only** express a designed miss with candidates (the requested
-        # target is outside the accessible set, and accessible/did_you_mean accompanies the result for the model to ask the user). Tools that
-        # truly deny authorization (insufficient permission/invisible content) **must not** reuse this name: those are real failures, and reuse would
-        # silently turn them into success here (review P2).
-        "not_accessible",
-        # feedback-0713 F4 (close a related gap documented in B3):
-        # ① switch_context retriggered idempotently in the same turn: a confirmation card already appeared, so repeat calls intentionally
-        #   emit no further cards (prevent prompt-injection flooding, tool_registry._switch_clar_emitted);
-        #   waiting is not failure. Reserved exclusively for this idempotency guard.
-        "pending_user_confirmation",
-        # A repeated question or exhausted clarification policy returns an
-        # expected refusal; the model should continue with existing answers.
-        "clarification_refused_on_resume",
-        # bi-workspace-list review c1: tool_list_workspaces has an empty accessible set; for a listing
-        # tool, this **is the answer itself** (no accessible workspaces, same meaning as zero_workspaces
-        # notice), not failure. Reserved for this read-only listing tool's empty-set outcome;
-        # switch's same-named error branch does not carry this kind (the user cannot switch as requested; separate semantics).
-        "no_accessible_workspaces",
-        # bi-workspace-tour: an intended pause in repeated switching (guide users to switch once, then read).
-        # Structural evidence checked below (actual switch_streak ≥ the shared production threshold).
-        "switch_streak_paused",
-        # Google Workspace reads (builtin_google_tool.EXPECTED_ERROR_KINDS): disconnected / reauthorization needed /
-        # permission not granted / file access not granted / file missing; results include a way forward (connect, reauthorize, insert via Picker),
-        # intended outcomes under the user's own authorization, not failures. Lead's final answer separately flags connection issues deterministically.
-        "google_not_connected",
-        "google_reauth_required",
-        "google_scope_missing",
-        "google_file_not_granted",
-        "google_file_not_found",
-    }
-)
-
-
-def _is_non_failure_result(result: Any) -> bool:
-    """Classify expected outcomes consistently in live events and stored traces.
-
-    Argument rejection is a failed attempt even when the model can correct it.
-    It does not determine the final Turn status or prevent a later successful call.
-    """
-    kind, _ = _extract_result_error(result)
-    if kind == "needs_clarification":
-        # Review P2: align the exemption predicate with is_clarification_sentinel shape-2: a kind
-        # claiming clarification without clarification.options cannot display a card, so it is a failure and must not become
-        # success (which would hide the problem more than a red step).
-        if not isinstance(result, dict):
-            return False
-        clar = result.get("clarification")
-        return isinstance(clar, dict) and bool(clar.get("options"))
-    # feedback-0713 F4 review security hardening: require structural evidence for both switch/resume guardrail kinds;
-    # otherwise third-party MCP tools (results are untrusted external data; MCP live since 0.77.0)
-    # could turn real failures into success with a magic error_kind string, hiding failures.
-    # Same idea as needs_clarification's clarification.options validation: forging a kind
-    # also requires forging its structure. (not_accessible was introduced in B3, claimed by review P2; changes need
-    # B3 test updates, so address separately in a follow-up.)
-    if kind == "pending_user_confirmation":
-        return isinstance(result, dict) and isinstance(result.get("accessible"), list)
-    if kind == "clarification_refused_on_resume":
-        return isinstance(result, dict) and result.get("clarification_refused_on_resume") is True
-    if kind == "no_accessible_workspaces":
-        # bi-workspace-list review r2#1: structural evidence: a kind claiming an empty list must accompany a result
-        # actually shaped as an empty list (total==0 + workspaces==[]). Otherwise third-party MCP tools
-        # (untrusted external data) could turn real auth/network failures into green steps with a magic string,
-        # following the same F4 hardening principle as the two kinds above.
-        return isinstance(result, dict) and result.get("total") == 0 and result.get("workspaces") == []
-    if kind == "switch_streak_paused":
-        # bi-workspace-tour circuit breaker: an intended pause in repeated switching (switch once, then read),
-        # not failure. Structural evidence = an accompanying actual counter that reached the threshold; share
-        # one constant with production (review r3#3: separately hardcoded 3s could silently drift, turning all intended pauses red).
-        from bowhead_core.tool_registry import SWITCH_STREAK_PAUSE_AT as _pause_at
-
-        _stk = result.get("switch_streak") if isinstance(result, dict) else None
-        return isinstance(_stk, int) and _stk >= _pause_at
-    if isinstance(kind, str) and kind.startswith("google_") and kind in EXPECTED_OUTCOME_ERROR_KINDS:
-        # Structural evidence: only Bowhead's own Google tools stamp this provider. A third-party
-        # MCP tool returning the same error_kind stays a failure.
-        return isinstance(result, dict) and result.get("provider") == "google_workspace"
-    if kind in EXPECTED_OUTCOME_ERROR_KINDS:
-        return True
-    return _is_self_correctable_code_error(result)
 
 
 # chat-polish-r3 Phase 3 (B4) — wrapper-tool surface set. `skill_invoke` /
@@ -10655,7 +10645,7 @@ def _is_inv_failure(inv: ToolInvocation) -> bool:
         - bi_attribute: rows=[]
         - bi_fetch_rows: row_count=0
     """
-    if inv.error:
+    if classify_tool_outcome(invocation_result(inv), inv.error).state == "failure":
         return True
     r = inv.result
     if not isinstance(r, dict):
@@ -11140,6 +11130,31 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         # M158 paradigm v2: sub-task context passed when Lead spawns after designing (design document §4 STEP 4)
         rationale = str(args.get("rationale") or "").strip()
         framework_hint = str(args.get("framework_hint") or "").strip()
+        from bowhead_core.source_obligations import required_source_urls
+
+        view = getattr(ctx, "tool_view", None)
+        if (
+            "required_source_urls" not in args
+            and view is not None
+            and view.has("subagent_spawn")
+            and "required_source_urls" in view.get("subagent_spawn").schema.input_schema.get("required", [])
+        ):
+            return {
+                "ok": False,
+                "error_kind": "invalid_args",
+                "error": "Include required_source_urls with the exact required pages, or [] for an output-only task.",
+            }
+        try:
+            declared_sources = required_source_urls(args.get("required_source_urls", []))
+        except ValueError as exc:
+            return {"ok": False, "error_kind": "invalid_args", "error": str(exc)}
+        from copy import copy as copy_source_scope
+
+        def source_context(context):
+            child = copy_source_scope(context)
+            child.required_web_sources = tuple(sorted(declared_sources))
+            return child
+
         data_hint = args.get("data_hint") or []
         if isinstance(data_hint, str):
             data_hint = [data_hint]
@@ -11814,7 +11829,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 try:
                     result = await _reference_delegate.run(
                         runner=runner,
-                        parent_ctx=_coach_ctx if _coach_ctx is not None else _configuration_ctx if _configuration_ctx is not None else ctx,
+                        parent_ctx=source_context(
+                            _coach_ctx if _coach_ctx is not None else _configuration_ctx if _configuration_ctx is not None else ctx
+                        ),
                         parent_bus=bus,
                         delegation_task=task,
                         delegation_call_id=_spawn_call_id or _peer_pre_minted_subagent_id,
@@ -11892,6 +11909,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     isolated.collaboration_runtime = None
                     isolated.collaboration_execution = None
                     _run_kwargs["parent_ctx"] = isolated
+                _run_kwargs["parent_ctx"] = source_context(_run_kwargs["parent_ctx"])
                 result = await runner.run(**_run_kwargs)
             raise_if_terminal_bus_failed(bus)
             if result.ok and result.document_outcome is not None:
@@ -12398,8 +12416,20 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             }
             _native_deck_receipts = [dict(receipt) for receipt in _binding.receipts.values() if receipt.get("artifact_id") in _rendered_ids]
 
+        _retained_artifacts: list[dict[str, str]] = []
+        if not result.ok:
+            from bowhead_core.artifact_presentation import retained_failure_artifacts
+
+            _retained_artifacts = await retained_failure_artifacts(result.tool_invocations, ctx)
+
         def _with_facts(payload: dict[str, Any]) -> dict[str, Any]:
             """把产出事实挂到回给 Lead 的结果上（并在必要时追加一句禁令）。"""
+            if result.completion == "partial":
+                payload["completion"] = "partial"
+                payload["directive"] = (payload.get("directive") or "") + (
+                    " Some requested work remains unfulfilled or unverified. Preserve the confirmed results, "
+                    "resolve the specific gap if possible, or disclose it in the final answer. Do not claim complete delivery."
+                )
             if result.ordinary_completion_reason in {"model_unknown", "tool_unknown"}:
                 payload.pop("error_code", None)
                 payload.update(
@@ -12444,6 +12474,16 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             _attach_available_figures(payload, result.tool_invocations)
             if not payload.get("ok"):
                 payload["tool_execution"] = _peer_tool_execution_receipt(result.tool_invocations)
+                if _retained_artifacts:
+                    payload["retained_artifacts"] = _retained_artifacts
+                    payload["directive"] = (payload.get("directive") or "") + (
+                        " Original files remain available in retained_artifacts despite this failure. "
+                        "Use present_artifacts to read their native diagnostics within the authorized task; "
+                        "do not regenerate files or repeat confirmed writes. Missing handoff detail does not mean "
+                        "the producer omitted a field. File availability does not resolve an unmet source requirement."
+                    )
+                if result.error == "subagent_source_unverified":
+                    payload["failure_stage"] = "source_verification"
                 if result.llm_reason_code is not None:
                     payload["llm_reason_code"] = result.llm_reason_code
                     payload["failure_stage"] = "model_request"
@@ -12895,8 +12935,9 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         )
                         if str(result.error or "").startswith("peer_llm_deadline_exceeded")
                         else (
-                            "Subagent 没有成功读取任务指定的网页。**不能**把模型生成的文字当作页面内容，"
-                            "不能引用该 URL 为已核实来源；请直接告诉用户本轮未能核实，并请其提供可访问的材料或调整 Tool 配置。"
+                            "No successful read of a required source was established. Do not present generated prose as page evidence. "
+                            "This does not establish a failed fetch attempt. Recover independent retained file evidence when available, "
+                            "and distinguish the remaining source-verification requirement from completed work."
                         )
                         if result.error == "subagent_source_unverified"
                         else (
@@ -12978,7 +13019,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
         if _canvas_revise_on()
         else {}
     )
-    _spawn_required: list[str] = ["profile", "task", *(["canvas_mode"] if _canvas_revise_on() else [])]
+    _spawn_required: list[str] = ["profile", "task", "required_source_urls", *(["canvas_mode"] if _canvas_revise_on() else [])]
     from bowhead_core.configuration_agent import SUPPORTED_FORMS
     from bowhead_core.configuration_contracts import DOMAINS
 
@@ -13153,6 +13194,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "framework_hint": {
                             "type": "string",
                             "description": "建议使用的分析框架 (Porter 5 力 / BCG matrix / RFM / cohort / 等)",
+                        },
+                        "required_source_urls": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {"type": "string", "maxLength": 4096},
+                            "description": "Exact HTTP(S) pages whose contents this assignment must read. Use [] for tasks with no page-reading requirement. Exclude addresses only written into code, examples or output links. Include an address used in both roles if its contents must also be read. Carry every explicit user source-reading requirement. This declares the assignment, never proof of reading.",
                         },
                         "data_hint": {
                             "type": "array",

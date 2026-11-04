@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -21,6 +22,33 @@ from bowhead_router import ToolCall
 pytestmark = pytest.mark.integration
 
 
+async def test_swapped_titles_do_not_replace_native_file_identities(presentation):
+    from bowhead_core.model_view import project_tool_result
+
+    ctx, first = presentation
+    second = await ctx.artifact_store.put_bytes(
+        content=b"item,amount\nAlpha,10\n",
+        filename="data.csv",
+        mime="text/csv",
+        source="python_sandbox",
+        created_by=ctx.user_id,
+        session_id="s_old",
+        kind="deliverable",
+    )
+    result = await present_artifacts(
+        {"artifacts": [{"artifact_id": first.id, "title": second.filename}, {"artifact_id": second.id, "title": first.filename}]}, ctx
+    )
+    assert result["ok"] is True
+    assert {item["artifact_id"] for item in result["label_conflicts"]} == {first.id, second.id}
+    projected = project_tool_result("present_artifacts", result)
+    assert "artifacts" not in projected
+    assert [(item["artifact_id"], item["name"], item["mime"], item["size"]) for item in projected["output_artifacts"]] == [
+        (first.id, first.filename, first.mime, first.size),
+        (second.id, second.filename, second.mime, second.size),
+    ]
+    assert all("title" not in item for item in projected["output_artifacts"])
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -34,6 +62,35 @@ async def test_model_arguments_cannot_override_scope_paths_or_metadata_bounds(ar
     result = await present_artifacts(arguments, SimpleNamespace(artifact_presentation_entry=True))
     assert result["error"] == "artifact_presentation_invalid_arguments"
     assert "/private/source" not in json.dumps(result)
+
+
+async def test_unpersisted_presentation_does_not_establish_reuse(presentation):
+    from bowhead_core.deliverable_ledger import build_deliverable_ledger
+
+    ctx, artifact = presentation
+    await ctx.session_store.pin_session_attachments(session_id=ctx.session_id, artifact_ids=[artifact.id])
+    assert await ctx.artifact_store.get_result_artifact_for_scope(artifact_id=artifact.id, session_id=ctx.session_id, user_id=ctx.user_id) is not None
+    result = await present_artifacts({"artifacts": [{"artifact_id": artifact.id}]}, ctx)
+    assert result["ok"] is True
+    ledger = await build_deliverable_ledger(turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store)
+    assert ledger.reused_files == 0
+
+
+@pytest.mark.parametrize("field", ["turn_id", "session_id", "user_id", "workspace_id"])
+async def test_ledger_rejects_mismatched_native_presentation_receipts(presentation, field):
+    from bowhead_core.deliverable_ledger import build_deliverable_ledger
+
+    ctx, artifact = presentation
+    logs = TurnLogStore(ctx.artifact_store.db_path)
+    bus = TurnEventBus(log_sink=OrderedTurnLogSink(logs))
+    await _execute(ctx, bus, {"artifacts": [{"artifact_id": artifact.id}]})
+    with sqlite3.connect(ctx.artifact_store.db_path) as db:
+        db.execute(
+            "UPDATE turn_events SET payload_json=json_set(payload_json,?,?) WHERE turn_id=? AND event_type='tool_result'",
+            (f"$.result_meta.artifact_presentation_receipt.{field}", "foreign", ctx.turn_id),
+        )
+    ledger = await build_deliverable_ledger(turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store)
+    assert ledger.reused_files == 0
 
 
 @pytest_asyncio.fixture
@@ -87,6 +144,22 @@ async def test_retained_file_reuse_is_durable_idempotent_and_snapshot_bounded(pr
     args = {"artifacts": [{"artifact_id": artifact.id, "title": "Editable source"}, {"artifact_id": artifact.id}]}
     result = await _execute(ctx, bus, args)
     assert result.result["ok"] is True
+    from bowhead_core.deliverable_ledger import build_deliverable_ledger
+
+    ledger = await build_deliverable_ledger(turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store)
+    assert ledger.files == 0 and ledger.reused_files == 1
+    assert ledger.reused_file_names == (artifact.filename,)
+    repeated_input = SimpleNamespace(
+        tool_name="python_exec", arguments={"inputs": {"source": {"artifact_id": artifact.id}}}, result={"ok": True}, nested=[]
+    )
+    combined = await build_deliverable_ledger(
+        turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store, invocations=[repeated_input]
+    )
+    assert combined.reused_files == 1
+    from bowhead_core.overclaim_guard import overclaimed_kinds
+
+    assert overclaimed_kinds("已有文件可下载。", ledger) == ()
+    assert overclaimed_kinds("文件已生成，可下载。", ledger) == ("file",)
     events = [event for event in bus._events if event.event_type == "tool_result"]
     assert len(events) == 1
     assert events[0].persist_before_delivery
@@ -98,6 +171,8 @@ async def test_retained_file_reuse_is_durable_idempotent_and_snapshot_bounded(pr
         count_before = db.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
     again = await _execute(ctx, bus, args)
     assert again.result["ok"] is True
+    ledger = await build_deliverable_ledger(turn_id=ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id, artifact_store=ctx.artifact_store)
+    assert ledger.reused_files == 1
     assert len([event for event in bus._events if event.event_type == "tool_result"]) == 1
     changed = await _execute(ctx, bus, {"artifacts": [{"artifact_id": artifact.id, "title": "Changed"}]})
     assert changed.result["error"] == "artifact_presentation_call_conflict"
@@ -199,6 +274,69 @@ async def test_failed_producer_preserves_valid_source_and_failure(presentation):
     assert result.declaration["origin"] == "producer_declared"
 
 
+async def test_retained_html_diagnostics_reach_explicit_and_producer_results(presentation):
+    ctx, _ = presentation
+    content = b'<section id="t1"><table id="t1"></table></section>'
+    artifact = await ctx.artifact_store.put_bytes(
+        content=content,
+        filename="report.html",
+        mime="text/html",
+        source="python_sandbox",
+        created_by=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_id=ctx.session_id,
+        kind="deliverable",
+        created_by_turn=ctx.turn_id,
+    )
+    explicit = await present_artifacts({"artifacts": [{"artifact_id": artifact.id}]}, ctx)
+    assert explicit["ok"] is True
+    check = explicit["output_artifacts"][0]["html_static_check"]
+    assert check["status"] == "issues_found"
+    assert check["findings"][0]["code"] == "duplicate_id"
+    output = {
+        "ok": False,
+        "error": "later generation step failed",
+        "output_artifacts": [
+            {
+                "artifact_id": artifact.id,
+                "name": artifact.filename,
+                "html_static_check": {"status": "forged"},
+            }
+        ],
+    }
+    producer = await normalize_producer_declaration(
+        "python_exec", {"purpose": "deliverable", "deliverable_outputs": [artifact.filename]}, output, ctx
+    )
+    assert producer["ok"] is False
+    assert producer["error"] == "later generation step failed"
+    assert producer["output_artifacts"][0]["html_static_check"] == check
+    assert await ctx.artifact_store.backend.read(artifact.path) == content
+
+
+async def test_html_inspection_failure_keeps_retained_delivery_and_missing_files_are_not_read(presentation, monkeypatch):
+    ctx, _ = presentation
+    artifact = await ctx.artifact_store.put_bytes(
+        content=b"<p>Retained</p>",
+        filename="report.html",
+        mime="text/html",
+        source="python_sandbox",
+        created_by=ctx.user_id,
+        workspace_id=ctx.workspace_id,
+        session_id=ctx.session_id,
+        kind="deliverable",
+        created_by_turn=ctx.turn_id,
+    )
+    read = AsyncMock(side_effect=OSError("storage unavailable"))
+    monkeypatch.setattr(ctx.artifact_store.backend, "read_bounded", read)
+    missing = await present_artifacts({"artifacts": [{"artifact_id": "art_missing"}]}, ctx)
+    assert missing["ok"] is False
+    read.assert_not_awaited()
+    retained = await present_artifacts({"artifacts": [{"artifact_id": artifact.id}]}, ctx)
+    assert retained["ok"] is True
+    assert retained["output_artifacts"][0]["html_static_check"]["status"] == "not_checked"
+    assert retained.declaration["items"] == [{"artifact_id": artifact.id}]
+
+
 async def test_future_contract_is_explicitly_unsupported_and_malformed_history_is_safe(presentation):
     from bowhead_core.artifact_presentation import PresentationContractUnsupported, project_declaration
 
@@ -297,3 +435,53 @@ async def test_unknown_object_storage_probe_never_becomes_presentation_success(p
     result = await present_artifacts({"artifacts": [{"artifact_id": artifact.id}]}, ctx)
     assert result["ok"] is False
     assert "provider-specific" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("denial", ["missing_bytes", "membership_revoked"])
+async def test_delivery_evidence_reuses_current_access_and_retained_bytes(presentation, denial):
+    from bowhead_core.tool_delivery_review import review_evidence_availability
+    from bowhead_core.types import ToolInvocation
+
+    ctx, artifact = presentation
+    calls = [
+        ToolInvocation("compute", {}, call_id="failed", result={"ok": False, "exit_code": 1}),
+        ToolInvocation("export", {}, call_id="retained", result={"ok": True, "output_artifacts": [{"artifact_id": artifact.id}]}),
+    ]
+    review = {
+        "requirements": [{"requirement": "Retained calculation", "status": "fulfilled", "evidence_call_ids": ["retained"]}],
+        "issues": [
+            {
+                "call_id": "failed",
+                "resolution": "covered",
+                "explanation": "The retained file contains the required result.",
+                "evidence_call_ids": ["retained"],
+            }
+        ],
+    }
+    assert await review_evidence_availability(review, calls, ctx) is None
+    if denial == "missing_bytes":
+        await ctx.artifact_store.backend.delete(artifact.path)
+    else:
+        with sqlite3.connect(ctx.artifact_store.db_path) as db:
+            db.execute("DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?", (ctx.workspace_id, ctx.user_id))
+    problem = await review_evidence_availability(review, calls, ctx)
+    assert problem and "retained" in problem
+    assert artifact.filename not in problem
+
+
+async def test_failed_handoff_recovers_only_native_authorized_files(presentation):
+    from bowhead_core.artifact_presentation import retained_failure_artifacts
+    from bowhead_core.types import ToolInvocation
+
+    ctx, artifact = presentation
+    native = await present_artifacts({"artifacts": [{"artifact_id": artifact.id}]}, ctx)
+    invocations = [ToolInvocation("present_artifacts", {}, result=native)]
+    assert await retained_failure_artifacts(invocations, ctx) == [
+        {"artifact_id": artifact.id, "filename": artifact.filename, "mime": artifact.mime, "size_bytes": artifact.size}
+    ]
+    assert await retained_failure_artifacts(invocations * 2, ctx) == [
+        {"artifact_id": artifact.id, "filename": artifact.filename, "mime": artifact.mime, "size_bytes": artifact.size}
+    ]
+    assert await retained_failure_artifacts([ToolInvocation("external", {}, result=dict(native))], ctx) == []
+    ctx.user_id = "u_denied"
+    assert await retained_failure_artifacts(invocations, ctx) == []

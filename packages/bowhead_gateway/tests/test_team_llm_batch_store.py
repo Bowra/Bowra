@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.team_llm_batch_store import (
     IdempotencyConflict,
@@ -24,6 +23,7 @@ from bowhead_core.team_llm_control_token import (
 from bowhead_gateway.llm_verification_runner import (
     LlmVerificationRunner,
 )
+from gateway_legacy_database import upgrade
 
 from bowhead_router import ProbeResult
 
@@ -36,7 +36,7 @@ def migrated_db(tmp_path, monkeypatch):
     db_path = tmp_path / "bowhead.db"
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", ROOT_KEY)
     return db_path
 
@@ -366,7 +366,8 @@ async def test_retention_keeps_current_apply_evidence_and_bounds_history(
 
 
 @pytest.mark.asyncio
-async def test_cancelled_attempt_never_becomes_evidence(migrated_db) -> None:
+@pytest.mark.parametrize("empty_output", [False, True], ids=["verified", "empty-output-diagnostics"])
+async def test_cancelled_attempt_never_becomes_evidence(migrated_db, empty_output: bool) -> None:
     store = TeamLlmBatchStore(migrated_db)
     _, batch = await _create_batch(store, items=[_item(0), _item(1)])
     claimed = await store.claim_next_item(
@@ -385,11 +386,12 @@ async def test_cancelled_attempt_never_becomes_evidence(migrated_db) -> None:
     final_state = await store.complete_item(
         item=claimed,
         completion=ItemCompletion(
-            state="verified",
-            safe_code="ok",
+            state="failed" if empty_output else "verified",
+            safe_code="empty_completion" if empty_output else "ok",
             safe_http_status=200,
             safe_summary_code=None,
             duration_ms=100,
+            diagnostics={"response_body": "screened response"} if empty_output else None,
         ),
         initiated_by="usr_admin",
         provider_display_name="Main",
@@ -404,15 +406,18 @@ async def test_cancelled_attempt_never_becomes_evidence(migrated_db) -> None:
     assert snapshot is not None
     assert snapshot["state"] == "cancelled"
     assert snapshot["counts"] == {"cancelled": 2}
+    assert all(item["diagnostics"] is None for item in snapshot["items"])
     async with aiosqlite.connect(migrated_db) as db:
         evidence_count = await (await db.execute("SELECT COUNT(*) FROM team_llm_capability_evidence")).fetchone()
     assert evidence_count == (0,)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("empty_output", [False, True], ids=["verified", "empty-output-diagnostics"])
 async def test_runner_executes_testable_and_persists_not_testable(
     migrated_db,
     monkeypatch,
+    empty_output: bool,
 ) -> None:
     store = TeamLlmBatchStore(migrated_db)
     _, batch = await _create_batch(
@@ -479,11 +484,12 @@ async def test_runner_executes_testable_and_persists_not_testable(
         calls += 1
         return ProbeResult(
             classification="factual_evidence",
-            outcome="verified",
-            code="ok",
+            outcome="failed" if empty_output else "verified",
+            code="empty_completion" if empty_output else "ok",
             safe_http_status=200,
             safe_summary_code=None,
             duration_ms=25,
+            diagnostics={"response_body": "empty response evidence"} if empty_output else None,
         )
 
     monkeypatch.setattr(
@@ -510,5 +516,74 @@ async def test_runner_executes_testable_and_persists_not_testable(
     assert snapshot["state"] == "completed"
     assert snapshot["counts"] == {
         "not_testable": 1,
-        "verified": 1,
+        "failed" if empty_output else "verified": 1,
     }
+
+    assert snapshot["items"][0]["diagnostics"] == ({"response_body": "empty response evidence"} if empty_output else None)
+
+
+@pytest.mark.asyncio
+async def test_empty_response_details_survive_store_reopen_encrypted_and_team_scoped(migrated_db, monkeypatch) -> None:
+    store = TeamLlmBatchStore(str(migrated_db))
+    _, batch = await _create_batch(store, items=[_item(0)])
+    item = await store.claim_next_item(team_id="team_a", batch_id=batch.batch_id, runner_id="runner-a", now=NOW)
+    assert item is not None
+    diagnostics = {"request": {"max_tokens": 8}, "response_body": '{"content": [], "stop_reason": "max_tokens"}'}
+    await store.complete_item(
+        item=item,
+        completion=ItemCompletion(
+            state="failed", safe_code="empty_completion", safe_http_status=200, safe_summary_code=None, duration_ms=10, diagnostics=diagnostics
+        ),
+        initiated_by="usr_admin",
+        provider_display_name="Main",
+        now=NOW,
+    )
+    refreshed = TeamLlmBatchStore(str(migrated_db))
+    snapshot = await refreshed.get_batch(team_id="team_a", batch_id=batch.batch_id)
+    assert snapshot["items"][0]["diagnostics"] == diagnostics
+    assert await refreshed.get_batch(team_id="team_other", batch_id=batch.batch_id) is None
+    async with aiosqlite.connect(migrated_db) as db:
+        row = await (await db.execute("SELECT diagnostics_ciphertext FROM team_llm_verification_items WHERE id = ?", (item.item_id,))).fetchone()
+    assert row[0].startswith("FERNET:")
+    assert "stop_reason" not in row[0]
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", base64.urlsafe_b64encode(bytes(reversed(range(32)))).decode())
+    degraded = await refreshed.get_batch(team_id="team_a", batch_id=batch.batch_id)
+    assert degraded["items"][0]["safe_code"] == "empty_completion"
+    assert degraded["items"][0]["diagnostics"] is None
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_storage_failure_preserves_the_verification_result(migrated_db, monkeypatch) -> None:
+    store = TeamLlmBatchStore(str(migrated_db))
+    _, batch = await _create_batch(store, items=[_item(0)])
+    item = await store.claim_next_item(team_id="team_a", batch_id=batch.batch_id, runner_id="runner-a", now=NOW)
+    assert item is not None
+
+    def unavailable_encryption(value: object) -> str:
+        raise ValueError("Diagnostic encryption unavailable")
+
+    monkeypatch.setattr("bowhead_core.team_llm_batch_store.encrypt_llm_config", unavailable_encryption)
+    state = await store.complete_item(
+        item=item,
+        completion=ItemCompletion(
+            state="failed",
+            safe_code="empty_completion",
+            safe_http_status=200,
+            safe_summary_code=None,
+            duration_ms=10,
+            diagnostics={"response_body": "empty"},
+        ),
+        initiated_by="usr_admin",
+        provider_display_name="Main",
+        now=NOW,
+    )
+    assert state == "failed"
+    snapshot = await store.get_batch(team_id="team_a", batch_id=batch.batch_id)
+    assert snapshot["items"][0]["safe_code"] == "empty_completion"
+    assert snapshot["items"][0]["safe_http_status"] == 200
+    assert snapshot["items"][0]["diagnostics"] is None
+    async with aiosqlite.connect(migrated_db) as db:
+        evidence = await (
+            await db.execute("SELECT outcome, safe_code FROM team_llm_capability_evidence WHERE item_id = ?", (item.item_id,))
+        ).fetchone()
+    assert evidence == ("failed", "empty_completion")

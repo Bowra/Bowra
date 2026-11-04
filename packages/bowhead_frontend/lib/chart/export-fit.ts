@@ -31,7 +31,7 @@ export function fitHbarRowsForExport(
   frameContentHeightPx: number,
   hiddenSeries: readonly string[] = [],
 ): ChartSpec {
-  if (spec.kind !== "hbar") return spec;
+  if (spec.kind !== "hbar" || spec.explicit_presentation) return spec;
   const rows = spec.rows ?? [];
   const hidden = new Set(hiddenSeries);
   const capacityFor = (series: number) => {

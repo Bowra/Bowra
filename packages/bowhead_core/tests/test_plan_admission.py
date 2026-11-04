@@ -529,13 +529,13 @@ async def test_final_resolve_and_plan_admission_require_assignment_and_live_acce
     """Reproduce the final-spawn bypass: roster filtering alone is not execution admission."""
     import sqlite3
 
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.agent_assignment_store import AgentAssignmentStore
     from bowhead_core.subagent import SubagentRunner
     from bowhead_core.user_store import UserStore
+    from core_legacy_database import upgrade
 
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     timestamp = "2026-08-30T00:00:00+00:00"
     with sqlite3.connect(db_path) as connection:
         connection.execute(
@@ -677,12 +677,12 @@ async def test_final_resolve_and_plan_admission_require_assignment_and_live_acce
 async def test_runtime_cutover_is_sticky_when_post_0025_schema_is_damaged(tmp_path, damage_sql: str) -> None:
     import sqlite3
 
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.agents.plan_admission import team_agent_runtime_allowed
     from bowhead_core.user_store import UserStore
+    from core_legacy_database import upgrade
 
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = UserStore(db_path)
     with sqlite3.connect(db_path) as connection:
         connection.execute(damage_sql)

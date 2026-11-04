@@ -5,7 +5,6 @@ import sqlite3
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.catalog_localization import (
     CatalogLocalizationConflictError,
     CatalogLocalizationError,
@@ -15,6 +14,7 @@ from bowhead_core.catalog_localization import (
     materialize_confirmed_agent_localizations_conn,
     resolve_agent_listing,
 )
+from core_legacy_database import upgrade
 
 _TIME = "2026-09-05T08:00:00+00:00"
 _SOURCE_HASH = agent_listing_source_hash(
@@ -23,7 +23,7 @@ _SOURCE_HASH = agent_listing_source_hash(
 
 
 def _seed(db_path) -> None:
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(

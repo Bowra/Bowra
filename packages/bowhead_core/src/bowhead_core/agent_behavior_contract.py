@@ -112,6 +112,26 @@ class AgentBehaviorDescriptor(BaseModel):
         )
 
 
+def supports_skill_method_input(
+    descriptor: AgentBehaviorDescriptor | None, *, allow_unproven_primary: bool, declared_primary: str | None = None
+) -> bool:
+    """Check descriptor eligibility only; source and execution authority stay separate."""
+    if descriptor is None:
+        return False
+    if descriptor.verification_state != "blocked":
+        return True
+    # The compiler clears primary_capability_ref when that declaration is
+    # unproven. Compare its reasons with the original definition instead.
+    primary = declared_primary
+    return bool(
+        allow_unproven_primary
+        and isinstance(primary, str)
+        and primary
+        and descriptor.primary_capability_ref in {None, primary}
+        and set(descriptor.reason_codes) == {f"composition:no_reviewed_implementation:{primary}", f"primary_capability_unproven:{primary}"}
+    )
+
+
 def prompt_module_fingerprint(refs: tuple[BehaviorPromptModuleRef, ...]) -> str:
     return canonical_fingerprint([item.model_dump(mode="json") for item in refs])
 

@@ -17,7 +17,6 @@ from zipfile import ZipFile
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
@@ -30,6 +29,7 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.datarc_context import DatarcTurnContext
 from bowhead_gateway.routes import chat, files, files_local_receiver, files_presign
 from fastapi import FastAPI
+from gateway_legacy_database import TARGET_FILES
 from test_chat_datarc_decouple import FakeOrchestrator
 from test_files_office_upload import _office_bytes
 
@@ -422,7 +422,14 @@ async def test_real_bundle_upload_then_send_checks_exact_members(kb_case, transp
         response = await case.client.post(
             "/api/v1/kb/presign/bundle",
             headers=case.headers(),
-            json={"filename": "sources.zip", "mime": "application/zip", "size_bytes": len(content), "scope": "personal", "scope_id": case.alice.id},
+            json={
+                "filename": "sources.zip",
+                "mime": "application/zip",
+                "size_bytes": len(content),
+                "scope": "personal",
+                "scope_id": case.alice.id,
+                "knowledge_intent": "add_to_knowledge",
+            },
         )
         assert response.status_code == 409 and "file_multipart_required" in response.text, response.text
     if transport in ("multipart", "local"):
@@ -430,7 +437,7 @@ async def test_real_bundle_upload_then_send_checks_exact_members(kb_case, transp
             "/api/v1/kb/files/bundle",
             headers=case.headers(),
             files={"file": ("sources.zip", content, "application/zip")},
-            data={"scope": "personal", "scope_id": case.alice.id, "use_llm": "false"},
+            data={"scope": "personal", "scope_id": case.alice.id, "use_llm": "false", "knowledge_intent": "add_to_knowledge"},
         )
     else:
         response = await case.client.post(
@@ -443,6 +450,7 @@ async def test_real_bundle_upload_then_send_checks_exact_members(kb_case, transp
                 "scope": "personal",
                 "scope_id": case.alice.id,
                 "use_llm": False,
+                "knowledge_intent": "add_to_knowledge",
             },
         )
         assert response.status_code == 200, response.text
@@ -511,107 +519,6 @@ async def test_long_multipart_filename_remains_exact_through_send(case, kind):
     await _assert_accepted(case, await _send(case, [ref]), [ref])
 
 
-@pytest.mark.parametrize("transport", ["multipart", "presign", "local"])
-@pytest.mark.parametrize("existing_session", [False, True])
-async def test_current_uploads_reach_native_document_admission(case, monkeypatch, transport, existing_session):
-    from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
-    from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
-    from bowhead_core.agents.registry import AgentRegistry
-    from bowhead_core.documents.executor import PROFILE
-    from bowhead_core.documents.request import DocumentScope
-    from bowhead_core.documents.tool import register_document_tool
-    from bowhead_core.subagent import _system_profile_snapshot
-    from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry
-    from bowhead_gateway.document_service import DocumentService
-
-    session_id = None
-    if existing_session:
-        session_id = (await case.sessions.ensure_session(session_id=None, workspace_id=case.spaces[0], user_id=case.alice.id)).id
-    refs = []
-    for kind in ("json", "pptx"):
-        filename, content, mime = _file(kind)
-        if transport == "local":
-            if kind == "json":
-                content = b'{"padding":"' + b"x" * (11 * 1024 * 1024) + b'"}'
-            else:
-                archive_bytes = io.BytesIO()
-                with ZipFile(io.BytesIO(content)) as original, ZipFile(archive_bytes, "w") as archive:
-                    for name in original.namelist():
-                        part = original.read(name)
-                        if name == "ppt/presentation.xml":
-                            part += b"<!--" + b"x" * (11 * 1024 * 1024) + b"-->"
-                        archive.writestr(name, part)
-                content = archive_bytes.getvalue()
-        refs.append(await _upload(case, transport, session_id=session_id, payload=(filename, content, mime)))
-    message = "Use the first attachment as data and the second attachment as template. Generate a PowerPoint and PDF."
-    service = DocumentService(case.app.state)
-    monkeypatch.setenv("BOWHEAD_SKILL_WORKDIR_ROOT", str(case.path.parent))
-    monkeypatch.setenv("BOWHEAD_SANDBOX_EXECUTOR_URL", "http://executor")
-    monkeypatch.setenv("BOWHEAD_SANDBOX_EXECUTOR_TOKEN", "test-only")
-    # The readiness fixture below is the pre-continuation executor; same-Turn continuation has its own suites.
-    monkeypatch.setenv("FEATURE_DOCUMENT_CHAT_CONTINUATION", "0")
-    client_type = httpx2.AsyncClient
-
-    def readiness(request):
-        assert request.url.path == "/document-runs/capabilities"
-        return httpx2.Response(200, json={"profile": PROFILE, "image_id": "sha256:" + "b" * 64})
-
-    monkeypatch.setattr(httpx2, "AsyncClient", lambda **kwargs: client_type(transport=httpx2.MockTransport(readiness), **kwargs))
-    registry = ToolRegistry()
-    register_document_tool(registry, service=lambda: service)
-
-    async def probe(req, source):
-        async def binding():
-            profile = manifest_to_profile(AgentRegistry.bootstrap().get("lead"))
-            admitted = await AgentExecutionBindingStore(case.path).admit_system_execution(
-                team_id=case.alice.team_id,
-                user_id=req.user_id,
-                turn_id=req.turn_id,
-                profile_name="lead",
-                dispatch_key="document-admission:" + req.turn_id,
-                definition=_system_profile_snapshot(profile),
-                manifest_fingerprint="sha256:" + "a" * 64,
-                override_version=None,
-                system_required=True,
-            )
-            return admitted, True
-
-        context = ToolExecutionContext(
-            workspace_id=req.workspace_id,
-            team_id=case.alice.team_id,
-            user_id=req.user_id,
-            member_uid="member",
-            turn_id=req.turn_id,
-            session_id=req.session_id,
-            role="lead",
-            datarc=None,
-            document_admission_binding=binding,
-        )
-        arguments = {
-            "action": "generate",
-            "evidence": {"text": source.user_text},
-            "inputs": [
-                {"artifact_id": ref["fileId"], "role": role, "evidence": {"text": quote}}
-                for ref, role, quote in zip(refs, ("data", "template"), ("first attachment as data", "second attachment as template"), strict=True)
-            ],
-            "requested_outputs": ["source", "pdf"],
-        }
-        return (await registry.execute("template_document_submit", arguments, context)).result
-
-    case.document_probe.run = probe
-    source = await _assert_accepted(case, await _send(case, refs, session_id=session_id, message=message), refs)
-    result = case.document_probe.results[0]
-    assert result["ok"] is True, result
-    scope = DocumentScope(team_id=case.alice.team_id, workspace_id=case.spaces[0], user_id=case.alice.id)
-    jobs = await service.jobs.list_for_session(scope=scope, session_id=source.session_id)
-    assert len(jobs) == 1 and jobs[0].id == result["document_job_id"]
-    assert jobs[0].status == "queued"
-    assert [(item.artifact_id, item.current_message_position) for item in jobs[0].proposal.inputs] == [(refs[0]["fileId"], 1), (refs[1]["fileId"], 2)]
-    assert await SessionStore(case.path).list_turn_attachments(turn_id=source.turn_id) == list(source.attachment_ids)
-    async with open_shared_ctx(case.path) as db:
-        assert (await (await db.execute("SELECT COUNT(*) FROM document_dispatches WHERE job_id=?", (jobs[0].id,))).fetchone())[0] == 1
-
-
 async def test_turn_attachment_write_failure_rolls_back_admission(case):
     ref = await _upload(case, "multipart")
     async with open_shared_ctx(case.path) as db:
@@ -635,14 +542,21 @@ async def test_local_kb_upload_negotiation_preserves_library_scope(kb_case):
     response = await case.client.post(
         "/api/v1/kb/presign",
         headers=case.headers(),
-        json={"filename": "source.txt", "mime": "text/plain", "size_bytes": len(content), "scope": "personal", "scope_id": case.alice.id},
+        json={
+            "filename": "source.txt",
+            "mime": "text/plain",
+            "size_bytes": len(content),
+            "knowledge_intent": "add_to_knowledge",
+            "scope": "personal",
+            "scope_id": case.alice.id,
+        },
     )
     assert response.status_code == 409 and "file_multipart_required" in response.text, response.text
     response = await case.client.post(
         "/api/v1/kb/files",
         headers=case.headers(),
         files={"file": ("source.txt", content, "text/plain")},
-        data={"scope": "personal", "scope_id": case.alice.id, "use_llm": "false"},
+        data={"scope": "personal", "scope_id": case.alice.id, "use_llm": "false", "knowledge_intent": "add_to_knowledge"},
     )
     assert response.status_code == 200, response.text
     uploaded = response.json()

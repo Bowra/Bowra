@@ -30,6 +30,8 @@ from bowhead_core.chat_references import (
     ReferenceNode,
 )
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
+from bowhead_core.sqlite_domains import domain_database_path
+from bowhead_core.sqlite_readable_schema import readable_view_exists
 from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
@@ -101,8 +103,8 @@ def reference_mcp_writer_ready(
             and mcp_index.ready
             and type(mcp_access) is AccessControlStore
             and store is not None
-            and Path(mcp_index.db_path).resolve() == Path(store.db_path).resolve()
-            and Path(mcp_access.db_path).resolve() == Path(store.db_path).resolve()
+            and Path(domain_database_path(mcp_index.db_path, "core")).resolve() == Path(domain_database_path(store.db_path, "core")).resolve()
+            and Path(domain_database_path(mcp_access.db_path, "core")).resolve() == Path(domain_database_path(store.db_path, "core")).resolve()
         )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
@@ -294,7 +296,10 @@ async def prepare_reference_http_start(
         sources = orchestrator.reference_skill_sources_factory(scope)
         if inspect.isawaitable(sources):
             sources = await sources
-        if type(sources) is not SkillReadSourceResolver or Path(sources.db_path).resolve() != Path(store.db_path).resolve():
+        if (
+            type(sources) is not SkillReadSourceResolver
+            or Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(store.db_path, "core")).resolve()
+        ):
             raise ValueError("reference_skill_source_scope_changed")
         from bowhead_core.documents.package_io import OFFICE_TEXT_MIMES
         from bowhead_core.documents.upload_confirmation import confirmed_content_hash
@@ -330,8 +335,8 @@ async def prepare_reference_http_start(
             if (
                 type(mcp_index) is not ReferenceMcpMetadataIndex
                 or type(mcp_access) is not AccessControlStore
-                or Path(mcp_index.db_path).resolve() != Path(store.db_path).resolve()
-                or Path(mcp_access.db_path).resolve() != Path(store.db_path).resolve()
+                or Path(domain_database_path(mcp_index.db_path, "core")).resolve() != Path(domain_database_path(store.db_path, "core")).resolve()
+                or Path(domain_database_path(mcp_access.db_path, "core")).resolve() != Path(domain_database_path(store.db_path, "core")).resolve()
             ):
                 raise ValueError("reference_mcp_source_scope_changed")
             kwargs.update(mcp_index=mcp_index, mcp_access=mcp_access)
@@ -413,6 +418,8 @@ async def prepare_reference_http_start(
                 has_attachments=has_attachments,
             )
         if entry_mode == "plan":
+            if prepared.task_method_reference:
+                raise ValueError("reference_plan_receiver_unavailable")
             import json
 
             from bowhead_core._db import open_shared_ctx
@@ -434,9 +441,8 @@ async def prepare_reference_http_start(
 
                 definition = expand_selected_builtin_plugins(definition, strict=False)
                 require_readonly_definition(definition, orchestrator.tool_registry)
-                async with db.execute("SELECT 1 FROM sqlite_master WHERE type='view' AND name='chat_reference_plan_step_scope'") as cursor:
-                    if await cursor.fetchone() is None:
-                        raise ValueError("reference_plan_migration_required")
+                if not await readable_view_exists(db, "chat_reference_plan_step_scope", owner_domain="execution"):
+                    raise ValueError("reference_plan_migration_required")
     except Exception as exc:
         # One opaque code for the caller, but never a silent one for the operator: every distinct
         # preparation failure used to look identical here and left no trace server-side.

@@ -451,75 +451,6 @@ _PSI_COMPOSED_KEYS: dict[str, set[tuple[str, str, str]]] = {}
 # skips charting but payload evidence provides data_artifact_id, composer falls back to
 # data-shape heuristics to build a chart section, avoiding caption-only prose for users.
 
-_HINT_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "trend": (
-        # Chinese
-        "趋势",
-        "走势",
-        "月",
-        "季",
-        "年",
-        "周",
-        "日",
-        "同比",
-        "环比",
-        # English
-        "trend",
-        "monthly",
-        "weekly",
-        "daily",
-        "quarterly",
-        "yearly",
-        "over time",
-        "yoy",
-        "mom",
-        "qoq",
-    ),
-    "rank": (
-        "排名",
-        "前",
-        "top",
-        "大到小",
-        "倒序",
-        "榜",
-        "ranking",
-        "leaderboard",
-        "highest",
-        "lowest",
-    ),
-    "share": (
-        "占比",
-        "份额",
-        "构成",
-        "分布",
-        "share",
-        "proportion",
-        "breakdown",
-        "composition",
-        "distribution",
-    ),
-    "compare": (
-        "对比",
-        "vs",
-        "与",
-        "compare",
-        "versus",
-        "comparison",
-    ),
-}
-
-
-def _hint_from_caption(caption: str) -> str | None:
-    """Heuristic: pick chart hint from evidence.caption text. None → 让 infer_chart_spec 自动."""
-    if not caption:
-        return None
-    low = caption.lower()
-    for hint, kws in _HINT_KEYWORDS.items():
-        for kw in kws:
-            if kw in low or kw in caption:
-                return hint
-    return None
-
 
 def _emit_auto_chart_metric(result: str) -> None:
     """chat-truth B-5.5 metric. result ∈ {built, failed, skipped}.
@@ -537,15 +468,6 @@ def _emit_auto_chart_metric(result: str) -> None:
         pass
 
 
-def _supports_computation_auto_chart(rows: list[dict[str, Any]], cols: list[Any]) -> bool:
-    """Computation evidence is only promoted when the artifact is chart-shaped."""
-    if len(rows) < 2:
-        return False
-    has_measure = any(getattr(col, "type", None) == "numeric" for col in cols)
-    has_dimension = any(getattr(col, "type", None) in {"date", "categorical", "geo"} for col in cols)
-    return has_measure and has_dimension
-
-
 async def _try_auto_build_chart_section(
     *,
     canvas_id: str,
@@ -556,14 +478,13 @@ async def _try_auto_build_chart_section(
     user_id: str | None,
     turn_id: str,
     bus: Any,
-    require_chart_shape: bool = False,
     units_lookup: Any = None,
     units_locale: str = "",
 ) -> str | None:
-    """Try to build a chart section from a data artifact when peer skipped add_chart.
+    """Build an all-column Table from an authorized source when the peer omitted add_chart.
 
     Returns new section_id on success, None on any failure (artifact missing, parse
-    error, infer fails, store error). Failures degrade to caption-only — never raise.
+    error, invalid source, store error). Failures retain the original caption without raising.
     """
     if not (artifact_store and canvas_store and data_artifact_id):
         _emit_auto_chart_metric("skipped")
@@ -581,7 +502,8 @@ async def _try_auto_build_chart_section(
             return None
         raw_bytes = await artifact_store.backend.read(art.path)
         from bowhead_core.canvas_tools import _parse_csv_with_types
-        from bowhead_core.chart import infer_chart_spec, spec_to_dict
+        from bowhead_core.chart import spec_to_dict
+        from bowhead_core.chart.explicit import compile_view
 
         rows, cols = _parse_csv_with_types(raw_bytes, type_overrides={})
         if not rows or not cols:
@@ -592,15 +514,6 @@ async def _try_auto_build_chart_section(
             )
             _emit_auto_chart_metric("skipped")
             return None
-        if require_chart_shape and not _supports_computation_auto_chart(rows, cols):
-            logger.info(
-                "composer.auto_chart_skip turn=%s aid=%s reason=insufficient_chart_shape",
-                turn_id,
-                data_artifact_id,
-            )
-            _emit_auto_chart_metric("skipped")
-            return None
-        hint = _hint_from_caption(caption)
         title = str(caption or "数据图表").strip()[:60] or "数据图表"
         # Unit enrichment: this **automatic chart** path and add_chart are separate producers;
         # covering only one still gives incorrect percentage shapes when the model omits add_chart (the original 1% bug).
@@ -639,13 +552,7 @@ async def _try_auto_build_chart_section(
         # The cost is raw values even for columns previously **guessed correctly** (`利润率` 0.1744 no longer displays 17.4%).
         # This is intentional: correctness came from coincidentally falling within ≤1, not from an informed declaration.
         mark_unknown_percent_shape(cols)
-        spec = infer_chart_spec(
-            rows=rows,
-            columns=cols,
-            hint=hint,
-            title=title,
-            data_artifact_id=data_artifact_id,
-        )
+        spec = compile_view({"title": title, "columns": "all"}, rows, cols, artifact_id=data_artifact_id, raw=raw_bytes)
         # Surface the auto-built hint to frontend (subtle UI indicator, aligned with ι sprint auto_charted).
         spec.auto_charted = True
         spec.source_meta = {
@@ -1187,7 +1094,6 @@ async def compose_canvas_from_payload(
                                     user_id=request.user_id,
                                     turn_id=request.turn_id,
                                     bus=bus,
-                                    require_chart_shape=True,
                                     units_lookup=_units_lookup,
                                     units_locale=_units_locale,
                                 )

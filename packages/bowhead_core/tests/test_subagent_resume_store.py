@@ -5,9 +5,9 @@ import os
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.session_store import SessionStore
 from bowhead_router.types import Message, ToolCall
+from core_legacy_database import upgrade
 
 from bowhead_core import subagent_resume as sr
 
@@ -26,7 +26,7 @@ def _fernet(monkeypatch):
 
 
 async def _db(tmp_path) -> str:
-    assert upgrade(f"sqlite+aiosqlite:///{tmp_path / 'requested.db'}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(tmp_path / 'requested.db').with_name('bowhead.db')}", target="core") == ("core",)
     store = SessionStore(str(tmp_path / "bowhead.db"))
     await store.initialize()
     for session_id, turns in {"s_1": ("t_1", "t_2", "t_3"), "s_2": ("t_9",)}.items():
@@ -196,3 +196,14 @@ async def test_a_deleted_session_lists_and_saves_nothing(tmp_path):
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM subagent_resume_checkpoints").fetchone()[0] == 0
     assert await sr.list_resumable(db_path, session_id="s_1", user_id="u_1") == []
+
+
+async def test_navigation_checkpoint_round_trips_in_its_own_version_without_changing_legacy_payloads(tmp_path):
+    from bowhead_core.kb.source_navigation import NavigationDependency
+
+    proof = NavigationDependency(file_id="file-a", generation_id="generation-a", membership_revision=1, view_token="a" * 64).model_dump()
+    db_path = await _db(tmp_path)
+    identity = await _capture(db_path, knowledge_navigation={"file-a": proof})
+    checkpoint = await sr.claim(db_path, checkpoint_id=identity, user_id="u_1", session_id="s_1", turn_id="t_2")
+    material = sr.open_material(checkpoint, db_path=db_path)
+    assert material.knowledge_navigation == {"file-a": proof}

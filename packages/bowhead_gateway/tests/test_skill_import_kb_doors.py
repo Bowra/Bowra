@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.artifact_store import LocalBackend
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.kb.permission import ScopeContext
@@ -21,6 +20,7 @@ from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.user_store import User
 from bowhead_gateway.routes.kb import _process_zip_bundle
 from fastapi import BackgroundTasks
+from gateway_legacy_database import upgrade
 
 from bowhead_core import ArtifactStore
 
@@ -61,7 +61,7 @@ async def _world(tmp_path: Path, monkeypatch):
     with sqlite3.connect(db) as c:
         c.executescript(initial_schema("core"))
         c.commit()
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     artifact_store = ArtifactStore(db_path=str(db), backend=LocalBackend(root_dir=tmp_path / "blobs"))
     await artifact_store.initialize()
     files_store = KbFilesStore(tmp_path / "kb_files.db")
@@ -77,7 +77,7 @@ async def _world(tmp_path: Path, monkeypatch):
         tool_registry=SimpleNamespace(list_names=lambda: ["bi_query", "python_sandbox"]),
     )
     # Real route uses fastapi.Request; persistence gate reads query_params/headers (personal skill scope checks).
-    request = SimpleNamespace(app=SimpleNamespace(state=state), query_params={}, headers={})
+    request = SimpleNamespace(app=SimpleNamespace(state=state), state=SimpleNamespace(), query_params={}, headers={})
     user = User(id="u_alice", email="alice@test.com", team_id="team_test", tier="ultra", email_verified=True)
     ctx = ScopeContext(user_id="u_alice", workspace_id="ws_test", team_id="team_test", role="user")
     return request, user, ctx, artifact_store, sis
@@ -174,6 +174,8 @@ async def test_inventory_failure_fails_open(tmp_path: Path, monkeypatch) -> None
         raise RuntimeError("sources down")
 
     monkeypatch.setattr("bowhead_gateway.skill_import_sources.build_resolution_sources", _boom)
+    # The original Team upload entry requires Team administration authority.
+    monkeypatch.setenv("BOWHEAD_AUTO_ADMIN_DOMAINS", "test.com")
     raw = _zip({"acme-qbr/SKILL.md": _SKILL_MD.encode(), "docs/brief.pdf": b"%PDF-1.4\nbrief"})
     resp = await _ingest(request, user, ctx, raw)
     assert resp.inventory is None and resp.landed_skills == []
@@ -245,6 +247,8 @@ async def test_duplicate_skill_md_members_cannot_bypass_per_name_grant(tmp_path:
 async def test_team_scope_bundle_skips_components_but_lands_nothing(tmp_path: Path, monkeypatch) -> None:
     """review P2：知识页往团队域传的知识包——能力组件仍不进 KB（拍板④），但不替上传者悄悄建个人 skill."""
     request, user, ctx, artifact_store, sis = await _world(tmp_path, monkeypatch)
+    # The original Team upload entry requires Team administration authority.
+    monkeypatch.setenv("BOWHEAD_AUTO_ADMIN_DOMAINS", "test.com")
     raw = _zip({"acme-qbr/SKILL.md": _SKILL_MD.encode(), "docs/brief.pdf": b"%PDF-1.4\nbrief"})
     resp = await _ingest(request, user, ctx, raw, scope="team", scope_id="team_test")
     assert {s.filename: s.reason_code for s in resp.skipped} == {"acme-qbr/SKILL.md": "kb_bundle_entry_capability_component"}
@@ -280,6 +284,8 @@ async def test_landed_skills_survive_into_the_persisted_inventory_row(tmp_path: 
     """批2 review P1-2：`<bundle_import>` 全靠这一列说「落没落地」，而它此前零覆盖——
     两处 `extra=` 一起删掉，242 个测试全绿。这里从真上传一路读到库里的那一行。"""
     request, user, ctx, artifact_store, sis = await _world(tmp_path, monkeypatch)
+    # The original Team upload entry requires Team administration authority.
+    monkeypatch.setenv("BOWHEAD_AUTO_ADMIN_DOMAINS", "test.com")
     raw = _zip({"acme-qbr/SKILL.md": _SKILL_MD.encode(), "docs/brief.pdf": b"%PDF-1.4\nbrief"})
     resp = await _ingest(request, user, ctx, raw)
     stored = await get_bundle_inventory(artifact_store.db_path, bundle_artifact_id=resp.bundle_artifact_id, created_by="u_alice")

@@ -26,6 +26,7 @@ import {
   type NotificationItemDTO,
   type NotificationTab,
 } from "@/lib/api";
+import { HttpStatusError } from "@/lib/api-client";
 import { normalizeAppActionUrl } from "@/lib/legacy-app-links";
 import { localizeNotification, notificationTypeLabel } from "@/lib/notification-copy";
 import { useAppRouter } from "@/lib/use-app-router";
@@ -36,9 +37,8 @@ const TABS: { id: NotificationTab; labelKey: string }[] = [
   { id: "all", labelKey: "tab_all" },
 ];
 
-function isDisabledError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes(": 404") || message.includes(": 503");
+function hasStatus(error: unknown, status: number): boolean {
+  return error instanceof HttpStatusError && error.status === status;
 }
 
 export function NotificationCenter() {
@@ -49,15 +49,19 @@ export function NotificationCenter() {
   );
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<NotificationTab>("action");
-  const [counts, setCounts] = useState<NotificationCountDTO>({
-    actionRequired: 0,
-    updatesUnread: 0,
-    totalBadge: 0,
-  });
+  const [counts, setCounts] = useState<NotificationCountDTO | null>(null);
   const [items, setItems] = useState<NotificationItemDTO[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<ShownError | null>(null);
+  const [countErr, setCountErr] = useState<ShownError | null>(null);
+  const [readingAll, setReadingAll] = useState(false);
+  const mounted = useRef(true);
+  const view = useRef({ open: false, tab: "action" as NotificationTab });
+  const listGeneration = useRef(0);
+  const countGeneration = useRef(0);
+  const pageInFlight = useRef<string | null>(null);
+  const readAllInFlight = useRef(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   // A3 (notification double-click guard): a slow markRead/archive used to let the
   // user click the same row repeatedly (re-firing read + router.push). inFlightRef
@@ -73,38 +77,67 @@ export function NotificationCenter() {
     middleware: [offset(8), flip(), shift({ padding: 10 })],
   });
 
+  const close = useCallback(() => {
+    view.current.open = false;
+    listGeneration.current += 1;
+    pageInFlight.current = null;
+    setOpen(false);
+  }, []);
+
+  const disableCenter = useCallback(() => {
+    close();
+    countGeneration.current += 1;
+    setDisabled(true);
+  }, [close]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      listGeneration.current += 1;
+      countGeneration.current += 1;
+    };
+  }, []);
+
   const refreshCount = useCallback(async () => {
     if (disabled) return;
+    const generation = ++countGeneration.current;
+    const current = () => mounted.current && generation === countGeneration.current;
     try {
-      setCounts(await fetchNotificationCount());
+      const body = await fetchNotificationCount();
+      if (!current()) return;
+      setCounts(body);
+      setCountErr(null);
     } catch (e: unknown) {
-      if (isDisabledError(e)) {
-        setDisabled(true);
-        setOpen(false);
-      }
-      // Topbar should not become noisy when the notification endpoint is down.
+      if (!current()) return;
+      if (hasStatus(e, 404)) disableCenter();
+      else setCountErr(shownError(t("count_failed_notice"), e));
     }
-  }, [disabled]);
+  }, [disabled, disableCenter, t]);
 
-  const load = useCallback(async (activeTab: NotificationTab, cursor?: string | null) => {
-    if (disabled) return;
+  const load = useCallback(async (activeTab: NotificationTab, cursor?: string | null, preserveError = false) => {
+    if (disabled || !view.current.open || view.current.tab !== activeTab) return;
+    if (cursor && pageInFlight.current !== null) return;
+    const generation = cursor ? listGeneration.current : ++listGeneration.current;
+    const pageKey = `${generation}:${cursor ?? ""}`;
+    pageInFlight.current = cursor ? pageKey : null;
+    const current = () => mounted.current && view.current.open && view.current.tab === activeTab && generation === listGeneration.current;
     setLoading(true);
-    setErr(null);
+    if (!preserveError) setErr(null);
     try {
       const body = await fetchNotifications(activeTab, cursor);
-      setItems((current) => (cursor ? [...current, ...body.items] : body.items));
+      if (!current()) return;
+      setItems((previous) => cursor ? Array.from(new Map([...previous, ...body.items].map((item) => [item.id, item])).values()) : body.items);
       setNextCursor(body.nextCursor);
     } catch (e: unknown) {
-      if (isDisabledError(e)) {
-        setDisabled(true);
-        setOpen(false);
-      } else {
-        setErr(shownError(t("load_failed_notice"), e));
-      }
+      if (!current()) return;
+      if (hasStatus(e, 404)) disableCenter();
+      else setErr(shownError(t("load_failed_notice"), e));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
+      if (pageInFlight.current === pageKey) pageInFlight.current = null;
     }
-  }, [disabled, t]);
+  }, [disabled, disableCenter, t]);
 
   useEffect(() => {
     void refreshCount();
@@ -128,15 +161,36 @@ export function NotificationCenter() {
     const onDocClick = (e: MouseEvent) => {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target)) return;
-      const panel = document.querySelector('[data-notification-center="true"]');
-      if (panel?.contains(target)) return;
-      setOpen(false);
+      if (document.querySelector('[data-notification-center="true"]')?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { close(); triggerRef.current?.focus(); }
     };
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, close]);
 
-  const handleOpen = () => setOpen((value) => !value);
+  const handleOpen = () => {
+    if (view.current.open) close();
+    else { view.current.open = true; setOpen(true); }
+  };
+
+  const changeTab = (next: NotificationTab) => {
+    if (view.current.tab === next) return;
+    view.current.tab = next;
+    listGeneration.current += 1;
+    pageInFlight.current = null;
+    setItems([]);
+    setNextCursor(null);
+    setErr(null);
+    setLoading(true);
+    setTab(next);
+  };
 
   const markBusy = (id: string) => {
     inFlightRef.current.add(id);
@@ -144,6 +198,7 @@ export function NotificationCenter() {
   };
   const clearBusy = (id: string) => {
     inFlightRef.current.delete(id);
+    if (!mounted.current) return;
     setBusyIds((s) => {
       const n = new Set(s);
       n.delete(id);
@@ -151,29 +206,32 @@ export function NotificationCenter() {
     });
   };
 
+  const ownsView = (generation: number) => mounted.current && view.current.open && listGeneration.current === generation;
+
   const handleAction = async (item: NotificationItemDTO) => {
-    if (inFlightRef.current.has(item.id)) return;  // in-flight → ignore re-click
+    if (inFlightRef.current.has(item.id)) return;
+    const generation = listGeneration.current;
     markBusy(item.id);
     try {
-      if (!item.readAt) {
-        try {
-          await markNotificationRead(item.id);
-          setItems((current) => current.map((x) => (x.id === item.id ? { ...x, readAt: new Date().toISOString() } : x)));
-          void refreshCount();
-        } catch (e: unknown) {
-          // A3: don't swallow. A failed markRead previously errored silently, and
-          // the unread badge "came back" on the next 45s refetch — surface it.
-          if (isDisabledError(e)) {
-            setDisabled(true);
-            setOpen(false);
-            return;
-          }
-          setErr(shownError(t("mark_read_failed_notice"), e));
-        }
+      if (!item.readAt) await markNotificationRead(item.id);
+      void refreshCount();
+      if (!ownsView(generation)) {
+        if (mounted.current && view.current.open) void load(view.current.tab);
+        return;
       }
       if (item.actionUrl) {
-        setOpen(false);
+        close();
         router.push(normalizeAppActionUrl(item.actionUrl));
+      } else {
+        void load(view.current.tab);
+      }
+    } catch (e: unknown) {
+      if (!ownsView(generation)) return;
+      setErr(shownError(t(hasStatus(e, 404) ? "item_unavailable_notice" : "mark_read_failed_notice"), e));
+      if (hasStatus(e, 404)) {
+        setItems((current) => current.filter((x) => x.id !== item.id));
+        void refreshCount();
+        void load(view.current.tab, undefined, true);
       }
     } finally {
       clearBusy(item.id);
@@ -181,18 +239,21 @@ export function NotificationCenter() {
   };
 
   const handleArchive = async (id: string) => {
-    if (inFlightRef.current.has(id)) return;  // in-flight → ignore re-click
+    if (inFlightRef.current.has(id)) return;
+    const generation = listGeneration.current;
     markBusy(id);
     try {
       await archiveNotification(id);
-      setItems((current) => current.filter((x) => x.id !== id));
       void refreshCount();
+      if (ownsView(generation)) setItems((current) => current.filter((x) => x.id !== id));
+      if (mounted.current && view.current.open) void load(view.current.tab);
     } catch (e: unknown) {
-      if (isDisabledError(e)) {
-        setDisabled(true);
-        setOpen(false);
-      } else {
-        setErr(shownError(t("archive_failed_notice"), e));
+      if (!ownsView(generation)) return;
+      setErr(shownError(t(hasStatus(e, 404) ? "item_unavailable_notice" : "archive_failed_notice"), e));
+      if (hasStatus(e, 404)) {
+        setItems((current) => current.filter((x) => x.id !== id));
+        void refreshCount();
+        void load(view.current.tab, undefined, true);
       }
     } finally {
       clearBusy(id);
@@ -200,20 +261,32 @@ export function NotificationCenter() {
   };
 
   const handleReadAll = async () => {
-    await markAllNotificationsRead(tab);
-    setItems((current) => current.map((x) => ({ ...x, readAt: x.readAt ?? new Date().toISOString() })));
-    void refreshCount();
+    if (readAllInFlight.current) return;
+    readAllInFlight.current = true;
+    setReadingAll(true);
+    const generation = listGeneration.current;
+    const activeTab = view.current.tab;
+    const ids = new Set(items.map((item) => item.id));
+    try {
+      await markAllNotificationsRead(activeTab);
+      void refreshCount();
+      if (ownsView(generation)) setItems((current) => current.map((x) => ids.has(x.id) ? { ...x, readAt: x.readAt ?? new Date().toISOString() } : x));
+      if (mounted.current && view.current.open) void load(view.current.tab);
+    } catch (e: unknown) {
+      if (ownsView(generation)) setErr(shownError(t("read_all_failed_notice"), e));
+    } finally {
+      readAllInFlight.current = false;
+      if (mounted.current) setReadingAll(false);
+    }
   };
 
-  const badge = counts.totalBadge;
-  // P2 batch 3: the bell shows only the action-required count (a dot for plain updates), so
-  // its accessible name says the same split: "N pending", plus "M unread updates" when there are any.
-  const pendingUpdates = Math.max(counts.updatesUnread, badge - counts.actionRequired, 0);
-  const bellLabel =
-    counts.actionRequired > 0 && pendingUpdates > 0
-      ? t("bell_aria_pending_updates", { action: counts.actionRequired, updates: pendingUpdates })
-      : counts.actionRequired > 0
-        ? t("bell_aria", { badge: counts.actionRequired })
+  const actionCount = counts?.actionRequired ?? 0;
+  const pendingUpdates = counts?.updatesUnread ?? 0;
+  const bellLabel = countErr && !counts ? t("count_unavailable") :
+    actionCount > 0 && pendingUpdates > 0
+      ? t("bell_aria_pending_updates", { action: actionCount, updates: pendingUpdates })
+      : actionCount > 0
+        ? t("bell_aria", { badge: actionCount })
         : pendingUpdates > 0
           ? t("bell_aria_updates", { updates: pendingUpdates })
           : t("bell_title");
@@ -237,11 +310,11 @@ export function NotificationCenter() {
         <Bell size={17} />
         {/* P2 batch 3 (topbar notifications): a number only for things that need you; ordinary updates
             alone show a dot. The accessible name still carries the full unread count. */}
-        {counts.actionRequired > 0 ? (
+        {actionCount > 0 ? (
           <span className="notification-bell__badge">
-            {counts.actionRequired > 99 ? "99+" : counts.actionRequired}
+            {actionCount > 99 ? "99+" : actionCount}
           </span>
-        ) : badge > 0 ? (
+        ) : pendingUpdates > 0 ? (
           <span className="notification-bell__dot" aria-hidden="true" />
         ) : null}
       </button>
@@ -259,27 +332,27 @@ export function NotificationCenter() {
               <div>
                 <div className="notification-panel__title">{t("panel_title")}</div>
                 <div className="notification-panel__meta">
-                  {t("panel_meta", { action: counts.actionRequired, updates: counts.updatesUnread })}
+                  {counts ? t("panel_meta", { action: actionCount, updates: pendingUpdates }) : t(countErr ? "count_unavailable" : "loading")}
                 </div>
               </div>
               {tab !== "action" && items.some((x) => !x.readAt) ? (
-                <button type="button" className="notification-ghost-btn" onClick={() => void handleReadAll()}>
+                <button type="button" className="notification-ghost-btn" disabled={readingAll} onClick={() => void handleReadAll()}>
                   <Check size={12} />
                   {t("mark_all_read")}
                 </button>
               ) : null}
             </div>
 
-            <Tabs value={tab} onValueChange={setTab}>
+            <Tabs value={tab} onValueChange={changeTab}>
               <TabList appearance="segmented" className="notification-tabs" aria-label={t("tabs_aria")}>
                 {TABS.map((it) => (
                   <Tab key={it.id} value={it.id} className={clsx("notification-tab", { active: tab === it.id })}>
                     {t(it.labelKey)}
-                    {it.id === "action" && counts.actionRequired > 0 ? (
-                      <span>{counts.actionRequired}</span>
+                    {it.id === "action" && actionCount > 0 ? (
+                      <span>{actionCount}</span>
                     ) : null}
-                    {it.id === "updates" && counts.updatesUnread > 0 ? (
-                      <span>{counts.updatesUnread}</span>
+                    {it.id === "updates" && pendingUpdates > 0 ? (
+                      <span>{pendingUpdates}</span>
                     ) : null}
                   </Tab>
                 ))}
@@ -287,16 +360,23 @@ export function NotificationCenter() {
             </Tabs>
 
             <div className="notification-list">
+              {countErr ? (
+                <div className="notification-empty danger" role="status">
+                  {countErr.message}
+                  <ErrorDiagnosticsInline error={countErr.error} surface="global" />
+                  <button type="button" className="notification-ghost-btn" onClick={() => void refreshCount()}>{t("retry")}</button>
+                </div>
+              ) : null}
               {err ? (
                 <div className="notification-empty danger">
                   {err.message}
                   <ErrorDiagnosticsInline error={err.error} surface="global" />
+                  <button type="button" className="notification-ghost-btn" onClick={() => void load(tab)}>{t("retry")}</button>
                 </div>
               ) : null}
               {!err && loading && items.length === 0 ? <div className="notification-empty">{t("loading")}</div> : null}
               {!err && !loading && items.length === 0 ? <NotificationEmpty tab={tab} /> : null}
-              {!err ? (
-                items.map((item) => (
+              {items.map((item) => (
                   <NotificationRow
                     key={item.id}
                     item={item}
@@ -304,8 +384,7 @@ export function NotificationCenter() {
                     onOpen={() => void handleAction(item)}
                     onArchive={() => void handleArchive(item.id)}
                   />
-                ))
-              ) : null}
+                ))}
             </div>
 
             {nextCursor ? (
@@ -340,8 +419,7 @@ function NotificationRow({
   const locale = useLocale();
   const copy = localizeNotification(item, t, locale);
   const unread = !item.readAt;
-  const actionRequired = (item.type === "approval.required" || item.type === "access_requested" || item.type === "memory.candidate")
-    && item.state === "open";
+  const actionRequired = item.actionRequired;
   return (
     <article
       className={clsx("notification-row", { unread, action: actionRequired, "is-busy": busy })}

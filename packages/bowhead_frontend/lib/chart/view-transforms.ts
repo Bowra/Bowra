@@ -327,7 +327,9 @@ export async function ensureFullRows(
     // spec column, making size the actual match count.
     const previewColBySpecKey = new Map<string, string>();
     for (const col of spec.columns ?? []) {
-      const hit = previewCols.find((p) => p === col.header) ?? previewCols.find((p) => p === col.key);
+      const hit = spec.explicit_presentation
+        ? previewCols.find((p) => p === col.key)
+        : previewCols.find((p) => p === col.header) ?? previewCols.find((p) => p === col.key);
       if (hit) previewColBySpecKey.set(col.key, hit);
     }
     // review R1: **all** columns must match before replacement. Original needed only one; partial matching

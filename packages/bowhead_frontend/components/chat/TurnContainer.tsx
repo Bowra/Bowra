@@ -45,6 +45,7 @@ import { useTranslations } from "next-intl";
 
 import {
   fetchEffectDisclosure,
+  dismissClarification,
   listClarificationsForTurn,
   resolveClarification,
   resumeTurnAfterClarification,
@@ -81,6 +82,7 @@ import { useMemoryCandidates, type MemoryCandidateMode } from "@/lib/use-memory-
 import { useFeedbackReceipts } from "@/lib/use-feedback-receipts";
 import { MemoryCandidateCard } from "./memory-candidate-card";
 import { FeedbackReceiptCard } from "./feedback-receipt-card";
+import { EarlierPendingQuestions } from "./earlier-pending-questions";
 import { CoachChangeReceipts } from "./coach-change-receipt";
 import { CoachAlignmentCards } from "./coach-alignment-card";
 import { MemoryDisclose } from "@/components/chat/memory-disclose";
@@ -1203,6 +1205,30 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   const handleSkipClarification = () =>
     resolveWith({ skip: true }, tr("clarification_skip_fallback"));
 
+  const handleCancelClarification = async () => {
+    const requestId = runner.clarificationPending?.clarificationId;
+    if (!requestId || resolving) return;
+    const turnId = runner.turnId;
+    const generation = runner.executionGeneration ?? null;
+    const isCurrent = () => clarificationMounted.current
+      && clarificationRunnerRef.current.turnId === turnId
+      && (clarificationRunnerRef.current.executionGeneration ?? null) === generation;
+    setResolving(true);
+    setClarificationError(null);
+    try {
+      const result = await dismissClarification(requestId);
+      if (!result.dismissed) throw new ApiError(409, "clarification_not_resolvable", { code: "clarification_not_resolvable" });
+      markClarificationAnswered(requestId, { values: [], dismissed: true });
+      if (!isCurrent()) return;
+      runner.clearClarificationPending?.(requestId);
+      setAnsweredSummary(null);
+    } catch (error) {
+      if (isCurrent()) setClarificationError(projectClarificationError(error, tClar("submit_failed")));
+    } finally {
+      if (isCurrent()) setResolving(false);
+    }
+  };
+
   const clarificationSlot = clarification ? (
     <ClarificationCard
       key={clarification.clarificationId}
@@ -1223,6 +1249,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
       onSubmitSingle={handleResolveClarification}
       onSubmitMulti={handleResolveClarificationMulti}
       onSkip={handleSkipClarification}
+      onCancel={handleCancelClarification}
     />
   ) : answeredSummary ? (
     <ClarificationAnsweredSummary
@@ -1971,6 +1998,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
         </div>
       ) : null}
 
+      {runner.sessionId ? <EarlierPendingQuestions sessionId={runner.sessionId} currentTurnId={runner.turnId} running={runner.running} /> : null}
       <div ref={tailRef} aria-hidden style={{ height: 1 }} />
     </div>
   );

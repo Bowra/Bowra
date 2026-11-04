@@ -15,8 +15,11 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core._db import open_shared_ctx
 from bowhead_core.access_control import _require_read_transaction
 from bowhead_core.skill_bundle_lock import skill_bundle_lock, skill_write_conflict
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS skill_instances (
@@ -87,14 +90,18 @@ class SkillInstanceStore:
     """
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     @property
     def db_path(self) -> str:
         return self._db_path
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(SCHEMA)
             # workflow-solidify S3 (§4.3): incremental verdict-column migration. This store originally had **no** migration block;
             # CREATE IF NOT EXISTS does not add columns to existing tables, so PRAGMA-guarded ALTER is required
@@ -140,7 +147,7 @@ class SkillInstanceStore:
         if connection is not None and not connection.in_transaction:
             raise ValueError("skill_write_transaction_required")
         now = _now()
-        async with nullcontext(connection) if connection is not None else aiosqlite.connect(self._db_path) as db:
+        async with nullcontext(connection) if connection is not None else diagnostic_connect(self._db_path) as db:
             if connection is None:
                 await db.execute("BEGIN IMMEDIATE")
             with skill_bundle_lock(Path(source_path)) if expected_content_hash is not None and connection is None else nullcontext():
@@ -233,7 +240,7 @@ class SkillInstanceStore:
         source_path=<catalog 路径> 以完整 upsert；此方法要求 row 已存在.
         不存在时返回 False，让调用方走 upsert 路径.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE skill_instances SET enabled=?, updated_at=? WHERE user_id=? AND name=?",
                 (1 if enabled else 0, _now(), user_id, name),
@@ -253,7 +260,7 @@ class SkillInstanceStore:
 
         verdict ∈ {pass, fail, skipped}；verdict_json = judge 结构化结果（checkpoint 逐条）.
         要求 row 已存在（recipe 已保存为 skill_instance）；返回是否命中一行."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE skill_instances SET verdict=?, verdict_json=?, updated_at=? WHERE user_id=? AND name=?",
                 (verdict, verdict_json, _now(), user_id, name),
@@ -271,7 +278,7 @@ class SkillInstanceStore:
     ) -> bool:
         """skill-import 批1：写清点结果与待处理导入状态（独立 setter，不经 upsert——
         upsert 只写显式列，且报告要合并不覆盖）。要求 row 已存在；返回是否命中一行."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE skill_instances SET import_status=?, import_report_json=?, updated_at=? WHERE user_id=? AND name=?",
                 (import_status, import_report_json, _now(), user_id, name),
@@ -294,7 +301,7 @@ class SkillInstanceStore:
         """
         from bowhead_core.skill_upload import bundle_sha256
 
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             source = Path(expected.source_path)
             if not source.is_dir() or "sha256:" + bundle_sha256(source) != content_hash:
@@ -320,7 +327,7 @@ class SkillInstanceStore:
             return cursor.rowcount == 1
 
     async def delete(self, *, user_id: str, name: str) -> bool:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "DELETE FROM skill_instances WHERE user_id=? AND name=?",
                 (user_id, name),
@@ -330,7 +337,7 @@ class SkillInstanceStore:
 
     async def delete_by_id(self, *, user_id: str, skill_id: str) -> bool:
         """按持久化 ID 删除，避免把用户自定义名称放入资源 URL。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "DELETE FROM skill_instances WHERE user_id=? AND id=?",
                 (user_id, skill_id),
@@ -349,7 +356,7 @@ class SkillInstanceStore:
         """Read a preference/instance; an explicit connection stays caller-owned."""
         _require_read_transaction(connection)
         async with (
-            nullcontext(connection) if connection is not None else aiosqlite.connect(self._db_path) as db,
+            nullcontext(connection) if connection is not None else diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT * FROM skill_instances WHERE user_id=? AND name=?",
                 (user_id, name),
@@ -369,7 +376,7 @@ class SkillInstanceStore:
         """读取当前用户拥有的 Skill 实例；跨用户 ID 不泄露。"""
         _require_read_transaction(connection)
         async with (
-            nullcontext(connection) if connection is not None else aiosqlite.connect(self._db_path) as db,
+            nullcontext(connection) if connection is not None else diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT * FROM skill_instances WHERE user_id=? AND id=?",
                 (user_id, skill_id),
@@ -384,7 +391,7 @@ class SkillInstanceStore:
         *,
         user_id: str,
     ) -> list[SkillInstance]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM skill_instances WHERE user_id=? ORDER BY source_type, name",

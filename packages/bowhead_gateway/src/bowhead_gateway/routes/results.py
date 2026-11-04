@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from bowhead_gateway.results_capabilities import resolve_results_capabilities
 from bowhead_gateway.results_contracts import (
+    ContentSharingCapabilityV1,
     ResultsCapabilitiesResponseV1,
     ResultsQueryRequestV1,
     ResultsQueryResponseV1,
@@ -36,6 +37,9 @@ async def results_capabilities(
     response: Response,
     _user: User = Depends(_current_user),
 ) -> ResultsCapabilitiesResponseV1:
+    from bowhead_core.share_service import content_sharing_enabled
+
+    sharing_enabled = content_sharing_enabled()
     capabilities = resolve_results_capabilities()
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Cookie"
@@ -53,6 +57,7 @@ async def results_capabilities(
         pass
     return ResultsCapabilitiesResponseV1(
         interactive_html=capabilities.interactive_html,
+        content_sharing=ContentSharingCapabilityV1(enabled=sharing_enabled, reason=None if sharing_enabled else "deployment_disabled"),
         workspace=capabilities.workspace,
         complete_list=capabilities.complete_list,
         scale_nav=capabilities.scale_nav,

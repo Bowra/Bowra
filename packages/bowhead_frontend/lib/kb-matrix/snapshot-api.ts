@@ -88,6 +88,7 @@ export interface WireColumn {
   prompt_version?: number;
   options?: string[] | null;
   cross_verify?: boolean;
+  navigation_role?: "none" | "description" | "topics";
 }
 
 interface WireDelta {
@@ -205,6 +206,7 @@ export function buildColumnFromWire(c: WireColumn): MatrixColumnVM {
     promptVersion: c.prompt_version,
     options: c.options ?? null,
     crossVerify: !!c.cross_verify,
+    navigationRole: c.navigation_role ?? "none",
   };
 }
 

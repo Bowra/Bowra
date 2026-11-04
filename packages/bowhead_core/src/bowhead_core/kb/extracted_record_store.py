@@ -32,6 +32,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core.kb.telemetry import emit_audit
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -463,7 +464,7 @@ async def _rebuild_field_indexes(
     db_path_str = str(db_path)
     dt_hash = _hash_id(doc_type_id)
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             # IntelliVault audit learning (Step 5 review): wrap DROP+CREATE in
             # BEGIN IMMEDIATE so partial fail (DROP succeeded, CREATE crashed)
             # doesn't leave the field un-indexed mid-transaction.
@@ -683,7 +684,7 @@ class KbExtractedRecordStore:
         self._db_path = str(db_path)
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             for stmt in _SCHEMA.split(";"):
                 stmt = stmt.strip()
                 if stmt:
@@ -734,7 +735,7 @@ class KbExtractedRecordStore:
             fields = {}
         # Sprint 2 I-B4: pre-INSERT dedup check
         if dedup_check:
-            async with aiosqlite.connect(self._db_path) as db:
+            async with diagnostic_connect(self._db_path) as db:
                 cur = await db.execute(
                     "SELECT record_id FROM kb_extracted_records WHERE file_id = ? AND doc_type_id = ? AND soft_deleted_at IS NULL LIMIT 1",
                     (file_id, doc_type_id),
@@ -756,7 +757,7 @@ class KbExtractedRecordStore:
             fields = wrap_extractor_result_to_variants(fields, doc_type_fields)
         record_id = f"rec_{uuid4().hex[:14]}"
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO kb_extracted_records "
                 "(record_id, doc_type_id, file_id, workspace_id, fields_json, "
@@ -801,7 +802,7 @@ class KbExtractedRecordStore:
         if workspace_id is not None:
             sql += " AND workspace_id = ?"
             params = (record_id, workspace_id)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 row = await cur.fetchone()
@@ -822,7 +823,7 @@ class KbExtractedRecordStore:
         per tech-design §A.2 step 7. Callers with batch context fetch once outside
         the loop + pass down.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_extracted_records "
@@ -841,7 +842,7 @@ class KbExtractedRecordStore:
         doc_type_fields: Any = None,
     ) -> list[KbExtractedRecordDTO]:
         """单 file 抽出的所有 records (一份 PDF 长 → chunk → merge 后通常 1 record)."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_extracted_records WHERE file_id = ? AND soft_deleted_at IS NULL ORDER BY extracted_at DESC",
@@ -863,7 +864,7 @@ class KbExtractedRecordStore:
         params: list[Any] = [workspace_id, doc_type_id]
         append_source_filter(clauses, params, allowed_file_ids)
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM kb_extracted_records WHERE " + " AND ".join(clauses),
                 params,
@@ -940,7 +941,7 @@ class KbExtractedRecordStore:
             new_corrected.append(field_name)
         now = _now()
         t0 = time.time()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             if is_v1_path:
                 # Lazy-migrate write: bump schema_version=2, stash V1 backup,
                 # all in one atomic UPDATE. WHERE clause guards re-migration.
@@ -1014,14 +1015,14 @@ class KbExtractedRecordStore:
         if workspace_id is not None:
             sql += " AND workspace_id = ?"
             params = (new_status, now, modified_by, record_id, workspace_id)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(sql, params)
             await db.commit()
             return cur.rowcount > 0
 
     async def soft_delete(self, record_id: str) -> bool:
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_extracted_records SET soft_deleted_at = ?, last_modified_at = ? WHERE record_id = ? AND soft_deleted_at IS NULL",
                 (now, now, record_id),
@@ -1032,7 +1033,7 @@ class KbExtractedRecordStore:
     async def soft_delete_for_file(self, file_id: str) -> int:
         """File 删时级联软删 records. 返删除条数."""
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_extracted_records SET soft_deleted_at = ?, last_modified_at = ? WHERE file_id = ? AND soft_deleted_at IS NULL",
                 (now, now, file_id),
@@ -1123,7 +1124,7 @@ class KbExtractedRecordStore:
 
         sql = f"SELECT * FROM kb_extracted_records WHERE {' AND '.join(clauses)} ORDER BY {sort_expr} {sort_dir} LIMIT ?"
         params.append(limit)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
@@ -1149,7 +1150,7 @@ async def migrate_v1_to_v2(db_path: str | Path) -> None:
     db_path_str = str(db_path)
     t0 = time.time()
     try:
-        async with aiosqlite.connect(db_path_str) as db:
+        async with diagnostic_connect(db_path_str) as db:
             # Step 1: single PRAGMA sniff to get all existing column names.
             # NOTE: existing_cols is intentionally a pre-ALTER snapshot — subsequent
             # `in existing_cols` checks must reflect the start state (idempotency).

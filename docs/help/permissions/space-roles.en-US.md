@@ -21,3 +21,7 @@ Membership makes the space available. Each report, attachment, Agent, Skill, and
 When a space is archived or a person is removed, future access through that space ends. Preserve or transfer any material that must remain available through a supported sharing path before removing access.
 
 Related: [Grant space access](space-access.en-US.md) · [Troubleshoot access](troubleshoot-access.en-US.md)
+
+## Leave a space yourself
+
+Members, viewers, and administrators with another active administrator can confirm **More Space Settings → Leave Current Space…** in the space switcher. Leaving preserves the team account and existing space content; rejoining requires an administrator to grant access. The last active administrator must assign another administrator first. See [Leave a space yourself](space-access.en-US.md#leave-a-space-yourself).

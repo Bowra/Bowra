@@ -18,6 +18,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 NotificationTab = Literal["all", "action", "updates"]
 ACTION_REQUIRED_TYPES = frozenset(
@@ -159,7 +160,14 @@ class NotificationCount:
 class NotificationStore:
     db_path: str
 
+    def __post_init__(self) -> None:
+        self.db_path = str(domain_database_path(self.db_path, "notifications"))
+
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(self.db_path) as db:
+                await require_domain_schema(db, "notifications")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self.db_path) as db:
             columns = {row[1] for row in await db.execute_fetchall("PRAGMA table_info(notification_items)")}

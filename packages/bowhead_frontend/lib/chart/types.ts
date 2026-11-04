@@ -67,6 +67,15 @@ export interface ChartColumn {
 
 export interface ChartSpec {
   kind: ChartKind;
+  /** Saved exact presentation; never infer or discard fields for these views. */
+  _explicit_pivoted?: boolean;
+  explicit_presentation?: {
+    version: 1;
+    mode: "table" | "plot" | "analytical";
+    columns?: string[];
+    axes?: { x?: string; y: string[]; x_scale?: "category" | "linear"; y_right?: string[] };
+    group_by?: string[];
+  };
   title: string;
   subtitle?: string;
 

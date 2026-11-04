@@ -10,6 +10,7 @@ import aiosqlite
 import anyio
 import pytest
 from bowhead_core.rate_card import ModelCreditRates, ModelTokenUsage, ModelUsageLine
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import (
     UserStore,
     _deduct_credit_with_stable_id_in_tx,
@@ -85,7 +86,7 @@ async def test_v2_deduction_keeps_model_and_rate_evidence(tmp_path: Path) -> Non
     from test_office_upload_confirmation_migration import _config
 
     path = tmp_path / "migrated.db"
-    command.upgrade(_config(path, "core"), "head")
+    command.upgrade(_config(path, "core"), SOURCE_REVISION)
     async with aiosqlite.connect(path) as db:
         await db.execute("INSERT INTO teams(id,name,created_at,team_credit_balance) VALUES('team_a','Test','2026-10-14',1000)")
         await db.execute("INSERT INTO users(id,team_id,email,created_at,credit_balance) VALUES('u_a','team_a','a@test.com','2026-10-14',1000)")

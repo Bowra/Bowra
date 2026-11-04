@@ -3,8 +3,9 @@ unresolved one reached the answer.
 
 Chat turn feedback signals D6 (``docs/design/chat-turn-feedback-signals-tech-design.md`` §3.3).
 
-Every decision here reads event **structure** only (event type, step id, owning agent, tool name,
-state, peer terminal status). It never reads previews, arguments or model prose.
+Operational counts read event **structure** only (event type, step id, owning agent, tool name,
+state, peer terminal status). Answer impact can additionally use the current native delivery
+review passed through the private done input. Neither reads previews, arguments or model prose.
 
 - ``issue_steps``: steps whose last ``step_done`` state is ``failure`` or ``partial``. This is the
   set the frontend counted before this field existed, so old and new counts agree.
@@ -115,7 +116,7 @@ class _Peer:
     seq: int
 
 
-def summarize_step_outcome(facts: Iterable[StepFact], *, status: str | None) -> dict[str, Any]:
+def summarize_step_outcome(facts: Iterable[StepFact], *, status: str | None, reviewed_complete: bool = False) -> dict[str, Any]:
     """Pure summary of one turn's recorded step facts (see the module docstring)."""
 
     ordered = sorted(facts, key=lambda fact: fact.seq)
@@ -174,7 +175,7 @@ def summarize_step_outcome(facts: Iterable[StepFact], *, status: str | None) -> 
     unresolved.extend(pending)
 
     affected = False
-    if status == "completed":
+    if status == "completed" and (not reviewed_complete or pending):
         for fact in unresolved:
             peer = owning_peer(fact)
             if peer is not None and peer.status in ("failed", "succeeded_with_warnings"):
@@ -192,7 +193,7 @@ def summarize_step_outcome(facts: Iterable[StepFact], *, status: str | None) -> 
     }
 
 
-def step_outcome_field(bus: Any, status: object) -> dict[str, Any]:
+def step_outcome_field(bus: Any, status: object, *, delivery_completion: object = None) -> dict[str, Any]:
     """``{"step_outcome": ...}`` for a terminal ``done``, or ``{}`` when unknown.
 
     Omitted on Terminal v1 (the adapter does not record facts), when the record cap was exceeded,
@@ -209,7 +210,13 @@ def step_outcome_field(bus: Any, status: object) -> dict[str, Any]:
         if getattr(bus, "_step_outcome_partial", False):
             # Continuation generation: earlier generations' steps are not in this bus.
             return {}
-        return {"step_outcome": summarize_step_outcome(facts, status=str(status) if status is not None else None)}
+        outcome = summarize_step_outcome(
+            facts, status=str(status) if status is not None else None, reviewed_complete=delivery_completion == "reviewed_complete"
+        )
+        # Operational recovery never overrides a reviewed required-delivery gap.
+        if status == "completed" and delivery_completion in {"partial", "unverified"}:
+            outcome["answer_affected"] = True
+        return {"step_outcome": outcome}
     except Exception:
         return {}
 

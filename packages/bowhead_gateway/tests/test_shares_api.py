@@ -690,3 +690,55 @@ def test_s6_share_notification_and_directory(tmp_path):
     g = a.get("/api/v1/team/groups-directory").json()
     assert [x["name"] for x in g["items"]] == ["g1"]
     assert set(g["items"][0]) == {"id", "name", "member_count"}
+
+
+@pytest.mark.parametrize("prefix", ["", "/bowhead", "/tenant/acme"])
+@pytest.mark.parametrize("principal", ["user", "team"])
+def test_disabled_report_sharing_blocks_all_writers_but_keeps_revocation(tmp_path, monkeypatch, principal, prefix):
+    from bowhead_core import share_service
+
+    env = _Env(tmp_path)
+    team, owner, recipient = _team_users(env)
+    space = _run(env.users.sync_workspace_from_datarc(team_id=team.id, datarc_workspace_id="901", name="Reports"))
+    _run(env.users.add_member(workspace_id=space, user_id=owner.id, role="admin"))
+    _run(env.canvas.ensure_canvas(session_id="ses_policy", workspace_id=space, user_id=owner.id))
+    client = TestClient(env.client(owner, admin=True).app, root_path=prefix)
+    recipient_client = TestClient(env.client(recipient).app, root_path=prefix)
+    path = f"{prefix}{_BASE}/report/ses_policy"
+    grant = _run(
+        env.access.create_or_update_resource_grant(
+            team_id=team.id,
+            resource_kind="report",
+            resource_id="ses_policy",
+            principal_type=principal,
+            principal_id=recipient.id if principal == "user" else team.id,
+            permission="read",
+            created_by=owner.id,
+        )
+    )
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    assert client.get(path).status_code == 200
+    assert recipient_client.get(path).status_code == 404
+    for response in (
+        client.post(path + "/grants", json={"principal_type": "user", "principal_id": recipient.id}),
+        client.put(path + "/audience", json={"audience": "team_wide"}),
+        client.put(path + "/audience", json={"audience": "custom"}),
+        client.post(
+            f"{prefix}/api/v1/resource-grants",
+            json={
+                "resource_kind": "report",
+                "resource_id": "ses_policy",
+                "permission": "read",
+                "principal_type": principal,
+                "principal_id": recipient.id if principal == "user" else team.id,
+                "effect": "allow",
+            },
+        ),
+    ):
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"]["error"]["code"] == "content_sharing_disabled"
+    assert len(_run(env.access.list_resource_grants(team.id, resource_kind="report", resource_id="ses_policy"))) == 1
+    assert client.delete(path + f"/grants/{grant.id}").status_code == 204
+    assert client.put(path + "/audience", json={"audience": "private"}).status_code == 200
+    monkeypatch.setattr(share_service, "_content_sharing_cache", True)
+    assert recipient_client.get(path).status_code == 404

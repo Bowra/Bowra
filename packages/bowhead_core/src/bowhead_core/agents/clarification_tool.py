@@ -124,33 +124,6 @@ def _normalize_question_type(raw_type: Any) -> str:
     return value if value in SUPPORTED_QUESTION_TYPES else "single_select"
 
 
-MAX_OPTIONS_PER_QUESTION = 4
-
-
-def _questions_over_option_limit(raw_questions: Any) -> list[dict[str, Any]]:
-    """Questions whose valid options exceed the per-question limit, with the overflow."""
-    if not isinstance(raw_questions, list):
-        return []
-    over: list[dict[str, Any]] = []
-    for index, raw in enumerate(raw_questions):
-        if not isinstance(raw, dict) or not isinstance(raw.get("options"), list):
-            continue
-        if _normalize_question_type(raw.get("type")) == "free_text":
-            # free_text takes no options; normalization already drops a free_text question that carries any.
-            continue
-        options = [str(opt).strip()[:80] for opt in raw["options"] if isinstance(opt, str) and opt.strip()]
-        if len(options) > MAX_OPTIONS_PER_QUESTION:
-            over.append(
-                {
-                    "question_index": index,
-                    "question": str(raw.get("question") or "")[:200],
-                    "option_count": len(options),
-                    "rejected_options": options[MAX_OPTIONS_PER_QUESTION:],
-                }
-            )
-    return over
-
-
 def normalize_clarification_questions(raw_questions: Any) -> list[dict[str, Any]]:
     """Normalize B5 `questions` while preserving every valid question.
 
@@ -170,10 +143,7 @@ def normalize_clarification_questions(raw_questions: Any) -> list[dict[str, Any]
         raw_options = raw.get("options") or []
         if not isinstance(raw_options, list):
             raw_options = []
-        # Match schema maxItems (ask_user_input_v0: 2-4 options/question). The tool
-        # handler rejects longer lists before this point; the cut only guards old
-        # persisted rows and non-tool producers.
-        options = [str(opt).strip()[:80] for opt in raw_options if isinstance(opt, str) and opt.strip()][:MAX_OPTIONS_PER_QUESTION]
+        options = [str(opt).strip()[:80] for opt in raw_options if isinstance(opt, str) and opt.strip()]
         q_type = _normalize_question_type(raw.get("type"))
         if q_type == "free_text":
             # The explicit input type wins; stray choices must not erase the question.
@@ -218,7 +188,7 @@ def _flatten_question_candidates(questions: list[dict[str, Any]]) -> list[str]:
         for opt in q.get("options") or []:
             if isinstance(opt, str):
                 candidates.append(opt)
-    return candidates[:12]  # ≤3 questions × ≤4 options
+    return candidates
 
 
 def _inc_clarification_metric(
@@ -370,8 +340,9 @@ def _clarification_ask_schema() -> ToolSchema:
             "WHEN TO USE\n"
             "- A value required to complete the task is absent, cannot be "
             "  derived from supplied data, and only the user can provide it. "
-            "  If the user asks you to obtain it before acting, call this tool "
-            "  alone before delegating or using other tools.\n"
+            "  Necessary read-only inspection may identify what is missing before "
+            "  this question. Ask alone before an action that depends on the answer; "
+            "  this Tool checks whether the current workflow can pause.\n"
             "- Or the query has multiple defensible interpretations, no "
             "  available tool or context can disambiguate them, and choosing "
             "  incorrectly would meaningfully change the answer.\n"
@@ -398,7 +369,7 @@ def _clarification_ask_schema() -> ToolSchema:
             "OUTPUT FORMAT\n"
             "- 1-3 clarifying questions per call (one per ambiguous facet; "
             "  bundle related ones, don't fragment).\n"
-            "- For choice questions, provide 2-4 short options. Cover the realistic space; "
+            "- For choice questions, provide concise, distinct options. Cover the realistic space; "
             "  user can enter another answer if you missed it.\n"
             "- When the user must supply a missing value (for example an equity amount), "
             "  use type='free_text' and options=[]; never invent value choices.\n"
@@ -418,7 +389,7 @@ def _clarification_ask_schema() -> ToolSchema:
             "  questions: list[Question]  # 1-3 questions, each with options/type\n"
             "    Question = {\n"
             "      question: str           # the framed question (1-2 sentences)\n"
-            "      options: list[str]      # 2-4 choice labels; [] for free_text\n"
+            "      options: list[str]      # concise choice labels; [] for free_text\n"
             "      type: 'single_select' | 'multi_select' | 'free_text'\n"
             "    }\n"
             "  fallback_text: str?         # prose shown when questions empty\n"
@@ -483,7 +454,6 @@ def _clarification_ask_schema() -> ToolSchema:
                                 "type": "array",
                                 "items": {"type": "string", "maxLength": 80},
                                 "minItems": 0,
-                                "maxItems": 4,
                             },
                             "type": {
                                 "type": "string",
@@ -506,7 +476,6 @@ def _clarification_ask_schema() -> ToolSchema:
                     "type": "array",
                     "items": {"type": "string", "maxLength": 80},
                     "minItems": 1,
-                    "maxItems": 5,
                     "description": (
                         "Legacy single-question shape (backward-compat). If `questions` is provided, this is ignored. Treated as single_select."
                     ),
@@ -621,35 +590,6 @@ async def _clarification_ask(
             ),
         }
 
-    over_limit = _questions_over_option_limit(questions)
-    if over_limit:
-        _inc_clarification_metric(
-            type="single_select",
-            caller="tool_handler_reject_options",
-            source_kind="generic",
-            outcome="rejected_too_many_options",
-            help_text="clarification_ask rejected: a question had more than the maximum options.",
-        )
-        # A rejection must carry the right answer: name the exact limit and the
-        # options that did not fit so the model can merge or drop them.
-        details = " ".join(
-            f"Question {item['question_index'] + 1} ({item['question']!r}) has {item['option_count']} options; "
-            f"these would not fit: {item['rejected_options']}."
-            for item in over_limit
-        )
-        return {
-            SENTINEL_CLARIFICATION_PENDING: False,
-            "ok": False,
-            "error_kind": "schema_invalid",
-            "max_options_per_question": MAX_OPTIONS_PER_QUESTION,
-            "questions_over_limit": over_limit,
-            "error_message": (
-                f"clarification_ask accepts at most {MAX_OPTIONS_PER_QUESTION} options per question; nothing was shown to the user. "
-                f"{details} Merge or drop options so each question has at most {MAX_OPTIONS_PER_QUESTION}, "
-                "then call clarification_ask again."
-            ),
-        }
-
     normalized_questions = normalize_clarification_questions(questions)
     if normalized_questions:
         candidates = _flatten_question_candidates(normalized_questions)
@@ -677,7 +617,7 @@ async def _clarification_ask(
         candidates = args.get("candidates") or []
         if not isinstance(candidates, list):
             candidates = []
-        candidates = [str(c)[:80] for c in candidates if isinstance(c, str)][:5]
+        candidates = [str(c).strip()[:80] for c in candidates if isinstance(c, str) and c.strip()]
         # bi-hitl-cleanup P8 (2026-05-21): close legacy-path telemetry gap —
         # without this, only B5 questions-shape callers were counted, masking
         # legacy traffic during the migration window.

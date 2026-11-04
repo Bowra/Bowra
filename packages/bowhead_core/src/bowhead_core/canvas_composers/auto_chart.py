@@ -1,11 +1,7 @@
-"""Sprint ι auto-chart fallback (PRD §4.C.2 / tech-r2 §2.7).
+"""Deliver unreferenced sandbox CSVs as complete native Tables.
 
-At compute peer subagent_return, scan tool_invocations for sandbox-derived
-artifacts that smell like a small numeric table but have no associated
-add_chart call. Emit auto-chart only when 5 conditions hold (AND-gate).
-
-The subagent peer-return path requires an advertised ``add_chart`` and uses
-the guarded tool execution path. See §4.2 in tech-r2.
+Only admitted peers and unconsumed, unreferenced CSV artifacts qualify. The
+shared chart Tool owns exact field handling and source/persistence boundaries.
 """
 
 from __future__ import annotations
@@ -67,23 +63,10 @@ def should_auto_chart(
     consumed_artifact_ids: set[str],
     chart_referenced_artifact_ids: set[str],
 ) -> bool:
-    """5-condition AND-gate per PRD §4.C.2.
-
-    1. mime = text/csv
-    2. 1 ≤ numeric_col_count ≤ 2
-    3. 3 ≤ row_count ≤ 200
-    4. NOT consumed as input by downstream sandbox call this turn
-    5. NOT already referenced by add_chart this turn
-    """
+    """Admit CSV fallback delivery without classifying dimensions or measures."""
     if not _flag_enabled():
         return False
     if artifact_meta.get("mime") != "text/csv":
-        return False
-    n_numeric = int(artifact_meta.get("numeric_col_count", 0) or 0)
-    if not (1 <= n_numeric <= 2):
-        return False
-    n_rows = int(artifact_meta.get("row_count", 0) or 0)
-    if not (3 <= n_rows <= 200):
         return False
     aid = artifact_meta.get("artifact_id")
     if not aid:
@@ -145,11 +128,9 @@ def collect_auto_chart_candidates(
             rows = preview.get("rows") or []
             if not isinstance(cols, list) or not isinstance(rows, list):
                 continue
-            n_numeric = sum(1 for idx, _c in enumerate(cols) if _looks_numeric_col(rows, idx))
             meta = {
                 "artifact_id": out.get("artifact_id"),
                 "mime": out.get("mime"),
-                "numeric_col_count": n_numeric,
                 "row_count": len(rows),
                 "filename": out.get("name") or "",
             }
@@ -162,7 +143,8 @@ def collect_auto_chart_candidates(
                     {
                         "data_artifact_id": meta["artifact_id"],
                         "title": meta["filename"] or "auto-chart",
-                        "hint": "auto",
+                        "force_kind": "table",
+                        "columns": "all",
                         "auto_charted": True,
                     }
                 )
@@ -185,28 +167,3 @@ def _sandbox_arguments(inv: ToolInvocation) -> dict[str, Any] | None:
     if inv.tool_name == "skill_invoke" and args.get("name") == "python_sandbox":
         return args["input"] if isinstance(args.get("input"), dict) else {}
     return None
-
-
-def _looks_numeric_col(rows: list[list[Any]], col_idx: int) -> bool:
-    """Best-effort detector: ≥80% of non-empty cells parse as float.
-
-    Samples up to 50 rows (matches sandbox preview row cap).
-    """
-    parsed_ok = 0
-    seen = 0
-    for row in rows[:50]:
-        if not isinstance(row, list) or col_idx >= len(row):
-            continue
-        cell = row[col_idx]
-        if cell is None:
-            continue
-        s = str(cell).strip()
-        if not s:
-            continue
-        seen += 1
-        try:
-            float(s.replace(",", ""))
-            parsed_ok += 1
-        except ValueError:
-            pass
-    return seen > 0 and (parsed_ok / seen) >= 0.8

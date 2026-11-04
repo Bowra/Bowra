@@ -14,17 +14,19 @@ from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME
 from bowhead_router.types import LLMRequest, LLMResponse, Message
 
 from bowhead_core._db import open_shared_ctx
-from bowhead_core.chat_reference_storage import ReferenceCipher
+from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.context_capacity import capacity_message_groups
 from bowhead_core.context_compaction import CompactionPreparationError, balanced_boundaries, message_digest
 from bowhead_core.context_dependencies import adoption_source_validator
 from bowhead_core.context_maintenance import ContextCandidate, ContextMaintenance, DecisionController, MaintenanceResult, Trigger
-from bowhead_core.context_ownership import ContextOwner, require_context_owner_in_tx
+from bowhead_core.context_ownership import ContextOwner, context_scope, require_context_owner_in_tx
 from bowhead_core.context_store import (
     ContextCompletion,
     ContextLane,
     ContextOrigin,
     ContextStoreError,
+    PreparedContextAncestry,
+    PreparedContextMessages,
     SourceValidator,
     prepare_context_messages,
     read_context_graph_in_tx,
@@ -86,20 +88,31 @@ class ExecutionContextView:
         values = self.source_dependencies() if self.source_dependencies is not None else []
         return await values if isawaitable(values) else values
 
-    async def _prepare_messages(self, messages):
-        return await prepare_context_messages(messages, worker=self.worker, execution_id=self.execution_id, lane=self.lane, cipher=self.cipher)
+    async def _prepare_messages(self, messages: list[Message], ancestry: PreparedContextAncestry | None = None) -> PreparedContextMessages:
+        return await prepare_context_messages(
+            messages,
+            worker=self.worker,
+            execution_id=self.execution_id,
+            lane=self.lane,
+            cipher=self.cipher,
+            db_path=self.db_path,
+            preparation=ancestry,
+        )
 
-    async def _prepare_source_validation(self, *batches: list[Message], for_publication: bool = False) -> SourceValidator:
+    async def _prepare_source_validation(
+        self, *batches: list[Message], for_publication: bool = False
+    ) -> tuple[SourceValidator, PreparedContextAncestry | None]:
         from bowhead_core.context_dependencies import ContextSourceValidator, PreparedContextSourceValidator
 
         if not isinstance(self.validate_sources, ContextSourceValidator):
-            return self.validate_sources
+            return self.validate_sources, None
         prepared = PreparedContextSourceValidator(self.validate_sources)
+        ancestry = PreparedContextAncestry(ReferenceScope(**context_scope(self.worker).model_dump(), policy_epoch=0), self.cipher)
         # Reading under WAL does not hold the shared writer lock. The write
-        # transaction rereads this ancestry and rechecks current authority.
-        async with open_shared_ctx(self.db_path) as db:
-            await db.execute("BEGIN")
-            for identity in dict.fromkeys(value for value in (self.generation, self.inherited_generation) if value):
+        # transaction checks immutable presence and fresh current authority.
+        for identity in dict.fromkeys(value for value in (self.generation, self.inherited_generation) if value):
+            async with open_shared_ctx(self.db_path) as db:
+                await db.execute("BEGIN")
                 await read_context_graph_in_tx(
                     db,
                     worker=self.worker,
@@ -110,11 +123,12 @@ class ExecutionContextView:
                     validate_sources=prepared.collect,
                     projection_only=True,
                     for_publication=for_publication,
+                    preparation=ancestry,
                 )
-            await db.rollback()
+                await db.rollback()
         for messages in batches:
             await prepared.collect(messages)
-        return prepared
+        return prepared, ancestry
 
     async def restore(self) -> None:
         if self._loaded:
@@ -220,12 +234,13 @@ class ExecutionContextView:
             nonlocal source_generation, operation_id
             origin = ContextOrigin(provider=budget.provider, model=budget.model, configuration_version=budget.configuration_version)
             dependencies = await self._dependencies()
-            validation = await self._prepare_source_validation(dependencies, lane_messages)
-            prepared_dependencies = await self._prepare_messages(dependencies) if dependencies else None
-            prepared_lane = await self._prepare_messages(lane_messages)
+            validation, ancestry = await self._prepare_source_validation(dependencies, lane_messages)
+            prepared_dependencies = await self._prepare_messages(dependencies, ancestry) if dependencies else None
+            prepared_lane = await self._prepare_messages(lane_messages, ancestry)
             async with open_shared_ctx(self.db_path) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 validation = adoption_source_validator(validation, db)
+                ancestry = ancestry.for_transaction() if ancestry is not None else None
                 parent = self.generation
                 if dependencies:
                     # Source hints can be delivered outside native Tool bodies.
@@ -239,6 +254,7 @@ class ExecutionContextView:
                         expected_generation=parent,
                         messages=dependencies,
                         prepared_messages=prepared_dependencies,
+                        prepared_ancestry=ancestry,
                         policy=budget.policy,
                         origin=origin,
                         cipher=self.cipher,
@@ -253,6 +269,7 @@ class ExecutionContextView:
                     expected_generation=parent,
                     messages=lane_messages,
                     prepared_messages=prepared_lane,
+                    prepared_ancestry=ancestry,
                     policy=budget.policy,
                     origin=origin,
                     cipher=self.cipher,
@@ -283,8 +300,8 @@ class ExecutionContextView:
             origin = ContextOrigin(
                 provider=candidate.after.provider, model=candidate.after.model, configuration_version=candidate.after.configuration_version
             )
-            validation = await self._prepare_source_validation(lane_candidate)
-            prepared_candidate = await self._prepare_messages(lane_candidate)
+            validation, ancestry = await self._prepare_source_validation(lane_candidate)
+            prepared_candidate = await self._prepare_messages(lane_candidate, ancestry)
             async with open_shared_ctx(self.db_path) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 identity = await write_context_in_tx(
@@ -295,6 +312,7 @@ class ExecutionContextView:
                     expected_generation=source_generation,
                     messages=lane_candidate,
                     prepared_messages=prepared_candidate,
+                    prepared_ancestry=ancestry.for_transaction() if ancestry is not None else None,
                     policy=candidate.after.policy,
                     origin=origin,
                     cipher=self.cipher,
@@ -393,7 +411,7 @@ class ExecutionContextView:
         dependencies = deepcopy(await self._dependencies())
         from bowhead_core.context_publication import ContextPublication
 
-        validation = await self._prepare_source_validation(projected, dependencies, for_publication=True)
+        validation, ancestry = await self._prepare_source_validation(projected, dependencies, for_publication=True)
         return ContextPublication(
             db_path=self.db_path,
             worker=self.worker,
@@ -405,4 +423,5 @@ class ExecutionContextView:
             budget=self.last_budget,
             expected_generation=self.generation,
             inherited_generation=self.inherited_generation,
+            prepared_ancestry=ancestry,
         )

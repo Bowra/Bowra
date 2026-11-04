@@ -12,12 +12,12 @@ from pathlib import Path
 import aiosqlite
 import pytest
 from bowhead_cli.main import app
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.llm_request_record import OMIT_CHUNK_BYTES, write_request_records
 from bowhead_router.invocation import canonical_transport_bytes
 from bowhead_router.request_record import RequestChange, RequestRecordEntry
 from bowhead_router.usage import UsageContext
+from cli_legacy_database import TARGET_FILES, upgrade
 from cryptography.fernet import Fernet
 from typer.testing import CliRunner
 

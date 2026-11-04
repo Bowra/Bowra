@@ -16,6 +16,8 @@ from pathlib import Path
 from time import perf_counter_ns
 from typing import Any
 
+from bowhead_core.sqlite_domain_runtime import connect_sync
+
 _ALLOWED_AGENT_COUNTS = frozenset({1, 50, 500, 5000})
 _ALLOWED_MEMBER_COUNTS = frozenset({1, 100, 1000})
 _BENCHMARK_SEED = 20260727
@@ -107,7 +109,7 @@ def generate_subagent_benchmark_fixture(
     """Create one deterministic synthetic fixture; never reads production data."""
     _validate_dimensions(agent_count=agent_count, member_count=member_count)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_path)
+    connection = connect_sync(db_path)
     try:
         connection.executescript(_SCHEMA)
         connection.execute("PRAGMA journal_mode=WAL")
@@ -514,7 +516,7 @@ def _environment(db_path: Path) -> dict[str, Any]:
 
 @contextmanager
 def _read_connection(db_path: Path) -> Iterator[sqlite3.Connection]:
-    connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = connect_sync(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         connection.execute("PRAGMA query_only=ON")
         yield connection

@@ -5,7 +5,7 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from core_legacy_database import TARGET_FILES
 from test_agent_eval_policy_plan_store import _comparison_context, _seed
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot

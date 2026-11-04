@@ -7,6 +7,8 @@
  * progress, failed/stuck reason+retry, ready “在对话中使用”. Content-deep-search entry pins/highlights matching chunk.
  */
 
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { KbSourceNavigation } from "./kb-source-navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
@@ -111,6 +113,14 @@ export function KbFileDrawer({
   openedWithPointer = false,
 }: Props) {
   const t = useTranslations("knowledge_base.drawer");
+  const [navigationBusy, setNavigationBusy] = useState(false);
+  const [navigationDirty, setNavigationDirty] = useState(false);
+  const discard = useConfirmDialog();
+  const discardT = useTranslations("locale");
+  const closeDrawer = async () => {
+    if (navigationBusy) return;
+    if (!navigationDirty || await discard.confirm({ title: discardT("discard_title"), description: discardT("discard_description"), confirmLabel: discardT("discard_confirm"), tone: "discard" })) onClose();
+  };
   const locale = useLocale();
   const tKb = useTranslations("knowledge_base");
   const tErr = useTranslations("knowledge_base.errors");
@@ -260,13 +270,14 @@ export function KbFileDrawer({
     // never closing entire drawer too.
     <DialogShell
       presentation="center"
-      onClose={onClose}
-      busy={showPreview || confirmingDelete}
+      onClose={() => void closeDrawer()}
+      busy={showPreview || confirmingDelete || navigationBusy}
       label={file.filename}
       backdropClassName="kb-drawer-overlay"
       panelClassName="kb-drawer-panel"
       panelProps={{
         "data-testid": "kb-file-drawer",
+        "aria-hidden": showPreview || undefined,
         "data-dialog-initial-focus": openedWithPointer ? "" : undefined,
         // Delete-confirmation strip inside panel: shell prevents panel-key bubbling to document; Esc collapses it here.
         onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -278,7 +289,7 @@ export function KbFileDrawer({
     >
         <header className="dr-hd">
           {narrow && (
-            <button type="button" className="kb-x" onClick={onClose} aria-label={t("back_aria")}>
+            <button type="button" className="kb-x" onClick={() => void closeDrawer()} aria-label={t("back_aria")}>
               <IconChevL />
             </button>
           )}
@@ -296,7 +307,7 @@ export function KbFileDrawer({
             </div>
           </div>
           {!narrow && (
-            <button type="button" className="kb-x" onClick={onClose} aria-label={t("close_aria")}>
+            <button type="button" className="kb-x" onClick={() => void closeDrawer()} aria-label={t("close_aria")}>
               <IconX />
             </button>
           )}
@@ -358,6 +369,7 @@ export function KbFileDrawer({
               ) : null}
             </dd>
           </dl>
+            {ready && <KbSourceNavigation key={`${file.file_id}:${file.version}`} file={file} readOnly={!onDeleted} onDirtyChange={setNavigationDirty} onBusyChange={setNavigationBusy} />}
 
           {!ready && (
             <>
@@ -450,6 +462,7 @@ export function KbFileDrawer({
             </p>
           )}
         </div>
+      {discard.dialog}
       {showPreview && <KbPreview file={file} onClose={() => setShowPreview(false)} />}
     </DialogShell>
   );

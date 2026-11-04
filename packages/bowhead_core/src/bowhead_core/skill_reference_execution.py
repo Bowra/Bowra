@@ -50,6 +50,7 @@ from bowhead_core.chat_references import (
 )
 from bowhead_core.skill_baseline_material import PreparedSkillBaseline, prepare_baseline_selected_reads, restore_skill_baseline
 from bowhead_core.skill_extension_material import PreparedSkillExtension, prepare_skill_extension, restore_skill_extension
+from bowhead_core.skill_method_policy import METHOD_REFERENCE_CONTRACT, TaskMethodReadPolicy
 from bowhead_core.skill_read_extensions import (
     SKILL_EXTENSION_RUNTIME_POLICY,
     primary_extension_policy,
@@ -126,6 +127,7 @@ class ReferenceSkillPrimaryComposition(ReferencePrimaryComposition):
     capability: ReferenceCapabilityComposition | None = None
     extension_digest: ContentHash | None = None
     extension_policy_digest: ContentHash | None = None
+    method_reference: Literal["user-selected-method.v1"] | None = None
 
     @model_validator(mode="after")
     def extension_contract(self):
@@ -139,6 +141,8 @@ class ReferenceSkillPrimaryComposition(ReferencePrimaryComposition):
                 raise ValueError("reference_extension_composition_invalid")
         elif self.extension_digest is not None or self.extension_policy_digest is not None or any(m.provenance != "baseline" for m in self.members):
             raise ValueError("reference_extension_composition_invalid")
+        if self.method_reference is not None and not active:
+            raise ValueError("reference_method_composition_invalid")
         return self
 
 
@@ -260,6 +264,8 @@ def _composition(
             for item in prepared.closure.items
         ),
     )
+    if prepared.extension is not None and isinstance(prepared.extension.policy, TaskMethodReadPolicy):
+        value["method_reference"] = METHOD_REFERENCE_CONTRACT
     composition = ReferenceSkillPrimaryComposition.model_validate(value)
     if len(composition.canonical_json().encode()) > MAX_REFERENCE_STORAGE_BYTES:
         raise ValueError("reference_composition_material_limit")
@@ -370,11 +376,16 @@ class SkillReferenceWorkerPreparation:
             if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_capability_composition'", ()) is None:
                 raise ValueError("reference_capability_migration_required")
         if self.prepared.extension is not None:
+            if isinstance(self.prepared.extension.policy, TaskMethodReadPolicy):
+                if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_method_composition'", ()) is None:
+                    raise ValueError("reference_skill_extension_migration_required")
             if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_extension_epoch_check'", ()) is None:
                 raise ValueError("reference_skill_extension_migration_required")
             if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_skill_extension_composition'", ()) is None:
                 raise ValueError("reference_skill_extension_migration_required")
-            if self.prepared.extension != await primary_extension_policy(db, primary, self.prepared.receiver):
+            if self.prepared.extension != await primary_extension_policy(
+                db, primary, self.prepared.receiver, prefer_task_method=isinstance(self.prepared.extension.policy, TaskMethodReadPolicy)
+            ):
                 raise ValueError("reference_skill_extension_changed")
             from bowhead_core.skill_read_extensions import revalidate_extension_sources
 

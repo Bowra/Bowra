@@ -4,8 +4,9 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.session_store import SESSION_TITLE_SOURCE_COLUMN_DDL, SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -64,13 +65,13 @@ def test_upgrade_preserves_rows_and_adds_title_source_only_to_core(tmp_path, tar
 
 def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_title_source(tmp_path):
     empty = tmp_path / "empty.db"
-    _upgrade(empty, "head")
+    _upgrade(empty, SQLITE_LEGACY_REVISION)
     baseline = tmp_path / "baseline.db"
     _upgrade(baseline, BASELINE.revision)
     with sqlite3.connect(baseline) as db:
         _seed_session(db, "s_baseline", None)
-    _upgrade(baseline, "head")
-    _upgrade(baseline, "head")
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
     for path in (empty, baseline):
         assert "title_source" in _columns(path)
     with sqlite3.connect(baseline) as db:
@@ -82,7 +83,7 @@ def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_title_source
 
 def test_title_source_rejects_unknown_values(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     with sqlite3.connect(path) as db:
         _seed_session(db)
         db.execute("UPDATE sessions SET title_source='user' WHERE id='s_old'")
@@ -99,7 +100,7 @@ async def test_store_initializer_and_migration_share_the_column_in_either_order(
     assert "title_source" in _columns(initialized_first)
     _upgrade(initialized_first, MIGRATION.revision, "core")
     migrated_first = tmp_path / "migrated.db"
-    _upgrade(migrated_first, "head", "core")
+    _upgrade(migrated_first, SQLITE_LEGACY_REVISION, "core")
     await SessionStore(migrated_first).initialize()
     for path in (initialized_first, migrated_first):
         assert _columns(path).count("title_source") == 1
@@ -107,7 +108,7 @@ async def test_store_initializer_and_migration_share_the_column_in_either_order(
 
 async def test_store_rename_marks_the_title_user_set_and_blocks_automatic_writes(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head", "core")
+    _upgrade(path, SQLITE_LEGACY_REVISION, "core")
     store = SessionStore(path)
     await store.initialize()
     await store.ensure_session(session_id="s_store", workspace_id="w1", user_id="u1")
@@ -124,7 +125,7 @@ async def test_touch_session_only_writes_automatic_titles(tmp_path):
     """touch_session reads the title before its UPDATE; a user-set row must keep its title."""
 
     path = tmp_path / "core.db"
-    _upgrade(path, "head", "core")
+    _upgrade(path, SQLITE_LEGACY_REVISION, "core")
     store = SessionStore(path)
     await store.initialize()
     for session_id in ("s_auto", "s_user"):

@@ -2,6 +2,16 @@
 
 Bowra recherche les documents ajoutés à la base de connaissances lorsque vous posez des questions. Pour conserver un fichier sans l’utiliser dans les recherches, placez-le dans **Bibliothèque → Fichiers**. Vous pourrez l’ajouter à la base plus tard.
 
+## Descriptions et catégories pour la navigation des sources
+
+Ouvrez les détails d’un fichier prêt. Les responsables autorisés peuvent saisir une description manuelle et attribuer jusqu’à huit catégories sur deux niveaux au maximum. La recherche retrouve les catégories absentes de la première liste. Les descriptions guident la recherche et ne remplacent pas les preuves originales.
+
+La description manuelle est prioritaire. L’effacer puis enregistrer rétablit une description automatique encore valide. Après modification de la source, vérifiez et ressaisissez une description manuelle périmée. Les mises à jour d’état préservent les brouillons non enregistrés.
+
+Les descriptions automatiques sont désactivées par défaut. Un propriétaire ou administrateur choisit **Descriptions des sources** dans **Paramètres d’équipe → Modèles → Affectations**. Les nouvelles versions publiées peuvent alors recevoir une description issue d’extraits limités ; enregistrer ne traite pas les anciens fichiers. Un responsable peut générer explicitement une description, ce qui consomme des crédits. Un échec laisse la recherche disponible. Actualisez avant de relancer, notamment si le résultat de la dernière requête est inconnu.
+
+Dans l’éditeur de colonne Matrix existant, choisissez **Description** ou **Sujets** pour réutiliser des résultats existants admissibles, actuels et non modifiés, dans leurs permissions d’origine. Ce réglage ne lance pas d’extraction et ne publie pas de description commune au fichier. Les Agents reçoivent un petit répertoire autorisé, peuvent découvrir d’autres sources et lisent les preuves originales au besoin. Une absence de résultat ne prouve pas l’absence de documents.
+
 ## Organisation de la page
 
 La page propose quatre vues. Elles figurent en onglets au-dessus du contenu ; sur écran étroit, elles deviennent une rangée de boutons à faire défiler latéralement :
@@ -183,4 +193,4 @@ La fenêtre explique les refus, reste ouverte et garde votre périmètre.
 - **Transfert interrompu** : réseau coupé pendant l’envoi, souvent par une limite de passerelle d’entreprise. Si seuls les gros fichiers échouent, demandez au responsable du déploiement d’augmenter la limite. Pour un incident isolé, **Réessayer** relance le même fichier.
 - **Échec de connexion réseau** : aucun contenu n’a été transmis. Vérifiez le réseau et **Réessayer**.
 
-**Annuler l’importation** arrête un transfert en cours.
+**Annuler l’importation** arrête un transfert en cours. Le même état de changement de source apparaît après l’actualisation ou la relecture du chat.

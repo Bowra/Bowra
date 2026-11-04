@@ -1082,7 +1082,27 @@ def merge_viewer_patch_preserving_provenance(
                     registry_path="spec.source_meta",
                     ordinal=1,
                 )
-            restored_spec = copy.deepcopy(dict(merged_spec))
+            if isinstance(incoming_spec, Mapping) and "_explicit_pivoted" in incoming_spec:
+                raise SourcePatchError("source_shape_conflict", "Internal render projections cannot be authored by a viewer")
+            current_explicit = current_spec.get("explicit_presentation")
+            if isinstance(incoming_spec, Mapping):
+                if current_explicit is None and "explicit_presentation" in incoming_spec:
+                    raise SourcePatchError("source_shape_conflict", "Explicit bindings must be authored by the native tool")
+                if current_explicit is not None:
+                    safe_spec = _redact_unregistered_source_like_fields("chart", {"spec": current_spec})["spec"]
+                    for field in ("explicit_presentation", "kind", "rows", "row_count"):
+                        if field in incoming_spec and incoming_spec[field] != safe_spec.get(field):
+                            raise SourcePatchError("source_shape_conflict", "Explicit field bindings and prepared data require native revalidation")
+                    if "columns" in incoming_spec:
+                        fields = ("key", "type", "role", "y_axis_id")
+                        incoming_columns = incoming_spec["columns"]
+                        if not isinstance(incoming_columns, list) or any(not isinstance(column, Mapping) for column in incoming_columns):
+                            raise SourcePatchError("source_shape_conflict", "Explicit column bindings must retain their shape")
+                        if [[column.get(field) for field in fields] for column in incoming_columns] != [
+                            [column.get(field) for field in fields] for column in safe_spec.get("columns", [])
+                        ]:
+                            raise SourcePatchError("source_shape_conflict", "Explicit columns must retain keys, order and placement")
+            restored_spec = copy.deepcopy({**current_spec, **merged_spec}) if current_explicit is not None else copy.deepcopy(dict(merged_spec))
             if isinstance(current_spec.get("views"), list) and isinstance(incoming_spec, Mapping):
                 # Native settings edit display fields inside one complete root.
                 # Keep canonical observation/provenance metadata, including fields
@@ -1121,6 +1141,11 @@ def merge_viewer_patch_preserving_provenance(
                         or not isinstance(incoming_view["spec"], Mapping)
                     ):
                         raise SourcePatchError("source_shape_conflict", "composition view identity changed")
+                    if (
+                        current_view["spec"].get("explicit_presentation")
+                        and incoming_view["spec"].get("kind", current_view["spec"]["kind"]) != current_view["spec"]["kind"]
+                    ):
+                        raise SourcePatchError("source_shape_conflict", "Explicit view kinds require native revalidation")
                     for key, value in incoming_view["spec"].items():
                         if key not in editable and (key not in safe_view["spec"] or value != safe_view["spec"][key]):
                             raise SourcePatchError("source_identity_injection", "composition observation metadata cannot be edited by a viewer")

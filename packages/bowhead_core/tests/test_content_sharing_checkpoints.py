@@ -10,12 +10,12 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import AgentAssignmentStore
 from bowhead_core.agents.lead_orchestrator import _gather_lead_peers
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.user_store import UserStore
 from bowhead_skill.skill_resolver import resolve_skill
+from core_legacy_database import upgrade
 from test_agent_legacy_deployment_dispatch import _publish_release
 from test_team_subagent_access import _setup_fixture
 
@@ -44,7 +44,7 @@ class _TeamSkillStore:
 @pytest.fixture
 async def agents(tmp_path):
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     fixture = await _setup_fixture(str(path))
     await AgentAssignmentStore(path).backfill_existing_access(apply=True, source_build="test-sharing")
     # Member Agents run only from a live release since 8e6f85c9a.

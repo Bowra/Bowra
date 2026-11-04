@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from rich.console import Console
 
 app = typer.Typer(
@@ -23,15 +24,14 @@ app.add_typer(migrate_app, name="migrate")
 def migrate_upgrade(
     revision: str = typer.Argument("head"),
     db_url: str | None = typer.Option(None, "--db", help="默认取 BOWHEAD_DB_URL"),
-    target: str | None = typer.Option(None, "--target", help="仅迁移一个 SQLite 目标"),
 ) -> None:
-    """执行 1.0.0 基线及后续 Alembic revision。"""
+    """Upgrade every registered SQLite database to the current image revision."""
     if revision != "head":
         raise typer.BadParameter("currently only 'head' is supported")
     from bowhead_cli.migrate import upgrade
 
     try:
-        completed = upgrade(db_url, target)
+        completed = upgrade(db_url)
     except ValueError as exc:
         console.print(f"[red]Migration failed:[/] {exc}")
         raise typer.Exit(1) from exc
@@ -1599,12 +1599,14 @@ def dream_digest(
     """产出 REM + Deep 报告（只读数据库）."""
     import asyncio
 
+    from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
     from bowhead_memory import DreamingEngine
 
     path = db_url.split("///", 1)[-1] if db_url.startswith("sqlite") else db_url
 
     async def run() -> None:
-        eng = DreamingEngine(db_path=path)
+        eng = DreamingEngine(db_path=path, connect_factory=diagnostic_connect)
         if phase in ("rem", "all"):
             rem = await eng.rem_digest(window_days=window_days)
             console.print(
@@ -1695,7 +1697,7 @@ def credit_show(db_url: str | None = _DB_OPT) -> None:
     """
     import sqlite3
 
-    con = sqlite3.connect(_credit_db_path(db_url))
+    con = connect_sync(_credit_db_path(db_url))
     con.row_factory = sqlite3.Row
     try:
         console.print("[bold]— teams —[/]")
@@ -1798,7 +1800,7 @@ def credit_reconcile(db_url: str | None = _DB_OPT) -> None:
     """
     import sqlite3
 
-    con = sqlite3.connect(_credit_db_path(db_url))
+    con = connect_sync(_credit_db_path(db_url))
     con.row_factory = sqlite3.Row
     try:
         for team in con.execute("SELECT id,name,team_credit_balance,team_credit_quota FROM teams"):
@@ -1859,7 +1861,7 @@ def credit_topup(
     if amount <= 0:
         console.print("[red]✗ amount 必须 > 0[/]")
         raise typer.Exit(1)
-    con = sqlite3.connect(_credit_db_path(db_url))
+    con = connect_sync(_credit_db_path(db_url))
     con.row_factory = sqlite3.Row
     try:
         row = con.execute("SELECT id,team_id,credit_balance,credit_quota FROM users WHERE email=?", (email,)).fetchone()

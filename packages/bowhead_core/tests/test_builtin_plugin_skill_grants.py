@@ -21,34 +21,6 @@ from bowhead_core import agent_dependency_compiler, system_plugins
 from bowhead_skill import SkillCatalog
 
 
-@pytest.mark.anyio
-async def test_document_plugin_compiles_its_actual_readonly_package():
-    from bowhead_core.system_plugins import builtin_plugin
-
-    plugin = builtin_plugin("builtin:document-authoring@1")
-    authored = {"tool_refs": [], "skill_grants": [], "builtin_plugin_ids": ["builtin:document-authoring"]}
-    resolved = expand_builtin_plugins(authored)
-    context = AgentDependencyContext(agent_id="osa_document", team_id="team_document", owner_user_id="usr_document", audience_mode="private")
-    catalog = SubagentAuthoringCatalogSnapshot(
-        team_id=context.team_id,
-        actor_user_id=context.owner_user_id,
-        native_tools=native_authoring_tools(),
-        team_tools=(),
-        fingerprint="sha256:" + "1" * 64,
-        dependency_guard=(),
-        built_at=datetime.now(UTC),
-    )
-    compiled = await AgentDependencyCompiler().compile(resolved, context=context, tool_catalog=catalog)
-    assert compiled.publishable, compiled.reason_codes
-    assert compiled.skill_scope.read_names == ("pptx-authoring",)
-    assert compiled.skill_scope.invoke_names == ()
-    assert compiled.skills[0].grant == plugin.skill_grants[0]
-    tool_refs = {item.stable_ref for item in compiled.tools}
-    assert {"template_document_submit", "skill_read"} <= tool_refs
-    assert "skill_invoke" not in tool_refs
-    assert authored["tool_refs"] == [] and authored["skill_grants"] == []
-
-
 @pytest.fixture
 def method_plugin(tmp_path, monkeypatch):
     root = tmp_path / "catalog"

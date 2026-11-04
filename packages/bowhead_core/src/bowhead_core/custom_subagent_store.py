@@ -23,6 +23,9 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.subagent_prompt_limits import (
     MAX_PROMPT_CHARS_PERSONAL,
     MAX_PROMPT_TOKENS,
@@ -186,11 +189,15 @@ def filter_destructive(tools: list[str]) -> list[str]:
 
 class CustomSubagentStore:
     def __init__(self, db_path: str):
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -255,7 +262,7 @@ class CustomSubagentStore:
             created_at=_now(),
             updated_at=_now(),
         )
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             try:
                 await db.execute(
                     "INSERT INTO custom_subagents(id, user_id, name, display_name, "
@@ -284,7 +291,7 @@ class CustomSubagentStore:
         return agent
 
     async def get(self, agent_id: str) -> CustomSubagent | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM custom_subagents WHERE id = ?",
@@ -298,7 +305,7 @@ class CustomSubagentStore:
         user_id: str,
         status: str = "active",
     ) -> list[CustomSubagent]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM custom_subagents WHERE user_id = ? AND status = ? ORDER BY created_at DESC",
@@ -345,7 +352,7 @@ class CustomSubagentStore:
         sets.append("updated_at = ?")
         vals.append(_now())
         vals.append(agent_id)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 f"UPDATE custom_subagents SET {', '.join(sets)} WHERE id = ?",
                 vals,
@@ -354,7 +361,7 @@ class CustomSubagentStore:
         return await self.get(agent_id)
 
     async def delete(self, agent_id: str) -> bool:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "DELETE FROM custom_subagents WHERE id = ?",
                 (agent_id,),

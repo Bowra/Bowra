@@ -109,14 +109,14 @@ async def test_silent_done_fallback_survives_event_log_failure(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from bowhead_cli.migrate import TARGET_FILES, upgrade
     from bowhead_core.events import EventBusRegistry, TerminalDurabilityAbort
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
+    from core_legacy_database import TARGET_FILES, upgrade
 
     monkeypatch.setenv("BOWHEAD_SILENT_DONE_FALLBACK", "1")
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)
@@ -405,8 +405,10 @@ async def test_session_store_mark_methods_write_ended_at(tmp_path: Path) -> None
     Real SQLite path (the methods do actual DB writes).
     """
     from bowhead_core.session_store import SessionStore
+    from core_legacy_database import upgrade
 
-    db_path = tmp_path / "test.db"
+    db_path = tmp_path / "bowhead.db"
+    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
     store = SessionStore(str(db_path))
     await store.initialize()
 
@@ -623,8 +625,10 @@ async def test_terminal_cas_losers_have_no_session_side_effects(
 async def test_session_store_complete_turn_alias_works(tmp_path: Path) -> None:
     """The retained rollback alias delegates to the canonical completion CAS."""
     from bowhead_core.session_store import SessionStore
+    from core_legacy_database import upgrade
 
-    db_path = tmp_path / "test_alias.db"
+    db_path = tmp_path / "bowhead.db"
+    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
     store = SessionStore(str(db_path))
     await store.initialize()
     sess = await store.ensure_session(
@@ -671,9 +675,9 @@ async def test_mark_completed_clears_stale_error_kind(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
     await store.initialize()
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     sess = await store.ensure_session(
         session_id=None,
         workspace_id="ws",
@@ -720,9 +724,9 @@ async def test_completed_turn_rolls_up_session_usage(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
     await store.initialize()
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     sess = await store.ensure_session(
         session_id=None,
         workspace_id="ws",
@@ -778,13 +782,13 @@ async def test_completed_turn_rolls_up_session_usage(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_resume_cancel_usage_is_cumulative_and_idempotent(tmp_path: Path) -> None:
     """A Stop settlement adds this generation to the clarification baseline once."""
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.session_store import SessionStore
+    from core_legacy_database import upgrade
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
     await store.initialize()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     sess = await store.ensure_session(
         session_id="s_resume_cancel",
         workspace_id="ws",
@@ -1135,8 +1139,10 @@ async def test_finish_cancelled_persists_aborted(tmp_path: Path) -> None:
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_runner import TurnRunner
     from bowhead_core.types import TurnRequest
+    from core_legacy_database import upgrade
 
-    db_path = tmp_path / "fc.db"
+    db_path = tmp_path / "bowhead.db"
+    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
     store = SessionStore(str(db_path))
     await store.initialize()
     sess = await store.ensure_session(
@@ -1202,16 +1208,16 @@ async def test_finish_cancelled_persists_aborted(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_durable_stop_worker_finalizes_partial_usage(tmp_path: Path) -> None:
     """HTTP Stop wins terminal CAS; the same-generation worker still settles usage."""
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.events import EventBusRegistry
     from bowhead_core.session_store import SessionStore
     from bowhead_core.turn_runner import TurnRunner
     from bowhead_core.types import TurnRequest
+    from core_legacy_database import upgrade
 
     db_path = tmp_path / "bowhead.db"
     store = SessionStore(str(db_path))
     await store.initialize()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     sess = await store.ensure_session(
         session_id="s_stop_usage",
         workspace_id="ws",

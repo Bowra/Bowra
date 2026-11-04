@@ -5,7 +5,6 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
 from bowhead_core.documents.routing import DocumentRoutingSnapshot
@@ -18,6 +17,7 @@ from bowhead_core.ordinary_lead_continuation import (
     reopen_ordinary_checkpoint,
 )
 from bowhead_core.ordinary_lead_runtime import _validate_document_routing_source
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_document_store import ctx as ctx
 from test_document_store import migrated_db as migrated_db
@@ -59,7 +59,14 @@ async def test_original_encrypted_card_roundtrip_preserves_version_and_bytes(ctx
         assert "document_routing" not in json.loads(encoded)
         assert "collaboration" not in json.loads(encoded)
         assert "knowledge_read" not in json.loads(encoded)
-        assert encoded == canonical_json(checkpoint.model_dump(exclude={"document_routing", "collaboration", "knowledge_read"})).encode()
+        assert "knowledge_sources" not in json.loads(encoded)
+        assert "knowledge_navigation" not in json.loads(encoded)
+        assert (
+            encoded
+            == canonical_json(
+                checkpoint.model_dump(exclude={"document_routing", "collaboration", "knowledge_read", "knowledge_sources", "knowledge_navigation"})
+            ).encode()
+        )
     path = tmp_path / "old-routing.db"
     _historical_fixture(ctx.path, path, MIGRATION.down_revision)
     before = snapshot(path)

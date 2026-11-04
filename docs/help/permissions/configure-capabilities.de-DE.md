@@ -56,6 +56,8 @@ Die Seite zeigt Standardwerte und zulässige Bereiche. Wählen Sie nach der Bear
 
 Sandbox-Änderungen gelten für neue Aufgaben. Laufende Aufgaben behalten ihre anfänglichen Grenzen. HTML-Vorschauen verwenden beim nächsten Laden die Einstellung des Teams des Berichts. Mehr Zeit hilft langsamen Berechnungen, behebt aber keinen ausgefallenen Dienst. Prüfen Sie unbekannte Ausführungsergebnisse vor einem erneuten Versuch.
 
+Im Ausführungsverlauf erstellt **Neue Präsentation erstellen** eine neue bearbeitbare PPTX aus bereitgestellten Inhalten. **Vorlagendokument bearbeiten** bereitet einen privaten Entwurf aus einer unterstützten hochgeladenen PPTX- oder DOCX-Vorlage vor; Word erfordert die aktivierte Funktion. Prüfen Sie den Entwurf im Canvas und bestätigen Sie die Veröffentlichung. Bei Word ohne PDF wird nur die Word-Datei veröffentlicht; eine optional angeforderte PDF stammt aus derselben geprüften Quelldatei. Der Export eines vorhandenen Canvas-Berichts bleibt eine separate Aktion.
+
 ## Zuständigkeit und automatisch verwendete Skills konfigurieren
 
 1. Wählen Sie beim integrierten Subagent **Konfigurieren**. Die Einstellungen sind in **Name und Zweck**, **Ausführung** und **Teamvorgaben** gegliedert; die Aktionen bleiben beim Scrollen sichtbar.

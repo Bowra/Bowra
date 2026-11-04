@@ -4,7 +4,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -51,14 +52,14 @@ def test_upgrade_preserves_rows_and_adds_the_ledger_only_to_core(tmp_path, targe
 
 def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_the_ledger(tmp_path):
     empty = tmp_path / "empty.db"
-    _upgrade(empty, "head")
+    _upgrade(empty, SQLITE_LEGACY_REVISION)
     baseline = tmp_path / "baseline.db"
     _upgrade(baseline, BASELINE.revision)
     with sqlite3.connect(baseline) as db:
         db.execute("INSERT INTO teams(id,name,created_at) VALUES('team_old','Old team','2026-01-01')")
         db.execute("INSERT INTO users(id,team_id,email,created_at) VALUES('usr_old','team_old','old@example.com','2026-01-01')")
-    _upgrade(baseline, "head")
-    _upgrade(baseline, "head")
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
     for path in (empty, baseline):
         assert "memory_turn_requests" in _tables(path)
     with sqlite3.connect(baseline) as db:
@@ -70,7 +71,7 @@ def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_the_ledger(t
 
 def test_rows_leave_with_their_turn_and_with_the_account(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     with sqlite3.connect(path) as db:
         db.execute("INSERT INTO users(id,team_id,email,created_at) VALUES('usr_a','team_a','a@example.com','2026-01-01')")
         db.execute("INSERT INTO turns(id,session_id,seq,user_text,started_at) VALUES('t_1','s_1',1,'remember this','2026-01-01')")
@@ -91,7 +92,7 @@ def test_rows_leave_with_their_turn_and_with_the_account(tmp_path):
 
 def test_closed_vocabularies_reject_unknown_codes(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     with sqlite3.connect(path) as db:
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO memory_turn_requests(user_id,turn_id,source,outcome,created_at) VALUES('u','t','model_prose','remembered','now')")

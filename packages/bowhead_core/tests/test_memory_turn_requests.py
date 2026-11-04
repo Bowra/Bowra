@@ -45,7 +45,7 @@ from bowhead_core.user_memory import UserMemoryStore
 
 @pytest.fixture(scope="module")
 def migrated_core(tmp_path_factory) -> Path:
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
     directory = tmp_path_factory.mktemp("memory-turn-requests")
     upgrade(f"sqlite+aiosqlite:///{directory / 'bowhead.db'}", target="core")

@@ -18,6 +18,7 @@ from typing import Any
 import aiosqlite
 
 from bowhead_core.account_deletion import AccountDeletionError
+from bowhead_core.sqlite_domains import TABLE_DOMAINS
 
 _POLICY = json.loads(Path(__file__).with_name("account_erasure_policy.json").read_text())
 _INFRASTRUCTURE = {
@@ -51,6 +52,10 @@ _PARENTS = {
     "agent_id": ("team_subagent", "id"),
 }
 _ROOTS = {
+    "llm_request_chunks": "turn_id IN (SELECT turn_id FROM llm_request_records WHERE user_id=?)",
+    "llm_request_changes": "record_id IN (SELECT id FROM llm_request_records WHERE user_id=?)",
+    "terminal_auth_scope_epochs": "(scope_kind='user_account' AND scope_ref=?) OR (scope_kind='session_visibility' AND scope_ref IN (SELECT id FROM sessions WHERE user_id=?))",
+    "terminal_authority_scope_epochs": "scope_kind='user_account' AND scope_ref=?",
     "admin_audit_log": "actor_user_id=? OR (target_kind='user' AND target_id=?)",
     "invite_tokens": "consumed_by_user_id=?",
     "team_invite_tokens": "consumed_by_user_id=?",
@@ -69,7 +74,6 @@ _ROOTS = {
             AND (g.expires_at IS NULL OR g.expires_at>strftime('%Y-%m-%dT%H:%M:%f+00:00','now')))
           THEN 'custom' ELSE 'private' END)='private'""",
     "team_skill": "created_by=? AND visibility IN ('creator_only','private')",
-    "business_rules": "user_id=?",
     "registered_facts": "user_id=?",
     "agent_command_receipt": "actor_user_id=?",
     "resource_change_receipt": "actor_user_id=?",
@@ -92,17 +96,30 @@ def key_sql(primary: list[str], *, alias: str = "") -> str:
 
 
 async def reviewed_schema(db: aiosqlite.Connection) -> dict[str, list[str]]:
-    async with db.execute("SELECT name FROM sqlite_schema WHERE type='table'") as cur:
-        names = {row[0] for row in await cur.fetchall()}
+    async with db.execute("PRAGMA database_list") as cur:
+        schemas = {row[1] for row in await cur.fetchall()}
+    managed = schemas & {"main", "domain_core", "domain_execution", "domain_content", "domain_notifications", "domain_observability"}
+    names: set[str] = set()
+    table_schemas: dict[str, str] = {}
+    for schema in sorted(managed):
+        async with db.execute(f"SELECT name FROM {_q(schema)}.sqlite_schema WHERE type='table'") as cur:
+            for (name,) in await cur.fetchall():
+                names.add(name)
+                if name in _POLICY["tables"]:
+                    if name in table_schemas:
+                        raise AccountDeletionError("account_erasure_duplicate_domain_table")
+                    table_schemas[name] = schema
     unknown = names - set(_POLICY["tables"]) - _INFRASTRUCTURE
     unknown = {name for name in unknown if not name.startswith(("sqlite_", "canvas_fts_"))}
     if unknown:
         raise AccountDeletionError("account_erasure_unreviewed_table")
     primary: dict[str, list[str]] = {}
     for table, policy in _POLICY["tables"].items():
+        if table == "terminal_authority_scope_epochs" and "domain_execution" not in schemas and table not in names:
+            continue
         if table not in names:
             raise AccountDeletionError("account_erasure_schema_incomplete")
-        async with db.execute(f"PRAGMA table_info({_q(table)})") as cur:
+        async with db.execute(f"PRAGMA {_q(table_schemas[table])}.table_info({_q(table)})") as cur:
             info = await cur.fetchall()
         if [row[1] for row in info] != policy["columns"]:
             raise AccountDeletionError("account_erasure_unreviewed_column")
@@ -153,6 +170,10 @@ async def freeze_rows(db: aiosqlite.Connection, operation_id: str, user_id: str)
                 parent = rows[0][2]
                 if parent in primary and parent not in {"users", "teams", "workspaces"} and all(row[4] for row in rows):
                     edges.append((parent, [(row[3], row[4]) for row in rows]))
+            for edge in _POLICY["tables"][table].get("containment_foreign_keys", []):
+                parent = edge["parent"]
+                if parent in primary and parent not in {"users", "teams", "workspaces"}:
+                    edges.append((parent, [tuple(pair) for pair in edge["columns"]]))
             for column, (parent, parent_column) in _PARENTS.items():
                 if column in columns and parent in primary and parent != table:
                     if table == "canvas_sections" and column == "turn_id":
@@ -226,11 +247,11 @@ async def protocol_receipts(db: aiosqlite.Connection, user_id: str, *, secret: s
             )
 
 
-async def erase_rows(db: aiosqlite.Connection, operation_id: str, primary: dict[str, list[str]]) -> None:
+async def erase_rows(db: aiosqlite.Connection, operation_id: str, primary: dict[str, list[str]], *, domain: str | None = None) -> None:
     """Only the due-account transaction can exercise exact-row guard exceptions."""
     await db.execute("PRAGMA defer_foreign_keys=ON")
     for table, keys in primary.items():
-        if table in {"users", "admin_audit_log"}:
+        if table in {"users", "admin_audit_log"} or domain is not None and TABLE_DOMAINS[table] != domain:
             continue
         columns = ",".join(_q(column) for column in keys)
         values = ",".join(f"json_extract(row_key,'$[{index}]')" for index in range(len(keys)))
@@ -238,3 +259,9 @@ async def erase_rows(db: aiosqlite.Connection, operation_id: str, primary: dict[
             f"DELETE FROM {_q(table)} WHERE ({columns}) IN (SELECT {values} FROM account_deletion_rows WHERE operation_id=? AND table_name=?)",
             (operation_id, table),
         )
+        async with db.execute(
+            f"SELECT 1 FROM {_q(table)} WHERE ({columns}) IN (SELECT {values} FROM account_deletion_rows WHERE operation_id=? AND table_name=?) LIMIT 1",
+            (operation_id, table),
+        ) as cursor:
+            if await cursor.fetchone() is not None:
+                raise AccountDeletionError("account_erasure_domain_rows_remaining")

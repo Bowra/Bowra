@@ -6,6 +6,8 @@ import type { HtmlPreviewIssue, InteractiveHtmlDocument } from "@/lib/html-previ
 import { INTERACTIVE_HTML_PERMISSIONS, INTERACTIVE_HTML_SANDBOX } from "@/lib/html-preview-contract";
 import { appFetch } from "@/lib/base-path";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
+import { prepareHtmlInWorker } from "@/lib/html-preview-client";
+import { HtmlPreviewBudgetError } from "@/lib/html-preview-budget";
 
 export const MAX_SAFE_HTML_BYTES = 25 * 1024 * 1024;
 const MAX_CONFIGURABLE_HTML_BYTES = 50 * 1024 * 1024;
@@ -89,7 +91,8 @@ export type SafeHtmlErrorCode =
   | "unsupported"
   | "unavailable"
   | "load_failed"
-  | "interaction_unavailable";
+  | "interaction_unavailable"
+  | "resource_limited";
 
 type SafeHtmlState = {
   key: string;
@@ -170,6 +173,9 @@ export async function buildSafeHtmlDocument(rawHtml: string): Promise<string> {
       if (!element.hasAttribute(attribute)) continue;
       const value = element.getAttribute(attribute)?.trim() ?? "";
       const isFragmentLink = attribute === "href" && value.startsWith("#");
+      if (isFragmentLink && ["A", "AREA"].includes(element.tagName)) {
+        element.setAttribute(attribute, `about:srcdoc${value}`);
+      }
       const isRasterDataImage =
         attribute === "src"
         && element.tagName === "IMG"
@@ -256,6 +262,7 @@ export function useSafeHtmlDocument({
   useEffect(() => {
     if (!enabled) {
       sourceCache.current = null;
+      setState(null);
       return;
     }
     if (declaredSize != null && declaredSize > MAX_CONFIGURABLE_HTML_BYTES) {
@@ -271,13 +278,14 @@ export function useSafeHtmlDocument({
         const prepare = async (raw: string, maxBytes: number) => {
           if (presentation === "interactive") {
             try {
-              const { buildInteractiveHtmlDocument } = await import("@/lib/interactive-html");
-              const interactive = await buildInteractiveHtmlDocument(raw);
+              const interactive = (await prepareHtmlInWorker(raw, true, controller.signal))!;
               commit({ key: requestKey, document: interactive.document, interactive, error: null, maxBytes });
-            } catch {
-              commit({ key: requestKey, document: null, error: "interaction_unavailable", maxBytes });
+            } catch (error) {
+              commit({ key: requestKey, document: null, error: error instanceof HtmlPreviewBudgetError ? "resource_limited" : "interaction_unavailable", maxBytes });
             }
           } else {
+            await prepareHtmlInWorker(raw, false, controller.signal);
+            if (controller.signal.aborted) return;
             commit({ key: requestKey, document: await buildSafeHtmlDocument(raw), error: null, maxBytes });
           }
         };
@@ -320,7 +328,7 @@ export function useSafeHtmlDocument({
         commit({
           key: requestKey,
           document: null,
-          error: error instanceof SafeHtmlStaticContentEmptyError
+          error: error instanceof HtmlPreviewBudgetError ? "resource_limited" : error instanceof SafeHtmlStaticContentEmptyError
             ? "unsupported"
             : "load_failed",
         });
@@ -376,6 +384,7 @@ export function SafeHtmlFrame({
       sandbox={interactive ? INTERACTIVE_HTML_SANDBOX : ""}
       allow={interactive ? INTERACTIVE_HTML_PERMISSIONS : undefined}
       referrerPolicy="no-referrer"
+      loading="lazy"
       className={className}
       style={height == null ? undefined : { height }}
     />

@@ -20,6 +20,7 @@ from typing import Any, Literal, get_args
 from bowhead_core import metrics
 from bowhead_core.llm_failure import LLM_REASON_CODES, LLMFailureProjection
 from bowhead_core.scrub import scrub as scrub_credentials
+from bowhead_core.tool_outcome import TOOL_FAILURE_CODES, ToolOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,10 @@ CHAT_TURN_FAILURE_CODES = frozenset(
         "entitlement_denied",
         "hop_cap_exceeded",
         "lead_internal_error",
+        "tool_call_not_executed",
         "lead_empty_answer",
         "lead_output_exhausted",
+        "knowledge_source_changed",
         "reference_policy_changed",
         "reference_continuation_unavailable",
         "reference_primary_incomplete",
@@ -465,8 +468,10 @@ _CHAT_FAILURE_CLASS_BY_PARENT = types.MappingProxyType(
         "entitlement_denied": "access",
         "hop_cap_exceeded": "limit",
         "lead_internal_error": "internal",
+        "tool_call_not_executed": "content",
         "lead_empty_answer": "content",
         "lead_output_exhausted": "limit",
+        "knowledge_source_changed": "access",
         "reference_policy_changed": "access",
         "reference_continuation_unavailable": "configuration",
         "reference_primary_incomplete": "runtime",
@@ -509,8 +514,10 @@ _CHAT_RETRYABLE_BY_PARENT = types.MappingProxyType(
         "entitlement_denied": False,
         "hop_cap_exceeded": False,
         "lead_internal_error": True,
+        "tool_call_not_executed": False,
         "lead_empty_answer": True,
         "lead_output_exhausted": True,
+        "knowledge_source_changed": False,
         "reference_policy_changed": False,
         "reference_continuation_unavailable": False,
         "reference_primary_incomplete": False,
@@ -555,6 +562,7 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
     {
         # retry
         "lead_internal_error": "retry",
+        "tool_call_not_executed": "edit_and_resend",
         "lead_empty_answer": "retry",
         "lead_output_exhausted": "retry",
         "service_interrupted": "retry",
@@ -585,6 +593,7 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         "document_request_rejected": "edit_and_resend",
         "document_routing_uncertain": "edit_and_resend",
         "document_routing_source_unavailable": "edit_and_resend",
+        "knowledge_source_changed": "new_session",
         "reference_policy_changed": "edit_and_resend",
         "reference_continuation_unavailable": "edit_and_resend",
         "reference_primary_incomplete": "edit_and_resend",
@@ -995,6 +1004,13 @@ class ChatTurnFailure:
 
 DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
     {
+        "tool_failure": DiagnosticPolicy(
+            diagnostic_code="tool_failure",
+            disclosure=ErrorDisclosure.AUTHENTICATED,
+            publisher_name="publish_tool_failure",
+            allowed_parent_codes=TOOL_FAILURE_CODES,
+            facts=("field=<safe>", "exception=<identifier>", "missing_key=<safe>", "exit_code=<integer>"),
+        ),
         "chat_llm_failed": DiagnosticPolicy(
             diagnostic_code="chat_llm_failed",
             disclosure=ErrorDisclosure.AUTHENTICATED,
@@ -1535,6 +1551,29 @@ def publish_powerbi_admin_failure(
     )
 
 
+def publish_tool_failure(outcome: ToolOutcome) -> PublishedDiagnostic | None:
+    """Publish bounded execution facts without provider prose or script output."""
+    if outcome.state != "failure" or outcome.code not in TOOL_FAILURE_CODES:
+        return None
+    facts: list[str] = []
+    for name, value in (("field", outcome.field), ("exception", outcome.exception), ("missing_key", outcome.missing_key)):
+        if not isinstance(value, str) or not value or len(value) > 80:
+            continue
+        # Field paths are schema paths, not host filesystem paths. Only this
+        # constrained vocabulary can be included in the published projection.
+        candidate = value.removeprefix("/") if name == "field" else value
+        if re.fullmatch(r"[\w .()\[\]-]{1,80}", candidate) and _safe_detail_is_allowed(candidate, max_length=80):
+            facts.append(f"{name}={candidate}")
+    if type(outcome.exit_code) is int and -255 <= outcome.exit_code <= 255:
+        facts.append(f"exit_code={outcome.exit_code}")
+    return _render_registered_diagnostic(
+        diagnostic_code="tool_failure",
+        parent_code=outcome.code,
+        safe_detail="; ".join(facts) if facts else None,
+        retryable=outcome.retryable,
+    )
+
+
 def publish_powerbi_query_failure(
     reason_code: str,
 ) -> PublishedDiagnostic | None:
@@ -1738,6 +1777,7 @@ __all__ = [
     "DiagnosticPolicy",
     "ErrorDisclosure",
     "PublishedDiagnostic",
+    "publish_tool_failure",
     "build_chat_canvas_failure",
     "build_chat_llm_failure",
     "build_chat_peer_failure",

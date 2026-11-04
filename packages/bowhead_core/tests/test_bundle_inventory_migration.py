@@ -12,6 +12,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.skill_import.bundle_inventory_store import get_bundle_inventory, save_bundle_inventory
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -34,8 +35,8 @@ def test_upgrade_creates_table_is_idempotent_and_core_only(tmp_path: Path) -> No
     command.upgrade(config, MIGRATION.down_revision)
     with sqlite3.connect(path) as db:
         assert not db.execute("SELECT name FROM sqlite_master WHERE name='chat_attachment_bundle_inventory'").fetchone()
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore the ledger to head; later historical revisions (e.g. 0063 table creation) may not rerun on upgraded DBs.
     command.upgrade(config, MIGRATION.revision)
@@ -55,14 +56,14 @@ def test_upgrade_creates_table_is_idempotent_and_core_only(tmp_path: Path) -> No
             db.execute("INSERT INTO chat_attachment_bundle_inventory VALUES ('art_y','u','not json','t','t')")
     # Other targets are no-ops.
     other = tmp_path / "other.db"
-    command.upgrade(_config(other, target="files"), "head")
+    command.upgrade(_config(other, target="files"), SOURCE_REVISION)
     with sqlite3.connect(other) as db:
         assert not db.execute("SELECT name FROM sqlite_master WHERE name='chat_attachment_bundle_inventory'").fetchone()
 
 
 def test_store_roundtrip_and_owner_filter(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
 
     async def _run():
         assert await save_bundle_inventory(str(path), bundle_artifact_id="art_1", created_by="u1", inventory_json=json.dumps({"grade": "red"}))

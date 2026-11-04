@@ -29,11 +29,17 @@ def frame_args(value, *, static=None):
     *_, args, _, _, raw = value
     bid = next(item["id"] for item in catalog(raw)["candidates"] if item["kind"] == "frame")
     return {
-        **{key: cell for key, cell in args.items() if key not in {"force_kind", "series", "presentation_plan"}},
+        **{key: cell for key, cell in args.items() if key not in {"force_kind", "series", "presentation_plan", "columns", "axes", "group_by"}},
         "title": "Prepared monthly relationships",
         "views": [
-            {"id": "relationship", "title": "Revenue and cost", "hint": "compare", "force_kind": "scatter", "series": ["revenue", "cost"]},
-            {"id": "detail", "title": "Original observations", "hint": "raw", "force_kind": "table", "series": ["revenue", "cost"]},
+            {
+                "id": "relationship",
+                "title": "Revenue and cost",
+                "force_kind": "scatter",
+                "axes": {"x": "revenue", "y": ["cost"], "x_scale": "linear"},
+                "group_by": [],
+            },
+            {"id": "detail", "title": "Original observations", "force_kind": "table"},
         ],
         "layout": "primary_aside",
         "presentation_plan": {

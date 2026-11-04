@@ -1,7 +1,7 @@
 """Central PII scrubber (Sprint ι R-γ).
 
-Used by `_map_code_block` before persisting `stdout_preview` and full stdout
-to `artifact_stdout` table. Patterns conservative — false positive accepted
+Used by `_map_code_block` before retaining `stdout_preview` in Canvas payloads.
+Patterns conservative — false positive accepted
 over false negative (audit visibility > log fidelity).
 
 Patterns covered (per PRD §5 R-γ):

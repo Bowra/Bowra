@@ -31,6 +31,7 @@ from bowhead_core.resource_dependency_projection import (
     edges_from_compilation,
     replace_subject_projection_conn,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 
@@ -127,7 +128,7 @@ class AgentSafetyCheckService:
         clock: _Clock | None = None,
         eval_gate_installed: bool = False,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._validator = validator
         self._semantic_scanner = semantic_scanner
         self._clock = clock or _SystemClock()

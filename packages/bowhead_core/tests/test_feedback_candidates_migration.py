@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -70,8 +71,8 @@ def test_0059_upgrade_is_repeatable_and_creates_contract(tmp_path: Path) -> None
     path = tmp_path / "core.db"
     config = _config(path)
     command.upgrade(config, MIGRATION.down_revision)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore the ledger to head; later historical revisions (e.g. 0063 table creation) may not be rerunnable on an upgraded database.
     command.upgrade(config, MIGRATION.revision)
@@ -100,7 +101,7 @@ def test_0059_upgrade_is_repeatable_and_creates_contract(tmp_path: Path) -> None
 
 def test_0059_partial_unique_index_guards_open_only(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _insert(db, "fbc_a", "sig1", "open")
         with pytest.raises(sqlite3.IntegrityError):
@@ -112,7 +113,7 @@ def test_0059_partial_unique_index_guards_open_only(tmp_path: Path) -> None:
 
 def test_0059_noops_on_non_core_targets(tmp_path: Path) -> None:
     path = tmp_path / "kb.db"
-    command.upgrade(_config(path, target="files"), "head")
+    command.upgrade(_config(path, target="files"), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "feedback_candidates" not in tables
@@ -122,7 +123,7 @@ def test_0059_rejects_impostor_index_on_rerun(tmp_path: Path) -> None:
     """同名假索引（非 partial/非 unique）重升级必须报 drift——拒绝路径的 positive control。"""
     path = tmp_path / "core.db"
     config = _config(path)
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         db.execute("DROP INDEX uq_fbc_open_sig")
         db.execute(
@@ -130,4 +131,4 @@ def test_0059_rejects_impostor_index_on_rerun(tmp_path: Path) -> None:
         )
     command.stamp(config, MIGRATION.down_revision)
     with pytest.raises(Exception, match="feedback index drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)

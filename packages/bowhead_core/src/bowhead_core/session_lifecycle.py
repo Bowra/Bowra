@@ -2,8 +2,9 @@
 
 Terminal Protocol v1 Sessions use the migration-0008 lifecycle ledger.  The
 operation is a resumable saga: prepare the stable request, fence an uncommitted
-generation with the protocol store, then atomically update Session visibility,
-delivery fences and the committed operation result.  A retry with the same
+generation with the protocol store, then atomically update Session visibility
+and delivery fences. Split-domain linked Canvas deletion records a durable pending
+phase until the separate content transaction finishes. A retry with the same
 request identity resumes that saga; it never guesses the winner from the
 current ``deleted_at`` value.
 """
@@ -11,14 +12,17 @@ current ``deleted_at`` value.
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 
 import aiosqlite
 
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.terminal_auth_epochs import bump_terminal_auth_epoch
 from bowhead_core.terminal_protocol import (
     AuthFenceScopeKind,
@@ -31,6 +35,8 @@ from bowhead_core.terminal_protocol_store import (
     TerminalProtocolStore,
     open_terminal_protocol_connection,
 )
+
+logger = logging.getLogger(__name__)
 
 SESSION_LIFECYCLE_ERROR_CODES = frozenset(
     {
@@ -122,10 +128,11 @@ class SessionLifecycleCoordinator:
         terminal_store: TerminalProtocolStore,
         canvas_store: CanvasStore | None = None,
     ) -> None:
-        if session_store.db_path != terminal_store.db_path:
-            raise ValueError("Session lifecycle stores must share one database")
-        if canvas_store is not None and str(canvas_store.db_path) != session_store.db_path:
-            raise ValueError("Canvas lifecycle store must share the Session database")
+        installation = Path(domain_database_path(session_store.db_path, "core")).resolve()
+        if Path(domain_database_path(terminal_store.db_path, "core")).resolve() != installation:
+            raise ValueError("Session lifecycle stores must share one installation")
+        if canvas_store is not None and Path(domain_database_path(canvas_store.db_path, "core")).resolve() != installation:
+            raise ValueError("Canvas lifecycle store must share the Session installation")
         self._sessions = session_store
         self._terminal = terminal_store
         self._canvases = canvas_store
@@ -159,6 +166,8 @@ class SessionLifecycleCoordinator:
         require_idle: bool = False,
     ) -> SessionLifecycleResult:
         self._validate_identity(session_id, actor_audit_ref, request_id)
+        if linked_canvas_id is not None and domain_layout_active(self._db_path) and request_id != f"canvas-delete:{linked_canvas_id}":
+            raise ValueError("Linked Canvas deletion requires its canonical request identity")
         protocol_version = await self._session_protocol_version(
             session_id,
             expected_user_id=expected_user_id,
@@ -188,6 +197,8 @@ class SessionLifecycleCoordinator:
         replay = self._committed_result(prepared, protocol_version=protocol_version)
         if replay is not None:
             return replay
+        if prepared.state == "protocol_settled" and domain_layout_active(self._db_path):
+            return await self._finish_pending_canvas_delete(prepared.operation_id)
         if prepared.expected_deleted_state == "deleted":
             return await self._commit_operation(
                 prepared,
@@ -258,7 +269,7 @@ class SessionLifecycleCoordinator:
         canvas_id: str,
         actor_audit_ref: str,
     ) -> SessionLifecycleReplay | None:
-        """Return stable cleanup identity after atomic Canvas/Session commit."""
+        """Return stable cleanup identity after completed Canvas/Session cleanup."""
 
         request_id = f"canvas-delete:{canvas_id}"
         self._validate_identity(canvas_id, actor_audit_ref, request_id)
@@ -267,16 +278,18 @@ class SessionLifecycleCoordinator:
             async with connection.execute(
                 """
                 SELECT operation_id,team_id,session_audit_ref,
-                       actor_audit_ref,result_code
+                       actor_audit_ref,result_code,state
                 FROM session_lifecycle_operations
                 WHERE actor_audit_ref=? AND request_id=? AND action='soft_delete'
-                  AND state='committed' AND result_code IN ('deleted','already_deleted')
+                  AND state IN ('committed','protocol_settled') AND result_code IN ('deleted','already_deleted')
                 """,
                 (actor_audit_ref, request_id),
             ) as cursor:
                 row = await cursor.fetchone()
         if row is None:
             return None
+        if row["state"] == "protocol_settled":
+            await self._finish_pending_canvas_delete(str(row["operation_id"]))
         return SessionLifecycleReplay(
             operation_id=str(row["operation_id"]),
             team_id=str(row["team_id"]),
@@ -537,6 +550,14 @@ class SessionLifecycleCoordinator:
                     raise SessionLifecycleError("session_not_found")
                 if require_idle:
                     await self._assert_session_idle(connection, session_id)
+                if action == "revive" and domain_layout_active(self._db_path):
+                    async with connection.execute(
+                        "SELECT 1 FROM session_lifecycle_operations WHERE session_audit_ref=? AND action='soft_delete' "
+                        "AND state='protocol_settled' AND request_id LIKE 'canvas-delete:%' LIMIT 1",
+                        (session_id,),
+                    ) as pending:
+                        if await pending.fetchone() is not None:
+                            raise SessionLifecycleError("session_lifecycle_conflict")
                 team_id = str(session["team_id"])
                 if session["active_turn_id"] is not None and session["active_turn_protocol_version"] != 1:
                     raise SessionLifecycleError("terminal_protocol_malformed")
@@ -807,6 +828,9 @@ class SessionLifecycleCoordinator:
                     )
                     assert replay is not None
                     return replay
+                if operation["state"] == "protocol_settled" and domain_layout_active(self._db_path):
+                    await connection.rollback()
+                    return await self._finish_pending_canvas_delete(prepared.operation_id)
                 if operation["state"] not in {"prepared", "fenced"}:
                     raise SessionLifecycleError("session_lifecycle_conflict")
                 async with connection.execute(
@@ -832,14 +856,22 @@ class SessionLifecycleCoordinator:
                 if linked_canvas_id is not None:
                     if self._canvases is None:
                         raise SessionLifecycleError("canvas_lifecycle_store_missing")
-                    deleted_canvas = await self._canvases.delete_canvas_in_transaction(
-                        connection,
-                        canvas_id=linked_canvas_id,
-                        expected_session_id=prepared.session_id,
-                        expected_user_id=prepared.actor_audit_ref,
-                    )
-                    if not deleted_canvas:
-                        raise SessionLifecycleError("linked_canvas_not_found")
+                    if domain_layout_active(self._db_path):
+                        async with connection.execute("SELECT session_id,user_id FROM canvases WHERE id=?", (linked_canvas_id,)) as canvas_cursor:
+                            canvas = await canvas_cursor.fetchone()
+                        if canvas is None:
+                            raise SessionLifecycleError("linked_canvas_not_found")
+                        if canvas["session_id"] != prepared.session_id or canvas["user_id"] != prepared.actor_audit_ref:
+                            raise SessionLifecycleError("session_owner_mismatch")
+                    else:
+                        deleted_canvas = await self._canvases.delete_canvas_in_transaction(
+                            connection,
+                            canvas_id=linked_canvas_id,
+                            expected_session_id=prepared.session_id,
+                            expected_user_id=prepared.actor_audit_ref,
+                        )
+                        if not deleted_canvas:
+                            raise SessionLifecycleError("linked_canvas_not_found")
                 if changed and prepared.action == "soft_delete":
                     open_count = await self._open_generation_count(connection, prepared.session_id)
                     if open_count:
@@ -894,18 +926,20 @@ class SessionLifecycleCoordinator:
                 if epoch_row is None:
                     raise SessionLifecycleError("session_visibility_epoch_missing")
                 committed_at = _now()
+                pending_content = linked_canvas_id is not None and domain_layout_active(self._db_path)
                 update = await connection.execute(
                     """
                     UPDATE session_lifecycle_operations
-                    SET state='committed',new_session_visibility_epoch=?,result_code=?,
+                    SET state=?,new_session_visibility_epoch=?,result_code=?,
                         row_version=row_version+1,updated_at=?,committed_at=?
                     WHERE operation_id=? AND state IN ('prepared','fenced')
                     """,
                     (
+                        "protocol_settled" if pending_content else "committed",
                         int(epoch_row["epoch"]),
                         result_code,
                         committed_at,
-                        committed_at,
+                        None if pending_content else committed_at,
                         prepared.operation_id,
                     ),
                 )
@@ -916,6 +950,8 @@ class SessionLifecycleCoordinator:
                 if connection.in_transaction:
                     await connection.rollback()
                 raise
+        if pending_content:
+            return await self._finish_pending_canvas_delete(prepared.operation_id)
         return SessionLifecycleResult(
             operation_id=prepared.operation_id,
             action=prepared.action,
@@ -923,6 +959,76 @@ class SessionLifecycleCoordinator:
             protocol_version=1,
             result_code=result_code,
         )
+
+    async def _finish_pending_canvas_delete(self, operation_id: str) -> SessionLifecycleResult:
+        if self._canvases is None:
+            raise SessionLifecycleError("canvas_lifecycle_store_missing")
+        async with open_terminal_protocol_connection(self._db_path) as execution:
+            execution.row_factory = aiosqlite.Row
+            async with execution.execute("SELECT * FROM session_lifecycle_operations WHERE operation_id=?", (operation_id,)) as cursor:
+                row = await cursor.fetchone()
+        if row is None or row["action"] != "soft_delete" or not str(row["request_id"]).startswith("canvas-delete:"):
+            raise SessionLifecycleError("session_lifecycle_conflict")
+        canvas_id = str(row["request_id"])[len("canvas-delete:") :]
+        if not canvas_id or row["state"] not in {"protocol_settled", "committed"} or row["result_code"] not in {"deleted", "already_deleted"}:
+            raise SessionLifecycleError("session_lifecycle_conflict")
+        if row["state"] != "committed":
+            # The execution visibility/fence transaction has already committed.
+            # Recheck the content parent while holding only the content writer.
+            async with open_terminal_protocol_connection(self._canvases.db_path) as content:
+                await content.execute("BEGIN IMMEDIATE")
+                try:
+                    await self._canvases.delete_canvas_in_transaction(
+                        content,
+                        canvas_id=canvas_id,
+                        expected_session_id=str(row["session_audit_ref"]),
+                        expected_user_id=str(row["actor_audit_ref"]),
+                    )
+                    await content.commit()
+                except BaseException:
+                    await content.rollback()
+                    raise
+            async with open_terminal_protocol_connection(self._db_path) as execution:
+                await execution.execute(
+                    "UPDATE session_lifecycle_operations SET state='committed',row_version=row_version+1,updated_at=?,committed_at=? "
+                    "WHERE operation_id=? AND state='protocol_settled'",
+                    (_now(), _now(), operation_id),
+                )
+                await execution.commit()
+            await self._canvases.notify_canvas_deleted(canvas_id)
+        return SessionLifecycleResult(
+            operation_id=operation_id,
+            action="soft_delete",
+            changed=row["result_code"] == "deleted",
+            protocol_version=1,
+            result_code=str(row["result_code"]),
+        )
+
+    async def resume_pending_canvas_deletions(self, *, limit: int = 100) -> int:
+        """Resume durable split-content cleanup during startup and maintenance."""
+        if not domain_layout_active(self._db_path) or self._canvases is None:
+            return 0
+        if not 1 <= limit <= 1000:
+            raise ValueError("Canvas cleanup batch limit must be between 1 and 1000")
+        async with (
+            open_terminal_protocol_connection(self._db_path) as execution,
+            execution.execute(
+                "SELECT operation_id FROM session_lifecycle_operations WHERE action='soft_delete' AND state='protocol_settled' "
+                "AND request_id LIKE 'canvas-delete:%' ORDER BY updated_at,operation_id LIMIT ?",
+                (limit,),
+            ) as cursor,
+        ):
+            identities = [str(row[0]) for row in await cursor.fetchall()]
+        completed = 0
+        for identity in identities:
+            try:
+                await self._finish_pending_canvas_delete(identity)
+                completed += 1
+            except Exception as error:
+                logger.warning(
+                    "session_lifecycle.canvas_cleanup_deferred operation=%s diagnostic_id=%s", identity, getattr(error, "bowhead_diagnostic_id", None)
+                )
+        return completed
 
     @staticmethod
     async def _open_generation_count(

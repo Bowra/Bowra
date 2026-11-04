@@ -521,3 +521,19 @@ async def test_resolve_shareable_report_cross_team_and_misses():
         )
         is None
     )
+
+
+async def test_disabled_report_service_blocks_expansion_but_allows_private(stores, monkeypatch):
+    from bowhead_core import share_service
+
+    _, access = stores
+    grant = await _grant(access, kind="report", rid="ses_policy", permission="read")
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    with pytest.raises(share_service.ContentSharingDisabledError):
+        await add_grant(
+            access, kind="report", resource_id="ses_policy", team_id=TEAM, principal_type="user", principal_id="user_other", actor_id="owner"
+        )
+    with pytest.raises(share_service.ContentSharingDisabledError):
+        await set_audience(access, kind="report", resource_id="ses_policy", team_id=TEAM, target="team_wide", actor_id="owner")
+    result = await set_audience(access, kind="report", resource_id="ses_policy", team_id=TEAM, target="private", actor_id="owner")
+    assert grant.id in result["revoked_grant_ids"]

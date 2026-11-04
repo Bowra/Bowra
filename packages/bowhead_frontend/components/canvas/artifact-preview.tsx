@@ -126,10 +126,10 @@ export function ArtifactPreview({
   const safeHtmlActive = mode === "preview" && isSafeHtmlMime(mime) && !loading && !error;
   const videoActive = mode === "preview" && isVideoPreviewMime(mime) && !loading && !error;
   const inlineHref = withInlineDisposition(href);
-  const htmlMode = useHtmlPreviewMode();
+  const htmlMode = useHtmlPreviewMode(fileId);
   const safeHtml = useSafeHtmlDocument({
     presentation: htmlMode.mode,
-    enabled: safeHtmlActive,
+    enabled: safeHtmlActive && !htmlMode.paused,
     href: rendererHref,
     declaredSize: sizeBytes,
     reloadToken,
@@ -174,6 +174,8 @@ export function ArtifactPreview({
     ? {
         ...safeHtml,
         htmlMode: htmlMode.available ? htmlMode.mode : undefined,
+        paused: htmlMode.paused,
+        onPause: htmlMode.togglePaused,
         onModeChange: htmlMode.select,
         onEscape: () => setExpanded(false),
         trust,
@@ -439,6 +441,8 @@ function ArtifactPreviewBody({
     onReload: () => void;
     interactive?: InteractiveHtmlDocument;
     htmlMode?: HtmlPreviewMode;
+    paused?: boolean;
+    onPause: () => void;
     onModeChange: (mode: HtmlPreviewMode) => void;
     onEscape: () => void;
   } | null;
@@ -571,6 +575,8 @@ function SafeHtmlPreviewBody({
     onReload: () => void;
     interactive?: InteractiveHtmlDocument;
     htmlMode?: HtmlPreviewMode;
+    paused?: boolean;
+    onPause: () => void;
     onModeChange: (mode: HtmlPreviewMode) => void;
     onEscape: () => void;
   };
@@ -587,6 +593,7 @@ function SafeHtmlPreviewBody({
         {state.htmlMode ? <HtmlPreviewModeControl value={state.htmlMode} onChange={state.onModeChange} />
           : <span className="safe-html-preview-badge">{t("safe_html_badge")}</span>}
         <span>{t(state.htmlMode === "interactive" ? "html_offline" : "safe_html_network_off")}</span>
+        {state.htmlMode === "interactive" ? <button type="button" onClick={state.onPause}>{t(state.paused ? "html_restart" : "html_stop")}</button> : null}
         {state.trust === "unverified" ? (
           <span className="safe-html-preview-unverified">{t("safe_html_unverified")}</span>
         ) : null}
@@ -595,7 +602,7 @@ function SafeHtmlPreviewBody({
           {t("safe_html_reload")}
         </button>
       </div>
-      {message ? (
+      {state.paused ? <div role="status" className="artifact-viewer-note">{t("html_paused")}</div> : message ? (
         <div className="artifact-viewer-note error" role="alert">{message}</div>
       ) : state.loading || state.document === null ? (
         <div className="artifact-viewer-note loading">{t("safe_html_loading")}</div>

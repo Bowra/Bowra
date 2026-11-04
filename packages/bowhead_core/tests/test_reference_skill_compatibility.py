@@ -5,12 +5,21 @@ from dataclasses import replace
 
 import pytest
 from bowhead_core.agent_dependency_compiler import ExactSkillGrant
+from bowhead_core.agent_execution_binding import project_system_agent_revision
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.reference_receiver_metadata import ReferenceReceiverMetadata
 from bowhead_core.reference_skill_compatibility import ReferenceSkillMetadata, reference_skill_modes
+from bowhead_core.subagent import PROFILES, _system_profile_snapshot
 from test_skill_read_extensions import policy_for
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def behavior():
+    return project_system_agent_revision(
+        team_id="org_graph_test", profile_name="compute", definition=_system_profile_snapshot(PROFILES["compute"])
+    ).behavior_descriptor
 
 
 def resource(name, revision="a"):
@@ -42,12 +51,12 @@ def method(name, children=(), required=False):
     )
 
 
-def test_baseline_and_optional_graph_preserve_exact_versions_and_full_grants():
+def test_baseline_and_optional_graph_preserve_exact_versions_and_full_grants(behavior):
     child, root, extra = resource("support"), resource("method"), resource("extra")
     grants = tuple(
         ExactSkillGrant("builtin", item.id, name, ("read",), item.version, "reference") for item, name in [(child, "support"), (root, "method")]
     )
-    receiver = ReferenceReceiverMetadata(grants, policy_for(extra))
+    receiver = ReferenceReceiverMetadata(grants, policy_for(extra), behavior=behavior)
     skills = {child: method("support"), root: method("method", [child], required=True), extra: method("extra", [child])}
     assert reference_skill_modes(receiver, [root], skills) == ("baseline",)
     assert reference_skill_modes(receiver, [extra], skills) == ("baseline", "readonly_extension")
@@ -78,9 +87,9 @@ def test_baseline_and_optional_graph_preserve_exact_versions_and_full_grants():
     assert reference_skill_modes(receiver, [root, child], required) == ("baseline",)
 
 
-def test_graph_depth_limits_apply_to_shared_dependencies_and_selected_roots():
+def test_graph_depth_limits_apply_to_shared_dependencies_and_selected_roots(behavior):
     refs = [resource("n" + str(index)) for index in range(9)]
-    receiver = ReferenceReceiverMetadata((), policy_for(*refs))
+    receiver = ReferenceReceiverMetadata((), policy_for(*refs), behavior=behavior)
     skills = {ref: method("n" + str(i), refs[i + 1 : i + 2]) for i, ref in enumerate(refs)}
     assert reference_skill_modes(receiver, [refs[1]], skills) == ("readonly_extension",)
     assert reference_skill_modes(receiver, [refs[0]], skills) is None

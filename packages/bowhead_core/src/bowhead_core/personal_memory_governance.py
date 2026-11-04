@@ -22,6 +22,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.memory_notes import MAX_BULLET_CHARS, MAX_CONTENT_CHARS, NotesCharLimitError, NotesLockedError
 from bowhead_core.memory_privacy import ensure_memory_write_allowed
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_memory import (
     CURRENT_MEMORY_POLICY_VERSION,
     MemoryConfidenceConflictError,
@@ -90,7 +91,7 @@ class PersonalMemoryGovernanceStore:
         *,
         root_secret: str | bytes | None = None,
     ) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
         seed = root_secret or f"dev-only:{Path(self._db_path).resolve()}"
         seed_bytes = seed.encode("utf-8") if isinstance(seed, str) else seed
         self._note_key_secret = hmac.new(

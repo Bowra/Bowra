@@ -79,6 +79,8 @@ export interface WorkspaceGrantRow {
 
 export interface WorkspaceGrantResp {
   user_id: string;
+  display_name?: string | null;
+  email?: string;
   items: WorkspaceGrantRow[];
 }
 

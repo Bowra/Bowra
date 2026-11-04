@@ -40,6 +40,7 @@ from bowhead_core.reference_mcp_metadata import (
     ReferenceMcpSourceMetadata,
 )
 from bowhead_core.reference_receiver_metadata import ReferenceTeamToolBaseline, read_reference_team_tools_in_connection
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 class ReferenceMcpPreparationError(ValueError):
@@ -224,7 +225,11 @@ async def _allowed(
 
 
 def _metadata_sources(index: ReferenceMcpMetadataIndex, *, db_path: Path, team_id: str) -> dict[str, ReferenceMcpSourceMetadata]:
-    if Path(index.db_path).resolve() != db_path.resolve() or not index.ready or team_id in index.incomplete_teams:
+    if (
+        Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+        or not index.ready
+        or team_id in index.incomplete_teams
+    ):
         raise ReferenceMcpPreparationError("reference_mcp_metadata_unavailable")
     values = {source.source_id: source for source in index.for_team(team_id)}
     if len(values) != len(index.for_team(team_id)):
@@ -244,7 +249,7 @@ async def _prepare_in_connection(
 ) -> PreparedReferenceMcpSelection:
     if not db.in_transaction:
         raise ReferenceMcpPreparationError("reference_transaction_required")
-    if Path(access.db_path).resolve() != db_path.resolve():
+    if Path(domain_database_path(access.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve():
         raise ReferenceMcpPreparationError("reference_mcp_access_unavailable")
     document = InputDocument.model_validate(input_document.model_dump(mode="python", warnings="error"))
     # Task content is validated with typed attachments by admission and the
@@ -461,7 +466,10 @@ async def _prepare_prompts_in_connection(
 ) -> PreparedReferenceMcpPromptSelection:
     if not db.in_transaction:
         raise ReferenceMcpPreparationError("reference_transaction_required")
-    if Path(access.db_path).resolve() != db_path.resolve() or not index.prompt_cache_ready:
+    if (
+        Path(domain_database_path(access.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+        or not index.prompt_cache_ready
+    ):
         raise ReferenceMcpPreparationError("reference_mcp_prompt_metadata_unavailable")
     document = InputDocument.model_validate(input_document.model_dump(mode="python", warnings="error"))
     # Task content is validated with typed attachments by admission and the

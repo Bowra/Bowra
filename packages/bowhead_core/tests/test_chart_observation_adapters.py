@@ -25,9 +25,21 @@ def arguments(prepared, kind: str):
     *_, data, _, raw = prepared
     bid = next(candidate["id"] for candidate in catalog(raw)["candidates"] if candidate["kind"] == kind)
     views = [
-        {"id": "trend", "title": "Revenue by region", "hint": "trend", "force_kind": "line", "series": ["revenue"]},
-        {"id": "relationship", "title": "Revenue and cost", "hint": "correlation", "force_kind": "scatter", "series": ["revenue", "cost"]},
-        {"id": "detail", "title": "Original observations", "hint": "raw", "force_kind": "table", "series": ["revenue", "cost"]},
+        {
+            "id": "trend",
+            "title": "Revenue by region",
+            "force_kind": "line",
+            "axes": {"x": "month", "y": ["revenue"], "x_scale": "category"},
+            "group_by": ["region"],
+        },
+        {
+            "id": "relationship",
+            "title": "Revenue and cost",
+            "force_kind": "scatter",
+            "axes": {"x": "revenue", "y": ["cost"], "x_scale": "linear"},
+            "group_by": [],
+        },
+        {"id": "detail", "title": "Original observations", "force_kind": "table"},
     ]
     interactions = [{"preset": "linked_focus", "from_view": "trend", "to_views": ["relationship", "detail"], "binding_id": bid}]
     if kind == "time":
@@ -52,7 +64,7 @@ async def test_tool_preserves_compound_grain_through_source_projection_and_layou
     plan = spec["presentation_plan"]
     descriptor = next(iter(plan["bindings"].values()))
     assert descriptor["observation_keys"] == ["region", "month"]
-    assert all([column["key"] for column in view["spec"]["columns"][:2]] == ["region", "month"] for view in spec["views"])
+    assert all({column["key"] for column in view["spec"]["columns"] if column["type"] != "numeric"} == {"region", "month"} for view in spec["views"])
     normalized, _ = normalize_chart_for_rendering_v1(spec["views"][0]["spec"])
     missing = next(row for row in normalized["rows"] if row["month"] == "2026-02")
     assert missing["__pivot__East"] == 0 and missing["__pivot__West"] is None

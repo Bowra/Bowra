@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import canvas_export as legacy_export
 from bowhead_core import migrations
@@ -44,8 +45,8 @@ def test_upgrade_preserves_existing_export_jobs_and_is_repeatable(tmp_path: Path
     with sqlite3.connect(path) as db:
         # Replay actually reaches this revision (checking the version after stamping head is always true and meaningless).
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (MIGRATION.revision,)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
 
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT id,renderer_contract_version,status FROM canvas_export_jobs WHERE id='exp_existing'").fetchone() == (
@@ -70,7 +71,7 @@ def test_upgrade_preserves_existing_export_jobs_and_is_repeatable(tmp_path: Path
 )
 def test_non_core_target_has_no_chart_style_schema(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert (
             db.execute("SELECT name FROM sqlite_schema WHERE name LIKE 'team_chart_style%' OR name='idx_export_jobs_claim_target'").fetchall() == []
@@ -79,7 +80,7 @@ def test_non_core_target_has_no_chart_style_schema(tmp_path: Path, target: str) 
 
 def test_revision_scope_active_name_and_immutability_are_enforced(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     style_id = "tcs_0123456789abcdef01234567"
     other_style_id = "tcs_1123456789abcdef01234567"
     revision_id = "tcsr_0123456789abcdef01234567"
@@ -194,4 +195,4 @@ def test_schema_drift_is_rejected(tmp_path: Path, kind: str) -> None:
                 )
 
     with pytest.raises(RuntimeError, match="schema drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)

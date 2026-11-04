@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 OIDC_TABLES = {
     "identity_provider_realms",

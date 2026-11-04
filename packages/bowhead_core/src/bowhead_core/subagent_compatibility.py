@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Protocol
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_store import RELEASE_A_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -108,7 +110,7 @@ class TeamSubagentCompatibilityStore:
     """Own process admission and heartbeats for the Release A schema."""
 
     def __init__(self, db_path: str | Path, *, clock: Clock | None = None) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or SystemClock()
 
     async def check_application(
@@ -224,7 +226,7 @@ class TeamSubagentCompatibilityStore:
             seconds=live_window_seconds,
         )
         uri = f"{db_path.resolve().as_uri()}?mode=ro"
-        async with aiosqlite.connect(uri, uri=True) as db:
+        async with diagnostic_connect(uri, uri=True) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")

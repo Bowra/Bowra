@@ -39,6 +39,60 @@
 :root:root .results-report-object-toolbar > div {
   gap: 4px;
 }
+/* One document toolbar owns navigation, actions, status and the existing source summary. */
+:root:root .v2-ws-right-head.results-report-unified-toolbar {
+  position: relative;
+  flex: none;
+  height: auto;
+  margin: 0;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  padding-block: 6px;
+}
+:root:root .results-report-unified-toolbar > .results-head-context {
+  flex: none;
+}
+:root:root .results-report-unified-toolbar > .results-report-status-group {
+  flex: 1 1 0;
+}
+:root:root .results-report-unified-toolbar > .results-report-actions {
+  margin-left: auto;
+}
+:root:root .results-report-unified-toolbar .results-report-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+:root:root .results-report-unified-toolbar > .r-actions {
+  margin-left: 0;
+}
+:root:root .results-report-object-toolbar > .results-report-source-summary {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+:root:root .results-report-unified-toolbar > .results-report-source-summary {
+  flex: 1 1 240px;
+}
+:root:root .results-report-source-summary:empty {
+  display: none;
+}
+:root:root .results-report-source-summary .rc-trust {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  font-family: var(--font-control);
+  font-size: var(--fs-sm);
+}
+/* Group existing menu commands without changing their handlers or permission gates. */
+:root:root .results-report-menu-group:empty {
+  display: none;
+}
+:root:root .results-report-menu-group:not(:empty) {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: var(--hairline) solid var(--c-separator);
+}
 /* One 0.5 separator each between editing/document-action groups and text export/icon more buttons, avoiding reading them as one button */
 :root:root .results-report-object-toolbar .results-report-edit-controls:not(:empty) {
   display: flex;
@@ -358,6 +412,79 @@
 :root:root .rc-ai-bar .legacy-rc-ai-close:focus-visible {
   outline: 2px solid var(--c-focus, var(--c-accent));
   outline-offset: 0;
+}
+:root:root .rc-ai-block-bar {
+  display: block;
+  padding: 12px;
+}
+:root:root .rc-ai-target {
+  min-width: 0;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-md);
+}
+:root:root .rc-ai-target strong {
+  font-weight: 600;
+}
+:root:root .rc-ai-target p {
+  margin: 4px 0 0;
+  color: var(--c-ink-2);
+  line-height: 1.5;
+}
+:root:root .rc-ai-target strong,
+:root:root .rc-ai-target-excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+:root:root .rc-ai-target .rc-ai-target-scope {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+:root:root .rc-ai-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+:root:root .rc-ai-input-row input {
+  min-width: 0;
+}
+:root:root .rc-ai-block-bar {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+:root:root .rc-ai-scope-options {
+  display: grid;
+  gap: 4px;
+  max-height: min(28vh, 180px);
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+:root:root .rc-ai-scope-options [role="radio"] {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+:root:root .rc-ai-scope-options [role="radio"] > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+:root:root .rc-ai-scope-notice {
+  margin: 0 0 10px;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+:root:root .canvas-report-article .ai-rewrite-target {
+  background: var(--c-accent-tint);
 }
 
 /* ── Rewriting / rewrite result bars: 36 high, radius 10, content surface + overlay shadow; accept is the only solid primary action, others secondary buttons (no pill radii) ── */
@@ -902,22 +1029,29 @@
 :root:root .canvas-report-article .v2-chart-table > .v2-chart-header {
   padding-bottom: 12px;
 }
-:root:root .canvas-report-article .v2-chart-table-el {
-  font-size: inherit;
+:root:root :is(.canvas-report-article, .rc-inspect-panel) .v2-chart-table-el {
+  font-size: var(--fs-content-table);
   line-height: 1.5;
 }
-:root:root .canvas-report-article .v2-chart-table-el :is(th, td) {
+:root:root :is(.canvas-report-article, .rc-inspect-panel) .v2-chart-table-el :is(th, td) {
   padding: 8px 12px;
   vertical-align: middle;
+  border-bottom: var(--hairline) solid var(--c-separator);
 }
 /* Virtual-scroll spacer cells retain their measured heights rather than a data-row minimum. */
 :root:root .canvas-report-article .v2-chart-table-el th,
 :root:root .canvas-report-article .v2-chart-table-el tbody tr:not([aria-hidden]) td {
   height: var(--table-row-h);
 }
-:root:root .canvas-report-article .v2-chart-table-el th {
+:root:root :is(.canvas-report-article, .rc-inspect-panel) .v2-chart-table-el th {
   font-weight: 600;
+  font-size: var(--fs-content-table-head);
   background: var(--c-surface);
+}
+:root:root :is(.canvas-report-article, .rc-inspect-panel) .v2-chart-table-unit-note {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
 }
 :root:root .canvas-report-article .v2-chart-table-el :is(th, td):first-child {
   padding-left: 0;

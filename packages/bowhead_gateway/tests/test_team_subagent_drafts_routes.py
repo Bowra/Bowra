@@ -5,7 +5,6 @@ import json
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.subagent_authoring_catalog import (
     SubagentAuthoringCatalogService,
@@ -30,6 +29,7 @@ from bowhead_gateway.routes import team_subagent_drafts as drafts
 from bowhead_gateway.routes import team_subagents
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 from starlette.requests import Request
 
 from bowhead_gateway import subagent_draft_chat_editor as chat_editor
@@ -57,7 +57,7 @@ def _setup(tmp_path, monkeypatch):
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     user_store = UserStore(str(db_path))
     _run(user_store.initialize())
     draft_store = SubagentDraftStore(

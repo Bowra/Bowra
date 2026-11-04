@@ -1,6 +1,4 @@
-requested_metrics: "   - Include every requested field/metric in the answer. When an artifact is required, include its columns in `add_chart.series`
-  (columns omitted from `series` are not displayed); combine separate input artifacts only when necessary to deliver that requested artifact.
-  A simple lookup may return the metrics directly in its sourced summary."
+requested_metrics: "   - Include every requested field/metric in the answer. Tables default to all source columns; narrow columns only for a user-requested subset, using exact keys in order. Plots explicitly declare kind, axes, scale and group_by ([] for no split). Prepare aggregation and Top N upstream. Combine inputs only when required for the requested artifact. Simple headline lookups may use sourced summaries."
 requested_artifacts: "   - For an explicitly requested table, chart, detail list or report, prose alone does not deliver its requested metrics.
   For a simple metric lookup without a requested artifact, a sourced `exec_summary` with all requested values is sufficient. If a requested item
   cannot be delivered, name it and the reason in `caveats[]`."

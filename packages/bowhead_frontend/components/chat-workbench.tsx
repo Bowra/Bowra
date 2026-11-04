@@ -688,6 +688,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     useState<HTMLDivElement | null>(null);
   // Appearance refresh batch 4b: toolbar status group mount point (writing progress / status badge) and share-dialog toggle.
   const [reportStatusHost, setReportStatusHost] = useState<HTMLDivElement | null>(null);
+  const [reportSourceLinkageHost, setReportSourceLinkageHost] = useState<HTMLDivElement | null>(null);
   const [reportShareOpen, setReportShareOpen] = useState(false);
   const reportShareButtonRef = useRef<HTMLButtonElement | null>(null);
   // ReportView reports editing state; mobile reading toolbar applies only outside editing.
@@ -3088,6 +3089,13 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     && !resultsCapabilityUnresolved
     && resultsSurface === "viewer"
     && !resultsMobileListOpen;
+  const reportUnifiedBar = resultsWorkspaceEnabled
+    && hasCanvas
+    && !canvasObjectOpener
+    && selectedTab === "report"
+    && resultsSurface === "viewer"
+    && !resultsMobileListOpen
+    && !reportPhoneBar;
   const openResultsMobileList = () => {
     trackResultsWorkspace({
       action: "navigator_opened",
@@ -3176,7 +3184,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               </MenuSubmenu>
             )
           ) : null}
-          {reportPhoneReading ? (
+          {!reportEditing && (resultsWorkspaceEnabled || reportPhoneReading) ? (
             <WorkbenchMenuItem onSelect={() => reportViewRef.current?.openHistory()}>
               {t("history")}
             </WorkbenchMenuItem>
@@ -3194,14 +3202,16 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           {/* The default (active) status shows no toolbar chip, so Mark as Reviewed / Archive live here, as on the
               reports list row "⋯". A non-default status keeps its chip and menu. */}
           {canvas.canvasId && !readOnly && !reportOnly && !reportEditing ? (
-            <ActiveReportStatusMenuItems
-              canvasId={canvas.canvasId}
-              renderItem={(item) => (
-                <WorkbenchMenuItem key={item.key} onSelect={item.onSelect}>
-                  {item.label}
-                </WorkbenchMenuItem>
-              )}
-            />
+            <div role="group" className="results-report-menu-group">
+              <ActiveReportStatusMenuItems
+                canvasId={canvas.canvasId}
+                renderItem={(item) => (
+                  <WorkbenchMenuItem key={item.key} onSelect={item.onSelect}>
+                    {item.label}
+                  </WorkbenchMenuItem>
+                )}
+              />
+            </div>
           ) : null}
           {/* Batch 4b: writing progress lives in the toolbar, so `复制轮次 ID` (troubleshooting) is here;
               show only while writing with a turn ID available. */}
@@ -3209,7 +3219,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             <CopyTurnIdMenuItem turnId={canvas.currentTurnId} />
           ) : null}
           {!readOnly && !reportOnly ? (
-            <>
+            <div role="group" className="results-report-menu-group">
               {/* Behavior batch A: clearing deletes all report content and requires confirmation; mark as a red dangerous action with `…`. */}
               <WorkbenchMenuItem
                 className="danger"
@@ -3221,11 +3231,26 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               <WorkbenchMenuItem className="danger" onSelect={() => void deleteCurrentReport()}>
                 {withConfirmEllipsis(t("hdr_delete_report"))}
               </WorkbenchMenuItem>
-            </>
+            </div>
           ) : null}
         </div>
       </MenuFloating>
     </div>
+  ) : null;
+  const reportDocumentActions = <>
+    <div ref={setReportStatusHost} className="results-report-status-group" />
+    <div className="results-report-actions">
+      {reportPhoneReading ? null : (
+        <div ref={setReportEditControlsHost} className="results-report-edit-controls" />
+      )}
+      {reportToolbarNarrow ? null : reportExportAction}
+      {reportShareAction}
+      {reportMoreAction}
+    </div>
+  </>;
+  const reportSourceSummary = <div ref={setReportSourceLinkageHost} className="results-report-source-summary" />;
+  const reportWritingHint = exportBlockedByWriting ? (
+    <p id={reportWritingHintId} className="results-report-writing-hint">{t("export_writing_hint")}</p>
   ) : null;
   const reportSurface = !hasCanvas && !reportOnly && (resultsWorkspaceEnabled || canvasObjectList) ? (
     <section className={resultsNavigatorStyles.landing} aria-label={resultsT("choose_result_title")}>
@@ -3252,7 +3277,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     </div>
   ) : (
     <>
-      {resultsWorkspaceEnabled ? (
+      {resultsWorkspaceEnabled && !reportUnifiedBar ? (
         <div
           className="results-report-object-toolbar"
           aria-label={resultsT("report_actions")}
@@ -3282,26 +3307,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               </strong>
             </>
           ) : null}
-          {/* Status group (writing progress or status badge, portaled by ReportView). */}
-          <div ref={setReportStatusHost} className="results-report-status-group" />
-          <div>
-            {/* Mobile reading removes the edit group from toolbar (`编辑` lives in `更多`). */}
-            {reportPhoneReading ? null : (
-              <div
-                ref={setReportEditControlsHost}
-                className="results-report-edit-controls"
-              />
-            )}
-            {reportToolbarNarrow ? null : reportExportAction}
-            {reportShareAction}
-            {reportMoreAction}
-          </div>
-          {/* Persistent writing-time reasons for unavailable editing/export (export button reads via aria-describedby). */}
-          {exportBlockedByWriting ? (
-            <p id={reportWritingHintId} className="results-report-writing-hint">
-              {t("export_writing_hint")}
-            </p>
-          ) : null}
+          {reportDocumentActions}
+          {reportSourceSummary}
+          {reportWritingHint}
         </div>
       ) : null}
       <ReportView
@@ -3322,7 +3330,8 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           && canvas.status !== "streaming"
           && canvas.status !== "outline"
         }
-        hideHistoryControl={resultsWorkspaceEnabled && reportPhoneReading && !reportOnly}
+        hideHistoryControl={resultsWorkspaceEnabled && !reportOnly}
+        sourceLinkageHost={resultsWorkspaceEnabled ? reportSourceLinkageHost : undefined}
         editControlsHost={resultsWorkspaceEnabled ? reportEditControlsHost : undefined}
         statusHost={resultsWorkspaceEnabled ? reportStatusHost : undefined}
         turnTerminalStatus={runner.terminalStatus ?? null}
@@ -3527,15 +3536,19 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             segmented tabs · export dropdown (folds PDF/PPT/XLS) · fullscreen toggle ·
             collapse-to-chat (desktop) · "更多" menu (history / clear / delete).
             Chrome only — every export/clear/delete/history handler below is verbatim. */}
-        <div className="v2-ws-right-head">
+        <div className={clsx("v2-ws-right-head", { "results-report-object-toolbar results-report-unified-toolbar": reportUnifiedBar })}>
           {canvasObjectOpener ? <span ref={documentOpenerRef}>{canvasObjectOpener}</span> : null}
           {resultsWorkspaceShellEnabled ? (
             <div className="results-head-context">
               <button
-                ref={resultsTriggerRef}
+                ref={(node) => {
+                  resultsTriggerRef.current = node;
+                  if (reportUnifiedBar) resultsCurrentTitleRef.current = node;
+                }}
                 type="button"
                 className="results-trigger"
                 disabled={resultsCapabilityUnresolved}
+                title={reportUnifiedBar ? resultsCurrentTitle : undefined}
                 aria-haspopup={
                   resultsCapabilities.scaleNav
                     ? "dialog"
@@ -3606,7 +3619,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                   {resultsT("back_to_results")}
                 </button>
               ) : null}
-              {reportPhoneBar || resultsChooserSelected ? null : (
+              {reportPhoneBar || reportUnifiedBar || resultsChooserSelected ? null : (
                 <strong
                   ref={resultsCurrentTitleRef}
                   className="results-current-title"
@@ -3674,6 +3687,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                </TabList>
              </Tabs>
            )}
+          {reportUnifiedBar ? <>{reportSourceSummary}{reportDocumentActions}</> : null}
           <div className="r-actions">
             {/* Export — one button folds PDF / PPT / XLS (triggerExport unchanged). */}
             {/* followup-context-deck #7: always render export, disabled/grayed without a canvas;
@@ -3718,6 +3732,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
             {/* More — history (RevisionRail) / clear / delete; handlers verbatim. */}
             {!resultsWorkspaceShellEnabled ? reportMoreAction : null}
           </div>
+          {reportUnifiedBar ? reportWritingHint : null}
           {/* click-away: closes whichever header menu is open */}
         </div>
         {reportConfirmDialog}

@@ -1,12 +1,16 @@
-# Space instructions
+# AI work instructions
 
-Space instructions are a short text that every conversation in a space follows. Use them for what everyone in the space would otherwise have to repeat: who the answers are for, which comparisons to show by default, the preferred tone or length, or background about the space's work. They apply to every member of the space and to every Agent that works in it, including built-in and team Agents.
+AI work instructions are a short text that every conversation in a space follows. Use them for what everyone in the space would otherwise have to repeat: who the answers are for, which comparisons to show by default, the preferred tone or length, or background about the space's work. They apply to every member of the space and to every Agent that works in it, including built-in and team Agents.
+
+## Purpose and scope
+
+The **Description** in General introduces what the space is for. **AI work instructions** set default AI work requirements, such as business definitions, audience, comparisons and writing style. They apply to all members and AI Agents working in this space, without changing other spaces. Changes take effect from the next message; a reply already being generated retains its starting version. Specific requests in the current conversation take precedence.
 
 ## Write or change the instructions
 
 Space administrators and team administrators can change the instructions. Team administrators do not need to join the space.
 
-1. As a space administrator, open the space and choose **Space settings → Instructions**. As a team administrator, open **Team settings → Spaces**, open the **More actions** menu of the space and choose **Instructions**.
+1. As a space administrator, open the space and choose **Space settings → AI Work Instructions**. As a team administrator, open **Team settings → Spaces**, open the **More actions** menu of the space and choose **AI Work Instructions**.
 2. Write the instructions in plain language. For example: "Answers are for regional sales managers. Compare with the same month last year by default and keep summaries short."
 3. Select **Save**.
 
@@ -24,7 +28,7 @@ You can also ask in a conversation in the space, for example: "Add to this space
 
 ## See the instructions as a member
 
-Every member can read the instructions of the space they are in. Select the **About this Space** button (the ⓘ icon next to the space switcher at the top). It shows the instructions, when they were last saved and which space administrators to ask for a change. You can also open **Instructions** under the space group in **Settings** to read the full text.
+Every member can read the instructions of the space they are in. Select the **About this Space** button (the ⓘ icon next to the space switcher at the top). It shows the instructions, when they were last saved and which space administrators to ask for a change. You can also open **AI Work Instructions** under the space group in **Settings** to read the full text.
 
 ## Add an adopted suggestion
 
@@ -42,9 +46,9 @@ Every save is kept as a version. Under **Version history**, select a version to 
 
 ## Good to know
 
-- A member's own request in a conversation, and their personal memory, take precedence over the space instructions for that member.
+- A member's own request in a conversation, and their personal memory, take precedence over the AI work instructions for that member.
 - The limit is 6,000 characters. A longer text cannot be saved; the page shows the current length.
 - If another administrator saves while you are editing, your save is stopped so their change is not overwritten without notice. Your text stays in the editor, and the version history opens their version with the lines they changed. Review it, then select **Save my text anyway** if your text should replace it, or **Discard my changes**.
 - Instructions of an archived space cannot be changed until the space is restored.
-- Evaluations of Agent versions do not use space instructions, so evaluation results show how the Agent behaves on its own.
+- Evaluations of Agent versions do not use AI work instructions, so evaluation results show how the Agent behaves on its own.
 - Members who are not space administrators cannot change the instructions. If something should be different, ask a space administrator, or suggest it in a conversation so it reaches the suggestion inbox.

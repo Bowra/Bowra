@@ -10,6 +10,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from artifact_row_helpers import artifact_columns, artifact_rows_by_column
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -41,20 +42,20 @@ def test_upgrade_keeps_existing_files_without_backfilled_claims(tmp_path) -> Non
         _artifact(db)
         preserved_columns = artifact_columns(db)
         before = artifact_rows_by_column(db, preserved_columns)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert artifact_rows_by_column(db, preserved_columns) == before
         assert db.execute("SELECT count(*) FROM artifact_purge_claims").fetchone()[0] == 0
         plan = db.execute("EXPLAIN QUERY PLAN SELECT id FROM artifacts WHERE path=?", ("/synthetic/key",)).fetchall()
         assert any("idx_artifacts_storage_path" in row[3] for row in plan)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == migrations.chain_head()
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == SOURCE_REVISION
 
 
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "extracted_rows", "per_row_jobs", "team_templates", "matrix"])
 def test_non_core_migration_is_noop(tmp_path, target) -> None:
     path = tmp_path / "other.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='artifact_purge_claims'").fetchone() is None
 
@@ -77,13 +78,13 @@ def test_schema_drift_rejected(tmp_path, kind) -> None:
                 "CREATE TRIGGER trg_session_attachments_purge_update BEFORE UPDATE ON session_attachments WHEN 0 BEGIN SELECT RAISE(ABORT,'disabled'); END"
             )
     with pytest.raises(RuntimeError, match="schema drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)
 
 
 @pytest.fixture
 def db(tmp_path):
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         _artifact(db)
         db.execute(

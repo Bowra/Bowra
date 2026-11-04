@@ -16,16 +16,17 @@ from bowhead_core.agent_execution_binding import AgentExecutionBindingError
 from bowhead_core.agent_run_limits import DEFAULT_LIMITS, get_tool_call_budget
 from bowhead_core.document_chat_continuation import DocumentPlanningAttemptRef, DocumentTurnOwner
 from bowhead_core.documents.agent_caller import authorize_document_job_caller, read_document_caller_in_tx
-from bowhead_core.documents.authoring_context import CANVAS_REFERENCE, runtime_api_reference
+from bowhead_core.documents.authoring_context import CANVAS_REFERENCE, WORD_CANVAS_REFERENCE, WORD_SYSTEM, runtime_api_reference
 from bowhead_core.documents.authoring_context import SYSTEM as AUTHORING_SYSTEM
 from bowhead_core.documents.authoring_executor import AuthoringExecutor
+from bowhead_core.documents.authoring_formats import WORD_PROFILE
 from bowhead_core.documents.authoring_protocol import PROFILE as AUTHORING_PROFILE
 from bowhead_core.documents.authoring_runner import run_authoring_turn
 from bowhead_core.documents.canvas_inputs import CanvasInputStore, inherit_canvas_input_in_tx
 from bowhead_core.documents.continuation import DocumentPlanningOutcome, DocumentRuntimeSnapshot
 from bowhead_core.documents.delivery import DocumentDeliveryStore
 from bowhead_core.documents.executor import PROFILE, DocumentExecutor
-from bowhead_core.documents.package_io import OfficePackageError
+from bowhead_core.documents.package_io import OFFICE_MIMES, OfficePackageError
 from bowhead_core.documents.pptx_plan import CURRENT_PROFILE
 from bowhead_core.documents.request import DocumentModelSelection, DocumentRequestError, DocumentScope
 from bowhead_core.documents.runner import run_document
@@ -172,10 +173,14 @@ class DocumentService:
         if not continuation and ctx.document_caller_execution_id is not None:
             raise DocumentRequestError("document_capability_unavailable")
         authoring = continuation and os.environ.get("FEATURE_DOCUMENT_SCRIPT_AUTHORING", "0") == "1"
+        profile = await self._authoring_profile(scope, prepared)
+        word = profile == WORD_PROFILE
+        if word and (not authoring or os.environ.get("FEATURE_TEMPLATE_DOCX_AUTHORING", "0") != "1"):
+            raise DocumentRequestError("document_word_unavailable")
         try:
             executor = self.executor()
             if authoring:
-                executor = AuthoringExecutor(root=executor.root, url=executor.url, token=executor.token)
+                executor = AuthoringExecutor(root=executor.root, url=executor.url, token=executor.token, **({"profile": profile} if word else {}))
                 readiness = await executor.capabilities()
             else:
                 async with httpx2.AsyncClient(
@@ -250,11 +255,13 @@ class DocumentService:
                         raise DocumentRequestError("document_authoring_budget_exhausted")
                 snapshot = (
                     DocumentRuntimeSnapshot(
-                        schema_version=2 if authoring else 1,
+                        schema_version=3 if word else 2 if authoring else 1,
                         image_id=readiness["image_id"],
                         model_config_version=model_version,
-                        planner_profile=AUTHORING_PROFILE if authoring else CURRENT_PROFILE,
-                        authoring_system=AUTHORING_SYSTEM + runtime_api_reference(readiness) + (CANVAS_REFERENCE if canvas_input is not None else "")
+                        planner_profile=profile if authoring else CURRENT_PROFILE,
+                        authoring_system=(WORD_SYSTEM if word else AUTHORING_SYSTEM)
+                        + runtime_api_reference(readiness)
+                        + ((WORD_CANVAS_REFERENCE if word else CANVAS_REFERENCE) if canvas_input is not None else "")
                         if authoring
                         else None,
                         authoring_limits=authoring_limits if authoring else None,
@@ -275,6 +282,7 @@ class DocumentService:
                     _answer=prepared.answer,
                     _revision=prepared.revision,
                     _canvas=canvas_input,
+                    _task_source=prepared.task_source,
                 )
             except DocumentRequestError:
                 # A concurrent exact request may have won with another runtime
@@ -299,6 +307,27 @@ class DocumentService:
                     except Exception as exc:
                         log.warning("document_admission.cleanup_failed error_type=%s", type(exc).__name__)
             raise
+
+    async def _authoring_profile(self, scope, prepared):
+        """Choose a finite byte-format hint from authorized service metadata.
+
+        The isolated source read verifies actual DOCX bytes before its first
+        model call. A browser field or filename cannot grant a runtime profile.
+        """
+        if prepared.revision is not None:
+            mime = next(item.mime for item in prepared.revision.inputs if item.role == "template")
+        else:
+            template = next(item for item in prepared.proposal.inputs if item.role == "template")
+            async with (
+                open_shared_ctx(self.delivery.path) as db,
+                db.execute(
+                    "SELECT mime FROM artifacts WHERE id=? AND created_by=? AND status='ready' AND deleted_at IS NULL",
+                    (template.artifact_id, scope.user_id),
+                ) as cursor,
+            ):
+                row = await cursor.fetchone()
+            mime = row[0] if row else ""
+        return WORD_PROFILE if mime.split(";", 1)[0].strip().lower() == OFFICE_MIMES[".docx"] else AUTHORING_PROFILE
 
     async def _space_instructions_block(self, job_id: str) -> str:
         """Space instructions the job's originating Turn received; every call of the job uses the same version."""
@@ -417,8 +446,13 @@ class DocumentService:
 
         space_block = await self._space_instructions_block(job_id)
 
-        if snapshot.schema_version == 2:
-            executor = AuthoringExecutor(root=executor.root, url=executor.url, token=executor.token)
+        if snapshot.schema_version in {2, 3}:
+            executor = AuthoringExecutor(
+                root=executor.root,
+                url=executor.url,
+                token=executor.token,
+                **({"profile": snapshot.planner_profile} if snapshot.schema_version == 3 else {}),
+            )
 
             async def invoke_authoring(system, messages, tools):
                 return await self._invoke(
@@ -488,6 +522,7 @@ class DocumentService:
             try:
                 await self.delivery.recover_expired()
                 await settle_pending_usage(str(self.delivery.path))
+                await self.delivery.repair_confirmed_publications()
                 if time.monotonic() >= next_cleanup:
                     await self.delivery.cleanup()
                     next_cleanup = time.monotonic() + 60

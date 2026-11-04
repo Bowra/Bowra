@@ -29,12 +29,17 @@ async def prepared(tmp_path: Path):
         {
             "data_artifact_id": art.id,
             "title": "Regions",
-            "hint": "compare",
             "column_units": {"revenue": "USD"},
             "column_display": {"revenue": {"decimal_places": 3, "decimal_mode": "fixed"}},
             "views": [
-                {"id": "comparison", "title": "Comparison", "hint": "compare", "series": ["revenue"], "force_kind": "bar"},
-                {"id": "details", "title": "Values", "hint": "raw", "series": ["revenue"], "force_kind": "table"},
+                {
+                    "id": "comparison",
+                    "title": "Comparison",
+                    "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+                    "group_by": [],
+                    "force_kind": "bar",
+                },
+                {"id": "details", "title": "Values", "force_kind": "table"},
             ],
         },
         _StubCtx(artifact_store=artifacts, canvas_store=store),

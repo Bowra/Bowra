@@ -13,7 +13,7 @@ from dataclasses import replace
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_reference_lead_delegation import _normal_lead
 from test_reference_lead_delegation import lead_case as lead_case

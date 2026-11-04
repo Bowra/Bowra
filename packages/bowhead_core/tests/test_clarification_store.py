@@ -1602,3 +1602,25 @@ async def test_legacy_invalidation_rejects_terminal_protocol_v1(tmp_path) -> Non
             actor="user",
         )
     assert (await store.get(req.request_id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_long_analysis_scope_and_late_choice_survive_resolution_replay(store: ClarificationStore) -> None:
+    candidates = [ClarificationCandidate(value=f"choice_{index}", label=f"Analysis section {index}") for index in range(18)]
+    request = await store.put(
+        turn_id="t_scope",
+        user_id="u_scope",
+        workspace_id="ws_scope",
+        token="scope",
+        rationale="Choose analysis sections",
+        candidates=candidates,
+        kind="ambiguous_turn",
+        multi_select=True,
+    )
+    answer = {"question": "Analysis scope", "source": "candidate", "answer": "Analysis section 17", "option_index": 17}
+    resolved, won = await store.resolve_once(request.request_id, chosen_values=["choice_17"], answers=[answer])
+    assert won and resolved.chosen_values == ["choice_17"]
+    replayed = await store.get(request.request_id)
+    assert len(replayed.candidates) == 18
+    assert replayed.answers == [answer]
+    assert replayed.chosen_values == ["choice_17"]

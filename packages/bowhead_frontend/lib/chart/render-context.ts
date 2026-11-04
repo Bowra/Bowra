@@ -1,4 +1,4 @@
-import type { ChartKind } from "./types";
+import type { ChartKind, ChartSpec } from "./types";
 import type { ChartFamily, NormalizedChartRenderShapeV1 } from "./normalize-chart-for-rendering";
 
 export type { ChartFamily } from "./normalize-chart-for-rendering";
@@ -87,10 +87,11 @@ export function resolveChartContentProfile(shape: NormalizedChartRenderShapeV1):
   };
 }
 
-/** Pure projection from real capabilities + final content shape to Chart.js layout decisions. */
+/** Pure projection from capabilities, final content shape and declared grouping to Chart.js layout decisions. */
 export function resolveChartRenderRecipe(
   context: ChartRenderContext,
   shape: NormalizedChartRenderShapeV1,
+  binding?: ChartSpec["explicit_presentation"],
 ): ChartRenderRecipe {
   const profile = resolveChartContentProfile(shape);
   const width = Math.max(1, context.bounds.widthPx);
@@ -102,7 +103,8 @@ export function resolveChartRenderRecipe(
       ? "spacious"
       : "standard";
   const compositionLegend = profile.kind === "pie" && profile.categoryCount > 1;
-  const showLegend = compositionLegend || profile.seriesCount > 1;
+  const declaredGrouping = binding?.mode === "plot" && (binding.group_by?.length ?? 0) > 0;
+  const showLegend = declaredGrouping || compositionLegend || profile.seriesCount > 1;
   const staticOrNoHover = context.output.static || !context.input.hover || context.input.pointer !== "fine";
   const labelCapacity = widthClass === "compact" ? 6 : widthClass === "wide" ? 16 : 12;
   const forceDataLabels = context.output.static

@@ -41,6 +41,9 @@ from bowhead_core.clarification_resume_context import (
     decode_resume_context,
 )
 from bowhead_core.clarification_resume_context import resume_context_version as resume_context_version
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 logger = logging.getLogger(__name__)
 
@@ -354,14 +357,7 @@ async def invalidate_pending_in_tx(
 async def _has_protocol_projection_tables(
     db: aiosqlite.Connection,
 ) -> bool:
-    async with db.execute(
-        """
-        SELECT COUNT(*) FROM sqlite_master
-        WHERE type='table' AND name IN ('turns','turn_terminal_receipts')
-        """
-    ) as cursor:
-        row = await cursor.fetchone()
-    return bool(row is not None and int(row[0]) == 2)
+    return await readable_table_exists(db, "turns") and await readable_table_exists(db, "turn_terminal_receipts")
 
 
 def normalize_clarification_resolution(
@@ -678,11 +674,15 @@ class ClarificationRequest:
 
 class ClarificationStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "execution"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             await db.executescript(SCHEMA)
             # V2.7: migrate old databases (ignore inability to add new columns).
             for stmt in _MIGRATIONS:
@@ -717,7 +717,7 @@ class ClarificationStore:
             "idx_clarification_invalidation_outbox_pending",
             "idx_clarification_invalidation_outbox_turn_claim",
         }
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             async with db.execute(
                 "PRAGMA table_info(clarification_invalidation_outbox)",
             ) as cursor:
@@ -850,7 +850,7 @@ class ClarificationStore:
             reason=reason,
             actor=actor,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -874,13 +874,23 @@ class ClarificationStore:
                         outcome="already_terminal",
                     )
                 return ClarificationInvalidationResult(request, canonical)
+            now = _now()
+            if (
+                target_status == "dismissed"
+                and reason == "user_rephrase"
+                and isinstance(request.resume_context, dict)
+                and request.resume_context.get("__schema_version") == 4
+            ):
+                from bowhead_core.ordinary_lead_continuation import cancel_ordinary_pause_in_tx
+
+                await cancel_ordinary_pause_in_tx(db, card_id=request_id, now=now)
             invalidations = await invalidate_pending_in_tx(
                 db,
                 [ClarificationIdentity(request_id, request.turn_id)],
                 target_status=target_status,
                 reason=reason,
                 actor=actor,
-                now=_now(),
+                now=now,
             )
             await db.commit()
         record_clarification_invalidation_metrics(
@@ -908,7 +918,7 @@ class ClarificationStore:
             reason=reason,
             actor=actor,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             if await self._is_v1_turn(db, turn_id):
@@ -960,7 +970,7 @@ class ClarificationStore:
             reason=reason,
             actor=actor,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -1171,7 +1181,7 @@ class ClarificationStore:
             req.resume_context = inserted_context
 
         if connection is None:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
                 if bounded_question is not None or ordinary_question is not None:
                     await db.execute("BEGIN IMMEDIATE")
                 await insert(db)
@@ -1202,7 +1212,7 @@ class ClarificationStore:
         leak防护 (callers SHOULD pass these from authenticated context).
         """
         params: list[Any] = [session_id]
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             protocol_tables = await _has_protocol_projection_tables(db)
             sql = (
@@ -1235,7 +1245,7 @@ class ClarificationStore:
         return [self._row_to_request(row) for row in rows]
 
     async def get_pending_for_turn(self, turn_id: str) -> list[ClarificationRequest]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             protocol_tables = await _has_protocol_projection_tables(db)
             sql = (
@@ -1265,8 +1275,19 @@ class ClarificationStore:
             rows = await cur.fetchall()
             return [self._row_to_request(r) for r in rows]
 
+    async def get_pending_for_session(self, *, session_id: str, user_id: str, workspace_id: str) -> list[ClarificationRequest]:
+        """Read pending targets in an exact owned conversation."""
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM clarification_requests WHERE session_id=? AND user_id=? AND workspace_id=? "
+                "AND status='pending' ORDER BY created_at,request_id",
+                (session_id, user_id, workspace_id),
+            ) as cursor:
+                return [self._row_to_request(row) for row in await cursor.fetchall()]
+
     async def get(self, request_id: str) -> ClarificationRequest | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 "SELECT * FROM clarification_requests WHERE request_id = ?",
@@ -1315,7 +1336,7 @@ class ClarificationStore:
         改后的 plan + free-form 指令). 持久化, turn_runner 下一轮 force_spawn 读 + 注入.
         """
         # Normalize: prefer chosen_values; otherwise wrap chosen_value in a list.
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             cur = await db.execute(
@@ -1426,7 +1447,7 @@ class ClarificationStore:
         """
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             cur = await db.execute(
@@ -1477,7 +1498,7 @@ class ClarificationStore:
         self,
         request_id: str,
     ) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cur = await db.execute(
                 "SELECT payload_json FROM clarification_resolution_outbox WHERE request_id=? AND state='completed'",
                 (request_id,),
@@ -1489,7 +1510,7 @@ class ClarificationStore:
         return payload if isinstance(payload, dict) else None
 
     async def get_resolution_work_state(self, request_id: str) -> str | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cur = await db.execute(
                 "SELECT state FROM clarification_resolution_outbox WHERE request_id=?",
                 (request_id,),
@@ -1510,7 +1531,7 @@ class ClarificationStore:
         lease_expires_at = (now_dt + timedelta(seconds=RESOLUTION_WORK_LEASE_SECONDS)).isoformat(
             timespec="seconds",
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
@@ -1565,7 +1586,7 @@ class ClarificationStore:
         lease_expires_at = (now_dt + timedelta(seconds=lease_seconds)).isoformat(
             timespec="microseconds",
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             candidate_sql = (
@@ -1633,7 +1654,7 @@ class ClarificationStore:
         lease_expires_at = (now_dt + timedelta(seconds=lease_seconds)).isoformat(
             timespec="microseconds",
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE clarification_invalidation_outbox SET lease_expires_at=?,updated_at=? WHERE turn_id=? AND state='pending' AND lease_owner=?",
                 (lease_expires_at, now, turn_id, owner),
@@ -1648,7 +1669,7 @@ class ClarificationStore:
         owner: str,
     ) -> bool:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cursor = await db.execute(
                 """
                 UPDATE clarification_invalidation_outbox
@@ -1663,7 +1684,7 @@ class ClarificationStore:
 
     async def count_pending_invalidations(self) -> int:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(domain_database_path(self.db_path, "execution")) as db,
             db.execute(
                 "SELECT COUNT(*) FROM clarification_invalidation_outbox WHERE state='pending'",
             ) as cursor,
@@ -1684,7 +1705,7 @@ class ClarificationStore:
         cutoff = (datetime.now(tz=UTC) - timedelta(days=retention_days)).isoformat(
             timespec="microseconds",
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cursor = await db.execute(
                 """
                 DELETE FROM clarification_invalidation_outbox
@@ -1727,7 +1748,7 @@ class ClarificationStore:
         # resolve can emit false skipped events for just-answered cards or miss expiring new cards; atomicity removes
         # both races (SQLite ≥3.35 supports RETURNING). Narrow by the frozen plan
         # resume context; do not also expire ordinary clarifications in the same turn or cards from another plan.
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -1764,7 +1785,7 @@ class ClarificationStore:
           取，规模上界 = 单 job 单 in-flight × 用户任务数，不必分批。
         """
         cutoff = (datetime.now(tz=UTC) - timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             protocol_tables = await _has_protocol_projection_tables(db)
@@ -1828,7 +1849,7 @@ class ClarificationStore:
         if ttl_hours <= 0 or not 1 <= limit <= 100:
             raise ValueError("clarification expiry bounds are invalid")
         cutoff = (datetime.now(tz=UTC) - timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -1856,7 +1877,7 @@ class ClarificationStore:
 
         if not 1 <= limit <= 100 or (after_id is not None and (not isinstance(after_id, str) or not after_id)):
             raise ValueError("clarification pending bounds are invalid")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -1986,7 +2007,7 @@ class ClarificationStore:
         full snapshot is only known after Lead has populated transient state
         (e.g. dispatch_window after first peer dispatch).
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             # A3: same storage-boundary rule as put(); this later snapshot also needs a version.
             if ctx.get("datarc_selection") is not None:
                 from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
@@ -2044,7 +2065,7 @@ class ClarificationStore:
         kind: str = "task_plan",
     ) -> ClarificationRequest | None:
         cutoff = (datetime.now(tz=UTC) - timedelta(minutes=within_minutes)).isoformat(timespec="microseconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 """
@@ -2065,7 +2086,7 @@ class ClarificationStore:
 
     async def mark_injected(self, request_id: str) -> bool:
         """Consume a legacy directive once; retained Lead state needs its worker CAS."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE clarification_requests SET injected_at=? WHERE request_id=? AND injected_at IS NULL "
                 "AND CASE WHEN json_valid(resume_context_json) THEN COALESCE(json_extract(resume_context_json,'$.__schema_version'),0)<>4 ELSE 1 END",
@@ -2082,7 +2103,7 @@ class ClarificationStore:
         impossible; ``directive_cancelled_at`` is the effective product state
         and ``find_recent_resolved_with_directive`` already excludes it.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE clarification_requests SET directive_cancelled_at=? "
                 "WHERE request_id=? AND user_id=? AND injected_at IS NULL "

@@ -21,6 +21,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_listing_safety import scan_agent_listing
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 CatalogResourceKind = Literal["agent", "skill", "capability"]
@@ -349,7 +350,7 @@ async def materialize_confirmed_agent_localizations_conn(
 
 class CatalogLocalizationStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def agent_manager_snapshot(
         self,

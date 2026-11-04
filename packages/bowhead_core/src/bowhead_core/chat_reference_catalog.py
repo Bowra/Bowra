@@ -45,6 +45,7 @@ from bowhead_core.reference_skill_compatibility import ReferenceSkillMetadata, r
 from bowhead_core.resource_access import builtin_capability_ids_for_skill
 from bowhead_core.share_service import grants_for_viewer, is_visible
 from bowhead_core.skill_reference_metadata import BuiltinSkillMetadataIndex
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.system_agent_marketplace import (
     SYSTEM_AGENT_LISTINGS,
     system_agent_localized_display_name,
@@ -679,7 +680,12 @@ async def _uploaded_skills(
         if access_factory is None:
             raise ValueError("catalog_metadata_unavailable")
         access_store, requested = await access_factory()
-        if Path(access_store.db_path) != db_path or (requested.team_id, requested.user_id, requested.workspace_id, requested.policy_epoch) != (
+        if Path(domain_database_path(access_store.db_path, "core")) != Path(domain_database_path(db_path, "core")) or (
+            requested.team_id,
+            requested.user_id,
+            requested.workspace_id,
+            requested.policy_epoch,
+        ) != (
             team_id,
             user_id,
             query.workspace_id,
@@ -761,7 +767,10 @@ async def _system_agents(
 ) -> ReferenceCatalogGroup:
     if index is None:
         return ReferenceCatalogGroup(id="system_agents", error="catalog_adapter_unavailable")
-    if Path(index.db_path) != db_path or (team_id, workspace_id) not in index.scopes:
+    if (
+        Path(domain_database_path(index.db_path, "core")) != Path(domain_database_path(db_path, "core"))
+        or (team_id, workspace_id) not in index.scopes
+    ):
         return ReferenceCatalogGroup(id="system_agents", error="catalog_metadata_unavailable")
     try:
         # Scope was checked on this transaction; system-required membership
@@ -848,13 +857,18 @@ async def _mcp_sources(
 ) -> ReferenceCatalogGroup:
     if index is None:
         return ReferenceCatalogGroup(id="mcp", error="catalog_adapter_unavailable")
-    if Path(index.db_path) != db_path or not index.ready:
+    if Path(domain_database_path(index.db_path, "core")) != Path(domain_database_path(db_path, "core")) or not index.ready:
         return ReferenceCatalogGroup(id="mcp", error="catalog_metadata_unavailable")
     try:
         if access_factory is None:
             raise ValueError("catalog_metadata_unavailable")
         access_store, requested = await access_factory()
-        if Path(access_store.db_path) != db_path or (requested.team_id, requested.user_id, requested.workspace_id, requested.policy_epoch) != (
+        if Path(domain_database_path(access_store.db_path, "core")) != Path(domain_database_path(db_path, "core")) or (
+            requested.team_id,
+            requested.user_id,
+            requested.workspace_id,
+            requested.policy_epoch,
+        ) != (
             team_id,
             user_id,
             workspace_id,
@@ -997,6 +1011,8 @@ async def read_reference_catalog(
         receiver_index=receiver_index,
         mcp_index=mcp_index,
     )
+    from bowhead_core.skill_method_policy import task_method_reads_ready
+
     return _catalog_response(
         team_id=team_id,
         user_id=user_id,
@@ -1012,6 +1028,7 @@ async def read_reference_catalog(
         compatibility_groups=compatibility_groups,
         automatic_receiver_identities=automatic_receiver_identities,
         tool_registry=tool_registry,
+        allow_task_methods=await task_method_reads_ready(db_path),
     )
 
 
@@ -1130,6 +1147,7 @@ def _catalog_response(
     compatibility_groups: list[ReferenceCatalogGroup] | None = None,
     automatic_receiver_identities: frozenset[tuple[str, str, str]] | None = None,
     tool_registry: ToolRegistry | None = None,
+    allow_task_methods: bool = False,
 ) -> ReferenceCatalogResponse:
     try:
         support = _validated_entry_support(query.entry_mode)
@@ -1226,6 +1244,7 @@ def _catalog_response(
             compatibility_groups,
             support,
             automatic_receiver_identities=automatic_receiver_identities,
+            allow_task_methods=allow_task_methods,
         )
     if query.exact_resource is not None:
         groups = [group.model_copy(update={"items": [item for item in group.items if item.resource == query.exact_resource]}) for group in groups]
@@ -1287,7 +1306,7 @@ def reference_skill_metadata_map(metadata_groups: list[ReferenceCatalogGroup]) -
     }
 
 
-def _compatible_choices(query, groups, metadata_groups, support, *, automatic_receiver_identities=None):
+def _compatible_choices(query, groups, metadata_groups, support, *, automatic_receiver_identities=None, allow_task_methods=False):
     from bowhead_core.chat_reference_capability import capability_supported_by_behavior
 
     agents = [item for group in metadata_groups for item in group.items if isinstance(item, ReferenceCatalogItem)]
@@ -1385,7 +1404,12 @@ def _compatible_choices(query, groups, metadata_groups, support, *, automatic_re
             return False
         if selected_mcp_prompts and item.resource.source_kind != "team":
             return False
-        modes = reference_skill_modes(item.receiver_metadata, selected_skills, skills)
+        modes = reference_skill_modes(
+            item.receiver_metadata,
+            selected_skills,
+            skills,
+            allow_task_methods=allow_task_methods and query.entry_mode in {"ordinary", "steer"},
+        )
         return bool(
             modes is not None
             and set(modes) <= ready_modes
@@ -1564,7 +1588,12 @@ def _compatible_choices(query, groups, metadata_groups, support, *, automatic_re
                 for receiver in receivers
                 if receiver is not None
                 and (not selected_capabilities or capability_supported_by_behavior(receiver.behavior, selected_capabilities[0]))
-                and (modes := reference_skill_modes(receiver, roots, skills)) is not None
+                and (
+                    modes := reference_skill_modes(
+                        receiver, roots, skills, allow_task_methods=allow_task_methods and query.entry_mode in {"ordinary", "steer"}
+                    )
+                )
+                is not None
                 and set(modes) <= ready_modes
             ]
             if not matches:
@@ -1580,7 +1609,11 @@ def _compatible_choices(query, groups, metadata_groups, support, *, automatic_re
             return item.model_copy(update={"availability": mode, "reason_code": None})
         if not roots:
             return item
-        modes = reference_skill_modes(receiver, roots, skills) if receiver is not None else None
+        modes = (
+            reference_skill_modes(receiver, roots, skills, allow_task_methods=allow_task_methods and query.entry_mode in {"ordinary", "steer"})
+            if receiver is not None
+            else None
+        )
         if modes is None:
             return item.model_copy(update={"availability": "unavailable", "reason_code": "unsupported_binding"})
         if not set(modes) <= ready_modes:

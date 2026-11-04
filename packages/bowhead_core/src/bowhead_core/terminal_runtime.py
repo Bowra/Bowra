@@ -120,6 +120,7 @@ _CHAT_FAILURE_REASON_COMPAT = {
     # The model still produced no answer or action after the one empty-response recovery.
     "lead_empty_answer": "terminal_projection_missing",
     "lead_output_exhausted": "terminal_projection_missing",
+    "tool_call_not_executed": "terminal_projection_missing",
     # The selected @Agent primary never completed: no deliverable was produced.
     "reference_primary_incomplete": "terminal_projection_missing",
     "peer_dispatch_network_error": "worker_start_failed",
@@ -138,6 +139,7 @@ _CHAT_FAILURE_REASON_COMPAT = {
     # Shortcut refs: selected Agent/Skill grant changed before resume, or required checkpoint/lease unavailable;
     # all nonretryable missing dependencies (access / configuration diagnostics), same category as entitlement_denied.
     "reference_policy_changed": "terminal_dependency_missing",
+    "knowledge_source_changed": "terminal_dependency_missing",
     "reference_continuation_unavailable": "terminal_dependency_missing",
     # Clarification resume checkpoint/lease no longer usable: nonretryable missing dependency,
     # same category as reference_continuation_unavailable.

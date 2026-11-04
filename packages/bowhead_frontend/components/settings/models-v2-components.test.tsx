@@ -197,7 +197,8 @@ describe("model settings V2 components", () => {
     // 2026-08-24: idle state no longer renders “服务端判定就绪/未就绪” verdicts (see readiness-unknown.test.tsx).
     // This case concerns authoritative evidence and latest attempt as two independent facts, unrelated to the verdict.
     expect(screen.queryByText("服务端判定就绪")).toBeNull();
-    expect(screen.getByText("已验证")).toBeTruthy();
+    expect(screen.getByText("验证通过")).toBeTruthy();
+    expect(screen.getByText(/^验证时间：/)).toBeTruthy();
     expect(screen.getByText("本次请求出错")).toBeTruthy();
     expect(screen.getByText("sha256:abc123")).toBeTruthy();
     expect(screen.queryByText(/Bearer|API key/i)).toBeNull();

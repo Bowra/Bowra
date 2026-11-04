@@ -6,11 +6,11 @@ from pathlib import Path
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.coach_skill_authoring import CoachSkillAuthoring
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.skill_upload import SkillUploadError, bundle_sha256
+from core_legacy_database import TARGET_FILES
 from test_agent_revision_store import _db, _seed
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot

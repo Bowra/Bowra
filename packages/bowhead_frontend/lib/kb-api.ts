@@ -222,6 +222,14 @@ export async function getKbFile(file_id: string): Promise<KbFileDTO> {
   return jsonOrThrow<KbFileDTO>(r, "getKbFile");
 }
 
+export async function prepareKbChatAttachment(fileId: string): Promise<import("./types").AttachmentRef> {
+  const response = await fetch(`/api/v1/kb/files/${encodeURIComponent(fileId)}/chat-attachment`, {
+    method: "POST",
+    headers: { ...getWorkspaceHeader() },
+  });
+  return jsonOrThrow<import("./types").AttachmentRef>(response, "prepareKbChatAttachment");
+}
+
 export interface KbGoogleImportResult {
   file_id: string;
   name: string | null;

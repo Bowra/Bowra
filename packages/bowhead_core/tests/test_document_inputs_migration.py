@@ -6,6 +6,7 @@ from importlib import import_module
 import pytest
 from alembic import command
 from artifact_row_helpers import artifact_columns, artifact_rows_by_column
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from test_document_admission_migration import _config
 
 pytestmark = pytest.mark.integration
@@ -30,8 +31,8 @@ def test_input_migration_preserves_existing_data_without_backfill(tmp_path):
     with sqlite3.connect(path) as db:
         # Verify replay reached this revision (checking after stamp head is tautological and meaningless).
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (MIGRATION.revision,)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert artifact_rows_by_column(db, preserved_columns) == before
         for table in ("document_input_sets", "document_input_copies", "document_artifact_refs"):
@@ -61,4 +62,4 @@ def test_input_schema_drift_fails_upgrade(tmp_path, kind):
                 "CREATE TRIGGER trg_document_ref_purge BEFORE INSERT ON artifact_purge_claims WHEN 0 BEGIN SELECT RAISE(ABORT,'disabled'); END"
             )
     with pytest.raises(RuntimeError, match="schema drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)

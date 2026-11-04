@@ -23,6 +23,8 @@ from bowhead_core.export_copy_contract import (
     output_producer_for,
 )
 from bowhead_core.export_snapshot import ExportSnapshotCandidate, ExportSnapshotStore
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import ArtifactStore, StagedArtifact
@@ -163,10 +165,15 @@ class ExportStore:
     _path: str = field(init=False)
 
     def __post_init__(self) -> None:
+        self.db_path = domain_database_path(self.db_path, "content")
         self._path = str(self.db_path)
 
     async def initialize(self) -> None:
-        async with open_shared_ctx(self._path) as db:
+        if domain_layout_active(self._path):
+            async with diagnostic_connect(domain_database_path(self._path, "content")) as db:
+                await require_domain_schema(db, "content")
+            return
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             await db.executescript(_EXPORT_EVENT_SCHEMA)
             await db.commit()
 
@@ -189,7 +196,7 @@ class ExportStore:
             raise ExportStoreError("invalid_export_job_id")
 
         lock_duration_ms = 0.0
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             lock_started = time.perf_counter()
@@ -291,7 +298,7 @@ class ExportStore:
         )
 
     async def get_job(self, job_id: str) -> ExportJobV2 | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"{_SELECT_JOB_SQL} WHERE id=? AND contract_version=2",
@@ -308,7 +315,7 @@ class ExportStore:
         limit: int = 20,
     ) -> tuple[ExportJobV2, ...]:
         bounded_limit = max(1, min(limit, 100))
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"{_SELECT_JOB_SQL} WHERE canvas_id=? AND requested_by=? AND contract_version=2 ORDER BY created_at DESC, id DESC LIMIT ?",
@@ -326,7 +333,7 @@ class ExportStore:
     ) -> ExportJobV2 | None:
         """Cancel a live V2 job and fence any late result with a new attempt."""
         finished_at = _now()
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -373,7 +380,7 @@ class ExportStore:
         requested_by: str,
         idempotency_key: str,
     ) -> ExportJobV2 | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             return await _get_idempotent_job(
                 db,
@@ -397,7 +404,7 @@ class ExportStore:
         lease_expires_at = _plus_seconds(claimed_at, lease_seconds)
         supported_sql, supported_params = _supported_target_filter(supported_targets)
         claimed_job_id: str | None = None
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -471,7 +478,7 @@ class ExportStore:
             supported_pairs,
         )
         failed_count = 0
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -526,7 +533,7 @@ class ExportStore:
     ) -> bool:
         heartbeat_at = now or _now()
         lease_expires_at = _plus_seconds(heartbeat_at, lease_seconds)
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             cursor = await db.execute(
                 "UPDATE canvas_export_jobs SET lease_expires_at=?, updated_at=? "
                 "WHERE id=? AND contract_version=2 AND status='running' "
@@ -550,7 +557,7 @@ class ExportStore:
             raise ExportStoreError("invalid_job_transition", phase=phase)
         progress_json = _progress_json(progress)
         changed_at = now or _now()
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -617,7 +624,7 @@ class ExportStore:
         if completion.committed:
             raise ExportStoreError("invalid_job_completion")
         finished_at = now or _now()
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -703,7 +710,7 @@ class ExportStore:
         current: ExportJobV2 | None = None
         committed = False
         try:
-            async with open_shared_ctx(self._path) as db:
+            async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
                 db.row_factory = aiosqlite.Row
                 await db.execute("BEGIN IMMEDIATE")
                 try:
@@ -795,6 +802,7 @@ class ExportStore:
                 )
             )
             return False
+        await artifact_store.complete_staged_artifact_publication((manifest_artifact, output_artifact))
         return True
 
     async def fail_job(
@@ -813,7 +821,7 @@ class ExportStore:
         if quality_status not in {"pending", "rejected"}:
             raise ExportStoreError("invalid_job_transition", quality_status=quality_status)
         finished_at = now or _now()
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -871,7 +879,7 @@ class ExportStore:
         attempt: int,
     ) -> bool:
         async with (
-            open_shared_ctx(self._path) as db,
+            open_shared_ctx(domain_database_path(self._path, "content")) as db,
             db.execute(
                 "SELECT 1 FROM canvas_export_jobs WHERE id=? AND contract_version=2 AND status='running' AND worker_id=? AND attempt=?",
                 (job_id, worker_id, attempt),
@@ -881,7 +889,7 @@ class ExportStore:
         return row is not None
 
     async def list_events(self, job_id: str) -> tuple[ExportJobEvent, ...]:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id, job_id, attempt, sequence, event_type, from_status, to_status, "
@@ -894,7 +902,7 @@ class ExportStore:
 
     async def list_active_job_ids(self) -> frozenset[str]:
         async with (
-            open_shared_ctx(self._path) as db,
+            open_shared_ctx(domain_database_path(self._path, "content")) as db,
             db.execute("SELECT id FROM canvas_export_jobs WHERE contract_version=2 AND status IN ('queued','running')") as cursor,
         ):
             rows = await cursor.fetchall()
@@ -907,7 +915,7 @@ class ExportStore:
     ) -> ExportDatabaseRetention:
         """Delete only expired terminal metadata and inactive snapshots."""
         cutoff = now or _now()
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 jobs = await db.execute(
@@ -1184,7 +1192,7 @@ def _validate_staged_completion(
     manifest = manifest_artifact.artifact
     if (
         not completion.committed
-        or Path(store_path).resolve() != Path(artifact_store.db_path).resolve()
+        or Path(domain_database_path(store_path, "content")).resolve() != Path(artifact_store.db_path).resolve()
         or completion.artifact_id != output.id
         or completion.manifest_artifact_id != manifest.id
         or completion.filename != output.filename

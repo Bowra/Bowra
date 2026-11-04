@@ -11,6 +11,7 @@ import respx
 from bowhead_core.events import OrchestratorEvent, TurnEventBus
 from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec, build_default_registry
+from bowhead_router.adapters.anthropic_compat import AnthropicCompatibleAdapter
 
 from bowhead_router import (
     AgentBinding,
@@ -62,6 +63,111 @@ async def test_invoke_and_stream_timing_are_persisted_with_distinct_first_chunk_
     assert all(timing["ok"] for timing in timings)
     assert all(timing["started_at"] <= timing["ended_at"] for timing in timings)
     assert timings[0]["seq"] < timings[1]["seq"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+@pytest.mark.parametrize("native", [True, False], ids=["native", "text-salvage"])
+@respx.mock
+async def test_anthropic_call_observations_match_saved_live_events_before_salvage(mode, native, monkeypatch):
+    secret = "private-response-and-argument-sentinel"
+    model_calls = 0
+    bodies = []
+
+    def respond(request):
+        nonlocal model_calls
+        body = json.loads(request.content)
+        bodies.append(body)
+        first = model_calls == 0
+        model_calls += 1
+        text = (
+            f'<｜DSML｜invoke name="diagnostic_echo"><｜DSML｜parameter name="private">{secret}</｜DSML｜parameter>'
+            if first and not native
+            else secret
+        )
+        blocks = [{"type": "text", "text": text}]
+        if first and native:
+            blocks.append({"type": "tool_use", "id": "native-original", "name": "diagnostic_echo", "input": {"private": secret}})
+        reason = "tool_use" if first and native else "end_turn"
+        usage = {"input_tokens": 5, "output_tokens": 2}
+        if not body.get("stream"):
+            return httpx2.Response(200, json={"content": blocks, "stop_reason": reason, "usage": usage})
+        events = [{"type": "message_start", "message": {"usage": {"input_tokens": 5}}}]
+        for index, block in enumerate(blocks):
+            start = dict(block)
+            if block["type"] == "tool_use":
+                start["input"] = {}
+                delta = {"type": "input_json_delta", "partial_json": json.dumps(block["input"])}
+            else:
+                start["text"] = ""
+                delta = {"type": "text_delta", "text": block["text"]}
+            events.extend(
+                [
+                    {"type": "content_block_start", "index": index, "content_block": start},
+                    {"type": "content_block_delta", "index": index, "delta": delta},
+                    {"type": "content_block_stop", "index": index},
+                ]
+            )
+        events.extend([{"type": "message_delta", "delta": {"stop_reason": reason}, "usage": usage}, {"type": "message_stop"}])
+        return httpx2.Response(200, text="".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events))
+
+    respx.post("https://api.anthropic.com/v1/messages").mock(side_effect=respond)
+    adapter = AnthropicCompatibleAdapter(base_url="https://api.anthropic.com", api_key="private-test-key", provider_name="p1")
+    providers = ProviderRegistry()
+    providers.load([ProviderConfig(name="p1", type="mock")])
+    providers._adapters["p1"] = adapter
+    router = Router(providers)
+    router.bind(AgentBinding(agent_type="lead", primary=("p1", "synthetic")))
+    profile = "compute" if mode == "invoke" else "lead"
+    monkeypatch.setitem(
+        PROFILES,
+        profile,
+        SubagentProfile(
+            name=profile, llm_agent_type="lead", tool_whitelist=("diagnostic_echo",), system_prompt="Use synthetic evidence.", max_iterations=3
+        ),
+    )
+    saved = []
+
+    async def sink(event):
+        saved.append(json.loads(json.dumps(asdict(event))))
+
+    async def callback(_text):
+        pass
+
+    registry = ToolRegistry()
+    executed = []
+
+    async def echo(args, _ctx):
+        executed.append(args)
+        return {"receipt": "original-result"}
+
+    registry.register(
+        ToolSpec(schema=ToolSchema(name="diagnostic_echo", description="Synthetic echo", input_schema={"type": "object"}), handler=echo)
+    )
+    runner = SubagentRunner(router=router, tool_registry=registry, backend="legacy")
+    bus = TurnEventBus(log_sink=sink, persist_before_live=True)
+    ctx = ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t", datarc=None)
+    try:
+        result = await runner.run(
+            profile_name=profile, task="Run one synthetic action.", parent_turn_id="t", parent_bus=bus, parent_ctx=ctx, stream_callback=callback
+        )
+    finally:
+        await adapter.close()
+        await bus.close()
+    live = [json.loads(json.dumps(asdict(event))) async for event in bus.subscribe()]
+    timings = [event for event in saved if event["event_type"] == "llm.call_timing"]
+    assert timings == [event for event in live if event["event_type"] == "llm.call_timing"]
+    assert secret not in json.dumps(timings) and "private-test-key" not in json.dumps(timings)
+    assert result.ok, result.error
+    assert model_calls == 2 and executed == [{"private": secret}]
+    first = timings[0]["payload"]
+    assert first["mode"] == mode
+    assert first["upstream_tool_call_count"] == first["tool_call_count"] == int(native)
+    assert first["upstream_finish_reason"] == ("tool_use" if native else "end_turn")
+    assert first["finish_reason"] == ("tool_use" if native else "stop")
+    assert "original-result" in json.dumps(bodies[-1]["messages"])
+    assert timings[-1]["payload"]["upstream_tool_call_count"] == 0
 
 
 @pytest.mark.unit

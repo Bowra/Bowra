@@ -203,3 +203,9 @@ it("keeps multi-series touch reading focused on series identity, while retaining
     expect(rendered.datasets.every((dataset) => Boolean(dataset.datalabels?.display?.({ dataIndex: 0 })))).toBe(true);
   } finally { vi.unstubAllGlobals(); }
 });
+
+it("keeps explicit field bindings instead of offering inferred chart kinds", () => {
+  render(<ChartBlock spec={{ ...spec, explicit_presentation: { version: 1, mode: "plot", axes: { x: "domain", y: ["entries"], x_scale: "category" }, group_by: [] } }} chrome="report" />);
+  expect(screen.getByTestId("chart-stub")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Horizontal Bar" })).not.toBeInTheDocument();
+});

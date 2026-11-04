@@ -54,6 +54,7 @@ from bowhead_core.chart_style_v2 import (
     normalize_team_chart_style_policy_v2,
     parse_team_chart_style_policy_v2,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_settings_store import TeamSettingsStore
 from bowhead_core.theme_compiler import canonical_json
 
@@ -324,7 +325,7 @@ async def _insert_revision(
 
 class ChartStyleUnitOfWork:
     def __init__(self, db_path: str | Path, *, now_fn: Callable[[], str] = _utc_now) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self.store = ChartStyleStore(db_path)
         self._now_fn = now_fn
 

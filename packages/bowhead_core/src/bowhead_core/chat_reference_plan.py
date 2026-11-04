@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bowhead_core.chat_reference_storage import _row
 from bowhead_core.chat_references import ContentHash, Identity, decode_reference_json
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.chat_reference_runtime import ReferencePrimaryRuntime
@@ -177,7 +178,7 @@ async def read_original_material(db, *, sources, cipher, scope, requirements, pl
 async def proposal_requirements(runtime: ReferencePrimaryRuntime, steps: Sequence[PlanStep], registry: ToolRegistry) -> ReferencePlanRequirements:
     from bowhead_core._db import open_shared_ctx
 
-    async with open_shared_ctx(runtime.bindings.db_path) as db:
+    async with open_shared_ctx(domain_database_path(runtime.bindings.db_path, "execution")) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN IMMEDIATE")
         primary = await runtime._read(db)
@@ -372,7 +373,7 @@ class ReferencePlanRuntime:
         from bowhead_core._db import open_shared_ctx
         from bowhead_core.agent_execution_binding import ExactAgentBindingExpectation
 
-        async with open_shared_ctx(self.sources.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.sources.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             primary, _, _, _ = await self.validate_in_connection(db)
             step = await _row(db, "SELECT * FROM plan_steps WHERE id=? AND plan_id=?", (spec.task_id, self.plan_id))
@@ -435,7 +436,7 @@ class ReferencePlanRuntime:
             generation=self.generation,
             plan_step=target,
         )
-        async with open_shared_ctx(self.sources.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.sources.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             _, _, rendered, _ = await self.validate_in_connection(db)
             await db.rollback()
@@ -462,7 +463,7 @@ async def prepare_plan_runtime(orchestrator: Orchestrator, request: TurnRequest)
     if not request.plan_execution_id:
         return None
     store = orchestrator.session_store
-    async with open_shared_ctx(store.db_path) as db:
+    async with open_shared_ctx(domain_database_path(store.db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         plan = await _row(db, "SELECT spec_json FROM plans WHERE id=?", (request.plan_execution_id,))
         requirements = read_requirements(plan["spec_json"]) if plan is not None else None
@@ -477,7 +478,10 @@ async def prepare_plan_runtime(orchestrator: Orchestrator, request: TurnRequest)
     sources = orchestrator.reference_skill_sources_factory(request_scope)
     if inspect.isawaitable(sources):
         sources = await sources
-    if type(sources) is not SkillReadSourceResolver or Path(sources.db_path).resolve() != Path(store.db_path).resolve():
+    if (
+        type(sources) is not SkillReadSourceResolver
+        or Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(store.db_path, "core")).resolve()
+    ):
         raise ValueError("reference_plan_runtime_unavailable")
     runtime = ReferencePlanRuntime(
         sources,
@@ -490,7 +494,7 @@ async def prepare_plan_runtime(orchestrator: Orchestrator, request: TurnRequest)
         request.execution_generation,
         orchestrator.tool_registry,
     )
-    async with open_shared_ctx(store.db_path) as db:
+    async with open_shared_ctx(domain_database_path(store.db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         await runtime.validate_in_connection(db)
         await db.rollback()

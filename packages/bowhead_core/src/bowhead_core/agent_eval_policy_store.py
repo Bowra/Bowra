@@ -17,6 +17,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_store import AgentEvalStoreError, verify_eval_suite_revision_conn
+from bowhead_core.sqlite_domains import domain_database_path
 
 EvalPlanTier = Literal["critical", "standard", "diagnostic"]
 EvalExecutionScope = Literal["paired", "candidate_only"]
@@ -139,7 +140,7 @@ class AgentEvalPolicyStore:
     """Validate exact suite identities and append canonical policy documents."""
 
     def __init__(self, db_path: str | Path, *, clock: _Clock | None = None) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or _SystemClock()
 
     async def default_preview(

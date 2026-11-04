@@ -45,12 +45,13 @@ from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _digest, _json
 from bowhead_core.documents.usage import DocumentModelHook
 from bowhead_core.rate_card import RATE_CARD_VERSION
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 async def fail_document_turn(delivery: DocumentDeliveryStore, worker: DocumentTurnOwner, job_id: str, code: str) -> DocumentPlanningFailure:
     # Terminalize only this retained worker identity, including failure before
     # input freezing. Revocation must not leave a permanently queued request.
-    async with open_shared_ctx(delivery.path) as db:
+    async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         identity = await _one(
             db,
@@ -105,7 +106,7 @@ async def fail_document_turn(delivery: DocumentDeliveryStore, worker: DocumentTu
 
 async def _read_inputs(delivery, scope, job_id):
     inputs_store = DocumentInputStore(delivery.artifacts)
-    async with open_shared_ctx(delivery.path) as db:
+    async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
         await db.execute("BEGIN")
         await _input_digest(db, job_id)
         async with db.execute("SELECT artifact_id,filename,role FROM document_input_copies WHERE job_id=? ORDER BY input_index", (job_id,)) as cursor:
@@ -142,7 +143,7 @@ async def run_document_turn(
     try:
         if type(attempt_no) is not int or attempt_no not in (1, 2):
             raise DocumentRequestError("document_execution_fenced")
-        async with open_shared_ctx(delivery.path) as db:
+        async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
             await db.execute("BEGIN")
             await validate_document_worker_in_tx(db, worker=worker, job_id=job_id)
             dispatch = await _one(db, "SELECT * FROM document_turn_dispatches WHERE job_id=?", (job_id,))
@@ -205,7 +206,7 @@ async def run_document_turn(
                 instruction_text = rebased.instruction
         if attempt_no == 1:
             await DocumentInputStore(delivery.artifacts).freeze(scope=scope, job_id=job_id)
-            async with open_shared_ctx(delivery.path) as db:
+            async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 if await _execution(db, job_id) is not None:
                     raise DocumentRequestError("document_execution_interrupted")
@@ -231,7 +232,7 @@ async def run_document_turn(
             if inventory.record["kind"] != "context":
                 raise OfficePackageError(inventory.record.get("error_code", "document_worker_failed"))
             context = inventory.record["context"]
-            async with open_shared_ctx(delivery.path) as db:
+            async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 await retain_document_context_in_tx(db, worker=worker, job_id=job_id, attempt_no=1, context=context)
                 await db.commit()
@@ -255,7 +256,7 @@ async def run_document_turn(
                 anyio.fail_after(90),
             ):
                 reply = await invoke(system, prompt)
-            async with open_shared_ctx(delivery.path) as db:
+            async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
                 await db.execute("BEGIN")
                 await _fence(db, scope, job_id, worker.owner_id)
                 await _known_observations_in_tx(db, job_id)
@@ -287,7 +288,7 @@ async def run_document_turn(
                     await delivery.fail(job_id=job_id, owner=worker.owner_id, code="document_information_incomplete")
                     return DocumentPlanningFailure("incomplete", job_id, "document_information_incomplete")
                 try:
-                    async with open_shared_ctx(delivery.path) as db:
+                    async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
                         await db.execute("BEGIN IMMEDIATE")
                         question = output.record["review"]["question"]
                         ref = await retain_document_question_in_tx(db, worker=worker, job_id=job_id, question=question, last_call_no=call_no)

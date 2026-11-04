@@ -14,6 +14,9 @@ async function expectSpaceContent(page: Page, section: string) {
     await expect(page.getByRole("combobox", { name: "周首日", exact: true })).toHaveValue("monday");
   } else if (section === "instructions") {
     await expect(page.locator("textarea")).toHaveValue("Explain your sources.");
+    await expect(page.locator(".ui-page-desc")).toContainText("适用于本空间的所有成员");
+    await expect(page.locator(".ui-page-desc")).toContainText("描述”用于介绍空间用途");
+    await expect(page.locator(".ui-page-desc")).toContainText("下一条消息");
   } else {
     await expect(page.getByText("Example Owner", { exact: true }).last()).toBeVisible();
   }
@@ -95,7 +98,7 @@ for (const width of [412, 1440]) {
     page.on("pageerror", (error) => errors.push(error.message));
     for (const [section, title] of [
       ["general", "Space 常规设置"],
-      ["instructions", "空间说明"],
+      ["instructions", "AI 工作说明"],
       ["members", "空间访问"],
     ]) {
       await page.goto(routePath(`/space/settings/${section}/`));
@@ -114,13 +117,13 @@ for (const width of [412, 1440]) {
       const next = section === "general" ? "instructions" : "general";
       await page.locator(`nav a[href$="/space/settings/${next}/"]`).first().click();
       await expectSettingsPath(page, `/space/settings/${next}/`);
-      await expect(page.getByRole("heading", { name: next === "general" ? "Space 常规设置" : "空间说明", level: 1, exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: next === "general" ? "Space 常规设置" : "AI 工作说明", level: 1, exact: true })).toBeVisible();
       await expectSpaceContent(page, next);
     }
-    await page.goto(routePath("/space/settings/"));
+    await page.goto(routePath("/space/settings/"), { waitUntil: "commit" });
     await expectSettingsPath(page, "/space/settings/general/");
     await expectSpaceContent(page, "general");
-    await page.goto(routePath("/team/settings/"));
+    await page.goto(routePath("/team/settings/"), { waitUntil: "commit" });
     await expectSettingsPath(page, "/team/settings/people/");
     expect(errors).toEqual([]);
   });

@@ -257,6 +257,7 @@ class LlmVerificationRunner:
                     duration_ms=result.duration_ms,
                     vector_dimension=result.vector_dimension,
                     actual_model_id=result.actual_model_id,
+                    diagnostics=result.diagnostics,
                 )
         except asyncio.CancelledError:
             raise

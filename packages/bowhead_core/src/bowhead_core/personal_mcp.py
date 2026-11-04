@@ -37,6 +37,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
 from bowhead_core.openapi_tool_source import connect_remote_mcp
 from bowhead_core.scrub import scrub
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.ssrf_guard import validate_url
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
 
@@ -318,7 +319,7 @@ async def discover(endpoint: str, headers: dict[str, str]) -> list[dict[str, Any
 
 class PersonalMcpStore:
     def __init__(self, db_path: str | Path, *, license_check: Callable[[str], Awaitable[bool]] | None = None) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self.license_check = license_check
 
     def _key(self, owner: str, identity: str, purpose: str) -> bytes:

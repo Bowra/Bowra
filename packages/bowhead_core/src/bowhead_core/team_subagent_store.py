@@ -38,6 +38,8 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import bootstrap_shared_db, open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 from bowhead_core.subagent_write_boundary import (
     TEAM_SUBAGENT_RESOURCE_KIND,
     _issue_team_subagent_transaction_token,
@@ -95,11 +97,8 @@ async def release_semantics_active_conn(db: aiosqlite.Connection) -> bool:
     This is the connection-scoped form, so a caller already inside a transaction
     does not need a second connection.
     """
-    async with db.execute(
-        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='team_subagent_schema_meta'",
-    ) as cursor:
-        if await cursor.fetchone() is None:
-            return False
+    if not await readable_table_exists(db, "team_subagent_schema_meta"):
+        return False
     async with db.execute("PRAGMA table_info(team_subagent_schema_meta)") as cursor:
         columns = await cursor.fetchall()
     if not any(str(column[1]) == "release_semantics_activated_at" for column in columns):
@@ -570,12 +569,19 @@ class TeamSubagentStore:
     """Own the additive Release A schema compatibility boundary."""
 
     def __init__(self, db_path: str | Path, *, clock: Clock | None = None) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or SystemClock()
         self._transaction_token = _issue_team_subagent_transaction_token()
 
     async def initialize(self) -> None:
         """Apply the idempotent migration without activating new semantics."""
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(self.db_path) as db:
+                await require_domain_schema(db, "core")
+                private_subagent_quarantine_days()
+                await self._initialize_metadata(db)
+                await db.commit()
+            return
         private_subagent_quarantine_days()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         await bootstrap_shared_db(self.db_path)

@@ -5,16 +5,19 @@ import {
   DocumentDraftCanvasObject,
   type DocumentDraftCanvasPublication,
 } from "../components/canvas/document-draft-canvas-object";
-import fixture from "../__tests__/fixtures/document-draft-canvas.json";
+import pptxFixture from "../__tests__/fixtures/document-draft-canvas.json";
+import wordFixture from "../__tests__/fixtures/document-word-canvas.json";
 import en from "../messages/en-US.json";
 import "../styles/ui-refresh-cards.css";
 
 // Test-only lifecycle harness. Root navigation and Canvas registration remain separate.
+const fixture = window.location.hash === "#word" ? wordFixture.source : pptxFixture;
 function Fixture() {
   const [open, setOpen] = useState(true);
   const [generation, setGeneration] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
   const [selected, setSelected] = useState(true);
+  const [openedArtifactId, setOpenedArtifactId] = useState("");
   const [receipt, setReceipt] = useState<DocumentDraftCanvasPublication | null>(
     null,
   );
@@ -44,9 +47,10 @@ function Fixture() {
           Switch view
         </button>
       </div>
-      <output aria-label="Published source">
+      <output aria-label="Published source" style={{ display: "block", overflowWrap: "anywhere" }}>
         {receipt?.source.artifactId ?? "No publication"}
       </output>
+      <output aria-label="Opened result" style={{ display: "block", overflowWrap: "anywhere" }}>{openedArtifactId}</output>
       <div hidden={!selected}>
         {open ? (
           <DocumentDraftCanvasObject
@@ -57,6 +61,7 @@ function Fixture() {
               original.instanceId === live.current.context.instanceId
             }
             onPublished={setReceipt}
+            onOpenPublished={(_, artifactId) => setOpenedArtifactId(artifactId)}
           />
         ) : null}
       </div>

@@ -10,8 +10,8 @@ from typing import Any
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.user_store import UserStore, _id, _now
+from core_legacy_database import TARGET_FILES, upgrade
 
 
 async def _seed_team(
@@ -59,7 +59,7 @@ async def store(tmp_path: Any) -> UserStore:
     db = tmp_path / TARGET_FILES["core"]
     # Current Stores run at the migration head; the user ledger reads the migrated
     # credit_model_usage table (0173, 5bca471f7).
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     s = UserStore(str(db))
     await s.initialize()
     return s

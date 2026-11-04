@@ -10,9 +10,10 @@ import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -41,15 +42,44 @@ class PreparedContextMessages:
     messages: list[Message]
     snapshot: ContextSnapshot
     segments: tuple[SealedContextSegment, ...]
+    verified_existing: dict[str, str] = field(default_factory=dict)
 
 
 async def prepare_context_messages(
-    messages: list[Message], *, worker: ContextOwner, execution_id: str, lane: ContextLane, cipher: ReferenceCipher
+    messages: list[Message],
+    *,
+    worker: ContextOwner,
+    execution_id: str,
+    lane: ContextLane,
+    cipher: ReferenceCipher,
+    db_path: str | Path | None = None,
+    preparation: PreparedContextAncestry | None = None,
 ) -> PreparedContextMessages:
     values = deepcopy(messages)
     scope, owner = _scope(worker), _owner(execution_id, lane)
     snapshot, segments = await anyio.to_thread.run_sync(partial(seal_context_messages, values, cipher=cipher, scope=scope, owner=owner))
-    return PreparedContextMessages(scope, owner, values, snapshot, segments)
+    existing = {}
+    verified = preparation.verified_segments if preparation is not None and preparation.scope == scope and preparation.cipher is cipher else set()
+    unknown = [segment for segment in segments if (execution_id, lane, segment.reference.digest) not in verified]
+    if db_path is not None and unknown:
+        from bowhead_core._db import open_shared_ctx
+
+        async with (
+            open_shared_ctx(db_path) as db,
+            db.execute(
+                "SELECT digest,ciphertext FROM model_context_segments WHERE session_id=? AND execution_id=? AND lane=? AND digest IN ("
+                + ",".join("?" for _ in unknown)
+                + ")",
+                (worker.session_id, execution_id, lane, *(segment.reference.digest for segment in unknown)),
+            ) as cursor,
+        ):
+            existing = dict(await cursor.fetchall())
+        if existing:
+            # A prior segment can be reused without decoding under the writer.
+            # The transaction compares these exact ciphertexts before adoption.
+            bodies = {segment.reference.digest: segment.ciphertext for segment in segments} | existing
+            await anyio.to_thread.run_sync(partial(open_context_messages, snapshot, bodies, cipher=cipher, scope=scope, owner=owner))
+    return PreparedContextMessages(scope, owner, values, snapshot, segments, existing)
 
 
 class ContextStoreError(ValueError):
@@ -90,6 +120,87 @@ class StoredContext:
     source_refs: tuple[str, ...]
     parent_id: str | None
     completion: ContextCompletion | None
+
+
+@dataclass
+class PreparedContextAncestry:
+    """Call-local evidence for immutable rows; current authority is never cached here."""
+
+    scope: ReferenceScope
+    cipher: ReferenceCipher
+    records: dict[str, tuple[dict, ContextSnapshot]] = field(default_factory=dict)
+    verified_segments: set[tuple[str, str, str]] = field(default_factory=set)
+    roots: set[str] = field(default_factory=set)
+    checked: set[str] = field(default_factory=set)
+
+    def for_transaction(self) -> PreparedContextAncestry:
+        return replace(self, checked=set())
+
+
+async def validate_prepared_context_in_tx(
+    db: aiosqlite.Connection,
+    *,
+    worker: ContextOwner,
+    execution_id: str,
+    lane: ContextLane,
+    generation_id: str,
+    cipher: ReferenceCipher,
+    validate_sources: SourceValidator,
+    preparation: PreparedContextAncestry | None,
+    for_publication: bool = False,
+) -> bool:
+    """Recheck immutable presence and current authority without decrypting history under the writer.
+
+    The schema rejects updates to generations and segments. Deletion is still
+    checked, including every referenced segment. Unprepared or changed input
+    retains the original full reader, rather than adding an availability gate.
+    """
+    if preparation is None or preparation.scope != _scope(worker) or preparation.cipher is not cipher or generation_id not in preparation.roots:
+        return False
+    execution = await _require_owner(db, worker, execution_id, for_publication=for_publication)
+    if generation_id in preparation.checked:
+        await adoption_source_validator(validate_sources, db)([])
+        return True
+    rows = await _ancestry_rows(db, worker.session_id, generation_id)
+    if generation_id not in rows or any(
+        identity not in preparation.records or row != preparation.records[identity][0] for identity, row in rows.items()
+    ):
+        return False
+    root = rows[generation_id]
+    if root["execution_id"] != execution_id or root["lane"] != lane:
+        published = await _row(db, "SELECT generation_id FROM model_context_conversation_heads WHERE session_id=?", (worker.session_id,))
+        if (
+            lane != "ordinary"
+            or root["lane"] != "ordinary"
+            or execution["runtime_profile_name"] != "lead"
+            or execution["parent_execution_id"] is not None
+            or published is None
+            or published["generation_id"] != generation_id
+        ):
+            raise ContextStoreError("context_owner_mismatch")
+    requested = {}
+    for identity, row in rows.items():
+        snapshot = preparation.records[identity][1]
+        refs = json.loads(row["source_refs_json"])
+        if any(reference not in rows for reference in refs):
+            return False
+        requested.update({(row["execution_id"], row["lane"], part.digest): part.byte_count for part in snapshot.segments})
+    keys = list(requested)
+    for offset in range(0, len(keys), MAX_CONTEXT_PARTS):
+        batch = keys[offset : offset + MAX_CONTEXT_PARTS]
+        values = ",".join("(?,?,?)" for _ in batch)
+        async with db.execute(
+            f"WITH requested(execution_id,lane,digest) AS (VALUES {values}) "
+            "SELECT s.execution_id,s.lane,s.digest,s.byte_count FROM requested r "
+            "JOIN model_context_segments s ON s.execution_id=r.execution_id AND s.lane=r.lane AND s.digest=r.digest WHERE s.session_id=?",
+            (*[value for key in batch for value in key], worker.session_id),
+        ) as cursor:
+            present = {(row[0], row[1], row[2]): row[3] for row in await cursor.fetchall()}
+        if any(present.get(key) != requested[key] for key in batch):
+            return False
+    await adoption_source_validator(validate_sources, db)([])
+    preparation.checked.update(rows)
+    return True
 
 
 def _json(value: object) -> str:
@@ -206,6 +317,7 @@ async def write_context_in_tx(
     completion: ContextCompletion | None = None,
     for_publication: bool = False,
     prepared_messages: PreparedContextMessages | None = None,
+    prepared_ancestry: PreparedContextAncestry | None = None,
 ) -> str:
     """Insert an immutable view and move only its exact execution/lane head.
 
@@ -241,7 +353,7 @@ async def write_context_in_tx(
                 and repeated["origin_json"] == origin.model_dump_json()
                 and repeated["source_refs_json"] == _json(references)
             ):
-                await read_context_generation_in_tx(
+                if not await validate_prepared_context_in_tx(
                     db,
                     worker=worker,
                     execution_id=execution_id,
@@ -249,8 +361,19 @@ async def write_context_in_tx(
                     generation_id=current,
                     cipher=cipher,
                     validate_sources=validate_sources,
+                    preparation=prepared_ancestry,
                     for_publication=for_publication,
-                )
+                ):
+                    await read_context_generation_in_tx(
+                        db,
+                        worker=worker,
+                        execution_id=execution_id,
+                        lane=lane,
+                        generation_id=current,
+                        cipher=cipher,
+                        validate_sources=validate_sources,
+                        for_publication=for_publication,
+                    )
                 return repeated["id"]
             raise ContextStoreError("context_operation_changed")
     if current != expected_generation:
@@ -265,6 +388,18 @@ async def write_context_in_tx(
             raise ContextStoreError("context_source_unavailable")
     # Validate originals, including dependencies inherited through earlier summaries.
     for reference in references:
+        if await validate_prepared_context_in_tx(
+            db,
+            worker=worker,
+            execution_id=execution_id,
+            lane=lane,
+            generation_id=reference,
+            cipher=cipher,
+            validate_sources=validate_sources,
+            preparation=prepared_ancestry,
+            for_publication=for_publication,
+        ):
+            continue
         await read_context_generation_in_tx(
             db,
             worker=worker,
@@ -276,12 +411,13 @@ async def write_context_in_tx(
             for_publication=for_publication,
         )
     await validate_sources(messages)
-    if (
+    prepared_matches = (
         prepared_messages is not None
         and prepared_messages.scope == _scope(worker)
         and prepared_messages.owner == owner
         and prepared_messages.messages == messages
-    ):
+    )
+    if prepared_matches:
         snapshot, segments = prepared_messages.snapshot, prepared_messages.segments
     else:
         snapshot, segments = seal_context_messages(messages, cipher=cipher, scope=_scope(worker), owner=owner)
@@ -297,20 +433,45 @@ async def write_context_in_tx(
     if completion is not None and completion.input_after >= completion.input_before:
         raise ContextStoreError("context_summary_not_smaller")
     now = datetime.now(UTC).isoformat()
+    prepared_segments_verified = prepared_ancestry is not None and prepared_ancestry.scope == _scope(worker) and prepared_ancestry.cipher is cipher
+    async with db.execute(
+        "SELECT digest,byte_count FROM model_context_segments WHERE session_id=? AND execution_id=? AND lane=? AND digest IN ("
+        + ",".join("?" for _ in segments)
+        + ")",
+        (worker.session_id, execution_id, lane, *(segment.reference.digest for segment in segments)),
+    ) as cursor:
+        prior_segments = dict(await cursor.fetchall())
+    if prepared_matches and prepared_messages.verified_existing:
+        async with db.execute(
+            "SELECT digest,ciphertext FROM model_context_segments WHERE session_id=? AND execution_id=? AND lane=? AND digest IN ("
+            + ",".join("?" for _ in prepared_messages.verified_existing)
+            + ")",
+            (worker.session_id, execution_id, lane, *prepared_messages.verified_existing),
+        ) as cursor:
+            for digest, ciphertext in await cursor.fetchall():
+                if prepared_messages.verified_existing[digest] == ciphertext and prepared_ancestry is not None:
+                    prepared_ancestry.verified_segments.add((execution_id, lane, digest))
+    inserts = []
     for segment in segments:
-        prior = await _row(
-            db,
-            "SELECT byte_count FROM model_context_segments WHERE session_id=? AND execution_id=? AND lane=? AND digest=?",
-            (worker.session_id, execution_id, lane, segment.reference.digest),
-        )
+        segment_key = (execution_id, lane, segment.reference.digest)
+        prior = prior_segments.get(segment.reference.digest)
         if prior is not None:
-            if prior["byte_count"] != segment.reference.byte_count:
+            if prior != segment.reference.byte_count:
                 raise ContextStoreError("context_segment_conflict")
+            if prepared_ancestry is None or segment_key not in prepared_ancestry.verified_segments:
+                prepared_segments_verified = False
             continue
         identity = "mcs_" + hashlib.sha256((worker.session_id + ":" + owner + ":" + segment.reference.digest).encode()).hexdigest()
-        await db.execute(
+        inserts.append(
+            (identity, worker.session_id, execution_id, lane, segment.reference.digest, segment.reference.byte_count, segment.ciphertext, now)
+        )
+        prior_segments[segment.reference.digest] = segment.reference.byte_count
+        if prepared_ancestry is not None and prepared_segments_verified:
+            prepared_ancestry.verified_segments.add(segment_key)
+    if inserts:
+        await db.executemany(
             "INSERT INTO model_context_segments(id,session_id,execution_id,lane,digest,byte_count,ciphertext,created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (identity, worker.session_id, execution_id, lane, segment.reference.digest, segment.reference.byte_count, segment.ciphertext, now),
+            inserts,
         )
     generation_id = "mcg_" + uuid4().hex
     await db.execute(
@@ -347,6 +508,10 @@ async def write_context_in_tx(
         )
         if changed.rowcount != 1:
             raise ContextStoreError("context_head_changed")
+    if prepared_ancestry is not None and prepared_segments_verified:
+        row = await _row(db, "SELECT * FROM model_context_generations WHERE id=?", (generation_id,))
+        prepared_ancestry.records[generation_id] = (row, snapshot)
+        prepared_ancestry.roots.add(generation_id)
     return generation_id
 
 
@@ -387,6 +552,7 @@ async def read_context_graph_in_tx(
     validate_sources: SourceValidator,
     for_publication: bool = False,
     projection_only: bool = False,
+    preparation: PreparedContextAncestry | None = None,
 ) -> dict[str, StoredContext]:
     """Read one authorized ancestry once for restoration or durable adoption."""
     validate_sources = adoption_source_validator(validate_sources, db)
@@ -431,8 +597,13 @@ async def read_context_graph_in_tx(
         pending.extend(refs)
     async for row, snapshot, refs, bodies in _ancestry_segments(db, worker.session_id, records):
         identity = row["id"]
-        messages = open_context_messages(snapshot, bodies, cipher=cipher, scope=_scope(worker), owner=_owner(row["execution_id"], row["lane"]))
+        messages = await anyio.to_thread.run_sync(
+            partial(open_context_messages, snapshot, bodies, cipher=cipher, scope=_scope(worker), owner=_owner(row["execution_id"], row["lane"]))
+        )
         await validate_sources(messages)
+        if preparation is not None and preparation.scope == _scope(worker) and preparation.cipher is cipher:
+            preparation.records[identity] = (row, snapshot)
+            preparation.verified_segments.update((row["execution_id"], row["lane"], part.digest) for part in snapshot.segments)
         # Keep the current projection and its own replacement chain. Foreign
         # ancestry still passes every source check, but must not accumulate a
         # full historical transcript copy for each earlier Turn in memory.
@@ -453,6 +624,8 @@ async def read_context_graph_in_tx(
         )
     if generation_id not in result:
         raise ContextStoreError("context_generation_unavailable")
+    if preparation is not None and preparation.scope == _scope(worker) and preparation.cipher is cipher:
+        preparation.roots.add(generation_id)
     return result
 
 
@@ -465,6 +638,7 @@ async def publish_conversation_context_in_tx(
     expected_conversation_generation: str | None,
     cipher: ReferenceCipher,
     validate_sources: SourceValidator,
+    prepared_ancestry: PreparedContextAncestry | None = None,
 ) -> None:
     """Publish with the original ordinary Lead terminal write in one transaction."""
     execution = await _require_owner(db, worker, execution_id, for_publication=True)
@@ -480,7 +654,7 @@ async def publish_conversation_context_in_tx(
     )
     if active is None or active["generation_id"] != generation_id:
         raise ContextStoreError("context_execution_head_changed")
-    await read_context_generation_in_tx(
+    if not await validate_prepared_context_in_tx(
         db,
         worker=worker,
         execution_id=execution_id,
@@ -488,8 +662,19 @@ async def publish_conversation_context_in_tx(
         generation_id=generation_id,
         cipher=cipher,
         validate_sources=validate_sources,
+        preparation=prepared_ancestry,
         for_publication=True,
-    )
+    ):
+        await read_context_generation_in_tx(
+            db,
+            worker=worker,
+            execution_id=execution_id,
+            lane="ordinary",
+            generation_id=generation_id,
+            cipher=cipher,
+            validate_sources=validate_sources,
+            for_publication=True,
+        )
     turn = await _row(db, "SELECT seq FROM turns WHERE id=? AND session_id=?", (worker.turn_id, worker.session_id))
     await db.execute(
         "INSERT INTO model_context_conversation_heads(session_id,generation_id,published_turn_id,published_turn_seq) VALUES (?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET generation_id=excluded.generation_id,published_turn_id=excluded.published_turn_id,published_turn_seq=excluded.published_turn_seq",

@@ -1,4 +1,5 @@
 {
+  "content_sharing_disabled": "Die Freigabe ist für diese Bereitstellung deaktiviert. Bestehende Freigaben können Sie prüfen oder widerrufen. Wenden Sie sich zum Aktivieren an Ihre Administration.",
   "coach_canvas_target_unavailable": "Die ursprüngliche Ressource oder ihre gespeicherte Version ist nicht mehr verfügbar. Prüfen Sie den Editor und senden Sie erneut; Ihre Nachricht bleibt erhalten.",
   "reference_input_invalid": "Die Referenzeingabe ist ungültig. Behalten Sie den Entwurf bei und prüfen Sie die Referenzen.",
   "reference_request_too_large": "Die Referenzeingabe ist zu groß. Kürzen Sie sie vor dem Senden.",
@@ -304,8 +305,10 @@
   "last_team_admin_cannot_self_demote": "Sie sind die letzte Administration. Ernennen Sie eine weitere Administration, bevor Sie Ihre Rolle herabstufen.",
   "last_workspace_admin": "Dieses Mitglied ist die einzige Administration des Space. Geben Sie zuerst einem anderen Mitglied Administrationszugriff.",
   "lead_internal_error": "Ein Systemfehler hat diesen Vorgang unterbrochen. Versuchen Sie es später erneut.",
+  "tool_call_not_executed": "Der erforderliche Vorgang wurde nicht ausgeführt. Die Aufgabe ist daher noch nicht abgeschlossen. Bitten Sie in einer weiteren Nachricht darum, die noch offenen Arbeiten fortzusetzen.",
   "lead_empty_answer": "Das Modell hat keine Antwort oder Aktion geliefert. Es wurde kein Vorgang ausgeführt. Versuchen Sie die Aufgabe erneut; kopieren Sie bei erneutem Auftreten die Diagnose für Ihre Administration.",
   "lead_output_exhausted": "Das Modell hat sein Antwortlimit erreicht, ohne eine Antwort oder Aktion zu liefern. Es wurde kein Vorgang ausgeführt. Versuchen Sie es erneut; kopieren Sie bei erneutem Auftreten die Diagnose für Ihre Administration.",
+  "knowledge_source_changed": "Die Wissensquellen haben sich vor der Fortsetzung geändert. Starten Sie eine neue Unterhaltung mit den aktuell verfügbaren Quellen.",
   "reference_policy_changed": "Die Teamberechtigungen wurden geändert, bevor diese Referenz verwendet wurde. Wählen Sie Agent und Skill vor dem Senden erneut aus.",
   "llm_config_encryption_required": "Die Verschlüsselung der Modellschlüssel ist für diese Bereitstellung nicht konfiguriert. Die Modellkonfiguration kann daher nicht gespeichert werden. Wenden Sie sich an die Systemadministration.",
   "llm_provider_auth_failed": "Die Authentifizierung beim Modelldienst ist fehlgeschlagen. Bitten Sie Ihre Teamadministration, den API-Schlüssel der Modellverbindung und die Zugriffsrechte zu prüfen. Geben Sie die Diagnose weiter und senden Sie nach der Korrektur erneut.",
@@ -717,5 +720,12 @@
   "shopify_outbound_blocked": "Die Richtlinie dieser Bereitstellung für ausgehende Adressen blockiert diese Shop-Adresse. Verwenden Sie die myshopify.com-Domain des Shops.",
   "shopify_api_version_unverified": "Der Shop unterstützt die hier benötigte Shopify-API-Version nicht. Wenden Sie sich an Ihre Administration.",
   "shopify_request_rejected": "Shopify hat die Anfrage abgelehnt. Prüfen Sie die Berechtigungen der App in diesem Shop und versuchen Sie es erneut.",
-  "shopify_response_invalid": "Shopify hat eine unerwartete Antwort geliefert. Versuchen Sie es später erneut; wenn das Problem bleibt, wenden Sie sich an Ihre Administration."
+  "shopify_response_invalid": "Shopify hat eine unerwartete Antwort geliefert. Versuchen Sie es später erneut; wenn das Problem bleibt, wenden Sie sich an Ihre Administration.",
+  "tool_arguments_invalid": "Eingabeformat oder Datenfelder passen nicht zu diesem Schritt. Der Agent muss die Eingaben vor einem neuen Versuch korrigieren.",
+  "tool_resource_unavailable": "Die gewählte Quelle ist nicht verfügbar. Prüfen Sie den Zugriff oder wählen Sie eine verfügbare Quelle.",
+  "tool_code_failed": "Das Skript ist fehlgeschlagen. Prüfen Sie die Ausnahme, die angegebenen Eingaben und die tatsächlichen Spaltennamen vor einer korrigierten Ausführung.",
+  "tool_execution_timeout": "Der Vorgang hat das Zeitlimit überschritten; das Ergebnis ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob Änderungen wirksam wurden.",
+  "tool_execution_unknown": "Das Ergebnis des Vorgangs ist unbestätigt. Prüfen Sie vor einer Wiederholung, ob er wirksam wurde.",
+  "tool_execution_failed": "Das Tool konnte diesen Schritt nicht abschließen. Prüfen Sie das Ergebnis oder kopieren Sie die Diagnose für Ihren Administrator.",
+  "tool_delivery_review_required": "Die Lieferung ist noch ungeprüft. Der Agent muss fehlgeschlagene Schritte und offene Anforderungen vor dem Abschluss prüfen."
 }

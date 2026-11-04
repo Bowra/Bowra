@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.canvas_store import CanvasStore
@@ -48,6 +47,7 @@ from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
+from gateway_legacy_database import upgrade
 
 from bowhead_core import canvas_export as legacy_export
 
@@ -90,7 +90,7 @@ class FakeExportRunner:
 @pytest.fixture(scope="module")
 def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     path = tmp_path_factory.mktemp("canvas-export-v2-template") / "bowhead.db"
-    upgrade(f"sqlite:///{path}", target="core")
+    upgrade(f"sqlite:///{(path).with_name('bowhead.db')}", target="core")
     return path
 
 
@@ -1071,10 +1071,16 @@ async def test_composed_chart_receipt_compares_screen_before_export_freeze(env: 
         "data_artifact_id": data.id,
         "title": "Monthly revenue",
         "views": [
-            {"id": "trend", "title": "Revenue", "hint": "trend", "force_kind": "line", "series": ["revenue"]},
-            {"id": "detail", "title": "Observations", "hint": "raw", "force_kind": "table", "series": ["revenue", "cost"]},
+            {
+                "id": "trend",
+                "title": "Revenue",
+                "force_kind": "line",
+                "axes": {"x": "month", "y": ["revenue"], "x_scale": "category"},
+                "group_by": ["region"] if presentation in {"trends", "frames"} else [],
+            },
+            {"id": "detail", "title": "Observations", "force_kind": "table", "columns": "all"},
         ],
-        "layout": "comparison_grid",
+        "layout": "grid2",
     }
     rows, columns = _parse_csv_with_types(raw)
     candidates = build_binding_catalog(columns, rows, raw=raw)["candidates"]
@@ -1083,7 +1089,7 @@ async def test_composed_chart_receipt_compares_screen_before_export_freeze(env: 
         if presentation == "trends":
             args["presentation_plan"] = {"version": 2, "table_trends": [{"view_id": "detail", "binding_id": binding, "measure_key": "revenue"}]}
         else:
-            args["views"][0].update(force_kind="scatter", series=["revenue", "cost"])
+            args["views"][0].update(force_kind="scatter", axes={"x": "revenue", "y": ["cost"], "x_scale": "linear"}, group_by=["region"])
             args["presentation_plan"] = {
                 "version": 1,
                 "interactions": [{"preset": "frame_player", "view_ids": ["trend", "detail"], "binding_id": binding}],

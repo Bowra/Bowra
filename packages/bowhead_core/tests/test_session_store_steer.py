@@ -17,10 +17,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.session_store import SessionStore
+from core_legacy_database import upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -281,7 +281,7 @@ async def test_cleanup_stale_running_turn_preserves_accepted_steer_for_recovery(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(

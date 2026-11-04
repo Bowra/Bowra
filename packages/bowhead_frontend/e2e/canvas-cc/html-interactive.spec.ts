@@ -7,6 +7,7 @@ import { INTERACTIVE_HTML_PERMISSIONS, INTERACTIVE_HTML_SANDBOX } from "../../li
 
 const escape = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 const fixture = `<!doctype html><html><head><title>Offline controls</title></head><body>
+  <nav><a href="#destination">Jump to section</a><a href="#">Back to top</a></nav>
   <button id="count">0</button><button id="inline" onclick="this.textContent='clicked'">Inline</button>
   <form id="calculator"><input id="amount" type="number" value="3"><button>Calculate</button><output id="total"></output></form>
   <button id="fail" onclick="throw new Error('synthetic-private-detail')">Fail script</button><button id="tab">Details</button><section id="detail" hidden>Complete content</section><canvas id="chart" width="20" height="20"></canvas>
@@ -16,7 +17,7 @@ const fixture = `<!doctype html><html><head><title>Offline controls</title></hea
   document.querySelector('#tab').onclick=()=>document.querySelector('#detail').hidden=false;
   const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='red';ctx.fillRect(0,0,20,20);
   document.body.dataset.strict=String((function(){return this})()===undefined);
-  </script></body></html>`;
+  </script><section id="destination" style="margin-top:1200px">Section destination</section></body></html>`;
 
 test("offline isolation blocks HTTP, navigation, host access, and WebRTC in fresh realms", async ({ page }) => {
   const hits: string[] = [];
@@ -113,6 +114,7 @@ for (const width of [1280, 390]) {
     const downloadServer = createServer((_request, response) => {
       response.setHeader("Content-Type", "text/html; charset=utf-8");
       response.setHeader("Content-Disposition", 'attachment; filename="executive-brief.html"');
+      response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'");
       response.end(fixture);
     });
     await new Promise<void>((resolve) => downloadServer.listen(0, "127.0.0.1", resolve));
@@ -158,6 +160,14 @@ for (const width of [1280, 390]) {
       const dialog = page.getByRole("dialog", { name: "executive-brief.html", exact: true });
       await expect.poll(() => dialog.boundingBox()).toEqual({ x: 0, y: 0, width, height });
       await expect(frame.locator("#count")).toHaveText("1");
+      const hostUrl = page.url();
+      await frame.getByRole("link", { name: "Jump to section", exact: true }).click();
+      await expect(frame.locator("#destination")).toBeInViewport();
+      expect(await frame.locator("body").evaluate((body) => body.ownerDocument.URL)).toBe("about:srcdoc#destination");
+      expect(page.url()).toBe(hostUrl);
+      await frame.getByRole("link", { name: "Back to top", exact: true }).click();
+      await expect(frame.locator("#count")).toHaveText("1");
+      await page.screenshot({ path: test.info().outputPath(`html-fragment-fullview-${width}.jpg`) });
       await frame.locator("#count").click();
       await frame.locator("#count").press("Escape");
       await expect(dialog).toHaveCount(0);
@@ -169,10 +179,24 @@ for (const width of [1280, 390]) {
       await expect(page.locator(".safe-html-preview")).not.toContainText("synthetic-private-detail");
       await page.getByRole("radio", { name: "静态阅读", exact: true }).click();
       await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveAttribute("sandbox", "");
+      const reading = page.frameLocator('iframe[title="executive-brief.html"]');
+      await reading.getByRole("link", { name: "Jump to section", exact: true }).click();
+      await expect(reading.locator("#destination")).toBeInViewport();
+      expect(await reading.locator("body").evaluate((body) => body.ownerDocument.URL)).toBe("about:srcdoc#destination");
+      expect(page.url()).toBe(hostUrl);
       await page.getByRole("radio", { name: "交互", exact: true }).click();
       await expect(frame.locator("#count")).toHaveText("0");
+      await page.getByRole("button", { name: "停止交互", exact: true }).click();
+      await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveCount(0);
+      await page.getByRole("button", { name: "重新启动交互", exact: true }).click();
+      await expect(frame.locator("#count")).toHaveText("0");
+      const complex = "<div>".repeat(150) + "Complex fixture" + "</div>".repeat(150);
+      await page.route("**/api/v1/sessions/*/artifacts/art_delivery/content", (route) => route.fulfill({ contentType: "text/html", body: complex }));
+      await page.getByRole("button", { name: "重新加载", exact: true }).click();
+      await expect(page.getByRole("alert").filter({ hasText: "超出预览复杂度" })).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('iframe[title="executive-brief.html"]')).toHaveCount(0);
       const downloaded = page.waitForEvent("download");
-      const downloadHref = await page.getByRole("link", { name: "下载", exact: true }).getAttribute("href");
+      const downloadHref = await page.locator("a.result-object-action-primary").getAttribute("href");
       expect(downloadHref).not.toBeNull();
       await page.goto(new URL(downloadHref!, page.url()).href).catch((error: Error) => {
         if (!/download|aborted|interrupted/i.test(error.message)) throw error;
@@ -186,3 +210,55 @@ for (const width of [1280, 390]) {
     }
   });
 }
+
+test("HTML cannot read sign-in cookies or borrow host requests, and status floods stay bounded", async ({ page }) => {
+  let body = "";
+  const requests: Array<{ cookie: boolean }> = [];
+  const server = createServer((request, response) => {
+    if (request.url === "/private-api") {
+      requests.push({ cookie: (request.headers.cookie ?? "").includes("bowhead_jwt=synthetic") });
+      response.end("synthetic private data"); return;
+    }
+    response.setHeader("Content-Type", "text/html");
+    response.setHeader("Set-Cookie", ["bowhead_jwt=synthetic; HttpOnly; SameSite=Lax; Path=/", "readable_preference=synthetic; SameSite=Lax; Path=/"]);
+    response.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const attack = `<output id="result"></output><script>
+    const result={};
+    try{result.cookie=document.cookie}catch(error){result.cookie=error.name}
+    try{result.host=!!top.document.body}catch(error){result.host=error.name}
+    try{top.fetch('${origin}/private-api',{credentials:'include'})}catch(error){result.borrow=error.name}
+    fetch('${origin}/private-api',{method:'POST',credentials:'include',mode:'no-cors',body:'synthetic'}).catch(()=>{});
+    document.querySelector('#result').textContent=JSON.stringify(result);
+    setTimeout(()=>{for(let i=0;i<1000;i++)parent.postMessage('bowhead-html-runtime','*');parent.postMessage('bowhead-html-blocked','*')},100);
+    </script>`;
+  try {
+    const prepared = await buildInteractiveHtmlDocument(attack);
+    const wrap = (document: string, sameOrigin: boolean) => `<script>window.runtimeNotices=0;window.blockedNotices=0;addEventListener('message',event=>{if(event.data?.type==='bowhead-html-runtime')window.runtimeNotices++;if(event.data?.type==='bowhead-html-blocked')window.blockedNotices++})</script><iframe title="outer" sandbox="allow-scripts allow-forms${sameOrigin ? " allow-same-origin" : ""}" srcdoc="${escape(document)}"></iframe>`;
+    body = wrap(prepared.document, false);
+    await page.goto(origin);
+    const frame = page.frameLocator('iframe[title="outer"]').frameLocator('iframe[title="HTML content"]');
+    const result = JSON.parse(await frame.locator("#result").innerText());
+    expect(["SecurityError", ""]).toContain(result.cookie);
+    expect(result.host).toBe("SecurityError");
+    expect(result.borrow).toBe("SecurityError");
+    await expect.poll(() => page.evaluate(() => (window as unknown as { blockedNotices: number }).blockedNotices)).toBe(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { runtimeNotices: number }).runtimeNotices)).toBe(1);
+    expect(requests).toEqual([]);
+    // Positive control: deliberately grant both realms same-origin authority.
+    // HttpOnly still hides the token string, but host fetch can use that token.
+    body = wrap(prepared.document.replaceAll('sandbox="allow-scripts allow-forms"', 'sandbox="allow-scripts allow-forms allow-same-origin"'), true);
+    await page.goto(origin);
+    const unsafeResult = JSON.parse(await frame.locator("#result").innerText());
+    expect(unsafeResult.cookie).toContain("readable_preference=synthetic");
+    expect(unsafeResult.cookie).not.toContain("bowhead_jwt");
+    await expect.poll(() => requests.some((request) => request.cookie)).toBe(true);
+  } finally {
+    await page.goto("about:blank"); server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

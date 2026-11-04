@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import type { Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
+import { isProseRange, REWRITE_TEXT_LIMIT, REWRITE_INSTRUCTION_LIMIT } from "./ai-rewrite-scope";
 import type { RewritePreset } from "@/components/canvas/ai-rewrite-menu";
 import type { SourceRef } from "./canvas-pm-adapter";
 import { trackInteraction as track } from "./metrics";
@@ -264,27 +265,6 @@ type RewriteRequest = {
   lost: boolean;
 };
 
-/** Reject selections containing non-prose blocks or crossing report sections. */
-function isProseRange(editor: Editor, from: number, to: number): boolean {
-  const doc = editor.state.doc;
-  if (from < 0 || to > doc.content.size || from >= to) return false;
-  let safe = true;
-  const sections = new Set<string>();
-  doc.nodesBetween?.(from, to, (node) => {
-    if (node.type.name.startsWith("section_")) {
-      sections.add(node.attrs.sectionId);
-      if (!["section_narrative", "section_deck", "section_callout"].includes(node.type.name))
-        safe = false;
-    }
-    if (
-      (node.isAtom && !node.isText && node.type.name !== "hardBreak") ||
-      ["codeBlock", "table"].includes(node.type.name)
-    )
-      safe = false;
-  });
-  return safe && sections.size <= 1;
-}
-
 function requestStillMatches(editor: Editor, request: RewriteRequest): boolean {
   const { from, to } = request.range;
   if (request.lost || !isProseRange(editor, from, to)) return false;
@@ -345,8 +325,8 @@ export function useAIRewrite(opts: UseAIRewriteOpts) {
     };
   }, [editor]);
 
-  const start = useCallback(
-    async (preset: RewritePreset, customPrompt?: string, range?: { from: number; to: number }) => {
+  const begin = useCallback(
+    (preset: RewritePreset, customPrompt?: string, range?: { from: number; to: number }): Promise<void> | null => {
       if (
         !enabled ||
         !editor ||
@@ -354,18 +334,18 @@ export function useAIRewrite(opts: UseAIRewriteOpts) {
         (!canvasId && !useMock) ||
         operationRef.current
       )
-        return;
+        return null;
       const { from, to } = range ?? editor.state.selection;
-      if (from === to) return;
+      if (from === to) return null;
       if (!isProseRange(editor, from, to)) {
         setState({ ...IDLE, error: "invalid_request" });
-        return;
+        return null;
       }
       const text = editor.state.doc.textBetween(from, to, "\n");
-      if (!text.trim()) return;
-      if (text.length > 12000 || (customPrompt?.length ?? 0) > 1000) {
+      if (!text.trim()) return null;
+      if (text.length > REWRITE_TEXT_LIMIT || (customPrompt?.length ?? 0) > REWRITE_INSTRUCTION_LIMIT) {
         setState({ ...IDLE, error: "invalid_request" });
-        return;
+        return null;
       }
       const request: RewriteRequest = {
         preset,
@@ -387,54 +367,64 @@ export function useAIRewrite(opts: UseAIRewriteOpts) {
       const stream = useMock
         ? mockRewriteStream(text, preset, customPrompt, operation.signal)
         : backendRewriteStream(canvasId!, text, preset, customPrompt, operation.signal);
-      let acc = "";
-      try {
-        for await (const event of stream) {
-          if (operationRef.current !== operation || operation.signal.aborted || editor.isDestroyed)
-            return;
-          if (!requestStillMatches(editor, request))
-            throw Object.assign(new Error("Rewrite target changed"), {
-              code: "rewrite_content_changed",
-            });
-          if (event.type === "chunk") {
-            acc += event.delta;
-            setAiRewriteDeco(editor.view, { old: request.range, new: null, preview: acc });
-          } else {
-            if (!event.full.trim())
-              throw Object.assign(new Error("Rewrite returned no text"), {
-                code: "rewrite_empty_result",
+      return (async () => {
+        let acc = "";
+        try {
+          for await (const event of stream) {
+            if (operationRef.current !== operation || operation.signal.aborted || editor.isDestroyed)
+              return;
+            if (!requestStillMatches(editor, request))
+              throw Object.assign(new Error("Rewrite target changed"), {
+                code: "rewrite_content_changed",
               });
-            const next = {
-              ...IDLE,
-              preset,
-              reviewing: true,
-              newText: event.full,
-              unverified: event.unverified,
-            };
-            stateRef.current = next;
-            setState(next);
-            setAiRewriteDeco(editor.view, { old: request.range, new: null, preview: event.full });
-            track("bowhead_canvas_ai_rewrite_total", { action: "done", preset, mode });
-            onDone?.({ newText: event.full, unverified: event.unverified });
-            return;
+            if (event.type === "chunk") {
+              acc += event.delta;
+              setAiRewriteDeco(editor.view, { old: request.range, new: null, preview: acc });
+            } else {
+              if (!event.full.trim())
+                throw Object.assign(new Error("Rewrite returned no text"), {
+                  code: "rewrite_empty_result",
+                });
+              const next = {
+                ...IDLE,
+                preset,
+                reviewing: true,
+                newText: event.full,
+                unverified: event.unverified,
+              };
+              stateRef.current = next;
+              setState(next);
+              setAiRewriteDeco(editor.view, { old: request.range, new: null, preview: event.full });
+              track("bowhead_canvas_ai_rewrite_total", { action: "done", preset, mode });
+              onDone?.({ newText: event.full, unverified: event.unverified });
+              return;
+            }
           }
+          if (operationRef.current === operation)
+            throw Object.assign(new Error("Rewrite stream ended without completion"), {
+              code: "rewrite_incomplete",
+            });
+        } catch (error) {
+          if (operationRef.current !== operation || editor.isDestroyed) return;
+          operationRef.current = null;
+          setAiRewriteDeco(editor.view, null);
+          const next = { ...IDLE, error: rewriteErrorKind(error), errorCause: error };
+          stateRef.current = next;
+          setState(next);
+          track("bowhead_canvas_ai_rewrite_total", { action: "fail", preset, mode });
         }
-        if (operationRef.current === operation)
-          throw Object.assign(new Error("Rewrite stream ended without completion"), {
-            code: "rewrite_incomplete",
-          });
-      } catch (error) {
-        if (operationRef.current !== operation || editor.isDestroyed) return;
-        operationRef.current = null;
-        setAiRewriteDeco(editor.view, null);
-        const next = { ...IDLE, error: rewriteErrorKind(error), errorCause: error };
-        stateRef.current = next;
-        setState(next);
-        track("bowhead_canvas_ai_rewrite_total", { action: "fail", preset, mode });
-      }
+      })();
     },
     [editor, canvasId, enabled, useMock, onDone],
   );
+
+  // Keep awaitable execution for selection callers; block input needs immediate admission only.
+  const start = useCallback(async (preset: RewritePreset, customPrompt?: string, range?: { from: number; to: number }) => {
+    await begin(preset, customPrompt, range);
+  }, [begin]);
+  const tryStart = useCallback((preset: RewritePreset, customPrompt: string, range: { from: number; to: number }): boolean => {
+    return begin(preset, customPrompt, range) !== null;
+  }, [begin]);
 
   const cancel = useCallback(() => {
     track("bowhead_canvas_ai_rewrite_total", {
@@ -495,7 +485,7 @@ export function useAIRewrite(opts: UseAIRewriteOpts) {
     void start(request.preset, request.customPrompt, request.range);
   }, [editor, reset, start]);
 
-  return { state, start, cancel, accept, reject, clearError: reset, retry };
+  return { state, start, tryStart, cancel, accept, reject, clearError: reset, retry };
 }
 
 export type { SourceRef };

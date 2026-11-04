@@ -89,6 +89,8 @@ def test_capability_contract_is_fixed_to_v1_and_page_size_50() -> None:
         "complete_list": False,
         "scale_nav": False,
         "max_page_size": 50,
+        "interactive_html": False,
+        "content_sharing": {"enabled": False, "reason": None},
     }
     with pytest.raises(ValidationError):
         ResultsCapabilitiesResponseV1.model_validate(value.model_dump() | {"max_page_size": 100})

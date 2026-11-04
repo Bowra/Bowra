@@ -11,6 +11,7 @@ from bowhead_core.agent_compatibility import (
     AgentCompatibilityCompiler,
     AgentCompatibilityStore,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -204,4 +205,4 @@ def _upgrade(path: Path) -> None:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)

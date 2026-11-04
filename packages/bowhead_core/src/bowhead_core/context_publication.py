@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -13,16 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.context_compaction import message_digest
-from bowhead_core.context_dependencies import adoption_source_validator
+from bowhead_core.context_dependencies import PreparedContextSourceValidator, adoption_source_validator
 from bowhead_core.context_ownership import ContextOwner, TerminalContextFinalizationOwner, TerminalContextOwner
 from bowhead_core.context_store import (
     ContextOrigin,
     ContextStoreError,
+    PreparedContextAncestry,
     PreparedContextMessages,
     SourceValidator,
     prepare_context_messages,
     publish_conversation_context_in_tx,
     read_context_generation_in_tx,
+    validate_prepared_context_in_tx,
     write_context_in_tx,
 )
 
@@ -53,15 +56,29 @@ class ContextPublication:
     inherited_generation: str | None
     append_answer: bool = True
     prepared_messages: tuple[PreparedContextMessages, ...] = ()
+    prepared_ancestry: PreparedContextAncestry | None = None
 
     async def prepare_for_answer(self, final_answer: str) -> ContextPublication:
-        values = [*self.messages, *([Message(role="assistant", content=final_answer)] if self.append_answer else [])]
+        messages, dependencies = deepcopy(self.messages), deepcopy(self.dependencies)
+        values = [*messages, *([Message(role="assistant", content=final_answer)] if self.append_answer else [])]
         prepared = []
-        for body in ([self.dependencies] if self.dependencies else []) + [values]:
+        for body in ([dependencies] if dependencies else []) + [values]:
+            if isinstance(self.validate_sources, PreparedContextSourceValidator):
+                # Revalidate changed final inputs before acquiring the writer;
+                # adoption still repeats current authority in its own snapshot.
+                await self.validate_sources.collect(body)
             prepared.append(
-                await prepare_context_messages(body, worker=self.worker, execution_id=self.execution_id, lane="ordinary", cipher=self.cipher)
+                await prepare_context_messages(
+                    body,
+                    worker=self.worker,
+                    execution_id=self.execution_id,
+                    lane="ordinary",
+                    cipher=self.cipher,
+                    db_path=self.db_path,
+                    preparation=self.prepared_ancestry,
+                )
             )
-        return replace(self, prepared_messages=tuple(prepared))
+        return replace(self, messages=messages, dependencies=dependencies, prepared_messages=tuple(prepared))
 
     async def _stage(self, db, final_answer: str) -> tuple[str, list[Message]]:
         current = self.expected_generation
@@ -92,6 +109,7 @@ class ContextPublication:
                 cipher=self.cipher,
                 validate_sources=validation,
                 prepared_messages=self.prepared_messages[index] if self.prepared_messages else None,
+                prepared_ancestry=self.prepared_ancestry,
                 source_refs=(self.inherited_generation,) if self.inherited_generation else (),
                 for_publication=True,
             )
@@ -101,7 +119,12 @@ class ContextPublication:
         """Legacy completion owns both staging and adoption in one transaction."""
         if isinstance(self.worker, TerminalContextOwner):
             raise ContextStoreError("context_terminal_candidate_required")
-        generation, _ = await self._stage(db, final_answer)
+        working = replace(
+            self,
+            validate_sources=adoption_source_validator(self.validate_sources, db),
+            prepared_ancestry=self.prepared_ancestry.for_transaction() if self.prepared_ancestry is not None else None,
+        )
+        generation, _ = await working._stage(db, final_answer)
         await publish_conversation_context_in_tx(
             db,
             worker=self.worker,
@@ -109,7 +132,8 @@ class ContextPublication:
             generation_id=generation,
             expected_conversation_generation=self.inherited_generation,
             cipher=self.cipher,
-            validate_sources=self.validate_sources,
+            validate_sources=working.validate_sources,
+            prepared_ancestry=working.prepared_ancestry,
         )
         if not self.append_answer:
             from bowhead_core.context_activity import recover_context_publications_in_connection
@@ -123,10 +147,15 @@ class ContextPublication:
         prepared = await self.prepare_for_answer(final_answer)
         async with open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            generation, messages = await prepared._stage(db, final_answer)
+            working = replace(
+                prepared,
+                validate_sources=adoption_source_validator(prepared.validate_sources, db),
+                prepared_ancestry=prepared.prepared_ancestry.for_transaction() if prepared.prepared_ancestry is not None else None,
+            )
+            generation, messages = await working._stage(db, final_answer)
             await db.commit()
         return StagedTerminalContext(
-            publication=self,
+            publication=prepared,
             projection=TerminalContextProjection(
                 execution_id=self.execution_id,
                 generation_id=generation,
@@ -134,6 +163,7 @@ class ContextPublication:
                 content_digest=message_digest(messages),
                 content_state="conversation" if self.append_answer else "maintenance",
             ),
+            final_answer=final_answer,
         )
 
 
@@ -141,6 +171,7 @@ class ContextPublication:
 class StagedTerminalContext:
     publication: ContextPublication
     projection: TerminalContextProjection
+    final_answer: str | None = None
 
     async def adopt(self, db, *, context, plan, selected, final_answer: str) -> None:
         from bowhead_core.terminal_protocol import CandidateOutcome, PreparedFinalizationContext, TerminalStatus
@@ -159,19 +190,38 @@ class StagedTerminalContext:
             workspace_id=original.workspace_id,
             prepared=context,
         )
-        retained = await read_context_generation_in_tx(
+        validation = adoption_source_validator(self.publication.validate_sources, db)
+        ancestry = self.publication.prepared_ancestry.for_transaction() if self.publication.prepared_ancestry is not None else None
+        verified = await validate_prepared_context_in_tx(
             db,
             worker=worker,
             execution_id=self.projection.execution_id,
             lane="ordinary",
             generation_id=self.projection.generation_id,
             cipher=self.publication.cipher,
-            validate_sources=self.publication.validate_sources,
+            validate_sources=validation,
+            preparation=ancestry,
             for_publication=True,
         )
+        if verified and ancestry is not None and self.final_answer is not None:
+            digest = ancestry.records[self.projection.generation_id][1].digest
+            answer_matches = self.final_answer == final_answer
+        else:
+            retained = await read_context_generation_in_tx(
+                db,
+                worker=worker,
+                execution_id=self.projection.execution_id,
+                lane="ordinary",
+                generation_id=self.projection.generation_id,
+                cipher=self.publication.cipher,
+                validate_sources=validation,
+                for_publication=True,
+            )
+            digest = message_digest(retained.messages)
+            answer_matches = not self.publication.append_answer or retained.messages[-1] == Message(role="assistant", content=final_answer)
         if (
-            message_digest(retained.messages) != self.projection.content_digest
-            or (self.publication.append_answer and retained.messages[-1] != Message(role="assistant", content=final_answer))
+            digest != self.projection.content_digest
+            or (self.publication.append_answer and not answer_matches)
             or (not self.publication.append_answer and final_answer)
         ):
             raise ContextStoreError("context_terminal_content_changed")
@@ -182,5 +232,6 @@ class StagedTerminalContext:
             generation_id=self.projection.generation_id,
             expected_conversation_generation=self.projection.expected_head_id,
             cipher=self.publication.cipher,
-            validate_sources=self.publication.validate_sources,
+            validate_sources=validation,
+            prepared_ancestry=ancestry,
         )

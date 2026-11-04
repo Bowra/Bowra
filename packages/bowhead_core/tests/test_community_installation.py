@@ -19,6 +19,7 @@ from bowhead_core.installation import (
     read_installation,
     setup_community_owner,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore, verify_password
 
 from bowhead_core import migrations
@@ -35,7 +36,7 @@ def _migration(path: Path, target: str = "core") -> Config:
 @pytest.fixture(scope="module")
 def migrated_template(tmp_path_factory):
     path = tmp_path_factory.mktemp("community-template") / "bowhead.db"
-    command.upgrade(_migration(path), "head")
+    command.upgrade(_migration(path), SOURCE_REVISION)
     return path
 
 

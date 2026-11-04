@@ -43,6 +43,7 @@ from bowhead_core.source_attribution import (
 from bowhead_router.inline_reasoning import split_inline_reasoning
 
 from bowhead_gateway.kb_citation_access import kb_file_access_for_request
+from bowhead_gateway.report_artifact_access import authorized_report_artifact_ids
 
 logger = logging.getLogger(__name__)
 
@@ -783,6 +784,7 @@ async def _event_projector(
     closure: list[str] = []
     _collect_artifact_ids(canonical_sections, closure, set())
     _collect_artifact_ids(source_refs, closure, set(closure))
+    closure = list(await authorized_report_artifact_ids(request, canvas or session, closure))
     # Chat citations may exist only in turn events. Include their artifacts only
     # after checking ownership: the closure is a tenant-isolation boundary, and
     # model-injected references to artifacts from another turn must stay stripped.
@@ -816,6 +818,7 @@ async def _event_projector(
         ref_ids = source_ref_artifact_ids(source_refs)
         seen_rendered = set(rendered_ids)
         rendered_ids.extend(aid for aid in sorted(ref_ids) if aid not in seen_rendered)
+        rendered_ids = list(await authorized_report_artifact_ids(request, canvas or session, rendered_ids))
         # Preserve byte access for event artifacts owned by this turn. Ownership
         # is server-written; omitting this set would incorrectly downgrade
         # accessible sandbox outputs to labels without accessible content.

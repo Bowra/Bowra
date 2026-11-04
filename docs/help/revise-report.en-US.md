@@ -1,5 +1,9 @@
 # Revise an existing report
 
+A new Table shows every column of the selected result unless you name the columns to show. Named columns keep your order, including constant values. For a plot, state the horizontal field, value fields and grouping (or “no grouping”); for example, “Decile on the horizontal axis, hospital count on the vertical axis, grouped by region.” Numeric Decile values remain categories when you request a category axis. Missing fields or unsupported shapes produce an explanation instead of a guessed plot. Request sorting, aggregation or Top N in data preparation; the renderer does not silently shorten the prepared result. To change an explicit view into another chart kind, ask in Chat with the intended fields; its menu does not guess new bindings. Existing charts keep their saved behavior until you request a new revision.
+
+When requesting a new chart, you can ask to hide its legend or show or hide data labels. In a combined figure, identify the individual view when you want a different choice for one chart. A single-series chart may omit its legend automatically.
+
 When the canvas already has a report, you can keep asking for changes in the same chat, and Bowra revises the existing report instead of writing a new one.
 
 New report attribution uses the Community name, Bowra. Existing saved reports and text supplied by you keep their original content.
@@ -16,7 +20,7 @@ Common requests:
 
 ## Edit text and use AI rewrites
 
-Choose **Edit this report** to edit text directly. Select a passage or open a prose block’s AI action, then choose a rewrite option or enter an instruction such as “Expand the explanation using only these facts.” On a phone, open the prose block’s **More** menu and choose **Edit with AI**.
+Choose **Edit this report** to edit text directly. Select a passage or open a prose block’s AI action, then choose a rewrite option or enter an instruction such as “Expand the explanation using only these facts.” On a phone, open the prose block’s **More** menu and choose **Edit with AI**. The input shows the chapter title and a short target excerpt; check it before sending. Pure text blocks can be rewritten whole. If the block contains charts, tables or code, choose one of the eligible prose paragraphs; a single eligible paragraph is selected automatically. Only that passage changes. If the target changes or validation fails, your instruction stays available. Selections are limited to 12,000 characters and instructions to 1,000. This action does not recalculate chart data.
 
 The highlighted candidate is a preview. Choose **Accept** to replace the original, or **Revert** to keep it. **Stop** cancels generation. Accept or revert before finishing editing, exporting, or leaving the report. One Undo restores the accepted passage. If the selected text changes while rewriting, select it again instead of applying the old candidate.
 
@@ -43,6 +47,10 @@ When a new chart replaces an old one, or you ask to remove a chart, the old char
 - Reading steps linked to an existing annotation open the same details. Interval annotations show supplied endpoint values without calculating a period total. Details show the selected measure’s definitions; a remark with an explicit citation shows its cited source text. This does not establish causality. Asking a follow-up remains a deliberate action; browsing or dismissing details does not save a report edit.
 - New compositions use equal-width columns for peer analyses. A primary chart with supporting detail can use a wider main column. Narrow canvases stack views in reading order. To change an existing composition, open its chart settings in edit mode and choose the layout; save to apply it.
 
+- For a new presentation from confirmed content, request an editable PPTX and specify the slide count and content. A successful reply includes a downloadable file card; download it there or from Results. An additional Canvas report is not required.
+
+- Standard PPT downloads follow the report content instead of filling a fixed seven-slide sample deck. Long text and tables continue onto additional slides, and chapter headings appear on divider slides. If the standard fallback cannot reproduce a chart, it includes a data table and an explanation; unavailable images or interactive content are marked in the deck. This is a paginated presentation, not a pixel-identical copy of the canvas.
+
 - The reply says honestly what changed in this round and which charts were tucked away. If an old chart is still in the report, or a key metric card still has a number that wasn't updated to the new scope, the reply tells you that too.
 - When you change only one part, the summary conclusion at the end isn't updated. If you want the conclusion updated to the new scope as well, say so explicitly.
 - If the part you name doesn't match the report (for example, you ask to change chapter 5 of a four-part report), Bowra asks which part you mean instead of picking one on its own. Naming the chapter is the most reliable, for example "change only the category chapter".
@@ -57,7 +65,7 @@ When requesting a new PPTX, specify the points for each slide. Supplied list ite
 
 ## Read on a phone and verify values
 
-A link to a report, file or code result opens Results directly on a phone. Choose Conversation to return to the chat. In compact report reading, use **More → History** for earlier revisions; desktop History remains beside the report.
+A link to a report, file or code result opens Results directly on a phone. Choose Conversation to return to the chat. In report reading, use **More → History** for earlier revisions on both desktop and phone. The document toolbar groups navigation, editing, export, sharing, status and the source summary. Its More menu separates document actions, review/status actions and destructive actions; available actions still depend on your access.
 
 - On a narrow chart, fewer dates or numeric labels may be printed to leave room for series identity. All observations remain available through the existing exact-value details and Table. A visible legend identifies lines when endpoint names cannot fit.
 - Shared time-window controls appear before the charts they affect. The range explanation states which views change and what the export includes.
@@ -66,3 +74,11 @@ A link to a report, file or code result opens Results directly on a phone. Choos
 - In manual editing, **Done** saves pending input, including text that still has focus. A failed save keeps editing available. Browser refresh/close protection also includes pending input and saving; wait for **Saved** before leaving.
 
 Community document Skills create new basic files. They do not provide the private PowerPoint template-draft review/publication workflow. Canvas report revisions and ordinary report exports retain their own controls.
+
+## Share a report and its files
+
+Open **Share** from the report library or report toolbar to inspect the audience, share with permitted recipients or revoke access. Recipients must sign in and have access within your Team; copying a link alone does not give them permission. Direct file sharing does not yet have an interface.
+
+If sharing is disabled for your deployment, you can still inspect or revoke shares you are allowed to manage, but cannot add recipients or expand the audience. Existing shares are suspended and may resume if the deployment administrator enables sharing again. If availability cannot be verified, reopen the dialog to retry; existing shares remain manageable.
+
+A report may reference a file shared with its author by someone else. Report recipients need their own access to that original; otherwise that file is unavailable while the rest of the report remains readable. Ask the file owner to grant appropriate access. Authorized HTML keeps its normal interaction and original download. Revocation prevents subsequent authorized reads; it cannot recall downloaded files or erase content already open in a browser.

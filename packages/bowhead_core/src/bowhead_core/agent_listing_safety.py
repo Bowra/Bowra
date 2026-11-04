@@ -21,6 +21,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.scrubber import scrub_with_count
 from bowhead_core.secret_redaction import extract_secrets
+from bowhead_core.sqlite_domains import domain_database_path
 
 LISTING_SAFETY_SCANNER_VERSION = "listing-safety-det-v1"
 NO_TEAM_DICTIONARY_REVISION = "none"
@@ -233,7 +234,7 @@ class AgentListingSafetyStore:
     """Persist and inventory exact-hash listing safety reports."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
 
     async def persist(
         self,

@@ -384,4 +384,5 @@ def test_policy_chain_order_and_stages() -> None:
         ("resource_grants", PolicyStage.BEFORE_DISPATCH, False),
         ("datarc_capability", PolicyStage.BEFORE_DISPATCH, False),
         ("connector_binding", PolicyStage.BEFORE_DISPATCH, False),
+        ("terminal_delivery_review", PolicyStage.BEFORE_DISPATCH, False),
     ]

@@ -171,9 +171,9 @@ async def test_turn_runner_reads_both_paths(monkeypatch, tmp_path) -> None:
     with sqlite3.connect(db) as c:
         c.executescript(initial_schema("core"))
         c.commit()
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     import json
 
     await save_bundle_inventory(

@@ -20,6 +20,8 @@ from bowhead_core.document_chat_continuation import (
     DocumentResumeReservation,
     DocumentTurnOwner,
 )
+from bowhead_core.sqlite_domains import domain_database_path
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from bowhead_core.documents.continuation import DocumentCheckpointMaterial
@@ -42,7 +44,7 @@ def _transaction(db) -> None:
 
 
 async def installed(db) -> bool:
-    return await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='clarification_document_continuations'") is not None
+    return await readable_table_exists(db, "clarification_document_continuations")
 
 
 async def document_card_id_in_tx(db, *, turn_id: str) -> str | None:
@@ -393,7 +395,7 @@ async def hydrate_document_resume_request(session_store, request) -> None:
     """Load frozen presentation/model selection without reading attachments again."""
     from bowhead_core._db import open_shared_ctx
 
-    async with open_shared_ctx(session_store.db_path) as db:
+    async with open_shared_ctx(domain_database_path(session_store.db_path, "execution")) as db:
         await db.execute("BEGIN")
         record = await require_document_pause_in_tx(db, card_id=request.document_clarification_id, answered=True)
         snapshot = record.snapshot

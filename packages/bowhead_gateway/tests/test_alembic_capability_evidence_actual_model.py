@@ -15,13 +15,13 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import upgrade
 
 from bowhead_core import migrations
 
 # Never hardcode head (see bowhead_core.migrations.chain_head); this file pinned 0020, failing from 0021 onward.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 PREVIOUS_REVISION = "0017_clarification_invalidation_outbox"
 TABLES = ("team_llm_capability_evidence", "team_llm_verification_items")
 
@@ -107,7 +107,7 @@ def test_existing_rows_survive_and_read_as_not_recorded(tmp_path: Path) -> None:
         )
         connection.commit()
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     with sqlite3.connect(db_path) as connection:
         row = connection.execute(

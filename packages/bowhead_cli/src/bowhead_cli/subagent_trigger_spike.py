@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from bowhead_core.sqlite_domain_runtime import connect_sync
+
 _NOW = "2026-07-27T12:00:00Z"
 _STALE_HEARTBEAT = "2026-07-27T11:58:29Z"
 _TEAM_ID = "team_trigger_spike"
@@ -476,7 +478,7 @@ def run_subagent_trigger_spike() -> SubagentTriggerSpikeReport:
     """Execute the deterministic Release A/B and rollback-fence matrix."""
     with tempfile.TemporaryDirectory(prefix="bowhead-subagent-trigger-spike-") as temp_dir:
         db_path = Path(temp_dir) / "trigger-spike.db"
-        connection = sqlite3.connect(db_path)
+        connection = connect_sync(db_path)
         connection.row_factory = sqlite3.Row
         try:
             initialize_trigger_spike_fixture(connection)

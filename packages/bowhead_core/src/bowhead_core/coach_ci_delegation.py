@@ -17,6 +17,7 @@ from bowhead_core.agent_change_proposal_store import _require_owner_conn
 from bowhead_core.agent_eval_plan_store import _workspace_scope
 from bowhead_core.agent_revision_store import AgentAudience, _working_copy_hash, working_copy_content_hash
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
+from bowhead_core.sqlite_domains import domain_database_path
 
 Authorize = Callable[[aiosqlite.Connection], Awaitable[None]]
 
@@ -209,7 +210,7 @@ async def bind_preparation_conn(db: aiosqlite.Connection, delegation_id: str, re
 
 class CoachCIDelegations:
     def __init__(self, db_path: str):
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def request(
         self,

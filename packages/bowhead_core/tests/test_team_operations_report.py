@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.team_operations_report import get_team_operations_report, set_team_report_timezone
 
 from bowhead_core import migrations
@@ -33,7 +34,7 @@ def migrated_db(tmp_path_factory) -> Path:
     command.upgrade(config(path), MIGRATION.down_revision)
     with sqlite3.connect(path) as db:
         db.execute("INSERT INTO teams(id,name,created_at) VALUES ('team_one','One','2026-10-01')")
-    command.upgrade(config(path), "head")
+    command.upgrade(config(path), SOURCE_REVISION)
     return path
 
 

@@ -19,6 +19,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_dependency_compiler import parse_exact_skill_grants
 from bowhead_core.resource_dependency_projection import invalidate_working_copy_projection_conn
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 class TeamPluginError(ValueError):
@@ -82,7 +83,7 @@ def _validate_contents(
 
 class TeamPluginStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def list(self, team_id: str, *, include_disabled: bool = False) -> list[dict[str, Any]]:
         async with open_shared_ctx(self.db_path) as db:

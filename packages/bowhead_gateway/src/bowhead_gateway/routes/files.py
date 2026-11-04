@@ -1912,6 +1912,9 @@ async def share_file(artifact_id: str, body: ShareRequest, request: Request) -> 
     if not team_id:
         raise _file_error(status.HTTP_400_BAD_REQUEST, "file_share_context_required")
 
+    from bowhead_gateway.sharing_policy import require_sharing_expansion
+
+    require_sharing_expansion("artifact")
     kb_ids = await _in_kb_ids(request, [artifact_id])
     try:
         assert_shareable(art, in_kb=artifact_id in kb_ids)

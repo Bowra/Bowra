@@ -5,12 +5,12 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 
 def _create_baseline(path, target: str) -> None:
@@ -31,8 +31,8 @@ def test_core_upgrade_adds_outbox_indexes_and_checks(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_baseline(db_path, "core")
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD_REVISION,)
@@ -73,7 +73,7 @@ def test_outbox_revision_is_core_only(tmp_path, target: str) -> None:
     db_path = target_dir / TARGET_FILES[target]
     _create_baseline(db_path, target)
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target=target) == (target,)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target=target) == (target,)
 
     with sqlite3.connect(db_path) as connection:
         assert (

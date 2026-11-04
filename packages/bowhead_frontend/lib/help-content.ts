@@ -354,11 +354,12 @@ export const HELP_ARTICLE_DEFINITIONS: readonly HelpArticleDefinition[] = [
   },
   {
     id: "space-instructions",
-    title: { "zh-CN": "空间说明", "en-US": "Space instructions", "fr-FR": "Instructions de l’espace" },
+    title: { "zh-CN": "AI 工作说明", "en-US": "AI work instructions", "de-DE": "KI-Arbeitsanweisungen", "fr-FR": "Consignes de travail de l’IA" },
     description: {
-      "zh-CN": "为空间里的每次对话写下共同遵循的说明",
-      "en-US": "Write instructions that every conversation in a space follows",
-      "fr-FR": "Rédiger les instructions suivies par chaque conversation d’un espace",
+      "zh-CN": "为本空间的所有成员和 AI 智能体设置默认工作要求，了解它与空间描述的区别",
+      "en-US": "Set default AI work requirements for everyone in the space and distinguish them from its description",
+      "de-DE": "Standardvorgaben für alle Mitglieder und KI-Agents im Bereich festlegen und von der Beschreibung unterscheiden",
+      "fr-FR": "Définir les exigences de travail de l’IA pour tous les membres de l’espace et les distinguer de sa description",
     },
     group: "team_access",
     source: "space-instructions.zh-CN.md",

@@ -14,6 +14,7 @@ from alembic import command
 from alembic.config import Config
 from bowhead_core.coach_drafting import CoachDraft, CoachResult
 from bowhead_core.feedback_casework_store import FeedbackCaseworkStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import User
 from bowhead_gateway.routes import feedback_coach as fcr
 from fastapi import FastAPI, HTTPException
@@ -36,7 +37,7 @@ def _migrated_db(tmp_path: Path) -> str:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return str(path)
 
 

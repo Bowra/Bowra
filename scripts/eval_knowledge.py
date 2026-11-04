@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ("file_only", "negative", "personal", "space", "ambiguous", "team_denied", "team_admin", "injection", "remove_replay", "english", "helper")
+CASES = ("file_only", "negative", "personal", "space", "ambiguous", "team_denied", "team_admin", "injection", "remove_replay", "english", "helper", "source_discovery")
 
 
 class Evaluation:

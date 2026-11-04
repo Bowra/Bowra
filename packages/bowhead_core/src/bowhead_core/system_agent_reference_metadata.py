@@ -23,6 +23,7 @@ from bowhead_core.agent_listing_safety import scan_agent_listing
 from bowhead_core.builtin_subagent_override import effective_description, restrict_override_to_manifest
 from bowhead_core.builtin_subagent_override_store import _row_to_override
 from bowhead_core.reference_receiver_metadata import ReferenceReceiverMetadata
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.system_agent_marketplace import (
     SYSTEM_AGENT_LISTINGS,
     system_agent_localized_display_name,
@@ -157,7 +158,9 @@ def _build_scope(
 async def build_system_agent_reference_metadata(db_path: str | Path, runner: SubagentRunner) -> SystemAgentReferenceMetadataIndex:
     from bowhead_core.subagent import SubagentRunner
 
-    if not isinstance(runner, SubagentRunner) or Path(getattr(runner.team_subagent_store, "db_path", "")) != Path(db_path):
+    if not isinstance(runner, SubagentRunner) or Path(domain_database_path(getattr(runner.team_subagent_store, "db_path", ""), "core")) != Path(
+        domain_database_path(db_path, "core")
+    ):
         raise ValueError("reference_system_metadata_unavailable")
 
     async def source_rows():

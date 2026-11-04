@@ -196,6 +196,7 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v11",
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
+        "ordinary-lead-loop.v14",
     }:
         raise OrdinaryContinuationUnavailable()
     metadata = asdict(art)
@@ -212,6 +213,7 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v11",
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
+        "ordinary-lead-loop.v14",
     }:
         # Classification can settle after the output observer. These labels
         # do not change content or provenance; actual deletion still invalidates

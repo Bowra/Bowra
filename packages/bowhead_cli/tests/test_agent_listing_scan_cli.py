@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from bowhead_cli.main import app
-from bowhead_cli.migrate import upgrade
+from cli_legacy_database import upgrade
 from typer.testing import CliRunner
 
 

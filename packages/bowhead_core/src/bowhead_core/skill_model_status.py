@@ -18,6 +18,8 @@ import aiosqlite
 from bowhead_core.chat_reference_retention import reference_material_available_in_connection
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceScope, _row, _transaction
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_readable_schema import readable_view_exists
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +69,7 @@ async def live_reference_model_executions_in_connection(db, *, scope, turn_id):
     """Original primary or the currently leased Plan steps, never old attempts."""
     live = await live_reference_model_execution_in_connection(db, scope=scope, turn_id=turn_id)
     result = {live} if live is not None else set()
-    if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='view' AND name='chat_reference_plan_step_scope'", ()) is not None:
+    if await readable_view_exists(db, "chat_reference_plan_step_scope", owner_domain="execution"):
         async with db.execute(
             "SELECT execution_id,generation FROM chat_reference_plan_step_scope WHERE source_turn_id=? AND session_id=? AND user_id=? AND workspace_id=? AND team_id=?",
             (turn_id, scope.session_id, scope.user_id, scope.workspace_id, scope.team_id),
@@ -162,7 +164,7 @@ async def read_reference_model_status(*, db_path: str | Path, scope: ReferenceRe
         if not isinstance(db_path, (str, Path)) or not str(db_path):
             raise ValueError()
         uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-        async with aiosqlite.connect(uri, uri=True) as db:
+        async with diagnostic_connect(uri, uri=True) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")

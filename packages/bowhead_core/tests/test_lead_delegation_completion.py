@@ -1,4 +1,4 @@
-"""Delegated inspection must return to Lead before the whole request can finish."""
+"""Ordinary Lead completion preserves remaining work and canonical final delivery."""
 
 import json
 from types import SimpleNamespace
@@ -37,7 +37,11 @@ async def test_ordinary_delegation_preserves_remaining_work(http_start: SimpleNa
         message = {"role": "assistant", "content": COMPLETE}
         if index in (0, 2):
             task = "Inspect the source, then complete the comparison." if role == "primary" else "Inspect the source."
-            args = {"profile": profile, "task": task if index == 0 else "Finish the comparison using the inspection."}
+            args = {
+                "profile": profile,
+                "task": task if index == 0 else "Finish the comparison using the inspection.",
+                "required_source_urls": [],
+            }
             if role is not None or index == 2:
                 args["delegation_role"] = role if index == 0 else "primary"
             name = "subagent_spawn"
@@ -87,3 +91,42 @@ async def test_ordinary_delegation_preserves_remaining_work(http_start: SimpleNa
     assert len(done) == 1 and done[0]["status"] == turn.status
     summaries = [row for row in events if row["event_type"] == "lead.subagent_summary"]
     assert len(summaries) == (1 if role == "primary" else 2)
+
+
+async def test_receipt_cleanup_agrees_in_final_delivery_store_and_replay(http_start: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    case = http_start
+    enable_lead_writer(case, monkeypatch)
+    raw = "The original `art_123456789abc` remains retained; status is `removed`."
+    expected = "The original  remains retained; status is `removed`."
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        usage = {"prompt_tokens": 11, "completion_tokens": 7}
+        if json.loads(request.content).get("stream"):
+            frames = [
+                {"choices": [{"delta": {"content": raw}, "finish_reason": None}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": usage},
+            ]
+            return httpx2.Response(200, text="".join("data: " + json.dumps(frame) + "\n\n" for frame in frames) + "data: [DONE]\n\n")
+        return httpx2.Response(200, json={"choices": [{"message": {"role": "assistant", "content": raw}, "finish_reason": "stop"}], "usage": usage})
+
+    with respx.mock() as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post(
+            "/api/v1/chat/send",
+            headers={"Content-Type": "application/json"},
+            json={"workspace_id": case.fixture.scope.workspace_id, "message": "Show a sample retention receipt without executing any operation."},
+        )
+        assert accepted.status_code == 200, accepted.text
+        turn_id = accepted.json()["turn_id"]
+        await settled(turn_id)
+
+    turn = await case.fixture.case.store.get_turn(turn_id)
+    assert turn.status == "completed", turn
+    assert turn.final_answer == expected
+    events = [row for row in rows(case, "turn_events") if row["turn_id"] == turn_id]
+    answers = [json.loads(row["payload_json"])["text"] for row in events if row["event_type"] == "final_answer"]
+    assert answers == [expected]
+    replay = await case.client.get(f"/api/v1/turns/{turn_id}/events")
+    assert replay.status_code == 200, replay.text
+    replay_answers = [event["payload"]["text"] for event in replay.json()["events"] if event["event_type"] == "final_answer"]
+    assert replay_answers == [expected]

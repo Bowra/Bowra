@@ -89,12 +89,15 @@ async def test_unsafe_numeric_plot_is_actionable_and_table_preserves_exact_token
         artifact_store=_ArtifactStore(artifact, b"category,amount\nA,9007199254740993\nB,9007199254740995\n"),
         canvas_store=canvas,
     )
-    result = await _add_chart({"data_artifact_id": artifact.id, "force_kind": "bar", "hint": "compare"}, context)
-    assert result["error_kind"] == "unsupported_exact_numeric_plot"
-    assert "force_kind=table" in result["error"]
+    result = await _add_chart(
+        {"data_artifact_id": artifact.id, "force_kind": "bar", "axes": {"x": "category", "y": ["amount"], "x_scale": "category"}, "group_by": []},
+        context,
+    )
+    assert result["error_kind"] == "invalid_chart_expression"
+    assert "use a Table" in result["error"]
     assert canvas.payload is None
 
-    result = await _add_chart({"data_artifact_id": artifact.id, "force_kind": "table", "hint": "raw"}, context)
+    result = await _add_chart({"data_artifact_id": artifact.id, "force_kind": "table"}, context)
     assert "error" not in result, result
     assert canvas.payload is not None
     assert [row["amount"] for row in canvas.payload["spec"]["rows"]] == ["9007199254740993", "9007199254740995"]
@@ -103,10 +106,8 @@ async def test_unsafe_numeric_plot_is_actionable_and_table_preserves_exact_token
 # Synthetic rows include fractional, scaled, and negative growth values.
 _SCALED_CSV = "门店,营业额同比增长率,增长率百分点\n示例店甲,0.0064,0.64\n示例店乙,0.0042,0.42\n示例店丙,0.0018,0.18\n示例店丁,-0.0025,-0.25\n"
 _SCALED_ARGS = {
-    "hint": "raw",
     "title": "各门店营业额同比增长率排名",
     "force_kind": "table",
-    "series": ["营业额同比增长率", "增长率百分点"],
     "column_types": {"营业额同比增长率": "percent_fraction"},
 }
 
@@ -132,7 +133,7 @@ async def test_undeclared_column_in_sandbox_data_is_not_guessed() -> None:
 async def test_percent_text_column_counts_as_a_declaration() -> None:
     """Percentage text declares points and must retain its shape below one percent."""
     csv = "门店,增长率\n示例店甲,0.51%\n示例店乙,0.29%\n示例店丙,0.29%\n"
-    cols = await _chart(csv, source="python_sandbox", args={"hint": "rank", "title": "各门店增长率"})
+    cols = await _chart(csv, source="python_sandbox", args={"title": "各门店增长率"})
     assert cols["增长率"].get("percent_shape_unknown") is None
     assert cols["增长率"].get("unit") == "%"
     # ★ Recording units alone is insufficient: all three values are **below 1%**; frontend range guessing scales them ×100 (0.51% → 51.0%).
@@ -145,7 +146,7 @@ async def test_percent_text_column_counts_as_a_declaration() -> None:
 async def test_bi_without_metadata_has_unknown_percentage_shape() -> None:
     """Source identity alone does not establish a percentage interpretation."""
     csv = "事业部,销售目标达成率\nDivision A,1.25\nDivision B,1.04\nDivision C,0.95\n"
-    cols = await _chart(csv, source="bi_fetch_rows", args={"hint": "rank", "title": "各事业部达成率"})
+    cols = await _chart(csv, source="bi_fetch_rows", args={"title": "各事业部达成率"})
     assert cols["销售目标达成率"].get("percent_shape_unknown") is True
 
 
@@ -153,7 +154,7 @@ async def test_bi_without_metadata_has_unknown_percentage_shape() -> None:
 async def test_upload_without_metadata_has_unknown_percentage_shape() -> None:
     """An uploaded file follows the same source-independent semantics."""
     csv = "品牌,占比\nA,0.41\nB,0.59\n"
-    cols = await _chart(csv, source="upload", args={"hint": "share", "title": "品牌占比"})
+    cols = await _chart(csv, source="upload", args={"title": "品牌占比"})
     assert cols["占比"].get("percent_shape_unknown") is True
 
 
@@ -187,7 +188,7 @@ async def test_every_percent_unit_column_also_declares_its_shape() -> None:
         cols = await _chart(
             "门店,退款率\n" + "".join(f"S{i},{v}\n" for i, v in enumerate(body.strip().split("\n"))),
             source="python_sandbox",
-            args={"hint": "rank", "title": "退款率"},
+            args={"title": "退款率"},
         )
         col = cols["退款率"]
         assert col.get("unit") == "%", f"{name}: 单位没认出来"
@@ -200,14 +201,14 @@ async def test_mixed_column_of_plain_and_grouped_numbers_is_numeric() -> None:
 
     此前只要列里有一个真数值就整列不动 ⇒ 判成类目列 ⇒ **这列再也进不了数值轴**。
     """
-    cols = await _chart('门店,营业额\nA,"1,101,000.00"\nB,500\nC,"2,202,000.50"\n', source="bi_fetch_rows", args={"hint": "rank", "title": "营业额"})
+    cols = await _chart('门店,营业额\nA,"1,101,000.00"\nB,500\nC,"2,202,000.50"\n', source="bi_fetch_rows", args={"title": "营业额"})
     assert cols["营业额"].get("type") == "numeric"
 
 
 @pytest.mark.asyncio
 async def test_percent_text_mixed_with_bare_numbers_stays_untouched() -> None:
     """负对照：`13.5%` 与裸数 `13.5` 同列时形状推不出来（116 实测 7 列），整列不动、交给前端判。"""
-    cols = await _chart("门店,占比\nA,13.5%\nB,13.5\nC,20%\n", source="bi_fetch_rows", args={"hint": "rank", "title": "占比"})
+    cols = await _chart("门店,占比\nA,13.5%\nB,13.5\nC,20%\n", source="bi_fetch_rows", args={"title": "占比"})
     assert cols["占比"].get("unit") is None
     assert cols["占比"].get("percent_scale") is None
 
@@ -220,7 +221,7 @@ async def test_signed_grouped_numbers_parse_like_the_frontend_does() -> None:
     同一列走「建图」与走「展开/细看补行」两条路会得到不同的类型（一条数值、一条文字）。
     116 上这种写法为 0 例，纯粹是把两处口径抹平。
     """
-    cols = await _chart('门店,金额\nA,"+1,234.50"\nB,"-2,345.00"\nC,"3,456.00"\n', source="bi_fetch_rows", args={"hint": "rank", "title": "金额"})
+    cols = await _chart('门店,金额\nA,"+1,234.50"\nB,"-2,345.00"\nC,"3,456.00"\n', source="bi_fetch_rows", args={"title": "金额"})
     assert cols["金额"].get("type") == "numeric"
 
 
@@ -231,12 +232,10 @@ async def test_a_blank_cell_does_not_kill_the_chart() -> None:
     过滤时按 `strip()` 判空、写回时只判 `""`，两处口径不同源 ⇒ `float("")` 炸。
     归一成 None 之后这列照样是数值列（空格是缺数据，不是类目）。
     """
-    cols = await _chart(
-        '门店,营业额\nA,"1,101,000.00"\nB,"   "\nC,"2,202,000.50"\n', source="bi_fetch_rows", args={"hint": "rank", "title": "营业额"}
-    )
+    cols = await _chart('门店,营业额\nA,"1,101,000.00"\nB,"   "\nC,"2,202,000.50"\n', source="bi_fetch_rows", args={"title": "营业额"})
     assert cols["营业额"].get("type") == "numeric"
 
-    pct = await _chart('门店,退款率\nA,15.37%\nB,"  "\nC,22.10%\n', source="python_sandbox", args={"hint": "rank", "title": "退款率"})
+    pct = await _chart('门店,退款率\nA,15.37%\nB,"  "\nC,22.10%\n', source="python_sandbox", args={"title": "退款率"})
     assert pct["退款率"].get("type") == "numeric"
     assert pct["退款率"].get("percent_scale") == "points"
 
@@ -251,7 +250,7 @@ async def test_percent_text_beats_a_contradicting_model_declaration() -> None:
     cols = await _chart(
         "门店,退款率\nA,0.35%\nB,0.80%\nC,0.12%\n",
         source="python_sandbox",
-        args={"hint": "rank", "title": "退款率", "column_types": {"退款率": "percent_fraction"}},
+        args={"title": "退款率", "column_types": {"退款率": "percent_fraction"}},
     )
     assert cols["退款率"].get("percent_scale") == "points"
 
@@ -263,7 +262,7 @@ async def test_percent_text_column_keeps_its_shape_when_a_sibling_is_hundredfold
     cols = await _chart(
         "门店,率,率放大\nA,0.35%,35\nB,0.80%,80\nC,0.12%,12\n",
         source="python_sandbox",
-        args={"hint": "rank", "title": "率", "column_types": {"率放大": "percent_points"}},
+        args={"title": "率", "column_types": {"率放大": "percent_points"}},
     )
     assert cols["率"].get("percent_scale") == "points", "文本剥出来的事实不该被丢"
     assert cols["率放大"].get("percent_scale") == "points", "Coincidentally proportional values do not contradict declared semantics"
@@ -276,7 +275,7 @@ async def test_percent_text_column_is_not_also_marked_unknown() -> None:
     cols = await _chart(
         "门店,率\nA,0.35%\nB,0.80%\nC,0.12%\n",
         source="python_sandbox",
-        args={"hint": "rank", "title": "率", "column_types": {"率": "numeric"}},
+        args={"title": "率", "column_types": {"率": "numeric"}},
     )
     col = cols["率"]
     assert col.get("percent_scale") == "points"

@@ -40,12 +40,14 @@ _BI_ONLY = [
     "skill_read",
     "skill_list",
     "add_chart",
+    "read_chart",
     "subagent_return",
 ]
 # delivery-surface M-C: guarded pen (M-B bake+owner+CAS).
 _PEN = ["write_report", "read_report"]
+# Full-edition inference fixtures; the Community consultant composition is checked separately.
 PROD_ALLOW = {
-    "kb-analyst": [*_BI_ONLY, *_PEN, "kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"],
+    "kb-analyst": [*_BI_ONLY, *_PEN, "kb_list_sources", "kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"],
     "consultant": [*_BI_ONLY, "render_deck"],
     "financial-analyst": [*_BI_ONLY, *_PEN],
     "business-analyst": [*_BI_ONLY, *_PEN],
@@ -64,6 +66,9 @@ PROD_ALLOW = {
         "web_crawl",
         "add_image",
         "python_exec",
+        "edit_chart",
+        "tool_list_workspaces",
+        "tool_switch_context",
         # Editing existing skills through conversation requires both read + save (previously no role had both).
         "skill_save_generated",
         # canvas-update-turn batch B2-2: follow-up revisions hide replaced prior-turn charts.
@@ -74,6 +79,7 @@ PROD_ALLOW = {
         "bi_query",
         "bi_schema",
         "add_chart",
+        "read_chart",
         "add_image",
         "canvas_create_design",
         "canvas_flatten_design",
@@ -96,16 +102,27 @@ PROD_CAPS = {name: derive_capabilities(allow) for name, allow in PROD_ALLOW.item
 
 
 def test_prod_allow_fixture_matches_real_manifests() -> None:
-    """★ 上面那份 `PROD_ALLOW` 是**手抄**的 —— 抄错或 manifest 改了而这里没跟，
-    整个文件的"不许回归"判据就全是虚构的（测的是我脑子里的 manifest，不是仓里的）。
-    这条闸对着真 yaml 校验，让漂移变成红灯而不是无声的假绿。
-    """
+    """Pin the current edition's composition against independent expected inventories."""
     import yaml
 
     root = pathlib.Path(__file__).resolve().parents[1] / "src/bowhead_core/agents/manifests/system"
     for name, expected in PROD_ALLOW.items():
         data = yaml.safe_load((root / f"{name}.yaml").read_text(encoding="utf-8"))
-        assert sorted(data["tools"]["allow"]) == sorted(expected), f"{name} 的 allowlist 与本文件的 fixture 不一致"
+        from bowhead_core.product_identity import product_name
+
+        current_expected = expected
+        if name == "consultant" and product_name() == "Bowra":
+            current_expected = [
+                "bi_query",
+                "bi_schema",
+                "bi_concept_resolve",
+                "skill_read",
+                "skill_invoke",
+                "skill_list",
+                "add_chart",
+                "subagent_return",
+            ]
+        assert sorted(data["tools"]["allow"]) == sorted(current_expected), f"{name} allowlist differs from its edition fixture"
 
 
 def test_consultant_and_financial_analyst_are_indistinguishable_by_tools() -> None:

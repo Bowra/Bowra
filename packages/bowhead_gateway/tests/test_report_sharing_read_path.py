@@ -159,7 +159,7 @@ def test_write_routes_stay_owner_only_despite_grant(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("current", [False, True])
-def test_report_results_export_trust_uses_viewer_and_only_authorized_page(tmp_path, monkeypatch, current):
+def test_report_results_export_trust_uses_viewer_and_only_authorized_page(tmp_path, monkeypatch, current, initialize_migrated_core_database):
     import json
 
     from bowhead_core._db import open_shared_ctx
@@ -168,6 +168,7 @@ def test_report_results_export_trust_uses_viewer_and_only_authorized_page(tmp_pa
     from cryptography.fernet import Fernet
 
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
+    initialize_migrated_core_database(tmp_path / "a.db")
     env = _Env(tmp_path)
     canvas = env.seed_report()
     manifest = (
@@ -238,7 +239,7 @@ def test_report_results_export_trust_uses_viewer_and_only_authorized_page(tmp_pa
         assert item["artifact_metadata"]["trust"] == ("export_copy_current" if current else expected)
         assert all(x["key"] != f"artifact:{outside.id}" for x in response.json()["items"])
     assert all(outside.id not in batch for batch in batches)
-    assert sum(batch == [inside.id] for batch in batches) == 2
+    assert sum(batch == [inside.id] for batch in batches) == 4
     _run(env.access.revoke_resource_grant(env.team.id, grant.id))
     batches.clear()
     response = env.client(env.bob).post(route, json={"surface": "explorer"})
@@ -495,11 +496,13 @@ def test_artifact_mediation_closure_and_no_redirect(tmp_path):
 def test_report_results_query_is_complete_closure_only_and_non_enumerable(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     from cryptography.fernet import Fernet
 
     root_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", root_key)
+    initialize_migrated_core_database(tmp_path / "a.db")
     env = _Env(tmp_path)
     cv = env.seed_report()
     inside = _run(
@@ -892,3 +895,247 @@ def test_shared_with_me_excludes_reports_owned_by_viewer(tmp_path):
     _exp_name = env.alice.display_name or (env.alice.email or "").split("@")[0] or env.alice.id
     assert bob_items[0]["shared_by"] == _exp_name
     assert bob_items[0]["shared_by"] != env.alice.id
+
+
+@pytest.mark.parametrize(
+    "cross_team,author_owned", [(False, False), (True, False), (True, True)], ids=["private-same-team", "cross-team", "cross-team-owned"]
+)
+@pytest.mark.parametrize("persisted", [False, True], ids=["write-fence", "persisted-read-fence"])
+def test_report_reference_cannot_delegate_an_unauthorized_file(
+    tmp_path, cross_team, author_owned, persisted, monkeypatch, initialize_migrated_core_database
+):
+    initialize_migrated_core_database(tmp_path / "a.db")
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    env = _Env(tmp_path)
+    canvas = env.seed_report()
+    victim = env.bob
+    victim_space = env.ws_id
+    if cross_team:
+        team = _run(env.users.create_team(name="Other team", max_seats=10))
+        victim = _run(env.users.create_user(team_id=team.id, email="victim@example.test", password="SyntheticPassw0rd!"))
+        victim_space = _run(env.users.sync_workspace_from_datarc(team_id=team.id, datarc_workspace_id="777", name="Other space"))
+    if author_owned:
+        victim = env.alice
+    own = _run(
+        env.artifacts.put_bytes(
+            content=b"owned", filename="own.txt", mime="text/plain", source="upload", created_by=env.alice.id, workspace_id=env.ws_id
+        )
+    )
+    foreign = _run(
+        env.artifacts.put_bytes(
+            content=b"private fixture", filename="private.txt", mime="text/plain", source="upload", created_by=victim.id, workspace_id=victim_space
+        )
+    )
+    section = _run(env.canvas.append_section(canvas_id=canvas.id, kind="html_artifact", payload={"artifact_id": own.id, "title": "HTML"}))
+    owner = env.client(env.alice)
+    if not persisted:
+        response = owner.patch(f"{_BASE}/{canvas.id}/sections/{section.id}", json={"patch": {"artifact_id": foreign.id}})
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == "report_artifact_reference_denied"
+        assert next(item for item in _run(env.canvas.list_sections(canvas.id)) if item.id == section.id).payload["artifact_id"] == own.id
+        return
+
+    # Existing corrupt references must not grant bytes, previews, metadata or
+    # representation access, even when they predate the HTTP write fence.
+    _run(env.canvas.patch_section(section_id=section.id, patch={"artifact_id": foreign.id}))
+    env.share_report("ses_1", env.bob)
+    for client in (owner, env.client(env.bob)):
+        path = f"{_BASE}/by-session/ses_1/artifacts/{foreign.id}"
+        for suffix in ("", "/preview", "/representations/details", "/representations/raw"):
+            assert client.get(path + suffix).status_code == 404
+        assert client.get(path, headers={"Range": "bytes=0-3"}).status_code == 404
+        assert client.get(f"{_BASE}/by-session/ses_1/artifacts").json()["items"] == []
+        results = client.post(f"{_BASE}/by-session/ses_1/results/query", json={"surface": "explorer"})
+        assert results.status_code == 200
+        assert foreign.id not in results.text
+
+
+def test_report_keeps_independently_granted_files_and_rechecks_revocation(tmp_path):
+    env = _Env(tmp_path)
+    _run(env.users.add_member(workspace_id=env.ws_id, user_id=env.bob.id, role="member"))
+    canvas = env.seed_report()
+    file = _run(
+        env.artifacts.put_bytes(
+            content=b"shared fixture", filename="shared.txt", mime="text/plain", source="upload", created_by=env.bob.id, workspace_id=env.ws_id
+        )
+    )
+    _run(env.canvas.append_section(canvas_id=canvas.id, kind="artifact", payload={"artifact_id": file.id}))
+    grant = _run(
+        env.access.create_or_update_resource_grant(
+            team_id=env.team.id,
+            resource_kind="artifact",
+            resource_id=file.id,
+            principal_type="user",
+            principal_id=env.alice.id,
+            permission="read",
+            effect="allow",
+            created_by=env.bob.id,
+        )
+    )
+    env.share_report("ses_1", env.bob)
+    client = env.client(env.bob)
+    path = f"{_BASE}/by-session/ses_1/artifacts/{file.id}"
+    assert client.get(path).content == b"shared fixture"
+    _run(env.access.revoke_resource_grant(env.team.id, grant.id))
+    assert client.get(path).status_code == 404
+
+
+def test_signed_cookie_report_author_cannot_read_cross_team_reference(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from bowhead_gateway.routes.auth import _issue_jwt
+
+    monkeypatch.setenv("BOWHEAD_JWT_SECRET", "synthetic-cookie-reference-key-000000000000")
+    monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
+    monkeypatch.setenv("BOWHEAD_DEPLOYMENT_MODE", "saas")
+    env = _Env(tmp_path)
+    canvas = env.seed_report()
+    other_team = _run(env.users.create_team(name="Other team", max_seats=10))
+    other_space = _run(env.users.sync_workspace_from_datarc(team_id=other_team.id, datarc_workspace_id="888", name="Other space"))
+    foreign = _run(
+        env.artifacts.put_bytes(
+            content=b"private fixture", filename="private.txt", mime="text/plain", source="upload", created_by=env.bob.id, workspace_id=other_space
+        )
+    )
+    section = _run(env.canvas.append_section(canvas_id=canvas.id, kind="html_artifact", payload={"artifact_id": foreign.id, "title": "HTML"}))
+    client = env.client(env.alice)
+    client.app.dependency_overrides.clear()
+    client.app.state.settings = SimpleNamespace(auth_mode="prod", deployment_mode="saas")
+    client.headers.clear()
+    client.cookies.set("bowhead_jwt", _issue_jwt(env.alice, "synthetic-cookie-reference-key-000000000000"))
+    assert client.get(f"{_BASE}/by-session/ses_1/artifacts/{foreign.id}").status_code == 404
+    assert client.get(f"{_BASE}/by-session/ses_1/artifacts").json()["items"] == []
+    own = _run(
+        env.artifacts.put_bytes(
+            content=b"owned fixture", filename="owned.txt", mime="text/plain", source="upload", created_by=env.alice.id, workspace_id=env.ws_id
+        )
+    )
+    _run(env.canvas.patch_section(section_id=section.id, patch={"artifact_id": own.id}))
+    response = client.patch(f"{_BASE}/{canvas.id}/sections/{section.id}", json={"patch": {"artifact_id": foreign.id}})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("owner_kind", ["author", "shared", "shared-report", "ownerless"])
+def test_report_rechecks_author_access_to_a_distinct_source_space(tmp_path, owner_kind):
+    env = _Env(tmp_path)
+    canvas = env.seed_report()
+    source_space = _run(env.users.sync_workspace_from_datarc(team_id=env.team.id, datarc_workspace_id="888", name="Source space"))
+    for user in (env.alice, env.bob):
+        _run(env.users.add_member(workspace_id=source_space, user_id=user.id, role="admin"))
+    artifact = _run(
+        env.artifacts.put_bytes(
+            content=b"synthetic source",
+            filename="source.txt",
+            mime="text/plain",
+            created_by={"author": env.alice.id, "shared": env.bob.id, "shared-report": env.bob.id, "ownerless": ""}[owner_kind],
+            workspace_id=source_space,
+        )
+    )
+    if owner_kind.startswith("shared"):
+        _run(
+            env.access.create_or_update_resource_grant(
+                resource_kind="artifact",
+                resource_id=artifact.id,
+                team_id=env.team.id,
+                principal_type="workspace",
+                principal_id=env.ws_id if owner_kind == "shared-report" else source_space,
+                permission="read",
+                created_by=env.bob.id,
+            )
+        )
+    _run(env.canvas.append_section(canvas_id=canvas.id, kind="artifact", payload={"artifact_id": artifact.id}))
+    env.share_report("ses_1", env.bob)
+    client = env.client(env.bob)
+    path = f"{_BASE}/by-session/ses_1/artifacts/{artifact.id}"
+    assert client.get(path).content == b"synthetic source"
+    membership_space = env.ws_id if owner_kind == "shared-report" else source_space
+    if membership_space == env.ws_id:
+        _run(env.users.add_member(workspace_id=env.ws_id, user_id=env.bob.id, role="admin"))
+    _run(env.users.remove_member(membership_space, env.alice.id))
+    assert client.get(path).status_code == 404
+    assert client.get(f"{_BASE}/by-session/ses_1/artifacts").json()["items"] == []
+    _run(env.users.add_member(workspace_id=membership_space, user_id=env.alice.id, role="member"))
+    assert client.get(path).content == b"synthetic source"
+
+
+def test_report_recipient_needs_independent_access_to_borrowed_original(tmp_path, monkeypatch, initialize_migrated_core_database):
+    initialize_migrated_core_database(tmp_path / "a.db")
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    env = _Env(tmp_path)
+    canvas = env.seed_report()
+    recipient = _run(env.users.create_user(team_id=env.team.id, email="recipient@x.com", password="Passw0rd!"))
+    for user in (env.bob, recipient):
+        _run(env.users.add_member(workspace_id=env.ws_id, user_id=user.id, role="member"))
+    artifact = _run(
+        env.artifacts.put_bytes(
+            content=b"independently shared original",
+            filename="original.txt",
+            mime="text/plain",
+            created_by=env.bob.id,
+            workspace_id=env.ws_id,
+        )
+    )
+    _run(env.canvas.append_section(canvas_id=canvas.id, kind="artifact", payload={"artifact_id": artifact.id}))
+    _run(
+        env.access.create_or_update_resource_grant(
+            team_id=env.team.id,
+            resource_kind="artifact",
+            resource_id=artifact.id,
+            principal_type="user",
+            principal_id=env.alice.id,
+            permission="read",
+            created_by=env.bob.id,
+        )
+    )
+    env.share_report("ses_1", recipient)
+    client = env.client(recipient)
+    path = f"{_BASE}/by-session/ses_1/artifacts/{artifact.id}"
+    assert env.client(env.alice).get(path).content == b"independently shared original"
+    assert client.get(f"{_BASE}/by-session/ses_1").status_code == 200
+    assert client.get(path).status_code == 404
+    assert client.get(path + "/preview").status_code == 404
+    assert client.get(path + "/representations/raw").status_code == 404
+    assert client.get(path + "/representations/details").status_code == 404
+    results = client.post(f"{_BASE}/by-session/ses_1/results/query", json={"surface": "explorer"})
+    assert results.status_code == 200
+    assert artifact.id not in results.text
+    assert artifact.filename not in results.text
+    assert client.get(f"{_BASE}/by-session/ses_1/artifacts").json()["items"] == []
+    grant = _run(
+        env.access.create_or_update_resource_grant(
+            team_id=env.team.id,
+            resource_kind="artifact",
+            resource_id=artifact.id,
+            principal_type="user",
+            principal_id=recipient.id,
+            permission="read",
+            created_by=env.bob.id,
+        )
+    )
+    assert client.get(path).content == b"independently shared original"
+    _run(env.access.revoke_resource_grant(env.team.id, grant.id))
+    assert client.get(path, headers={"Range": "bytes=0-5"}).status_code == 404
+    assert client.get(f"{_BASE}/by-session/ses_1/artifacts").json()["items"] == []
+
+
+def test_ownerless_report_reference_requires_recipient_source_membership(tmp_path):
+    env = _Env(tmp_path)
+    canvas = env.seed_report()
+    artifact = _run(
+        env.artifacts.put_bytes(
+            content=b"source members only",
+            filename="source.txt",
+            mime="text/plain",
+            created_by="",
+            workspace_id=env.ws_id,
+        )
+    )
+    _run(env.canvas.append_section(canvas_id=canvas.id, kind="artifact", payload={"artifact_id": artifact.id}))
+    env.share_report("ses_1", env.bob)
+    client = env.client(env.bob)
+    path = f"{_BASE}/by-session/ses_1/artifacts/{artifact.id}"
+    assert client.get(path).status_code == 404
+    _run(env.users.add_member(workspace_id=env.ws_id, user_id=env.bob.id, role="member"))
+    assert client.get(path).content == b"source members only"
+    _run(env.users.remove_member(env.ws_id, env.bob.id))
+    assert client.get(path).status_code == 404

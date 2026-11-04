@@ -1,6 +1,7 @@
+import { installHtmlPreviewWorker } from "@/__tests__/helpers/html-preview-worker";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/messages/en-US.json";
 import zhMessages from "@/messages/zh-CN.json";
@@ -538,3 +539,6 @@ describe("ArtifactPreview", () => {
     expect(pdfGetDocument).not.toHaveBeenCalled();
   });
 });
+
+
+beforeEach(() => installHtmlPreviewWorker());

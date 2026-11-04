@@ -20,6 +20,7 @@ from bowhead_core.agent_eval_policy_store import (
     AgentEvalPolicyStore,
 )
 from bowhead_core.agent_eval_store import AgentEvalStoreError, verify_eval_suite_revision_conn
+from bowhead_core.sqlite_domains import domain_database_path
 
 AGENT_EVAL_PLAN_COMPILER_VERSION = "agent-eval-plan-v1"
 EvalReadiness = Literal[
@@ -127,7 +128,7 @@ class AgentEvalPlanStore:
     """Compile plans from exact candidate, policy, suite, fixture, and Space facts."""
 
     def __init__(self, db_path: str | Path, *, clock: _Clock | None = None) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or _SystemClock()
         self._policy_store = AgentEvalPolicyStore(self.db_path)
 

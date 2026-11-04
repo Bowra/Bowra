@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_eval_effects import (
     EvalEffectAdapterRegistry,
     EvalEffectOutcome,
@@ -52,6 +51,7 @@ from bowhead_core.terminal_effect_contract import (
 from bowhead_core.terminal_protocol import EffectClass
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 from bowhead_core import agent_eval_service as agent_eval_service_module
 from bowhead_router import LLMResponse, TokenUsage, ToolSchema
@@ -83,7 +83,7 @@ _HASH_C = "sha256:" + "3" * 64
 
 async def _fixture(tmp_path: Path, *, plugin_tool_ref: str | None = None):
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     team = await users.create_team(name="Eval execution", max_seats=3)
     owner = await users.create_user(team_id=team.id, email="eval-execution@example.com")

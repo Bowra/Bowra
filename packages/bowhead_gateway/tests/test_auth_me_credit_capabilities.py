@@ -12,12 +12,16 @@ from bowhead_gateway.settings import Settings
 
 
 @pytest.fixture
-async def app_ctx(tmp_path, monkeypatch):
+async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_secret_auth_me_credit_caps")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
-    db = tmp_path / "auth_me_credit_caps.db"
+    from gateway_legacy_database import upgrade
+
+    db = tmp_path / "bowhead.db"
+    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
     user_store = UserStore(str(db))
     await user_store.initialize()
+    await complete_community_http_installation(user_store)
     app = create_app()
     app.state.settings = Settings()
     app.state.user_store = user_store
@@ -231,41 +235,6 @@ async def test_auth_me_reference_input_requires_released_agent_and_local_runtime
     assert response.status_code == 200, response.text
     assert response.json()["capabilities"]["composer"]["reference_input"] is (boundary in {"ready", "flag_off"})
     assert response.json()["capabilities"]["composer"]["agent_start_use"] is (boundary == "ready")
-
-
-async def test_migrated_member_uses_current_role_with_existing_login(app_ctx, tmp_path) -> None:
-    """Upgrade compatibility: an existing login loses retired team authority."""
-    from importlib import import_module
-    from pathlib import Path
-
-    from alembic import command
-    from alembic.config import Config
-
-    from bowhead_core import migrations
-
-    migration = import_module("bowhead_core.migrations.versions.0097_retire_billing_admin")
-    path = tmp_path / "prior.db"
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).parent))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
-    config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, migration.down_revision)
-    app, _ = app_ctx
-    store = UserStore(path)
-    app.state.user_store = store
-    await _seed_team_and_user(store, user_id="u_migrated", role="billing_admin")
-    # The same signed login remains valid after the database migration.
-    token = _jwt("u_migrated")
-    command.upgrade(config, "head")
-    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
-        client.cookies.set("bowhead_jwt", token)
-        me = await client.get("/api/v1/auth/me")
-        assert me.status_code == 200, me.text
-        assert me.json()["team_role"] == "member"
-        assert not any(me.json()["credit_capabilities"].values())
-        for endpoint in ("/api/v1/admin/credits", "/api/v1/admin/audit", "/api/v1/admin/members"):
-            response = await client.get(endpoint)
-            assert response.status_code == 403, response.text
 
 
 @pytest.mark.parametrize(("flag", "expected"), [(None, False), ("0", False), ("1", True)])

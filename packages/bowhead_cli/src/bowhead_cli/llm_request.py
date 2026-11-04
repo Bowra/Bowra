@@ -12,10 +12,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import aiosqlite
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.llm_request_record import find_request_record, list_turn_request_records, rebuild_request
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.user_store import UserStore
 
 #: Synthetic audit actor for host-side reads; the person is in the payload.
@@ -23,13 +23,13 @@ AUDIT_ACTOR = "system-llm-request-cli"
 
 
 async def list_records(db_path: Path, turn_id: str) -> list[dict[str, Any]]:
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         return await list_turn_request_records(db, turn_id)
 
 
 async def show_record(db_path: Path, ref: str, *, operator: str, cipher: ReferenceCipher) -> dict[str, Any] | None:
     """Audit, then rebuild one record. Returns None when no record matches `ref`."""
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         record = await find_request_record(db, ref)
         if record is None:
             return None

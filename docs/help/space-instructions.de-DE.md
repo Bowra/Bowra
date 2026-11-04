@@ -1,12 +1,16 @@
-# Bereichsanweisungen
+# KI-Arbeitsanweisungen
 
-Bereichsanweisungen sind ein kurzer Text, den jede Unterhaltung in einem Bereich befolgt. Nutzen Sie sie für das, was sonst alle im Bereich immer wieder sagen müssten: für wen die Antworten bestimmt sind, welche Vergleiche standardmäßig gezeigt werden, bevorzugter Tonfall oder Umfang oder Hintergrund zur Arbeit im Bereich. Sie gelten für alle Mitglieder des Bereichs und für alle Agents, die darin arbeiten, einschließlich integrierter Agents und Team-Agents.
+KI-Arbeitsanweisungen sind ein kurzer Text, den jede Unterhaltung in einem Bereich befolgt. Nutzen Sie sie für das, was sonst alle im Bereich immer wieder sagen müssten: für wen die Antworten bestimmt sind, welche Vergleiche standardmäßig gezeigt werden, bevorzugter Tonfall oder Umfang oder Hintergrund zur Arbeit im Bereich. Sie gelten für alle Mitglieder des Bereichs und für alle Agents, die darin arbeiten, einschließlich integrierter Agents und Team-Agents.
+
+## Zweck und Geltungsbereich
+
+Die **Beschreibung** unter Allgemein erklärt den Zweck des Bereichs. **KI-Arbeitsanweisungen** legen Standardvorgaben für die KI fest, etwa Fachbegriffe, Zielgruppe, Vergleiche und Schreibstil. Sie gelten für alle Mitglieder und KI-Agents in diesem Bereich, nicht für andere Bereiche. Änderungen gelten ab der nächsten Nachricht; eine bereits laufende Antwort behält ihre ursprüngliche Version. Konkrete Wünsche in der aktuellen Unterhaltung haben Vorrang.
 
 ## Anweisungen schreiben oder ändern
 
 Die Bereichsadministration und die Teamadministration können die Anweisungen ändern. Die Teamadministration muss dem Bereich dafür nicht beitreten.
 
-1. Als Bereichsadministration öffnen Sie den Bereich und wählen **Bereichseinstellungen → Anweisungen**. Als Teamadministration öffnen Sie **Teameinstellungen → Bereiche**, öffnen das Menü **Weitere Aktionen** des Bereichs und wählen **Anweisungen**.
+1. Als Bereichsadministration öffnen Sie den Bereich und wählen **Bereichseinstellungen → KI-Arbeitsanweisungen**. Als Teamadministration öffnen Sie **Teameinstellungen → Bereiche**, öffnen das Menü **Weitere Aktionen** des Bereichs und wählen **KI-Arbeitsanweisungen**.
 2. Schreiben Sie die Anweisungen in einfacher Sprache, zum Beispiel: „Die Antworten richten sich an regionale Vertriebsleitungen. Standardmäßig mit dem Vorjahresmonat vergleichen und Zusammenfassungen kurz halten.“
 3. Wählen Sie **Speichern**.
 
@@ -22,9 +26,9 @@ Jedes Speichern wird als Version aufbewahrt. Wählen Sie unter **Versionsverlauf
 
 ## Gut zu wissen
 
-- Die eigene Anfrage eines Mitglieds in einer Unterhaltung und sein persönliches Gedächtnis haben für dieses Mitglied Vorrang vor den Bereichsanweisungen.
+- Die eigene Anfrage eines Mitglieds in einer Unterhaltung und sein persönliches Gedächtnis haben für dieses Mitglied Vorrang vor den KI-Arbeitsanweisungen.
 - Die Grenze liegt bei 6.000 Zeichen. Längerer Text kann nicht gespeichert werden; die Seite zeigt die aktuelle Länge.
 - Speichert eine andere Administratorin oder ein anderer Administrator während Ihrer Bearbeitung, wird Ihr Speichern angehalten, damit deren Änderung nicht unbemerkt überschrieben wird. Ihr Text bleibt im Editor, und der Versionsverlauf zeigt die andere Änderung. Prüfen Sie sie und speichern Sie erneut, wenn Ihr Text sie ersetzen soll.
 - Die Anweisungen eines archivierten Bereichs können erst nach dessen Wiederherstellung geändert werden.
-- Evaluierungen von Agent-Versionen verwenden keine Bereichsanweisungen; die Ergebnisse zeigen also, wie sich der Agent selbst verhält.
+- Evaluierungen von Agent-Versionen verwenden keine KI-Arbeitsanweisungen; die Ergebnisse zeigen also, wie sich der Agent selbst verhält.
 - Mitglieder ohne Bereichsadministration können die Anweisungen nicht ändern. Wenn etwas anders sein soll, wenden Sie sich an die Bereichsadministration oder schlagen Sie es in einer Unterhaltung vor, damit es in den Vorschlagseingang gelangt.

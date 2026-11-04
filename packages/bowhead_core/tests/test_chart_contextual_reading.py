@@ -272,8 +272,14 @@ async def test_csv_units_are_per_measure_and_never_rescale_original_values(prepa
         "column_types": {"margin": "percent_fraction"},
         "column_units": {"revenue": unit, "margin": "%"},
         "views": [
-            {"id": "metrics", "title": "Revenue and margin", "force_kind": "dual_axis", "series": ["revenue", "margin"]},
-            {"id": "detail", "title": "Original observations", "force_kind": "table", "series": ["revenue", "margin"]},
+            {
+                "id": "metrics",
+                "title": "Revenue and margin",
+                "force_kind": "dual_axis",
+                "axes": {"x": "month", "y": ["revenue", "margin"], "x_scale": "category", "y_right": ["margin"]},
+                "group_by": [],
+            },
+            {"id": "detail", "title": "Original observations", "force_kind": "table"},
         ],
     }
     result = await _add_chart(args, ctx)
@@ -362,8 +368,19 @@ async def test_host_resolves_native_trend_and_time_window_without_model_binding_
         "column_units": {"revenue": "CNY 10k"},
         "column_types": {"margin": "percent_fraction"},
         "views": [
-            {"id": "trend", "title": "Trend", "force_kind": kind, "series": ["revenue"] if kind == "line" else ["revenue", "margin"]},
-            {"id": "detail", "title": "Details", "force_kind": "table", "series": ["revenue"] if kind == "line" else ["revenue", "margin"]},
+            {
+                "id": "trend",
+                "title": "Trend",
+                "force_kind": kind,
+                "axes": {
+                    "x": "month",
+                    "y": ["revenue"] if kind == "line" else ["revenue", "margin"],
+                    "x_scale": "category",
+                    **({"y_right": ["margin"]} if kind == "dual_axis" else {}),
+                },
+                "group_by": ["region"] if kind == "line" else [],
+            },
+            {"id": "detail", "title": "Details", "force_kind": "table"},
         ],
         "presentation_plan": {"version": 2, "interactions": [{"preset": "time_window", "view_ids": ["trend", "detail"]}]},
     }
@@ -420,7 +437,7 @@ async def test_percentage_storage_shape_cannot_replace_its_display_unit(prepared
 
 
 @pytest.mark.parametrize("preset", ["linked_focus", "frame_player"])
-async def test_native_focus_and_frames_resolve_unique_omitted_binding(prepared, preset):
+async def test_native_focus_and_explicit_frames_resolve_source_bindings(prepared, preset):
     from test_chart_linked_focus import focus_args
 
     value = await time_prepared(prepared, RAW) if preset == "frame_player" else prepared
@@ -428,8 +445,9 @@ async def test_native_focus_and_frames_resolve_unique_omitted_binding(prepared, 
     args = frame_args(value) if preset == "frame_player" else focus_args(value[4], value[-1])
     plan = args["presentation_plan"]
     plan.pop("view_bindings", None)
-    for interaction in plan["interactions"]:
-        interaction.pop("binding_id")
+    if preset == "linked_focus":
+        for interaction in plan["interactions"]:
+            interaction.pop("binding_id")
     result = await _add_chart(args, ctx)
     assert "error" not in result, result
     spec = (await canvas.list_sections(result["canvas_id"]))[0].payload["spec"]

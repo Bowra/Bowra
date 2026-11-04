@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.session_store import SessionStore
+from core_legacy_database import TARGET_FILES
 
 from bowhead_core import migrations
 

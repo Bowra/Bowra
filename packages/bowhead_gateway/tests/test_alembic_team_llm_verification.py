@@ -3,12 +3,12 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 EXPECTED_TABLES = {
     "team_llm_provider_identities",
@@ -88,7 +88,7 @@ def test_team_llm_verification_upgrades_1_0_core_schema(tmp_path) -> None:
 def test_team_llm_verification_constraints_and_immutability(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as connection:
         connection.execute(

@@ -82,10 +82,7 @@ async def _chart(csv: str, args: dict[str, Any]) -> tuple[dict[str, Any], _Canva
 # The 116 turn's shape: a ranking table with inf caused by a zero baseline in the growth-rate column.
 _CSV = "种类大类,平均月度环比增长率 (%),标准化趋势斜率 (%/月)\n文体,2.66,0.62\n新品类,inf,-inf\n冷饮,7.13,-1.86\n个洗用品,5.54,nan\n"
 _ARGS = {
-    "hint": "rank",
     "title": "各品类大类增长排名",
-    "series": ["平均月度环比增长率 (%)", "标准化趋势斜率 (%/月)"],
-    "sort_by": "平均月度环比增长率 (%)",
 }
 
 

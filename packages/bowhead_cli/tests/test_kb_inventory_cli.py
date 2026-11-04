@@ -6,9 +6,9 @@ import sqlite3
 from pathlib import Path
 
 from bowhead_cli.main import app
-from bowhead_cli.migrate import upgrade
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.kb.files_store import KbFilesStore
+from cli_legacy_database import upgrade
 from typer.testing import CliRunner
 
 

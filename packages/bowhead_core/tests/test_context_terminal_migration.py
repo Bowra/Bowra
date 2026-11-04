@@ -4,8 +4,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.events import OrchestratorEvent
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_skill_invocation_migration import schema
 from test_terminal_runtime import _create_db, _runtime

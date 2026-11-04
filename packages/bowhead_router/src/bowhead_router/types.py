@@ -143,7 +143,23 @@ class LLMResponseDiagnostics:
                 or (
                     isinstance(self.upstream_finish_reason, str)
                     and self.upstream_finish_reason
-                    in {"stop", "length", "tool_calls", "function_call", "content_filter", "completed", "incomplete", "failed"}
+                    in {
+                        "stop",
+                        "length",
+                        "tool_calls",
+                        "function_call",
+                        "content_filter",
+                        "completed",
+                        "incomplete",
+                        "failed",
+                        "end_turn",
+                        "max_tokens",
+                        "stop_sequence",
+                        "tool_use",
+                        "pause_turn",
+                        "refusal",
+                        "model_context_window_exceeded",
+                    }
                 )
                 else "unknown"
             ),

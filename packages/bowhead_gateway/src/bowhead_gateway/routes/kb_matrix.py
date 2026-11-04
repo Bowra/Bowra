@@ -156,6 +156,7 @@ class _FilesReplaceIn(BaseModel):
 
 
 class _ColumnPatchIn(BaseModel):
+    navigation_role: Literal["none", "description", "topics"] | None = None
     name: str | None = Field(None, max_length=_MAX_NAME_LEN)
     question: str | None = Field(None, max_length=_MAX_QUESTION_LEN)
     extraction_hint: str | None = Field(None, max_length=500)
@@ -974,7 +975,13 @@ async def update_column(
         # (select/multi_select promotion needs options), still not alongside name/question/hint/
         # cross_verify changes (impl-diff review P3-2: promote silently drops cross_verify sent together;
         # return explicit 422 instead of silently dropping it; change cv via a separate PATCH).
-        if body.name is not None or body.question is not None or body.extraction_hint is not None or body.cross_verify is not None:
+        if (
+            body.name is not None
+            or body.question is not None
+            or body.extraction_hint is not None
+            or body.cross_verify is not None
+            or body.navigation_role is not None
+        ):
             raise _matrix_error(422, "promote_must_be_sole_change")
         try:
             promoted = await store.promote_column(matrix.matrix_id, column_id, body.type, workspace_id=ctx.workspace_id, options=body.options)
@@ -992,6 +999,7 @@ async def update_column(
             extraction_hint=body.extraction_hint,
             options=body.options,
             cross_verify=body.cross_verify,
+            navigation_role=body.navigation_role,
         )
     except ValueError as e:
         raise _column_validation_error(e) from e
@@ -1322,6 +1330,7 @@ async def get_snapshot(
         except Exception:
             index_version = None
     file_meta: dict[str, tuple[str, bool, int]] = {}
+    navigation_files = {}
     source_states = {}
     for f in matrix.files:
         fid = str(f.get("file_id") or "")
@@ -1333,8 +1342,13 @@ async def get_snapshot(
             file_meta[fid] = ("", True, 1)
         else:
             file_meta[fid] = (dto.filename, False, int(dto.version or 1))
+            navigation_files[fid] = dto
             if use_guard_enabled():
                 source_states[fid] = cached_source_state(dto, index_version=index_version)
+
+    from bowhead_gateway.kb_source_navigation import refresh_matrix_navigation
+
+    await refresh_matrix_navigation(request.app, ctx, matrix, navigation_files, all_cells)
 
     def visible_cell(cell):
         meta = file_meta.get(cell.file_id, ("", True, 1))
@@ -1375,6 +1389,7 @@ async def get_snapshot(
                 "prompt_version": c.get("prompt_version"),
                 "options": c.get("options"),
                 "cross_verify": bool(c.get("cross_verify")),
+                "navigation_role": c.get("navigation_role", "none"),
             }
             for c in matrix.columns
         ],

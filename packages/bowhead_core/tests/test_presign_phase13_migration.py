@@ -24,6 +24,7 @@ from bowhead_core.kb.files_store import (
     KbFilesStore,
 )
 from bowhead_core.kb.schemas import KbFileDTO
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from test_artifact_workspace_cutover_migration import _config
 
 if TYPE_CHECKING:
@@ -473,7 +474,7 @@ async def test_kb_files_migrates_post_parse_status_org_scope_schema_without_data
     await store.initialize()
     await store.initialize()
     # Columns after 1.0.0 come only from Alembic (数据库迁移.md); Store first aligns old DBs to 1.0.0, then upgrades to head.
-    command.upgrade(_config(db_path, "files"), "head")
+    command.upgrade(_config(db_path, "files"), SOURCE_REVISION)
 
     async with aiosqlite.connect(db_path) as db:
         cur = await db.execute(

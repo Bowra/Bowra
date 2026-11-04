@@ -5,8 +5,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.documents.continuation import DocumentRuntimeSnapshot, _validated_context
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_document_planning_continuation import planning
 from test_document_store import ctx as ctx

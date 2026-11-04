@@ -86,6 +86,7 @@ export interface MatrixRowVM {
 }
 
 export interface MatrixColumnVM {
+  navigationRole?: "none" | "description" | "topics";
   columnId: string;
   name: string;
   /** Storage token: string/number/currency/date (+question from M2). */

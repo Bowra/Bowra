@@ -182,11 +182,11 @@ class _AgentRuntime:
         self.adapter = _LeadCallsWebFetch()
 
     async def start(self, db_path: Path | None = None) -> None:
-        from bowhead_cli.migrate import TARGET_FILES, upgrade
+        from gateway_legacy_database import TARGET_FILES, upgrade
 
         db = db_path or self.tmp_path / TARGET_FILES["core"]
         if db_path is None:
-            upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+            upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
         self.sessions = SessionStore(db)
         await self.sessions.initialize()
         self.store = ArtifactStore(backend=LocalBackend(root_dir=self.tmp_path / "blobs"), db_path=db)
@@ -307,16 +307,31 @@ async def _wait_for_done(client: httpx2.AsyncClient, stream_url: str) -> list[st
 
 
 @pytest.mark.integration
-async def test_web_chat_attributes_artifacts_to_the_signed_in_user(tmp_path, faked_clients) -> None:
-    from bowhead_cli.migrate import TARGET_FILES, upgrade
+async def test_web_chat_attributes_artifacts_to_the_signed_in_user(
+    tmp_path, monkeypatch, faked_clients, complete_community_http_installation
+) -> None:
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
     from bowhead_gateway.main import create_app
     from bowhead_gateway.settings import Settings
+    from gateway_legacy_database import TARGET_FILES, upgrade
 
     from bowhead_core import get_event_registry
 
+    monkeypatch.setenv("FEATURE_CHAT_REFERENCE_PRIMARY_RUNTIME", "0")
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
+    from bowhead_core.user_store import UserStore
+    from community_http_fixture import (
+        bind_scripted_community_model_runtime,
+        community_http_headers,
+        create_scripted_http_actor,
+        seed_community_http_space,
+    )
+
+    users = UserStore(core_path)
+    owner = await create_scripted_http_actor(users, monkeypatch)
+    if owner is not None:
+        await seed_community_http_space(users, owner, "ws_web")
     runtime = _AgentRuntime(tmp_path)
     await runtime.start(core_path)
     turn_log_store = TurnLogStore(str(core_path))
@@ -327,17 +342,27 @@ async def test_web_chat_attributes_artifacts_to_the_signed_in_user(tmp_path, fak
 
     app = create_app()
     settings = Settings()
+    if owner is not None:
+        settings.dev_default_user = owner.id
     orch = runtime.build(event_registry)
+    bind_scripted_community_model_runtime(monkeypatch, orch.router)
     orch.dispatch_owner_id = "artifact_owner_attribution_test"  # type: ignore[attr-defined]
     app.state.settings = settings
+    if owner is not None:
+        app.state.user_store = users
+        await complete_community_http_installation(users, app=app)
     app.state.orchestrator = orch
     app.state.session_store = runtime.sessions
     app.state.artifact_store = runtime.store
     app.state.turn_log_store = turn_log_store
+    from bowhead_core.terminal_protocol_store import TerminalProtocolStore
+
+    app.state.terminal_protocol_store = TerminalProtocolStore(core_path)
+    await app.state.terminal_protocol_store.initialize()
     signed_in = settings.dev_default_user
 
     try:
-        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client:
+        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw", headers=community_http_headers(owner)) as client:
             session_id = None
             for text in ("read the page and draw a poster", "show them again"):
                 payload: dict[str, Any] = {"workspace_id": "ws_web", "member_uid": "m_web", "message": text}

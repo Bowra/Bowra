@@ -31,11 +31,11 @@ This is a **source preview**. You can build and initialize the reviewed Communit
 
 Known production dependency advisories remain under review. This source preview does not establish deployment security readiness; follow the [security guidance](SECURITY.md) and review the dependency lock before deployment.
 
-## Source snapshot 1.6.43
+## Source snapshot 1.6.80
 
-This snapshot adds explicit knowledge ingestion and authorized source navigation, unified Agent run controls, field-specific configuration guidance, richer chart edits, automatic/manual context compaction and isolated offline HTML interaction. It improves Coach and clarification continuity, personal Skill revisions, source-unit readouts and export recovery. Existing Tiptap 3.32.0 security fixes remain included. Read the [Community release notes](docs/help/release-notes/releases/v1.6.43.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+This update improves authorized knowledge navigation, explicit chart fields, model connection and assignment verification, task-scoped methods, delivery feedback and report/file access checks. Read the [Community release notes](docs/help/release-notes/releases/v1.6.80.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
 
-The complete database migration chain is required. Sandbox source/versions retain the separately reviewed Community baseline; this update does not publish runtime images. Basic Bowra document Skills retain their existing limits; private PowerPoint template authoring is unavailable.
+SQLite upgrades now coordinate twelve database files and complete recovery archives. Stop every writer and preserve instance keys and the current deletion ledger before upgrading. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 
 ## Verified Intelligence
 

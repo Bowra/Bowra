@@ -6,10 +6,10 @@ from importlib import import_module
 
 import pytest
 import respx
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.events import TurnEventBus
 from bowhead_core.skill_read_extensions import SkillExtensionPolicyCheck
 from bowhead_core.subagent import SubagentRunner
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema

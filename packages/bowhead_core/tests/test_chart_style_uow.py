@@ -11,6 +11,7 @@ from alembic.config import Config
 from bowhead_core.chart_style import KEY_TEAM_CHART_STYLE_POLICY
 from bowhead_core.chart_style_models import ChartStyleDomainError
 from bowhead_core.chart_style_uow import ChartStyleUnitOfWork
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.team_settings_store import TeamSettingsStore
 
 from bowhead_core import migrations
@@ -29,7 +30,7 @@ def _config(path: Path) -> Config:
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     path = tmp_path / "chart-style-uow.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     return path
 
 

@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 
 from bowhead_core.session_store import _requires_reference_execution_in_tx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
+from bowhead_core.sqlite_readable_schema import readable_table_exists, readable_view_exists
 
 if TYPE_CHECKING:
     from bowhead_core.agent_dependency_compiler import ExactSkillGrant
@@ -44,7 +47,8 @@ class ReferenceHelperSkillScope:
             or getattr(ctx, "reference_skill_access", None) is not None
             or ctx.skill_runtime_grants != self.grants
             or not isinstance(source_path, (str, Path))
-            or Path(source_path).resolve() != Path(self.runtime.bindings.db_path).resolve()
+            or Path(domain_database_path(source_path, "core")).resolve()
+            != Path(domain_database_path(self.runtime.bindings.db_path, "core")).resolve()
             or any(getattr(ctx, key, None) != value for key, value in {**self.runtime.scope.identity(), "turn_id": self.runtime.turn_id}.items())
         ):
             raise ReferenceContextUnavailable("reference_helper_context_unavailable")
@@ -94,18 +98,31 @@ class ReferenceHelperSkillScope:
 
 
 async def _ordinary_primary_receiver(db: aiosqlite.Connection, *, turn_id: str, subagent_id: str) -> bool:
-    """Whether `subagent_id` is the admitted primary of a Skill-free `initial-primary.v1` composition."""
+    """Keep ordinary primary Tools on their original authorization path."""
     import hashlib
+    import json
 
-    async with db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_resolutions'") as cursor:
-        if await cursor.fetchone() is None:
-            return False
+    from bowhead_core.system_skill_snapshot import has_ordinary_system_skill_scope
+
+    if not await readable_table_exists(db, "chat_reference_resolutions"):
+        return False
     async with db.execute(
-        "SELECT execution_id FROM chat_reference_resolutions WHERE turn_id=? AND kind='composition' "
-        "AND json_extract(CASE WHEN json_valid(composition_json) THEN composition_json ELSE '{}' END,'$.runtime_policy')='initial-primary.v1'",
+        "SELECT r.execution_id,r.composition_json,s.definition_json FROM chat_reference_resolutions r "
+        "JOIN turn_agent_execution e ON e.id=r.execution_id "
+        "LEFT JOIN system_agent_effective_revision s ON s.id=e.revision_ref AND s.team_id=e.team_id AND s.agent_id=e.agent_id "
+        "WHERE r.turn_id=? AND r.kind='composition' AND r.resolution_seq=1 "
+        "AND (json_extract(r.composition_json,'$.runtime_policy')='initial-primary.v1' "
+        "OR (e.agent_source_kind='system' AND json_extract(r.composition_json,'$.runtime_policy')='initial-primary-skill-extension.v1' "
+        "AND json_extract(r.composition_json,'$.method_reference')='user-selected-method.v1'))",
         (turn_id,),
     ) as cursor:
-        executions = [row[0] for row in await cursor.fetchall()]
+        rows = await cursor.fetchall()
+    executions = [
+        row[0]
+        for row in rows
+        if json.loads(row[1])["runtime_policy"] == "initial-primary.v1"
+        or (row[2] is not None and has_ordinary_system_skill_scope(json.loads(row[2])))
+    ]
     return any(
         isinstance(execution_id, str) and "sub_" + hashlib.sha256(execution_id.encode()).hexdigest()[:20] == subagent_id
         for execution_id in executions
@@ -117,7 +134,7 @@ async def reference_turn_requires_context(db_path: str | Path, *, turn_id: str, 
         if not isinstance(db_path, (str, Path)) or not str(db_path) or type(turn_id) is not str or not turn_id:
             raise ValueError()
         uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-        async with aiosqlite.connect(uri, uri=True) as db:
+        async with diagnostic_connect(uri, uri=True) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")
@@ -134,9 +151,8 @@ async def reference_turn_requires_context(db_path: str | Path, *, turn_id: str, 
                     # and Skill scope, as when Lead delegates to it; Lead and every
                     # helper of the same Turn still require exact reference access.
                     return not (subagent_id and await _ordinary_primary_receiver(db, turn_id=turn_id, subagent_id=subagent_id))
-                async with db.execute("SELECT 1 FROM sqlite_master WHERE type='view' AND name='chat_reference_plan_step_scope'") as cursor:
-                    if await cursor.fetchone() is None:
-                        return False
+                if not await readable_view_exists(db, "chat_reference_plan_step_scope", owner_domain="execution"):
+                    return False
                 async with db.execute(
                     "SELECT p.spec_json FROM plans p WHERE p.execution_turn_id=? "
                     "AND json_extract(CASE WHEN json_valid(p.spec_json) THEN p.spec_json ELSE '{}' END,'$.reference.contract')='reference-plan.v1'",

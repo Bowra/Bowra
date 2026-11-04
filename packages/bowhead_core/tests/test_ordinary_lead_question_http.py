@@ -250,7 +250,12 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
                 message = call(
                     "helper-native",
                     "subagent_spawn",
-                    {"profile": case.fixture.case.args["reference_start"].profile_name, "task": "Inspect this request.", "delegation_role": "helper"},
+                    {
+                        "profile": case.fixture.case.args["reference_start"].profile_name,
+                        "task": "Inspect this request.",
+                        "delegation_role": "helper",
+                        "required_source_urls": [],
+                    },
                 )
             elif index == 2:
                 message = call("question-native", "clarification_ask", {"questions": questions})
@@ -292,7 +297,13 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
                         ),
                         "tool_calls",
                     )
-                assert len(helper_calls) == rejection_count + 1
+                if mode in {"unclassified_return", "changed_return"}:
+                    # Lost native provenance remains a business failure. Allow
+                    # both shared review corrections before the partial fallback;
+                    # ordinary continuation must still reject the unproven return.
+                    assert rejection_count < len(helper_calls) <= rejection_count + 3
+                else:
+                    assert len(helper_calls) == rejection_count + 1
                 if mode == "narrative":
                     return response(body, {"role": "assistant", "content": "The request needs an audience before its Skill list."}, "stop")
             else:
@@ -384,7 +395,8 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             return
         if refused_capture:
             assert cards == []
-            assert len(lead_calls) == 2 and len(helper_calls) == 2
+            expected_helper_calls = 4 if mode in {"unclassified_return", "changed_return"} else 2
+            assert len(lead_calls) == 2 and len(helper_calls) == expected_helper_calls
             turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
             assert turn["status"] == "failed" and turn["error"] == "clarification_resume_unavailable"
             persisted = [

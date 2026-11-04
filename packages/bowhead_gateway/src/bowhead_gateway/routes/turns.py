@@ -2917,39 +2917,13 @@ async def replay(
     store: TurnLogStore | None = Depends(_optional_log),
     delay_ms: int = 0,
 ) -> EventSourceResponse:
-    """Replay 持久化事件到 SSE，与活 turn 的 /chat/stream 格式一致."""
+    """Replay persisted events as SSE with the live chat stream format."""
     history = await list_events(turn_id, request, store)
     if not history.events:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "turn not found")
-    # Keep the browser-facing replay route visibly inside the viewer-safe
-    # projection boundary.  list_events() already projects its DTO, but this
-    # final egress pass is intentional: future refactors cannot replace that
-    # helper with a raw store read without the static egress guard noticing.
-    # Stable persisted ordinals make the pass idempotent for source aliases.
-    try:
-        replay_payloads = await project_event_payloads_for_viewer(
-            request,
-            turn_id,
-            [(event.event_type, event.payload) for event in history.events],
-            event_ordinals=[event.seq for event in history.events],
-        )
-    except ViewerSourceProjectionError as exc:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            {"error": {"code": "source_projection_unavailable"}},
-        ) from exc
-    history = history.model_copy(
-        update={
-            "events": [
-                event.model_copy(update={"payload": safe_payload})
-                for event, safe_payload in zip(
-                    history.events,
-                    replay_payloads,
-                    strict=True,
-                )
-            ],
-        },
-    )
+    # The original reader checks current turn/source access and returns viewer-safe
+    # payloads. Reprojecting its opaque aliases loses their canonical identities.
+    # Replay the same DTO; each replay request invokes the original reader again.
 
     history_protocol = resolve_persisted_chat_execution_protocol(
         history.terminal_protocol_version,

@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import en from "@/messages/en-US.json";
+import zh from "@/messages/zh-CN.json";
+import de from "@/messages/de-DE.json";
+import fr from "@/messages/fr-FR.json";
 
 async function openReport(page: Page) {
   await page.request.post(`http://127.0.0.1:${process.env.PLAYWRIGHT_API_PORT ?? "18080"}/api/v1/_test/reset`);
@@ -19,6 +23,103 @@ async function openReport(page: Page) {
       started_at: "2026-10-27T00:00:00Z", ended_at: "2026-10-27T00:00:01Z", final_answer: "Report ready", trace_steps: [], summary: null }],
   } }));
   await expect(page.locator(".canvas-report-article")).toBeAttached();
+}
+
+for (const [locale, messages] of [["en-US", en], ["zh-CN", zh], ["de-DE", de], ["fr-FR", fr]] as const) {
+  test.describe(`Canvas UI repairs in ${locale}`, () => {
+    test.use({ hasTouch: true });
+    test("keeps inspection actions reachable and shares Table metadata styles", async ({ page }) => {
+      await page.context().addCookies([{ name: "NEXT_LOCALE", value: locale, domain: "localhost", path: "/" }]);
+      await page.route("**/api/v1/auth/me", async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({ response, json: { ...await response.json(), ui_language: locale } });
+      });
+      // Reproduce the deployed HTTP clipboard fallback without requesting a download.
+      await page.addInitScript(() => Object.defineProperty(window, "ClipboardItem", { configurable: true, value: undefined }));
+      await page.route("**/api/v1/canvas/by-session/s_e2e**", async (route) => {
+        const response = await route.fetch();
+        const dto = await response.json();
+        if (!Array.isArray(dto.sections)) {
+          await route.fulfill({ response });
+          return;
+        }
+        const section = dto.sections.find((item: { id: string }) => item.id === "sec_results_data");
+        section.spec = {
+          kind: "table", title: "Unit table", row_count: 3,
+          columns: [{ key: "month", header: "Month", type: "date" }, { key: "revenue", header: "Revenue", type: "numeric", unit: "万元" }],
+          rows: [{ month: "2026-01", revenue: 120.5 }, { month: "2026-02", revenue: 101.2 }, { month: "2026-03", revenue: 99.3 }],
+        };
+        dto.sections.push({ id: "sec_ui_trend", kind: "chart", spec: { ...section.spec, kind: "line", title: "Revenue trend" } });
+        dto.sections.push({ id: "sec_ui_sources", kind: "sources", entries: [{ label: "Synthetic fixture" }] });
+        await route.fulfill({ json: dto });
+      });
+      await page.setViewportSize({ width: 1280, height: 844 });
+      await openReport(page);
+      await page.goto("/?session=s_e2e&result=report");
+      const toolbar = page.locator(".results-report-object-toolbar");
+      await expect(toolbar).toHaveCount(1);
+      await expect(toolbar).toHaveClass(/results-report-unified-toolbar/);
+      await expect(toolbar.getByTestId("source-linkage-strip")).toBeVisible();
+      await expect(page.locator(".canvas-report-history-btn")).toHaveCount(0);
+      await expect.poll(() => toolbar.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        return Array.from(element.querySelectorAll("button")).every((button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.y >= bounds.y && rect.bottom <= bounds.bottom + 1;
+        });
+      })).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`report-toolbar-${locale}.jpg`) });
+      const sourceStyles = await page.locator(".canvas-report-article .v2-chart-table").first().evaluate((element) => {
+        const style = (selector: string) => {
+          const value = getComputedStyle(element.querySelector(selector)!);
+          return { fontSize: value.fontSize, line: value.borderBottomWidth, color: value.borderBottomColor, background: value.backgroundColor };
+        };
+        return { header: style("th"), cell: style("td"), note: style("[data-chart-unit-note]") };
+      });
+      const figure = page.getByRole("figure", { name: "Revenue trend", exact: true });
+      await figure.locator(".is-more").click();
+      await page.getByRole("menuitem", { name: messages.chart_inspect.open, exact: true }).click();
+      const dialog = page.locator(".rc-inspect-panel");
+      await expect(dialog).toBeVisible();
+      for (const width of [1280, 768, 390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        const actions = dialog.locator(".rc-inspect-actions button");
+        await expect(actions).toHaveCount(4);
+        await expect(actions.nth(2)).toHaveText(messages.chart_inspect.copy_degraded_download);
+        await expect.poll(async () => {
+          const panel = (await dialog.boundingBox())!;
+          return actions.evaluateAll((buttons, bounds) => buttons.flatMap((button) => {
+            const rect = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+            const fits = rect.x >= bounds.x && rect.right <= bounds.x + bounds.width + 1
+              && rect.y >= bounds.y && rect.bottom <= bounds.y + bounds.height + 1
+              && rect.height >= 44 && button.scrollWidth <= button.clientWidth + 1 && !!hit && button.contains(hit);
+            return fits ? [] : [{ text: button.textContent, whiteSpace: getComputedStyle(button).whiteSpace, width: rect.width, scrollWidth: button.scrollWidth, panel: bounds }];
+          }), panel);
+        }).toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+      }
+      await page.screenshot({ path: test.info().outputPath(`inspection-chart-${locale}.jpg`) });
+      await dialog.getByRole("tab", { name: messages.chart_inspect.tab_data, exact: true }).click();
+      const inspectStyles = await dialog.evaluate((element) => {
+        const style = (selector: string) => {
+          const value = getComputedStyle(element.querySelector(selector)!);
+          return { fontSize: value.fontSize, line: value.borderBottomWidth, color: value.borderBottomColor, background: value.backgroundColor };
+        };
+        return { header: style("th"), cell: style("td"), note: style("[data-chart-unit-note]") };
+      });
+      expect(inspectStyles).toEqual(sourceStyles);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await page.locator(".results-report-actions .ws-menu-wrap > .v2-icon-btn").click();
+      const menu = page.getByRole("menu");
+      await expect(menu.locator(".results-report-menu-group .danger")).toHaveCount(2);
+      await page.keyboard.press("End");
+      await expect(menu.getByRole("menuitem").last()).toBeFocused();
+      await page.screenshot({ path: test.info().outputPath(`report-more-${locale}.jpg`) });
+      await page.keyboard.press("Escape");
+    });
+  });
 }
 
 test("desktop report reading width expands prose and keeps a local reversible margin choice", async ({ page }) => {

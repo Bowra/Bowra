@@ -5,7 +5,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.subagent_authoring_catalog import (
     AuthoringTool,
@@ -35,6 +34,7 @@ from bowhead_core.subagent_draft_store import (
     SubagentDraftVersionConflictError,
 )
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 
 class FakeCatalogService:
@@ -159,7 +159,7 @@ async def _service(tmp_path, generator: FakeGenerator):
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     users = UserStore(str(db_path))
     await users.initialize()
     drafts = SubagentDraftStore(str(db_path), hmac_key=b"s" * 32)

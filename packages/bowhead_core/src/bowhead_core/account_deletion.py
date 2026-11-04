@@ -12,6 +12,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import structlog
+
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 if TYPE_CHECKING:
     from bowhead_core.user_store import UserStore
@@ -126,10 +130,21 @@ async def retire_account_conn(
         ("mcp_oauth_pending", "created_by"),
     ):
         await db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
-    await store._bump_user_account_epoch_conn(db, user_id, now=result.requested_at)
-    from bowhead_core.session_store import SessionStore
+    split = domain_layout_active(store.db_path)
+    if split:
+        from bowhead_core.terminal_auth_epochs import bump_terminal_auth_epoch
+        from bowhead_core.terminal_protocol import AuthFenceScopeKind
 
-    await SessionStore._invalidate_all_chat_auth_session_generations_conn(db, user_id=user_id)
+        # Retirement is always an authority revocation, including stores whose
+        # ordinary protocol feature flag has not been enabled by assembly.
+        await bump_terminal_auth_epoch(
+            db, scope_kind=AuthFenceScopeKind.USER_ACCOUNT, team_id="__global__", scope_ref=user_id, now=result.requested_at
+        )
+    else:
+        await store._bump_user_account_epoch_conn(db, user_id, now=result.requested_at)
+        from bowhead_core.session_store import SessionStore
+
+        await SessionStore._invalidate_all_chat_auth_session_generations_conn(db, user_id=user_id)
     await db.execute(
         "UPDATE access_requests SET status='stale',updated_at=? WHERE requester_id=? AND status='pending'", (result.requested_at, user_id)
     )
@@ -139,7 +154,8 @@ async def retire_account_conn(
         (result.requested_at, user_id, user_id),
     )
     await db.execute("UPDATE workspace_members SET status='removed' WHERE user_id=? AND status='active'", (user_id,))
-    await db.execute("UPDATE scheduled_jobs SET status='paused',updated_at=? WHERE user_id=?", (result.requested_at, user_id))
+    if not split:
+        await db.execute("UPDATE scheduled_jobs SET status='paused',updated_at=? WHERE user_id=?", (result.requested_at, user_id))
     await db.execute(
         "INSERT INTO account_deletions(user_id,operation_id,requested_at,purge_after,time_source) VALUES (?,?,?,?,?)",
         (result.user_id, result.operation_id, result.requested_at, result.purge_after, time_source),
@@ -173,6 +189,49 @@ async def retire_account_conn(
     return result
 
 
+async def finish_account_retirement_execution(store: UserStore, deletion: AccountDeletion) -> bool:
+    """Repair execution projections after the authoritative core retirement.
+
+    A retained core deletion row is the durable retry work item. Failure here
+    never revives the identity; periodic adoption and ledger replay retry it.
+    """
+    if not domain_layout_active(store.db_path):
+        return True
+    try:
+        async with diagnostic_connect(domain_database_path(store.db_path, "execution")) as execution:
+            await execution.execute("BEGIN IMMEDIATE")
+            try:
+                async with execution.execute(
+                    "SELECT 1 FROM account_deletions d JOIN users u ON u.id=d.user_id WHERE d.user_id=? AND d.operation_id=? AND u.status='deleted'",
+                    (deletion.user_id, deletion.operation_id),
+                ) as cursor:
+                    if await cursor.fetchone() is None:
+                        raise AccountDeletionError("account_retirement_authority_missing")
+                requested_epoch = datetime.fromisoformat(deletion.requested_at).timestamp()
+                await execution.execute(
+                    "UPDATE chat_auth_session_generations SET state='invalidated',invalidated_at=? WHERE user_id=? AND state='active'",
+                    (deletion.requested_at, deletion.user_id),
+                )
+                await execution.execute(
+                    "INSERT INTO chat_auth_user_generation_fences(user_id,invalidated_before_epoch,updated_at) VALUES (?,?,?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET invalidated_before_epoch=excluded.invalidated_before_epoch,updated_at=excluded.updated_at "
+                    "WHERE chat_auth_user_generation_fences.invalidated_before_epoch<excluded.invalidated_before_epoch",
+                    (deletion.user_id, requested_epoch, deletion.requested_at),
+                )
+                await execution.execute(
+                    "UPDATE scheduled_jobs SET status='paused',updated_at=? WHERE user_id=? AND status<>'paused'",
+                    (deletion.requested_at, deletion.user_id),
+                )
+                await execution.commit()
+            except BaseException:
+                await execution.rollback()
+                raise
+        return True
+    except Exception:
+        structlog.get_logger(__name__).warning("account_deletion.execution_projection_pending", operation_id=deletion.operation_id, exc_info=True)
+        return False
+
+
 async def request_account_deletion(
     store: UserStore,
     user_id: str,
@@ -181,7 +240,7 @@ async def request_account_deletion(
     record_intent: Callable[[AccountDeletion], Awaitable[None]] | None = None,
     expected_pwd_version: int | None = None,
 ) -> AccountDeletion:
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             if expected_pwd_version is not None:
@@ -198,17 +257,19 @@ async def request_account_deletion(
             if record_intent is not None:
                 await record_intent(result)
             await db.commit()
-            return result
         except BaseException:
             await db.rollback()
             raise
+
+    await finish_account_retirement_execution(store, result)
+    return result
 
 
 async def adopt_deleted_accounts(store: UserStore, *, now: datetime | None = None, limit: int = 100) -> int:
     """Recover exact audit time; missing/invalid evidence gets a fresh 30 days."""
     adoption_time = now or datetime.now(UTC)
     adopted = 0
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             async with db.execute(
@@ -243,4 +304,20 @@ async def adopt_deleted_accounts(store: UserStore, *, now: datetime | None = Non
         except BaseException:
             await db.rollback()
             raise
+    if domain_layout_active(store.db_path):
+        async with (
+            diagnostic_connect(store.db_path) as core,
+            core.execute(
+                "SELECT user_id,operation_id,requested_at,purge_after FROM account_deletions d WHERE state<>'completed' AND ("
+                "NOT EXISTS(SELECT 1 FROM chat_auth_user_generation_fences f WHERE f.user_id=d.user_id "
+                "AND f.invalidated_before_epoch>=(julianday(d.requested_at)-2440587.5)*86400) "
+                "OR EXISTS(SELECT 1 FROM chat_auth_session_generations g WHERE g.user_id=d.user_id AND g.state='active') "
+                "OR EXISTS(SELECT 1 FROM scheduled_jobs j WHERE j.user_id=d.user_id AND j.status<>'paused')) "
+                "ORDER BY requested_at LIMIT ?",
+                (limit,),
+            ) as cursor,
+        ):
+            pending = [AccountDeletion(*row) for row in await cursor.fetchall()]
+        for deletion in pending:
+            await finish_account_retirement_execution(store, deletion)
     return adopted

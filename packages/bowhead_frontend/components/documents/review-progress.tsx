@@ -93,7 +93,7 @@ export function ReviewProgress({
   return (
     <div className={styles.progress}>
       <div className={styles.head}>
-        <span className={styles.count} role="status">{t("review_progress", { seen: viewed, total })}</span>
+        <span className={styles.count} role="status">{t(orientation === "page" ? "document_review_progress" : "review_progress", { seen: viewed, total })}</span>
         {requiredLeft === 0 ? (
           <Badge tone="positive" size="sm"><Check size={14} aria-hidden />{t(changed ? "review_changed_done" : "review_all_done")}</Badge>
         ) : changed ? (
@@ -121,7 +121,7 @@ export function ReviewProgress({
         {pages.map((page) => {
           const selected = page.n === current;
           const label = [
-            t("thumb_page", { page: page.n }),
+            t(orientation === "page" ? "document_thumb_page" : "thumb_page", { page: page.n }),
             page.changeCount ? t("thumb_changes", { count: page.changeCount }) : null,
             t(page.viewed ? "thumb_viewed" : "thumb_not_viewed"),
           ].filter(Boolean).join(t("thumb_separator"));

@@ -92,7 +92,7 @@ describe("Recoverable step severity", () => {
 });
 
 describe("StepSummary recorded issues", () => {
-  it("shows recorded failed and partial steps without claiming retries", () => {
+  it("keeps execution issues in the process without inferring delivery impact", () => {
     wrap(
       <StepSummary
         steps={[
@@ -104,7 +104,7 @@ describe("StepSummary recorded issues", () => {
         onExpand={() => {}}
       />,
     );
-    expect(screen.getByTestId("step-summary-issues").textContent).toBe("3 个步骤遇到问题");
+    expect(screen.queryByTestId("step-summary-issues")).toBeNull();
   });
 
   it("omits the issue count for clean execution", () => {

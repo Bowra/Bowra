@@ -7,15 +7,14 @@ from importlib import import_module
 
 import pytest
 from alembic import command
-from bowhead_cli.migrate import upgrade as upgrade_database
 from bowhead_core.llm_config_crypto import encrypt_llm_config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade as upgrade_database
 from cryptography.fernet import Fernet
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from test_artifact_workspace_cutover_migration import _config
-
-from bowhead_core import migrations
 
 MIGRATION = import_module("bowhead_core.migrations.versions.0122_builtin_powerbi")
 
@@ -140,7 +139,7 @@ async def test_powerbi_migration_accepts_legacy_delegated_registry_at_0121(tmp_p
         event.remove(Engine, "connect", enable_foreign_keys)
 
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SQLITE_LEGACY_REVISION,)
         assert db.execute("SELECT COUNT(*) FROM team_builtin_tool WHERE provider='powerbi'").fetchone() == (0,)
         assert db.execute("SELECT COUNT(*) FROM builtin_pbi_template").fetchone() == (0,)
         assert db.execute("SELECT id FROM team_builtin_tool WHERE provider='google_workspace'").fetchone() == ("ibt_google",)

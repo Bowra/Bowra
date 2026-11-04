@@ -239,7 +239,7 @@ def system_agent_capabilities() -> dict[str, frozenset[str]]:
 @pytest.fixture(scope="session")
 def migrated_kb_files_snapshot(tmp_path_factory):
     """Pristine current ``files`` schema (Alembic head) for tests that build a KbFilesStore directly."""
-    from bowhead_cli.migrate import upgrade
+    from core_legacy_database import upgrade
 
     directory = tmp_path_factory.mktemp("kb-files-schema")
     upgrade(f"sqlite+aiosqlite:///{directory / 'bowhead.db'}", target="files")

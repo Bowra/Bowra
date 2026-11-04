@@ -32,6 +32,7 @@ from bowhead_core.chat_references import (
     McpToolResourceRef,
 )
 from bowhead_core.openapi_tool_source import TeamToolEntry, mcp_entry, openapi_entry, parse_openapi_ops
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -481,7 +482,7 @@ async def build_reference_mcp_metadata(db_path: str | Path) -> ReferenceMcpMetad
 
 class ReferenceMcpMetadataCache:
     def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self._index = ReferenceMcpMetadataIndex(self.db_path)
         self._expires_at = 0.0
         self._lock = anyio.Lock()

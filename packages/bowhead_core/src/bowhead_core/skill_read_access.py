@@ -194,6 +194,7 @@ class ReferenceSkillReadAccess:
     execution_id: str
     extension_read_names: tuple[str, ...] = ()
     plan_step: ReferencePlanStep | None = None
+    context_only: bool = False
 
     @property
     def receiver_turn_id(self) -> str:
@@ -244,8 +245,11 @@ class ReferenceSkillReadAccess:
                 composition.digest,
                 _handles(composition, scope, generation, prepared, execution_id),
                 execution_id,
-                tuple(sorted(item.proof.name for item in prepared.closure.items)) if prepared.extension else (),
+                tuple(sorted(item.proof.name for item in prepared.closure.items))
+                if prepared.extension and prepared.receiver.ordinary_system_scope is not True
+                else (),
                 plan_step,
+                prepared.receiver.ordinary_system_scope is True and composition.method_reference is not None,
             )
         except Exception:
             raise SkillReadAccessError("reference_skill_access_unavailable") from None
@@ -276,7 +280,10 @@ class ReferenceSkillReadAccess:
         return await self._read(handle, ctx=ctx, file=file)
 
     def require_model_receiver(self, ctx: ToolExecutionContext) -> None:
-        if ctx.reference_skill_required is not True or ctx.reference_skill_access is not self:
+        if self.context_only:
+            if ctx.reference_skill_required is not False or ctx.reference_skill_access is not None:
+                raise SkillReadAccessError("reference_skill_access_unavailable")
+        elif ctx.reference_skill_required is not True or ctx.reference_skill_access is not self:
             raise SkillReadAccessError("reference_skill_access_unavailable")
         self._require_receiver(ctx)
 
@@ -288,6 +295,8 @@ class ReferenceSkillReadAccess:
     ) -> tuple[ReferenceSkillPrimaryComposition, RenderedSkillReads, PreparedReceiverSkillReads]:
         self.require_model_receiver(ctx)
         composition, _, prepared = material
+        if self.context_only != (prepared.receiver.ordinary_system_scope is True and composition.method_reference is not None):
+            raise SkillReadAccessError("reference_skill_receiver_changed")
         if (
             composition.digest != self.composition_digest or (self.plan_step is None and composition.execution_id != self.execution_id)
         ) or self.handles != _handles(composition, self.scope, self.generation, prepared, self.execution_id):

@@ -121,16 +121,16 @@ async def test_clarification_ask_empty_candidates_uses_fallback_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_clarification_ask_truncates_candidates() -> None:
-    """Max 5 candidates per schema; extra dropped."""
+async def test_clarification_ask_preserves_all_legacy_choices() -> None:
+    """Legacy single-question callers preserve the same choices as structured questions."""
     ctx = _StubCtx()
     result = await _clarification_ask(
         {"candidates": [f"c{i}" for i in range(8)]},
         ctx,
     )
-    assert len(result["candidates"]) == 5
+    assert len(result["candidates"]) == 8
     assert result["candidates"][0] == "c0"
-    assert result["candidates"][4] == "c4"
+    assert result["candidates"][7] == "c7"
 
 
 @pytest.mark.asyncio
@@ -225,23 +225,17 @@ async def test_bounded_card_sentinel_carries_no_throwaway_id(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_more_than_four_options_is_rejected_with_the_limit_and_overflow() -> None:
-    """Options used to be cut to 4 silently; the model never learned what was dropped."""
+async def test_analysis_scope_preserves_six_choices_in_question_and_candidates() -> None:
     store = _RecordingStore()
     ctx = _StubCtxWithStore(clarification_store=store)
-    options = ["华东", "华南", "华北", "西南", "西北"]
+    options = ["Revenue", "Profit", "Brands", "Stores", "Members", "Traffic"]
     result = await _clarification_ask(
-        {"questions": [{"question": "看哪个区域?", "options": options, "type": "single_select"}]},
+        {"questions": [{"question": "Which analysis sections?", "options": options, "type": "multi_select"}]},
         ctx,
     )
-    assert not is_clarification_sentinel(result)
-    assert result["ok"] is False
-    assert result["error_kind"] == "schema_invalid"
-    assert result["max_options_per_question"] == 4
-    assert result["questions_over_limit"] == [{"question_index": 0, "question": "看哪个区域?", "option_count": 5, "rejected_options": ["西北"]}]
-    assert "at most 4 options" in result["error_message"]
-    assert "西北" in result["error_message"]
-    assert store.put_calls == []
+    assert is_clarification_sentinel(result)
+    assert result["questions"][0]["options"] == options
+    assert result["candidates"] == options
 
 
 @pytest.mark.asyncio
@@ -405,3 +399,13 @@ async def test_invalid_questions_never_fall_back_to_partial_or_legacy_cards(ques
     assert field in result["error_message"]
     assert not is_clarification_sentinel(result)
     assert store.put_calls == []
+
+
+@pytest.mark.asyncio
+async def test_all_question_options_survive_flattened_candidate_projection() -> None:
+    questions = [
+        {"question": f"Analysis section {q}", "type": "multi_select", "options": [f"Section {q} option {i}" for i in range(6)]} for q in range(3)
+    ]
+    result = await _clarification_ask({"questions": questions}, _StubCtx(turn_id="t_full_scope"))
+    assert result["questions"] == questions
+    assert result["candidates"] == [option for question in questions for option in question["options"]]

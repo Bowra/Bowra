@@ -8,6 +8,7 @@ Gateway/runtime；所有 v1 写事务继续使用本模块的 FULL/foreign-key c
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -21,6 +22,7 @@ import aiosqlite
 
 from bowhead_core.agent_draft_send_target import AgentDraftSendTarget
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.chat_turn_source import (
     chat_turn_user_source_projection,
     snapshot_chat_turn_user_source,
@@ -34,6 +36,9 @@ from bowhead_core.session_store import (
     _insert_chat_turn_user_source_in_tx,
     _read_chat_turn_user_source_in_tx,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
+from bowhead_core.terminal_auth_epochs import terminal_auth_epoch_table
 from bowhead_core.terminal_effect_contract import (
     EffectDisclosureKind,
     EffectExecutionContract,
@@ -623,12 +628,12 @@ class GenerationClaimResult:
 async def open_terminal_protocol_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
     """打开 v1 correctness connection；FULL 与 FK 失败时不泄漏连接。"""
 
-    connection = await aiosqlite.connect(db_path)
+    connection = await diagnostic_connect(db_path)
     try:
         await connection.execute("PRAGMA busy_timeout=5000")
-        await connection.execute("PRAGMA synchronous=FULL")
+        await connection.execute("PRAGMA main.synchronous=FULL")
         await connection.execute("PRAGMA foreign_keys=ON")
-        await connection.execute("PRAGMA secure_delete=ON")
+        await connection.execute("PRAGMA main.secure_delete=ON")
     except BaseException:
         await connection.close()
         raise
@@ -827,23 +832,38 @@ class TerminalProtocolStore:
         *,
         _clock: Callable[[], datetime] | None = None,
         _fault_injector: Callable[[TerminalProtocolFaultPoint], None] | None = None,
+        billing_db_path: str | Path | None = None,
+        billing_cipher: ReferenceCipher | None = None,
     ) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "execution"))
+        self._core_db_path = str(domain_database_path(db_path, "core"))
+        self._billing_db_path = str(billing_db_path or self._core_db_path)
+        self._billing_cipher = billing_cipher
+        if self._billing_db_path != self._db_path and self._billing_cipher is None:
+            self._billing_cipher = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", ""))
         self._clock = _clock or (lambda: datetime.now(UTC))
         self._fault_injector = _fault_injector
+
+    @asynccontextmanager
+    async def _open_connection(self) -> AsyncIterator[aiosqlite.Connection]:
+        async with open_terminal_protocol_connection(self._db_path) as connection:
+            if self._billing_db_path != self._db_path:
+                connection.bowhead_billing_cipher = self._billing_cipher
+            yield connection
 
     @property
     def db_path(self) -> str:
         return self._db_path
 
     async def initialize(self) -> None:
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             tables = await _schema_objects(connection, "table")
             turn_columns = await _table_columns(connection, "turns")
             session_columns = await _table_columns(connection, "sessions")
             event_columns = await _table_columns(connection, "turn_events")
             decision_columns = await _table_columns(connection, "turn_control_decisions")
             generation_columns = await _table_columns(connection, "turn_generations")
+            settlement_columns = await _table_columns(connection, "turn_effect_settlements")
         missing = sorted(
             (TERMINAL_PROTOCOL_TABLES - tables)
             | {f"turns.{name}" for name in _REQUIRED_TURN_COLUMNS - turn_columns}
@@ -851,6 +871,11 @@ class TerminalProtocolStore:
             | {f"turn_events.{name}" for name in _REQUIRED_EVENT_COLUMNS - event_columns}
             | {f"turn_control_decisions.{name}" for name in _REQUIRED_DECISION_COLUMNS - decision_columns}
             | {f"turn_generations.{name}" for name in _REQUIRED_GENERATION_COLUMNS - generation_columns}
+            | (
+                {"turn_effect_settlements.billing_witness_ciphertext"}
+                if self._billing_db_path != self._db_path and "billing_witness_ciphertext" not in settlement_columns
+                else set()
+            )
         )
         if missing:
             raise RuntimeError(f"terminal protocol schema missing; run bowhead migrate upgrade head: {missing[0]}")
@@ -872,7 +897,7 @@ class TerminalProtocolStore:
 
         if not all(isinstance(value, str) and value for value in (team_id, actor, workspace_id, session_id)):
             raise ValueError("Session protocol fact scope is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -893,12 +918,32 @@ class TerminalProtocolStore:
         if not isinstance(context, AuthFenceResolveContext):
             raise TypeError("auth fence resolve context is invalid")
         result: AuthFenceVector
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        split = domain_layout_active(self._db_path)
+        if split:
+            # Core revocation epochs must commit before the execution writer
+            # starts. Only idempotent epoch initialization happens here.
+            async with open_terminal_protocol_connection(self._core_db_path) as core:
+                await core.execute("BEGIN IMMEDIATE")
+                try:
+                    for scope in sorted(context.required_scopes, key=AuthFenceScope.sort_key):
+                        if scope.scope_kind is AuthFenceScopeKind.SESSION_VISIBILITY:
+                            continue
+                        await core.execute(
+                            "INSERT OR IGNORE INTO terminal_authority_scope_epochs(scope_kind,team_id,scope_ref,epoch,row_version,updated_at) VALUES (?,?,?,1,1,?)",
+                            (scope.scope_kind.value, scope.team_id, scope.scope_ref, _iso_utc(self._now())),
+                        )
+                    await core.commit()
+                except BaseException:
+                    await core.rollback()
+                    raise
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
                 now_text = _iso_utc(self._now())
                 for scope in sorted(context.required_scopes, key=AuthFenceScope.sort_key):
+                    if split and scope.scope_kind is not AuthFenceScopeKind.SESSION_VISIBILITY:
+                        continue
                     await connection.execute(
                         """
                         INSERT OR IGNORE INTO terminal_auth_scope_epochs(
@@ -921,7 +966,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, AuthFenceResolveContext):
             raise TypeError("auth fence resolve context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             return await _read_auth_fence_vector(connection, context.required_scopes)
 
@@ -936,7 +981,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (team_id, session_id, turn_id)):
             raise ValueError("turn protocol identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -968,7 +1013,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (team_id, turn_id)):
             raise ValueError("turn protocol binding identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -1001,7 +1046,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (team_id, turn_id)):
             raise ValueError("turn locale identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -1030,7 +1075,7 @@ class TerminalProtocolStore:
 
         if not isinstance(turn_id, str) or not turn_id:
             raise ValueError("turn protocol scope identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -1069,7 +1114,7 @@ class TerminalProtocolStore:
         if version != 1:
             raise DecisionSourceNotReadyError("turn is not a v1 Turn")
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 "SELECT current_generation FROM turns WHERE id=?",
                 (turn_id,),
@@ -1146,7 +1191,7 @@ class TerminalProtocolStore:
         team_id: str,
         turn_id: str,
     ) -> WebChatActionLookup | None:
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("PRAGMA query_only=ON")
             async with connection.execute(
@@ -1342,7 +1387,7 @@ class TerminalProtocolStore:
             generation=execution_generation,
             idempotency_key=f"steer_ack:{action_id}",
         )
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("PRAGMA query_only=ON")
             async with connection.execute(
@@ -1558,7 +1603,7 @@ class TerminalProtocolStore:
             raise TypeError("decision preflight source enum is invalid")
         if not isinstance(principals, DecisionPrincipalSet):
             raise TypeError("decision preflight principals are invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -1659,7 +1704,7 @@ class TerminalProtocolStore:
             raise TypeError("source decision enum is invalid")
         if not isinstance(principals, DecisionPrincipalSet):
             raise TypeError("source decision principals are invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             if source_kind is DecisionSourceKind.SYSTEM_CONTROL and source_id == "__auto_control__":
                 query = """
@@ -1781,7 +1826,7 @@ class TerminalProtocolStore:
 
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("pending decision limit must be between 1 and 100")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -1907,7 +1952,7 @@ class TerminalProtocolStore:
         if not isinstance(decision, RecordedDecision) or decision.state is not DecisionState.DECISION_RECORDED:
             raise TypeError("revocation requires a recorded decision")
         old_context = decision.context
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2086,7 +2131,7 @@ class TerminalProtocolStore:
 
         if not isinstance(decision_id, str) or not decision_id:
             raise ValueError("decision effect source identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -2154,7 +2199,7 @@ class TerminalProtocolStore:
         if not isinstance(delay_seconds, int) or isinstance(delay_seconds, bool) or delay_seconds < 1:
             raise ValueError("pending decision defer delay is invalid")
         next_attempt = _iso_utc(self._now() + timedelta(seconds=delay_seconds))
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             update = await connection.execute(
                 """
                 UPDATE turn_control_decisions
@@ -2193,7 +2238,7 @@ class TerminalProtocolStore:
         now_text = _iso_utc(now)
         expires = _iso_utc(now + timedelta(seconds=lease_seconds))
         claimed: list[ClaimedDecisionSideEffect] = []
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2279,7 +2324,7 @@ class TerminalProtocolStore:
             raise ValueError("decision effect settlement is invalid")
         if not isinstance(retry_delay_seconds, int) or isinstance(retry_delay_seconds, bool) or not 1 <= retry_delay_seconds <= 3600:
             raise ValueError("decision effect retry delay is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             if applied:
                 update = await connection.execute(
                     """
@@ -2329,7 +2374,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (decision_id, code)):
             raise ValueError("decision effect skip identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             update = await connection.execute(
                 """
                 UPDATE turn_decision_effects
@@ -2365,7 +2410,7 @@ class TerminalProtocolStore:
             raise ValueError("decision effect list limit is invalid")
         now_text = _iso_utc(self._now())
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
                 SELECT decision_id,MIN(created_at) AS first_created
@@ -2398,7 +2443,7 @@ class TerminalProtocolStore:
             raise ValueError("decision effect defer delay is invalid")
         now_text = _iso_utc(self._now())
         next_attempt = _iso_utc(self._now() + timedelta(seconds=delay_seconds))
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             update = await connection.execute(
                 """
                 UPDATE turn_decision_effects
@@ -2424,7 +2469,7 @@ class TerminalProtocolStore:
     ) -> str:
         if not isinstance(decision, RecordedDecision):
             raise TypeError("decision auth recovery input is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             stored = await _read_stored_decision(connection, decision.context.decision_id)
             _validate_stored_decision(stored, decision)
@@ -2445,7 +2490,7 @@ class TerminalProtocolStore:
         if any(not isinstance(value, str) or not value for value in (owner_instance_id, rollout_config_generation)):
             raise ValueError("recovery writer identity is invalid")
         result: RecoveryWriterFence | None
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2545,7 +2590,7 @@ class TerminalProtocolStore:
     ) -> RecoveryWriterFence:
         if not isinstance(fence, RecoveryWriterFence):
             raise TypeError("recovery writer fence is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2582,7 +2627,7 @@ class TerminalProtocolStore:
     async def release_recovery_writer_fence(self, fence: RecoveryWriterFence) -> bool:
         if not isinstance(fence, RecoveryWriterFence):
             raise TypeError("recovery writer fence is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             await connection.execute("BEGIN IMMEDIATE")
             try:
                 update = await connection.execute(
@@ -2618,7 +2663,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (owner_instance_id, rollout_config_generation)):
             raise ValueError("terminal writer identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2720,7 +2765,7 @@ class TerminalProtocolStore:
     ) -> TerminalWriterLease:
         if not isinstance(lease, TerminalWriterLease):
             raise TypeError("terminal writer lease is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             now = self._now()
             expiry = _iso_utc(now + timedelta(seconds=_RECOVERY_LEASE_SECONDS))
             update = await connection.execute(
@@ -2756,7 +2801,7 @@ class TerminalProtocolStore:
             raise TypeError("terminal writer lease is invalid")
         if lease.admission_state == "draining":
             return lease
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             now = self._now()
             expiry = _iso_utc(now + timedelta(seconds=_RECOVERY_LEASE_SECONDS))
             next_admission_epoch = lease.writer_admission_epoch + 1
@@ -2796,7 +2841,7 @@ class TerminalProtocolStore:
     ) -> bool:
         if not isinstance(lease, TerminalWriterLease):
             raise TypeError("terminal writer lease is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             update = await connection.execute(
                 """
                 UPDATE terminal_protocol_writer_lease
@@ -2849,7 +2894,7 @@ class TerminalProtocolStore:
         digest = decision_identity_digest(request)
         control_outcome_code = _decision_control_outcome_code(request)
         result: RecordedDecision
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -2970,7 +3015,7 @@ class TerminalProtocolStore:
         if not isinstance(request, ResumeGenerationRequest):
             raise TypeError("resume generation request is invalid")
         context = request.decision.context
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3199,7 +3244,7 @@ class TerminalProtocolStore:
             raise TypeError("control generation request is invalid")
         context = request.decision.context
         result: CommittedReceipt
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3375,7 +3420,7 @@ class TerminalProtocolStore:
             raise TypeError("active v1 control context is invalid")
         if not isinstance(expected_turn_id, str) or not expected_turn_id:
             raise ValueError("active v1 control turn id is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3472,7 +3517,7 @@ class TerminalProtocolStore:
             user_message_id=request.user_message_id,
         )
         result: TerminalAdmissionResult
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3689,7 +3734,7 @@ class TerminalProtocolStore:
         """原子 claim generation 与 Session claim epoch；commit 前不得创建 task。"""
 
         result: GenerationClaimResult
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3838,7 +3883,7 @@ class TerminalProtocolStore:
         """在任何 event/model/tool/cost 前 durable 标记 execution 已开始。"""
 
         result: ExecutionGenerationContext
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -3914,7 +3959,7 @@ class TerminalProtocolStore:
             raise TypeError("execution recovery handoff context is invalid")
         if not isinstance(reason_code, str) or not reason_code or len(reason_code) > 128:
             raise ValueError("execution recovery handoff reason is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             await connection.execute("BEGIN IMMEDIATE")
             try:
                 now_text = _iso_utc(self._now())
@@ -3956,7 +4001,7 @@ class TerminalProtocolStore:
         is never revived by this method; recovery must claim it explicitly.
         """
 
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -4007,7 +4052,7 @@ class TerminalProtocolStore:
             raise TypeError("frozen steer scope is invalid")
         if not isinstance(claim_epoch, int) or isinstance(claim_epoch, bool) or claim_epoch < 0:
             raise ValueError("frozen steer claim epoch is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -4105,7 +4150,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("recovery steer context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             generation = await _read_generation_claim_row(connection, context.scope)
             recovery = await _read_active_recovery(connection, context.recovery_id)
@@ -4123,7 +4168,7 @@ class TerminalProtocolStore:
 
     async def read_context_maintenance_action(self, context: ExecutionGenerationContext):
         """Resolve only the original admitted source under its running owner."""
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             await require_live_execution_in_connection(connection, context=context, now=self._now())
@@ -4133,7 +4178,7 @@ class TerminalProtocolStore:
         """Resolve maintenance identity without granting recovery publication rights."""
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("Operation recovery requires an original capability")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             generation = await _read_generation_claim_row(connection, context.scope)
@@ -4149,7 +4194,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("Context completion recovery requires an original capability")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             generation = await _read_generation_claim_row(connection, context.scope)
@@ -4170,7 +4215,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("recovery auth context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             generation = await _read_generation_claim_row(connection, context.scope)
             recovery = await _read_active_recovery(connection, context.recovery_id)
@@ -4218,7 +4263,7 @@ class TerminalProtocolStore:
         if not isinstance(decision_id, str) or not decision_id:
             raise ValueError("decision control outcome identity is invalid")
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
                 SELECT source_kind,action,control_outcome_code
@@ -4249,7 +4294,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("unknown-effect recovery context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -4493,7 +4538,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("effect-intent recovery context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -4553,7 +4598,7 @@ class TerminalProtocolStore:
             now - timedelta(seconds=TERMINAL_TASK_START_GRACE_SECONDS),
         )
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
                 SELECT
@@ -4610,7 +4655,7 @@ class TerminalProtocolStore:
         )
         opened_grace_modifier = f"+{TERMINAL_TASK_START_GRACE_SECONDS} seconds"
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
                 SELECT MIN(due_at) FROM (
@@ -4686,7 +4731,7 @@ class TerminalProtocolStore:
         )
         opened_grace_modifier = f"+{TERMINAL_TASK_START_GRACE_SECONDS} seconds"
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
                 SELECT MAX(due_at) FROM (
@@ -4782,7 +4827,7 @@ class TerminalProtocolStore:
             or float(cost_amount) == float("inf")
         ):
             raise ValueError("terminal execution cost usage is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -4868,7 +4913,7 @@ class TerminalProtocolStore:
             or float(cost_amount) == float("inf")
         ):
             raise ValueError("terminal execution cost usage is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             row = await _read_generation_claim_row(connection, context.scope)
             if row is None or not _execution_context_matches(row, context, self._now()):
@@ -4896,7 +4941,7 @@ class TerminalProtocolStore:
             (ExecutionGenerationContext, RecoveryProcessingContext),
         ):
             raise TypeError("local billing capability is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -4925,12 +4970,104 @@ class TerminalProtocolStore:
                 raise
         return result
 
+    async def _record_split_billing_settlement(
+        self,
+        context: ExecutionGenerationContext | FinalizationContext | RecoveryProcessingContext,
+        attempt: EffectAttemptContext,
+    ) -> EffectAttemptContext:
+        """Charge the stable core identity without retaining an execution writer."""
+        cipher = self._billing_cipher
+        if cipher is None:
+            raise TerminalProtocolMalformedError("split billing witness key is unavailable")
+        async with self._open_connection() as connection:
+            connection.row_factory = aiosqlite.Row
+            await connection.execute("BEGIN")
+            generation = await _read_generation_claim_row(connection, context.scope)
+            await _require_split_billing_capability_in_tx(connection, context=context, generation=generation, now=self._now())
+            assert generation is not None
+            fact = _local_billing_fact_from_generation(context.scope, generation)
+            current = await _read_local_billing_attempt_in_tx(connection, fact=fact, generation=generation)
+            if not _same_effect_attempt_identity(current, attempt):
+                raise TerminalProtocolMalformedError("local billing attempt identity changed")
+            settlement = await _read_local_billing_settlement_outcome_in_tx(connection, current)
+            auth_digest = generation["execution_authz_snapshot_digest"]
+            if generation["usage_digest"] != fact.usage_digest:
+                raise TerminalProtocolMalformedError("local billing frozen usage changed")
+            if settlement is not None:
+                await _verify_stored_billing_witness(connection, cipher, fact, generation, *settlement)
+            elif current.state not in {EffectState.DISPATCHED, EffectState.UNKNOWN}:
+                raise TerminalProtocolMalformedError("local billing attempt is not dispatch-complete")
+            await connection.rollback()
+        self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
+        async with open_terminal_protocol_connection(self._billing_db_path) as core:
+            core.row_factory = aiosqlite.Row
+            await core.execute("BEGIN IMMEDIATE")
+            try:
+                if settlement is None:
+                    outcome_text, code = await _deduct_credit_with_stable_id_in_tx(
+                        core,
+                        ledger_id=fact.ledger_id,
+                        user_id=fact.user_id,
+                        team_id=fact.scope.team_id,
+                        cost_credits=fact.cost_credits,
+                        turn_id=fact.scope.turn_id,
+                        workspace_id=fact.workspace_id,
+                        tokens_input=fact.input_tokens,
+                        tokens_output=fact.output_tokens,
+                        reason="turn",
+                        rate_card_version=fact.rate_card_version,
+                        model_usage=fact.model_usage,
+                    )
+                    outcome = EffectSettlementOutcome(outcome_text)
+                    code = code or "credit_ledger_applied"
+                else:
+                    outcome, code = settlement
+                    present = await _local_billing_ledger_exists_in_tx(core, fact)
+                    if present is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
+                        raise TerminalProtocolMalformedError("local billing settlement disagrees with ledger truth")
+                await core.commit()
+            except ValueError as exc:
+                if core.in_transaction:
+                    await core.rollback()
+                raise TerminalProtocolMalformedError("local billing ledger identity changed") from exc
+            except BaseException:
+                if core.in_transaction:
+                    await core.rollback()
+                raise
+        # A crash here retains the stable debit. Retrying looks up the same ledger ID.
+        self._inject(TerminalProtocolFaultPoint.LOCAL_BILLING_AFTER_LEDGER)
+        witness = seal_committed_billing_witness(cipher, fact, outcome, code, auth_digest)
+        async with self._open_connection() as connection:
+            connection.row_factory = aiosqlite.Row
+            await connection.execute("BEGIN IMMEDIATE")
+            try:
+                generation = await _read_generation_claim_row(connection, context.scope)
+                await _require_split_billing_capability_in_tx(connection, context=context, generation=generation, now=self._now())
+                assert generation is not None
+                if _local_billing_fact_from_generation(context.scope, generation) != fact:
+                    raise TerminalProtocolMalformedError("local billing fact changed after core settlement")
+                result = await _settle_local_billing_in_tx(
+                    connection,
+                    generation=generation,
+                    attempt=current,
+                    now=self._now(),
+                    inject=self._inject,
+                    committed_witness=(outcome, code, witness),
+                )
+                await connection.commit()
+            except BaseException:
+                if connection.in_transaction:
+                    await connection.rollback()
+                raise
+        self._inject(TerminalProtocolFaultPoint.LOCAL_BILLING_AFTER_COMMIT_BEFORE_ACK)
+        return result
+
     async def record_local_billing_settlement(
         self,
         context: ExecutionGenerationContext | RecoveryProcessingContext,
         attempt: EffectAttemptContext,
     ) -> EffectAttemptContext:
-        """Atomically settle stable credit ledger truth under a typed owner fence."""
+        """Settle stable ledger truth and durable evidence under a typed owner fence."""
 
         if not isinstance(
             context,
@@ -4939,8 +5076,10 @@ class TerminalProtocolStore:
             raise TypeError("local billing settlement capability is invalid")
         if attempt.scope != context.scope:
             raise ValueError("local billing settlement scope mismatch")
+        if self._billing_db_path != self._db_path:
+            return await self._record_split_billing_settlement(context, attempt)
         self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5004,7 +5143,7 @@ class TerminalProtocolStore:
         if idempotency_key is not None and (not isinstance(idempotency_key, str) or not idempotency_key):
             raise ValueError("event idempotency key is invalid")
         result: AcceptedEventProposal
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5054,7 +5193,7 @@ class TerminalProtocolStore:
     ) -> int:
         """Read the started generation's accepted prefix under exact writer fences."""
 
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -5108,7 +5247,7 @@ class TerminalProtocolStore:
         if accepted_through == 0:
             return ()
         result: tuple[EventTicket, ...]
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5197,7 +5336,7 @@ class TerminalProtocolStore:
             raise ValueError("post-terminal auxiliary actor scope is invalid")
         if not isinstance(payload, Mapping):
             raise TypeError("post-terminal auxiliary payload must be a mapping")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5247,7 +5386,7 @@ class TerminalProtocolStore:
         if idempotency_or_fence_token is None and not non_retriable:
             raise ValueError("effect without provider token must be non-retriable")
         result: EffectAttemptContext
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5362,7 +5501,7 @@ class TerminalProtocolStore:
             raise TypeError("effect attempt scope is invalid")
         if not isinstance(action_ref, str) or not action_ref:
             raise ValueError("effect attempt action identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -5390,7 +5529,7 @@ class TerminalProtocolStore:
             raise TypeError("effect intent discard context is invalid")
         if attempt.scope != context.scope or attempt.claim_epoch != context.claim_epoch or attempt.state is not EffectState.INTENT:
             raise ValueError("effect intent discard identity mismatch")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5462,7 +5601,7 @@ class TerminalProtocolStore:
             raise TypeError("effect dispatch context is invalid")
         if attempt.scope != context.scope or attempt.claim_epoch != context.claim_epoch:
             raise ValueError("effect dispatch identity mismatch")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5580,7 +5719,7 @@ class TerminalProtocolStore:
 
         if not isinstance(attempt, EffectAttemptContext) or attempt.state is not EffectState.DISPATCHED:
             raise TypeError("effect unknown transition requires dispatched attempt")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5644,7 +5783,7 @@ class TerminalProtocolStore:
             raise ValueError("effect UNKNOWN recovery identity mismatch")
         if not isinstance(scanner_id, str) or not scanner_id:
             raise ValueError("effect UNKNOWN recovery scanner identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -5763,7 +5902,7 @@ class TerminalProtocolStore:
 
         if not isinstance(scope, TerminalScope):
             raise TypeError("effect disclosure scope is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -5786,7 +5925,7 @@ class TerminalProtocolStore:
 
         if not isinstance(scope, TerminalScope):
             raise TypeError("effect execution contract scope is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             generation = await _read_generation_claim_row(connection, scope)
             if generation is None:
@@ -5802,7 +5941,7 @@ class TerminalProtocolStore:
 
         if not isinstance(scope, TerminalScope):
             raise TypeError("effect disclosure overlay scope is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -5910,7 +6049,7 @@ class TerminalProtocolStore:
 
         if not isinstance(receipt, CommittedReceipt):
             raise TypeError("follow-up receipt identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -6042,7 +6181,7 @@ class TerminalProtocolStore:
 
         if not isinstance(processing, RecoveryProcessingContext):
             raise TypeError("recovery effect processing context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             generation = await _read_generation_claim_row(connection, processing.scope)
             recovery = await _read_active_recovery(connection, processing.recovery_id)
@@ -6126,7 +6265,7 @@ class TerminalProtocolStore:
         if not isinstance(context, EffectSettlementContext):
             raise TypeError("effect settlement context is invalid")
         self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -6251,7 +6390,7 @@ class TerminalProtocolStore:
             raise ValueError("tool completion cannot carry LLM usage")
 
         self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -6427,7 +6566,7 @@ class TerminalProtocolStore:
             raise ValueError("provider probe settlement auth identity mismatch")
         self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
         created_here = False
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -6573,7 +6712,7 @@ class TerminalProtocolStore:
             raise ValueError("manual effect settlement auth identity mismatch")
         self._inject(TerminalProtocolFaultPoint.EFFECT_BEFORE_SETTLE)
         created_here = False
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -6673,7 +6812,7 @@ class TerminalProtocolStore:
             raise TypeError("effect attempt detail scope is invalid")
         if not isinstance(actor_user_id, str) or not actor_user_id:
             raise ValueError("effect attempt detail actor is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -6801,7 +6940,7 @@ class TerminalProtocolStore:
         now = self._now()
         now_text = _iso_utc(now)
         opened_cutoff = _iso_utc(now - timedelta(seconds=task_start_grace_seconds))
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -6868,7 +7007,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryDiscoveryContext):
             raise TypeError("recovery discovery context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -6901,7 +7040,7 @@ class TerminalProtocolStore:
             raise TypeError("recovery scope is invalid")
         if not isinstance(scanner_id, str) or not scanner_id:
             raise ValueError("recovery scanner identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             row = await _read_generation_claim_row(connection, scope)
         if row is None or row["terminal_receipt_id"] is not None or row["recovery_resolution"] is not None:
@@ -6936,7 +7075,7 @@ class TerminalProtocolStore:
             raise TypeError("recovery record is invalid")
         if not isinstance(owner_instance_id, str) or not owner_instance_id:
             raise ValueError("recovery owner identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7084,7 +7223,7 @@ class TerminalProtocolStore:
             raise ValueError("recovery deferral code is invalid")
         if not isinstance(delay_seconds, int) or isinstance(delay_seconds, bool) or not 1 <= delay_seconds <= 3600:
             raise ValueError("recovery deferral delay is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             await connection.execute("BEGIN IMMEDIATE")
             try:
                 now = self._now()
@@ -7145,7 +7284,7 @@ class TerminalProtocolStore:
             raise ValueError("discovered recovery deferral code is invalid")
         if not isinstance(delay_seconds, int) or isinstance(delay_seconds, bool) or not 1 <= delay_seconds <= 3600:
             raise ValueError("discovered recovery deferral delay is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             now = self._now()
             now_text = _iso_utc(now)
             update = await connection.execute(
@@ -7184,7 +7323,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("recovery processing context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -7212,7 +7351,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, RecoveryProcessingContext):
             raise TypeError("recovery processing context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7270,7 +7409,7 @@ class TerminalProtocolStore:
         if plan.scope != context.scope or plan.closing_accepted_through != context.closing_accepted_through:
             raise ValueError("recovery candidate fence is invalid")
         _validate_candidate_plan_envelopes(plan)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7391,7 +7530,7 @@ class TerminalProtocolStore:
             raise ValueError("recovery candidate auth snapshot is invalid")
         if not isinstance(writer_admission_epoch, int) or isinstance(writer_admission_epoch, bool) or writer_admission_epoch < 0:
             raise ValueError("recovery writer admission epoch is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7460,7 +7599,7 @@ class TerminalProtocolStore:
         if not isinstance(closing_reason, str) or not closing_reason or len(closing_reason) > 128:
             raise ValueError("closing reason is invalid")
         result: FinalizationContext
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7501,7 +7640,7 @@ class TerminalProtocolStore:
         *,
         finalization_owner_instance_id: str | None = None,
     ) -> FinalizationContext | RecoveryProcessingContext:
-        """Atomically freeze Stop, local billing, and the complete v2 effect set."""
+        """Freeze Stop/effects, then confirm stable billing before returning readiness."""
 
         if not isinstance(
             context,
@@ -7518,7 +7657,7 @@ class TerminalProtocolStore:
         elif finalization_owner_instance_id is not None:
             raise ValueError("cancelled finalization owner is already frozen")
         result: FinalizationContext | RecoveryProcessingContext
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7690,7 +7829,7 @@ class TerminalProtocolStore:
                     context.scope,
                 )
                 assert generation is not None
-                if billing is not None:
+                if billing is not None and self._billing_db_path == self._db_path:
                     await _settle_local_billing_in_tx(
                         connection,
                         generation=generation,
@@ -7702,11 +7841,12 @@ class TerminalProtocolStore:
                     connection,
                     scope=context.scope,
                 )
-                await _require_v2_cancelled_finalization_ready_in_tx(
-                    connection,
-                    scope=context.scope,
-                    generation=generation,
-                )
+                if billing is None or self._billing_db_path == self._db_path:
+                    await _require_v2_cancelled_finalization_ready_in_tx(
+                        connection,
+                        scope=context.scope,
+                        generation=generation,
+                    )
                 self._inject(
                     TerminalProtocolFaultPoint.CANCEL_FINALIZATION_BEFORE_COMMIT,
                 )
@@ -7716,6 +7856,16 @@ class TerminalProtocolStore:
                     await connection.rollback()
                 raise
         self._inject(TerminalProtocolFaultPoint.FINALIZE_AFTER_CLOSING)
+        if billing is not None and self._billing_db_path != self._db_path:
+            await self._record_split_billing_settlement(result, billing)
+            async with self._open_connection() as connection:
+                connection.row_factory = aiosqlite.Row
+                await connection.execute("BEGIN")
+                generation = await _read_generation_claim_row(connection, result.scope)
+                await _require_split_billing_capability_in_tx(connection, context=result, generation=generation, now=self._now())
+                assert generation is not None
+                await _require_v2_cancelled_finalization_ready_in_tx(connection, scope=result.scope, generation=generation)
+                await connection.rollback()
         return result
 
     async def flush_finalization_through(
@@ -7726,7 +7876,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, FinalizationContext):
             raise TypeError("finalization context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7783,7 +7933,7 @@ class TerminalProtocolStore:
         if plan.closing_accepted_through != context.closing_accepted_through:
             raise ValueError("terminal candidate accepted fence mismatch")
         _validate_candidate_plan_envelopes(plan)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7894,7 +8044,7 @@ class TerminalProtocolStore:
         if not isinstance(writer_admission_epoch, int) or isinstance(writer_admission_epoch, bool) or writer_admission_epoch < 0:
             raise ValueError("terminal candidate writer admission epoch is invalid")
         result: CommittedReceipt
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -7960,7 +8110,7 @@ class TerminalProtocolStore:
 
         if any(not isinstance(value, str) or not value for value in (candidate_id, candidate_projection_digest)):
             raise ValueError("terminal commit confirmation identity is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -8010,7 +8160,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, TerminalDeleteContext):
             raise TypeError("terminal delete context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -8232,7 +8382,7 @@ class TerminalProtocolStore:
             raise ValueError("evidence purge owner is invalid")
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("evidence purge limit is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -8367,7 +8517,7 @@ class TerminalProtocolStore:
         }
         if canonical_digest_v1(expected_signed_projection) != receipt.signed_receipt_digest:
             raise ValueError("evidence purge signed receipt digest is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -8438,7 +8588,7 @@ class TerminalProtocolStore:
 
         if not isinstance(context, EffectRetentionContext):
             raise TypeError("effect retention context is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -8731,7 +8881,7 @@ class TerminalProtocolStore:
             raise ValueError("effect retention provider token digest is invalid")
         now_text = _iso_utc(self._now())
         async with (
-            open_terminal_protocol_connection(self._db_path) as connection,
+            self._open_connection() as connection,
             connection.execute(
                 """
             SELECT 1 FROM turn_effect_retention_member_keys k
@@ -8759,7 +8909,7 @@ class TerminalProtocolStore:
 
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("effect retention purge limit is invalid")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -8811,7 +8961,7 @@ class TerminalProtocolStore:
             self._fault_injector(point)
 
     async def read_protocol_summary(self, context: TerminalReadContext) -> TerminalProtocolSummary:
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -8886,7 +9036,7 @@ class TerminalProtocolStore:
     async def read_checkpoint(self, context: TerminalReadContext) -> TerminalCheckpoint:
         """在一个 SQLite snapshot 中读取 pointer、receipt、manifest 与 event highwater。"""
 
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN")
             try:
@@ -8934,7 +9084,7 @@ class TerminalProtocolStore:
             if prior.team_id != context.team_id or prior.session_id != context.session_id:
                 raise ValueError("generation pointer batch contains conflicting turn identity")
         placeholders = ",".join("?" for _ in by_turn)
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 f"""
@@ -8992,7 +9142,7 @@ class TerminalProtocolStore:
         if context.auth_fence_vector_digest != expected_auth_fence_vector.auth_fence_vector_digest:
             raise ValueError("subscription promotion auth digest mismatch")
 
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -9053,7 +9203,7 @@ class TerminalProtocolStore:
             raise ValueError("frame enqueue viewer mismatch")
         if context.auth_fence_vector_digest != expected_auth_fence_vector.auth_fence_vector_digest:
             raise ValueError("frame enqueue auth digest mismatch")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             await connection.execute("BEGIN IMMEDIATE")
             try:
@@ -9120,7 +9270,7 @@ class TerminalProtocolStore:
         upper_bound = persistent_highwater if up_to_event_seq is None else up_to_event_seq
         if upper_bound > persistent_highwater:
             raise ValueError("up_to_event_seq exceeds persistent highwater")
-        async with open_terminal_protocol_connection(self._db_path) as connection:
+        async with self._open_connection() as connection:
             connection.row_factory = aiosqlite.Row
             async with connection.execute(
                 """
@@ -9188,11 +9338,12 @@ async def _read_auth_fence_vector(
 ) -> AuthFenceVector:
     entries: list[AuthFenceEpoch] = []
     for scope in sorted(scopes, key=AuthFenceScope.sort_key):
+        table = await terminal_auth_epoch_table(connection, scope.scope_kind)
         async with connection.execute(
-            """
-            SELECT epoch FROM terminal_auth_scope_epochs
+            f"""
+            SELECT epoch FROM {table}
             WHERE scope_kind=? AND team_id=? AND scope_ref=?
-            """,
+            """,  # noqa: S608 -- fixed epoch authority table selected above
             (scope.scope_kind.value, scope.team_id, scope.scope_ref),
         ) as cursor:
             row = await cursor.fetchone()
@@ -10767,6 +10918,185 @@ async def _local_billing_ledger_exists_in_tx(
         ) from exc
 
 
+_BILLING_WITNESS_PURPOSE = "sqlite-credit-settlement/v1"
+
+
+def _billing_witness_scope(fact: _LocalBillingFact) -> ReferenceScope:
+    return ReferenceScope(
+        team_id=fact.scope.team_id,
+        user_id=fact.user_id,
+        workspace_id=fact.workspace_id,
+        session_id=fact.scope.session_id,
+        policy_epoch=fact.scope.generation,
+    )
+
+
+def _billing_witness_payload(fact: _LocalBillingFact, outcome: EffectSettlementOutcome, code: str, auth_digest: str) -> dict[str, object]:
+    return {
+        "contract": "committed-credit-ledger.v1",
+        "billing_fact": fact.fact_digest,
+        "ledger_id": fact.ledger_id,
+        "usage_digest": fact.usage_digest,
+        "outcome": outcome.value,
+        "settlement_code": code,
+        "authz_snapshot_digest": auth_digest,
+    }
+
+
+def seal_committed_billing_witness(
+    cipher: ReferenceCipher,
+    fact: _LocalBillingFact,
+    outcome: EffectSettlementOutcome,
+    code: str,
+    auth_digest: str,
+) -> str:
+    """Seal only after the exact core debit/result has durably committed."""
+    return cipher.seal(
+        scope=_billing_witness_scope(fact),
+        purpose=_BILLING_WITNESS_PURPOSE,
+        identity=fact.attempt_id,
+        content=canonical_json_v1(_billing_witness_payload(fact, outcome, code, auth_digest)).encode(),
+    )
+
+
+def _verify_billing_witness_payload(
+    cipher: ReferenceCipher | None,
+    ciphertext: str,
+    fact: _LocalBillingFact,
+    generation: Mapping[str, object],
+    outcome: EffectSettlementOutcome,
+    code: str,
+) -> None:
+    if not isinstance(cipher, ReferenceCipher):
+        raise TerminalProtocolMalformedError("split billing witness key is unavailable")
+    try:
+        raw = cipher.open(scope=_billing_witness_scope(fact), purpose=_BILLING_WITNESS_PURPOSE, identity=fact.attempt_id, ciphertext=ciphertext)
+        actual = json.loads(raw)
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise TerminalProtocolMalformedError("committed billing witness is invalid") from exc
+    expected = _billing_witness_payload(fact, outcome, code, generation["execution_authz_snapshot_digest"])
+    if actual != expected:
+        raise TerminalProtocolMalformedError("committed billing witness identity changed")
+
+
+async def _verify_stored_billing_witness(
+    connection: aiosqlite.Connection,
+    cipher: ReferenceCipher,
+    fact: _LocalBillingFact,
+    generation: Mapping[str, object],
+    outcome: EffectSettlementOutcome,
+    code: str,
+) -> None:
+    async with connection.execute(
+        "SELECT billing_witness_ciphertext FROM turn_effect_settlements WHERE attempt_id=?",
+        (fact.attempt_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None or not isinstance(row[0], str):
+        raise TerminalProtocolMalformedError("committed billing witness is missing")
+    _verify_billing_witness_payload(cipher, row[0], fact, generation, outcome, code)
+
+
+async def prepare_billing_witness_for_migration(
+    connection: aiosqlite.Connection,
+    cipher: ReferenceCipher,
+    scope: TerminalScope,
+    *,
+    existing_ciphertext: str | None = None,
+) -> tuple[str, str] | None:
+    """Validate committed legacy truth, then return attempt identity and additive proof."""
+    generation = await _read_generation_claim_row(connection, scope)
+    if generation is None:
+        raise TerminalProtocolMalformedError("billing migration generation is missing")
+    fact = _local_billing_fact_from_generation(scope, generation)
+    if fact.cost_credits == 0:
+        return None
+    attempt = await _read_local_billing_attempt_in_tx(connection, fact=fact, generation=generation)
+    settlement = await _read_local_billing_settlement_outcome_in_tx(connection, attempt)
+    if settlement is None:
+        return None
+    outcome, code = settlement
+    present = await _local_billing_ledger_exists_in_tx(connection, fact)
+    if present is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
+        raise TerminalProtocolMalformedError("billing migration ledger truth conflicts")
+    if existing_ciphertext is not None:
+        _verify_billing_witness_payload(cipher, existing_ciphertext, fact, generation, outcome, code)
+        return fact.attempt_id, existing_ciphertext
+    return fact.attempt_id, seal_committed_billing_witness(cipher, fact, outcome, code, generation["execution_authz_snapshot_digest"])
+
+
+async def prepare_all_billing_witnesses_for_migration(core_path: str | Path, *, existing: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Attest settled local debits from a read-only, consistent source snapshot."""
+    from bowhead_core.sqlite_diagnostics import connect as migration_reader_connect
+
+    uri = Path(core_path).resolve().as_uri() + "?mode=ro"
+    async with migration_reader_connect(uri, uri=True) as connection:
+        connection.row_factory = aiosqlite.Row
+        await connection.execute("BEGIN")
+        try:
+            async with connection.execute(
+                "SELECT a.attempt_id,a.turn_id,a.generation,1 AS protocol_version,t.session_id,w.team_id "
+                "FROM turn_effect_attempts a JOIN turn_effect_settlements e ON e.attempt_id=a.attempt_id "
+                "LEFT JOIN turns t ON t.id=a.turn_id LEFT JOIN sessions s ON s.id=t.session_id "
+                "LEFT JOIN workspaces w ON w.id=s.workspace_id "
+                "WHERE a.provider LIKE 'credit_ledger/%' ORDER BY a.attempt_id"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            if existing is not None and set(existing) != {row["attempt_id"] for row in rows}:
+                raise TerminalProtocolMalformedError("billing migration witness identity set changed")
+            if not rows:
+                return {}
+            cipher = ReferenceCipher(os.environ.get("BOWHEAD_FERNET_KEY", ""))
+            result = {}
+            for row in rows:
+                prepared = await prepare_billing_witness_for_migration(
+                    connection,
+                    cipher,
+                    TerminalScope(
+                        team_id=row["team_id"],
+                        session_id=row["session_id"],
+                        turn_id=row["turn_id"],
+                        generation=row["generation"],
+                        protocol_version=row["protocol_version"],
+                    ),
+                    existing_ciphertext=existing[row["attempt_id"]] if existing is not None else None,
+                )
+                if prepared is None or prepared[0] != row["attempt_id"]:
+                    raise TerminalProtocolMalformedError("billing migration settlement identity changed")
+                result[prepared[0]] = prepared[1]
+            return result
+        finally:
+            await connection.rollback()
+
+
+async def _require_split_billing_capability_in_tx(
+    connection: aiosqlite.Connection,
+    *,
+    context: ExecutionGenerationContext | FinalizationContext | RecoveryProcessingContext,
+    generation: aiosqlite.Row | None,
+    now: datetime,
+) -> None:
+    if isinstance(context, FinalizationContext):
+        if (
+            generation is None
+            or not _finalization_context_matches(generation, context, now)
+            or generation["closing_reason"] != _CANCELLED_FINALIZATION_REASON
+        ):
+            raise TerminalProtocolMalformedError("cancelled billing finalization capability changed")
+        if generation["terminal_candidate_id"] is not None or generation["terminal_receipt_id"] is not None:
+            raise TerminalProtocolMalformedError("cancelled billing is frozen after candidate prepare")
+        await _read_effect_disclosure_snapshot_v2(connection, context.scope)
+    elif isinstance(context, RecoveryProcessingContext) and context.cancelled_finalization:
+        recovery = await _read_active_recovery(connection, context.recovery_id)
+        if generation is None or not _recovery_processing_matches(generation, recovery, context, now):
+            raise TerminalProtocolMalformedError("cancelled billing recovery capability changed")
+        if generation["terminal_candidate_id"] is not None or generation["terminal_receipt_id"] is not None:
+            raise TerminalProtocolMalformedError("cancelled billing is frozen after candidate prepare")
+        await _read_effect_disclosure_snapshot_v2(connection, context.scope)
+    else:
+        await _require_local_billing_capability_in_tx(connection, context=context, generation=generation, now=now)
+
+
 async def _settle_local_billing_in_tx(
     connection: aiosqlite.Connection,
     *,
@@ -10774,6 +11104,7 @@ async def _settle_local_billing_in_tx(
     attempt: EffectAttemptContext,
     now: datetime,
     inject: Callable[[TerminalProtocolFaultPoint], None],
+    committed_witness: tuple[EffectSettlementOutcome, str, str] | None = None,
 ) -> EffectAttemptContext:
     """Settle one deterministic local charge inside the caller transaction."""
 
@@ -10807,39 +11138,42 @@ async def _settle_local_billing_in_tx(
             raise TerminalProtocolMalformedError(
                 "local billing attempt is not dispatch-complete",
             )
-        try:
-            outcome_value, settlement_code = await _deduct_credit_with_stable_id_in_tx(
-                connection,
-                ledger_id=fact.ledger_id,
-                user_id=fact.user_id,
-                team_id=fact.scope.team_id,
-                cost_credits=fact.cost_credits,
-                turn_id=fact.scope.turn_id,
-                workspace_id=fact.workspace_id,
-                tokens_input=fact.input_tokens,
-                tokens_output=fact.output_tokens,
-                reason="turn",
-                rate_card_version=fact.rate_card_version,
-                model_usage=fact.model_usage,
-            )
-        except ValueError as exc:
-            raise TerminalProtocolMalformedError(
-                "local billing ledger identity changed",
-            ) from exc
-        inject(TerminalProtocolFaultPoint.LOCAL_BILLING_AFTER_LEDGER)
-        outcome = EffectSettlementOutcome(outcome_value)
-        settlement_code = settlement_code or "credit_ledger_applied"
+        if committed_witness is None:
+            try:
+                outcome_value, settlement_code = await _deduct_credit_with_stable_id_in_tx(
+                    connection,
+                    ledger_id=fact.ledger_id,
+                    user_id=fact.user_id,
+                    team_id=fact.scope.team_id,
+                    cost_credits=fact.cost_credits,
+                    turn_id=fact.scope.turn_id,
+                    workspace_id=fact.workspace_id,
+                    tokens_input=fact.input_tokens,
+                    tokens_output=fact.output_tokens,
+                    reason="turn",
+                    rate_card_version=fact.rate_card_version,
+                    model_usage=fact.model_usage,
+                )
+            except ValueError as exc:
+                raise TerminalProtocolMalformedError(
+                    "local billing ledger identity changed",
+                ) from exc
+            inject(TerminalProtocolFaultPoint.LOCAL_BILLING_AFTER_LEDGER)
+            outcome = EffectSettlementOutcome(outcome_value)
+            settlement_code = settlement_code or "credit_ledger_applied"
+        else:
+            outcome, settlement_code, witness = committed_witness
+            _verify_billing_witness_payload(getattr(connection, "bowhead_billing_cipher", None), witness, fact, generation, outcome, settlement_code)
         expected_row_version = current.row_version
     else:
         outcome, settlement_code = settlement
-        ledger_exists = await _local_billing_ledger_exists_in_tx(
-            connection,
-            fact,
-        )
-        if ledger_exists is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
-            raise TerminalProtocolMalformedError(
-                "local billing settlement disagrees with ledger truth",
-            )
+        cipher = getattr(connection, "bowhead_billing_cipher", None)
+        if cipher is not None:
+            await _verify_stored_billing_witness(connection, cipher, fact, generation, outcome, settlement_code)
+        else:
+            ledger_exists = await _local_billing_ledger_exists_in_tx(connection, fact)
+            if ledger_exists is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
+                raise TerminalProtocolMalformedError("local billing settlement disagrees with ledger truth")
         expected_row_version = current.row_version - 1
     settlement_context = _local_billing_settlement_context(
         fact=fact,
@@ -10858,6 +11192,7 @@ async def _settle_local_billing_in_tx(
         allow_v2_approval_dispatched=False,
         allow_v2_local_billing=True,
         allow_v2_llm_completion=False,
+        billing_witness_ciphertext=committed_witness[2] if committed_witness is not None else None,
     )
 
 
@@ -10900,12 +11235,14 @@ async def _require_local_billing_settled_truth_in_tx(
         raise TerminalProtocolMalformedError(
             "contract-v2 local billing is not settled",
         )
-    outcome, _ = settlement
-    ledger_exists = await _local_billing_ledger_exists_in_tx(connection, fact)
-    if ledger_exists is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
-        raise TerminalProtocolMalformedError(
-            "local billing settlement disagrees with ledger truth",
-        )
+    outcome, settlement_code = settlement
+    cipher = getattr(connection, "bowhead_billing_cipher", None)
+    if cipher is not None:
+        await _verify_stored_billing_witness(connection, cipher, fact, generation, outcome, settlement_code)
+    else:
+        ledger_exists = await _local_billing_ledger_exists_in_tx(connection, fact)
+        if ledger_exists is not (outcome is EffectSettlementOutcome.CONFIRMED_APPLIED):
+            raise TerminalProtocolMalformedError("local billing settlement disagrees with ledger truth")
     return attempt
 
 
@@ -11432,6 +11769,7 @@ async def _record_effect_settlement_in_tx(
     allow_v2_local_billing: bool,
     allow_v2_llm_completion: bool,
     allow_v2_tool_completion: bool = False,
+    billing_witness_ciphertext: str | None = None,
 ) -> EffectAttemptContext:
     async with connection.execute(
         """
@@ -11615,30 +11953,42 @@ async def _record_effect_settlement_in_tx(
         created_at=now_text,
     )
     inject(TerminalProtocolFaultPoint.EFFECT_SETTLEMENT_AFTER_EVIDENCE_LINK)
+    columns = (
+        "settlement_id",
+        "attempt_id",
+        "source",
+        "outcome",
+        "settlement_code",
+        "actor_audit_ref",
+        "authz_snapshot_digest",
+        "provider_external_ref_digest",
+        "provider_external_ref_key_version",
+        "evidence_link_id",
+        "evidence_digest",
+        "evidence_recorded_at",
+        "created_at",
+    )
+    values = (
+        context.settlement_id,
+        context.attempt_id,
+        context.source.value,
+        context.outcome.value,
+        context.settlement_code,
+        context.principal_ref,
+        context.authz_snapshot_digest,
+        context.provider_external_ref_digest,
+        context.provider_external_ref_key_version,
+        context.evidence_link_id,
+        context.evidence_digest,
+        now_text,
+        now_text,
+    )
+    if billing_witness_ciphertext is not None:
+        columns = (*columns, "billing_witness_ciphertext")
+        values = (*values, billing_witness_ciphertext)
     settlement_insert = await connection.execute(
-        """
-        INSERT INTO turn_effect_settlements(
-          settlement_id,attempt_id,source,outcome,settlement_code,
-          actor_audit_ref,authz_snapshot_digest,provider_external_ref_digest,
-          provider_external_ref_key_version,evidence_link_id,evidence_digest,
-          evidence_recorded_at,created_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """,
-        (
-            context.settlement_id,
-            context.attempt_id,
-            context.source.value,
-            context.outcome.value,
-            context.settlement_code,
-            context.principal_ref,
-            context.authz_snapshot_digest,
-            context.provider_external_ref_digest,
-            context.provider_external_ref_key_version,
-            context.evidence_link_id,
-            context.evidence_digest,
-            now_text,
-            now_text,
-        ),
+        f"INSERT INTO turn_effect_settlements({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",  # noqa: S608 -- fixed internal columns
+        values,
     )
     if settlement_insert.rowcount != 1:
         raise TerminalProtocolMalformedError("effect settlement insert failed")

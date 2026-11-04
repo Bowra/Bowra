@@ -16,6 +16,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -47,8 +48,8 @@ def test_upgrade_adds_column_keeps_rows_and_is_repeatable(tmp_path: Path) -> Non
             ("art_legacy", "old.csv", "text/csv", 12, "bi_fetch_rows", "/tmp/old.csv", "2026-09-01"),
         )
 
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")  # Idempotent: second call must not fail.
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)  # Idempotent: second call must not fail.
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore the ledger to head; later historical revisions (e.g. 0063 table creation) may not be rerunnable on an upgraded database.
     command.upgrade(config, MIGRATION.revision)  # Replaying the same revision must not fail either.
@@ -73,7 +74,7 @@ def test_both_maintenance_paths_agree(tmp_path: Path) -> None:
     """
     # Path A: Alembic.
     via_alembic = tmp_path / "alembic.db"
-    command.upgrade(_config(via_alembic), "head")
+    command.upgrade(_config(via_alembic), SOURCE_REVISION)
     with sqlite3.connect(via_alembic) as db:
         assert "row_count" in {r[1] for r in db.execute("PRAGMA table_info(artifacts)")}
     # Store initialize must also succeed on an already migrated database (ALTER loop must be idempotent).
@@ -102,7 +103,7 @@ def test_both_maintenance_paths_agree(tmp_path: Path) -> None:
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "extracted_rows", "per_row_jobs", "team_templates", "matrix"])
 def test_non_core_target_untouched(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
         assert "artifacts" not in tables, f"{target} 目标不该有 artifacts 表"

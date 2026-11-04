@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.context_segments import CONTEXT_SEGMENT_BYTES, MAX_CONTEXT_BYTES, MAX_CONTEXT_PARTS, SegmentReference
+from bowhead_core.sqlite_domain_runtime import connect_sync
 
 PREFIX = b"bowhead-continuation-segments.v1\n"
 
@@ -92,7 +92,7 @@ def open_payload(
     if reference.kind != kind or reference.turn_id != turn_id or sum(part.byte_count for part in reference.segments) != reference.byte_count:
         raise ValueError("continuation_payload_scope_invalid")
     uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True) as db:
+    with connect_sync(uri, uri=True) as db:
         rows = db.execute(
             "SELECT ordinal,digest,byte_count,ciphertext FROM continuation_payload_segments "
             "WHERE kind=? AND owner_id=? AND session_id=? AND turn_id=? ORDER BY ordinal",

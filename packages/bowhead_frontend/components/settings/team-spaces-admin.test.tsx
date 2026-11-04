@@ -216,7 +216,7 @@ describe("TeamSpacesAdmin 行尾「⋯」（外观段第四批）", () => {
     await screen.findByText("Unjoined");
     expect(screen.queryByRole("button", { name: "归档" })).toBeNull();
     const menu = await openRowMenu("Unjoined 的更多操作");
-    expect(menuItemNames(menu)).toEqual(["管理员", "空间说明", "归档"]);
+    expect(menuItemNames(menu)).toEqual(["管理员", "AI 工作说明", "归档"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "归档" }));
     await waitFor(() => expect(archiveTeamSpace).toHaveBeenCalledWith("ws_unjoined", 7));
     expect(screen.queryByRole("dialog", { name: "归档" })).toBeNull();
@@ -240,8 +240,8 @@ describe("TeamSpacesAdmin 行尾「⋯」（外观段第四批）", () => {
     });
     vi.mocked(listSpaceInstructionVersions).mockResolvedValue([]);
     renderIntl(<TeamSpacesAdmin />);
-    await chooseRowAction("Unjoined 的更多操作", "空间说明", { danger: false });
-    const dialog = await screen.findByRole("dialog", { name: "「Unjoined」的空间说明" });
+    await chooseRowAction("Unjoined 的更多操作", "AI 工作说明", { danger: false });
+    const dialog = await screen.findByRole("dialog", { name: "「Unjoined」的 AI 工作说明" });
     expect(await within(dialog).findByRole("textbox")).toBeTruthy();
     expect(getSpaceInstructions).toHaveBeenCalledWith("ws_unjoined");
   });

@@ -15,13 +15,13 @@ import os
 import sqlite3
 import traceback
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import bowhead_gateway.terminal_protocol_rollout as terminal_rollout
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.approval_store import ApprovalStore
 from bowhead_core.clarification_store import (
@@ -32,6 +32,8 @@ from bowhead_core.events import EventBusRegistry, OrchestratorEvent
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.plan_store import PlanStore
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_runtime import connect_sync
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.terminal_generation_bus import GenerationEventBusRegistry
 from bowhead_core.terminal_protocol import TerminalProtocolMalformedError
 from bowhead_core.terminal_protocol_store import (
@@ -51,6 +53,7 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from bowhead_gateway.terminal_approval_runner import TerminalApprovalRunner
+from gateway_legacy_database import upgrade
 
 
 @pytest.fixture(autouse=True)
@@ -150,12 +153,15 @@ class _ProviderExecutor:
         return True, {"provider": "applied", "call": self.calls}, None
 
 
-def _initialize_db(path: str) -> None:
+async def _initialize_db(path: str, monkeypatch) -> None:
     now = datetime.now(tz=UTC)
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{Path(path).with_name('bowhead.db')}", target="core")
+    from community_http_fixture import initialize_community_http_installation
+
+    await initialize_community_http_installation(UserStore(path), monkeypatch)
     with sqlite3.connect(path) as connection:
         connection.execute(
             "INSERT INTO teams(id,name,status,created_at,created_by_user_id) VALUES ('team_1','Team','active',?,'u_1')",
@@ -208,6 +214,9 @@ async def _build_app(
 ) -> tuple[Any, TerminalProtocolStore, TerminalRuntimeFactory, _Orchestrator]:
     user_store = UserStore(db_path)
     await user_store.initialize()
+    from community_http_fixture import initialize_community_http_installation
+
+    await initialize_community_http_installation(user_store, monkeypatch)
     access_store = AccessControlStore(db_path)
     await access_store.initialize()
     session_store = SessionStore(db_path)
@@ -283,6 +292,7 @@ async def _build_app(
             active_datarc_workspace_name="",
             accessible_datarc_workspaces=(),
             datarc_absence_reason="",
+            connection_binding=None,
         )
 
     async def team_runtime(*_args: Any, **_kwargs: Any) -> tuple[object, object]:
@@ -390,7 +400,7 @@ async def _wait_for_receipt(
     attempts: int = 100,
 ) -> tuple[str, str | None]:
     for _ in range(attempts):
-        with sqlite3.connect(db_path) as connection:
+        with connect_sync(domain_database_path(db_path, "execution")) as connection:
             row = connection.execute(
                 "SELECT status,reason_code FROM turn_terminal_receipts WHERE turn_id=? AND generation=?",
                 (turn_id, generation),
@@ -469,6 +479,7 @@ async def _hard_kill_resume_child_main(
             active_datarc_workspace_name="",
             accessible_datarc_workspaces=(),
             datarc_absence_reason="",
+            connection_binding=None,
         )
 
     async def team_runtime(
@@ -553,7 +564,7 @@ def _hard_kill_resume_child(db_path: str, request_id: str) -> None:
 
 
 def _assert_exact_n_plus_one(db_path: str, expected: tuple[str, str | None]) -> None:
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         generations = connection.execute("SELECT generation,state FROM turn_generations WHERE turn_id='t_1' ORDER BY generation").fetchall()
         receipts = connection.execute("SELECT status,reason_code FROM turn_terminal_receipts WHERE turn_id='t_1' AND generation=2").fetchall()
         turn_usage = connection.execute(
@@ -573,9 +584,10 @@ async def test_typed_start_requires_internal_release_and_explicit_writer(
     monkeypatch: pytest.MonkeyPatch,
     writer_config: str | None,
 ) -> None:
+    monkeypatch.setenv("BOWHEAD_PLANNING_MODE", "1")
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
-    with sqlite3.connect(db_path) as connection:
+    await _initialize_db(db_path, monkeypatch)
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         now = datetime.now(tz=UTC).isoformat()
         connection.execute(
             "UPDATE users SET credit_balance=999999 WHERE id='u_1'",
@@ -1099,7 +1111,7 @@ async def test_typed_start_requires_internal_release_and_explicit_writer(
                 assert turn_id == "t_99999999999999999999999999999999"
                 if stale_owner_bind_calls == 1:
                     return await real_bind_execution_turn(plan_id, turn_id)
-                with sqlite3.connect(db_path) as connection:
+                with connect_sync(domain_database_path(db_path, "execution")) as connection:
                     connection.execute(
                         "UPDATE plans SET execution_turn_id='t_newer_plan_owner' WHERE id=? AND execution_turn_id=?",
                         (plan_id, turn_id),
@@ -1342,7 +1354,7 @@ async def test_typed_start_requires_internal_release_and_explicit_writer(
     assert planning_version is None
     assert auto_planning_version is None
     assert canonical_replay_version is None
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         receipt = connection.execute(
             "SELECT actual_session_id,turn_id FROM chat_submission_receipts WHERE client_submission_id='22222222-2222-4222-8222-222222222222'",
         ).fetchall()
@@ -1445,7 +1457,7 @@ async def test_persisted_v1_resolve_double_resume_and_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, orchestrator = await _build_app(
         db_path,
@@ -1508,7 +1520,7 @@ async def test_persisted_v1_stream_replays_checkpoint_and_current_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     app, _store, factory, _orchestrator = await _build_app(
         db_path,
         monkeypatch,
@@ -1562,7 +1574,7 @@ async def test_v1_read_surfaces_distinguish_malformed_scope_from_dependency_outa
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     app, _store, factory, _orchestrator = await _build_app(
         db_path,
         monkeypatch,
@@ -1596,7 +1608,7 @@ async def test_persisted_v1_resume_task_creation_failure_is_durable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, orchestrator = await _build_app(
         db_path,
@@ -1639,7 +1651,7 @@ async def test_persisted_v1_dismiss_replay_commits_one_control_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, _orchestrator = await _build_app(
         db_path,
@@ -1670,7 +1682,7 @@ async def test_persisted_v1_dismiss_replay_commits_one_control_generation(
         db_path,
         ("cancelled", "clarification_dismissed"),
     )
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         assert connection.execute(
             "SELECT status FROM clarification_requests WHERE request_id=?",
             (clarification.request_id,),
@@ -1683,7 +1695,7 @@ async def test_persisted_v1_resolve_without_resume_first_and_replay_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, orchestrator = await _build_app(
         db_path,
@@ -1730,7 +1742,7 @@ async def test_persisted_v1_approval_provider_runs_once_on_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, _orchestrator = await _build_app(
         db_path,
@@ -1785,7 +1797,7 @@ async def test_persisted_v1_approval_provider_runs_once_on_replay(
         None,
     )
     _assert_exact_n_plus_one(db_path, ("completed", None))
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM turn_effect_attempts WHERE state='settled'").fetchone() == (1,)
         assert connection.execute("SELECT COUNT(*) FROM turn_control_decisions").fetchone() == (1,)
 
@@ -1795,7 +1807,7 @@ async def test_persisted_v1_approval_reject_replay_commits_one_control_generatio
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     monkeypatch.setenv("FEATURE_DURABLE_CHAT_EXECUTION_V1", "off")
     app, _store, factory, _orchestrator = await _build_app(
         db_path,
@@ -1832,7 +1844,7 @@ async def test_persisted_v1_approval_reject_replay_commits_one_control_generatio
         db_path,
         ("cancelled", "approval_rejected"),
     )
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM turn_control_decisions").fetchone() == (1,)
 
 
@@ -1845,10 +1857,10 @@ async def test_real_gateway_hard_kill_after_open_recovers_without_n_plus_two(
 
     monkeypatch.chdir(tmp_path)
     db_path = str(tmp_path / "bowhead.db")
-    _initialize_db(db_path)
+    await _initialize_db(db_path, monkeypatch)
     # Both are real Gateway startups: first upgrade every SQLite target to head, as in production (since a763f7abc, lifespan
     # reads files DB's kb_rebuild_jobs; upgrading core alone fails during startup).
-    upgrade(f"sqlite+aiosqlite:///{db_path}")
+    upgrade(f"sqlite+aiosqlite:///{Path(db_path).with_name('bowhead.db')}")
     seed_app, _store, seed_factory, _orchestrator = await _build_app(
         db_path,
         monkeypatch,
@@ -1861,7 +1873,7 @@ async def test_real_gateway_hard_kill_after_open_recovers_without_n_plus_two(
     # The helper writer is not a running process.  Relinquish only that setup
     # lease before boot one; after the child dies, the test never edits the
     # production lease and boot two must wait for its natural expiry.
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         connection.execute(
             """
             UPDATE terminal_protocol_writer_lease
@@ -1872,6 +1884,9 @@ async def test_real_gateway_hard_kill_after_open_recovers_without_n_plus_two(
         )
         connection.commit()
 
+    from community_http_fixture import prepare_gateway_fixture
+
+    await prepare_gateway_fixture(db_path, monkeypatch)
     context = multiprocessing.get_context("spawn")
     child = context.Process(
         target=_hard_kill_resume_child,
@@ -1891,7 +1906,7 @@ async def test_real_gateway_hard_kill_after_open_recovers_without_n_plus_two(
         raise AssertionError("hard-kill Gateway child did not exit")
     assert child.exitcode == 73
 
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         generation_rows = connection.execute(
             """
             SELECT generation,state,claim_epoch,execution_started_at

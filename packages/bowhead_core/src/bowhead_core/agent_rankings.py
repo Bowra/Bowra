@@ -18,6 +18,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import TeamSubagentAccessDecision, TeamSubagentAccessResolver
 
 RankingKind = Literal["popular", "trending"]
@@ -26,7 +27,7 @@ PRIVACY_FLOOR = 5
 
 class AgentRankingStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def collection(
         self,

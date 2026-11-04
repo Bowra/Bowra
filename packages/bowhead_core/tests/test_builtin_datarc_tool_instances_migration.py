@@ -7,6 +7,7 @@ from importlib import import_module
 
 import pytest
 from alembic import command
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore
 from cryptography.fernet import Fernet
 from test_artifact_workspace_cutover_migration import _config
@@ -52,7 +53,7 @@ def test_builtin_datarc_instance_migration_is_scoped_and_preserves_tavily(tmp_pa
 async def test_builtin_datarc_instances_round_trip_encrypted_credentials(tmp_path, monkeypatch):
     path = tmp_path / "core.db"
     config = _config(path, "core")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         db.execute("INSERT INTO teams(id,name,max_seats,default_user_tier,status,created_at) VALUES ('team_1','Team',1,'pro','active','t')")
         db.commit()

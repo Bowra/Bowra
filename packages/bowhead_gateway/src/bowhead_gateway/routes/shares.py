@@ -6,7 +6,7 @@ tech-design.md §3. Owner-facing share management for the SHAREABLE_KINDS
 ``bowhead_core.share_service``; admin's ``/api/v1/resource-grants`` console
 stays separate but writes the same ``resource_grants`` table.
 
-Mounted in main.py under ``content_sharing_enabled()`` (default ON). Per-kind
+Report management stays mounted for inspection/revocation when sharing is off. Per-kind
 the capability assets additionally follow their creation flag (dark kind →
 404, same as its CRUD routes). DTOs are ``extra="forbid"`` and carry NO
 ``effect`` / ``permission`` / ``expires_at`` fields: user-side shares are
@@ -39,6 +39,7 @@ from bowhead_gateway.access_context import (
     require_space_lifecycle_without_authorization,
 )
 from bowhead_gateway.routes.auth import _current_user, _store
+from bowhead_gateway.sharing_policy import require_sharing_expansion
 
 if TYPE_CHECKING:
     from bowhead_core.access_control import AccessControlStore, ResourceGrantRecord
@@ -148,6 +149,8 @@ async def _resolve_shareable(
     rid = (rid or "").strip()
     if kind not in SHAREABLE_KINDS or not rid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported kind")
+    if kind != "report" and not share_service.content_sharing_enabled():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     canvas_store = getattr(request.app.state, "canvas_store", None)
     if kind == "report" and canvas_store is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "canvas store not configured")
@@ -396,6 +399,8 @@ async def get_shares(
         # nudge "N 个访问申请待处理 →". Best-effort; never block the share roster.
         base["pending_requests"] = await _pending_request_count(request, user, res)
         return base
+    if not share_service.content_sharing_enabled():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     # 0708 ⑤: recipient's read-only view shows "由 X 分享" — resolve owner name too.
     try:
         _owner_names = await store.get_users_by_ids([res.owner_id]) if res.owner_id else {}
@@ -449,6 +454,8 @@ async def put_audience(
         operation=SpaceOperation.WRITE,
     )
     _reject_obsolete_team_subagent_write(res.kind)
+    if body.audience != "private":
+        require_sharing_expansion(res.kind)
     await _guard_team_skill_downgrade(store, user, res, body.audience)  # P2-C: approved team_wide downgrades are admin-only.
     try:
         result = await share_service.set_audience(
@@ -506,6 +513,7 @@ async def create_share_grant(
         operation=SpaceOperation.WRITE,
     )
     _reject_obsolete_team_subagent_write(res.kind)
+    require_sharing_expansion(res.kind)
     pid = body.principal_id.strip()
     if body.principal_type == "user":
         target = await store.get_user(pid)
@@ -669,7 +677,7 @@ async def revoke_share_grant(
     grant = await access_store.get_resource_grant(user.team_id, grant_id)
     if grant is None or grant.resource_kind != res.kind or grant.resource_id != res.resource_id or grant.revoked_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "grant not found")
-    if grant.principal_type == "team":
+    if grant.principal_type == "team" and res.kind != "report":
         # P2-C: deleting a team-principal grant unpublishes an approved team_wide skill (set_audience(custom)
         # writes through visibility). team_skill unpublishing is admin-only, preventing author bypass via owner short-circuiting.
         await _guard_team_skill_downgrade(store, user, res, "custom")

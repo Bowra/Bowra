@@ -27,6 +27,8 @@ from bowhead_core.artifact_store import _open_db
 from bowhead_core.documents.canvas_inputs import cleanup_canvas_inputs
 from bowhead_core.documents.inputs import cleanup_document_inputs
 from bowhead_core.documents.upload_confirmation import cleanup_confirmations, has_confirmation_schema
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.kb.files_store import KbFilesStore
@@ -124,7 +126,7 @@ async def _sweep_once(
         cascade_ok = True
         try:
             if kb_files_store is not None:
-                async with aiosqlite.connect(kb_files_store._db_path) as kb_db:
+                async with diagnostic_connect(kb_files_store._db_path) as kb_db:
                     await kb_db.execute(
                         "DELETE FROM kb_files WHERE artifact_id=?",
                         (aid,),
@@ -138,7 +140,7 @@ async def _sweep_once(
                 e,
             )
 
-        async with _open_db(artifact_store.db_path) as db:
+        async with _open_db(domain_database_path(artifact_store.db_path, "execution")) as db:
             try:
                 await db.execute(
                     "DELETE FROM session_attachments WHERE artifact_id=?",
@@ -168,11 +170,13 @@ async def _sweep_once(
             # 3. Artifact row last — gated on 'expiring' so a future
             #    concurrent (impossible in single-pod, defensive otherwise)
             #    actor can't lose work.
-            final = await db.execute(
-                "DELETE FROM artifacts WHERE id=? AND status='expiring'",
-                (aid,),
-            )
             await db.commit()
+            async with _open_db(domain_database_path(artifact_store.db_path, "content")) as content_db:
+                final = await content_db.execute(
+                    "DELETE FROM artifacts WHERE id=? AND status='expiring'",
+                    (aid,),
+                )
+                await content_db.commit()
             if final.rowcount != 1:
                 cascade_ok = False
 

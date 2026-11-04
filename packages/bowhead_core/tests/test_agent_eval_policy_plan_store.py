@@ -33,6 +33,7 @@ from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
 from bowhead_core.agent_revision_store import AgentPublicationValidation, AgentReleaseStaleError, AgentRevisionStore
 from bowhead_core.agent_version_automation import AgentVersionAutomationError
 from bowhead_core.agent_version_service import AgentVersionError, AgentVersionService
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -60,7 +61,7 @@ def _upgrade(path: Path) -> None:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
 
 
 def _seed(path: Path, *, owner_expected_contract: dict[str, Any] | None = None) -> None:

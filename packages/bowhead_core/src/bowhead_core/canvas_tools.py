@@ -1,10 +1,8 @@
-"""Canvas-facing tools for LLM：`add_chart` / `canvas_add_external_iframe`.
+"""Native Canvas Tools using exact CSV columns and explicit plot bindings.
 
-`add_chart` 是 Phase 1 主入口：LLM 拿 fetch_rows 返的 artifact_id → 这里读 CSV →
-infer_chart_spec → 落 canvas_store + 实时 SSE 广播. 前端即时 hydrate.
-
-（`canvas_add_iframe` 已下线：datarc 卡片不再嵌 iframe，一律走原生 chart；datarc_iframe
-section kind + FE renderer 仅保留渲染历史报告。外部 URL 嵌入走 `canvas_add_external_iframe`。）
+The chart Tool preserves authorized source identity, atomic persistence and live
+events. Historical saved figures remain readable; new requests never infer or
+reduce displayed content.
 """
 
 from __future__ import annotations
@@ -25,13 +23,12 @@ from bowhead_router.types import ToolSchema
 
 from bowhead_core.agents._lead_context import run_ref_allowlist
 from bowhead_core.canvas_store import CanvasRevConflictError
-from bowhead_core.chart import ChartColumn, infer_chart_spec, spec_to_dict
+from bowhead_core.chart import ChartColumn, spec_to_dict
 from bowhead_core.chart.date_display import apply_date_patterns
+from bowhead_core.chart.explicit import PLOT_KINDS, ExplicitPresentationError, compile_view, input_properties, validate_request
 from bowhead_core.chart.expression import composition, derive_columns, schema_properties, structured
-from bowhead_core.chart.infer import _take_top_n, indistinguishable_rows_reason
 from bowhead_core.chart.numeric_display import apply_column_display, currency_identity
 from bowhead_core.chart.presentation_plan import ChartPlanError, compile_notes_plan, evidence_notes_schema, parse_plan_input, verify_plan_notes
-from bowhead_core.chart.types import VALID_HINTS, capped_series, downsampled_points
 from bowhead_core.chart.units_enrich import (
     can_enrich_from_current_datarc_turn,
     enrich_columns_with_units,
@@ -60,7 +57,6 @@ class _PreparedChartDataset(NamedTuple):
     rows: list[dict[str, Any]]
     columns: list[ChartColumn]
     non_finite: dict[str, int]
-    reselect_meta: dict[str, Any] | None
     derived_bytes: bytes | None
     calculation_metadata: list[dict[str, Any]] | None
     calculation_missing: dict[str, int] | None
@@ -76,63 +72,6 @@ class _PreparedChartDataset(NamedTuple):
 # `skipped` reason so LLM can correct next iteration.
 _VALID_DATA_ARTIFACT_ID_RE = re.compile(r"^art_[a-f0-9]{12}$")
 _SIMPLE_INT_REF_RE = re.compile(r"^\d{1,4}$")
-_SERIES_TITLE_HINTS = ("走势", "趋势", "月度", "各月", "每月", "同比", "环比", " vs ", "VS")
-_TIME_COLUMN_HINTS = ("月份", "每月", "年月", "日期", "时间", "周", "季度", "year", "month", "date")
-_MONTHLY_FILENAME_HINTS = ("各月", "月度", "每月", "逐月")
-# #5 (dingsiyan 2026-07-07): titles implying a temporal PROGRESSION genuinely need
-# ≥2 time points; a 1-row scalar under these is a wrong-artifact mistake. Narrower
-# than _SERIES_TITLE_HINTS — excludes 同比/环比/vs, which can legitimately be 1 row.
-_TREND_PROGRESSION_HINTS = ("走势", "趋势", "月度", "各月", "每月", "逐月")
-
-_METRIC_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("refund_rate", ("退款率", "退货率", "refund")),
-    ("profit_margin", ("利润率", "毛利率", "margin")),
-    ("traffic", ("客流量", "客流", "人次", "traffic")),
-    ("sales_volume", ("销售量", "销量", "件数", "volume")),
-    ("floor_efficiency", ("月坪效", "坪效")),
-    ("ipt", ("ipt", "pit", "客单价")),
-    ("profit", ("利润", "profit")),
-    ("revenue", ("营业额", "营收", "收入", "销售额", "revenue", "turnover")),
-)
-_METRIC_EXCLUSION_TERMS: dict[str, tuple[str, ...]] = {
-    "revenue": ("利润", "利润率", "客流", "销售量", "销量", "退款率", "月坪效", "ipt", "pit"),
-    "profit": ("营业额", "营收", "收入", "客流", "销售量", "销量", "退款率", "月坪效", "ipt", "pit"),
-    "traffic": ("营业额", "营收", "收入", "利润", "销售量", "销量", "退款率", "月坪效", "ipt", "pit"),
-    "refund_rate": ("营业额", "营收", "收入", "利润", "客流", "销售量", "销量", "月坪效", "ipt", "pit"),
-    "profit_margin": ("营业额", "营收", "收入", "客流", "销售量", "销量", "退款率", "月坪效", "ipt", "pit"),
-    "sales_volume": ("营业额", "营收", "收入", "利润", "客流", "退款率", "月坪效", "ipt", "pit"),
-    "floor_efficiency": ("营业额", "营收", "收入", "利润", "客流", "销售量", "销量", "退款率", "ipt", "pit"),
-    "ipt": ("利润", "利润率", "客流", "销售量", "销量", "退款率", "月坪效"),
-}
-_LATIN_TERM_CHARS = r"a-z0-9_"
-
-
-def _contains_search_term(text: str, term: str) -> bool:
-    term_l = str(term or "").lower()
-    if not term_l:
-        return False
-    text_l = str(text or "").lower()
-    if re.search(r"[a-z0-9]", term_l):
-        return (
-            re.search(
-                rf"(?<![{_LATIN_TERM_CHARS}]){re.escape(term_l)}(?![{_LATIN_TERM_CHARS}])",
-                text_l,
-            )
-            is not None
-        )
-    return term_l in text_l
-
-
-def _segments_in_text(text: str) -> set[str]:
-    text_s = str(text or "")
-    segments: set[str] = set()
-    without_non_member = text_s
-    if "非会员" in without_non_member:
-        segments.add("非会员")
-        without_non_member = without_non_member.replace("非会员", "")
-    if "会员" in without_non_member:
-        segments.add("会员")
-    return segments
 
 
 def _metric_inc(name: str, labels: dict[str, str] | None = None) -> None:
@@ -209,17 +148,9 @@ def register_canvas_tools(registry: ToolRegistry) -> None:
 # add_chart
 # ─────────────────────────────────────────────────────────────
 def _add_chart_schema() -> ToolSchema:
-    return ToolSchema(
+    schema = ToolSchema(
         name="add_chart",
-        description=(
-            "把一份数据加到画布作为**原生交互图表**（折线/柱/饼/瀑布/桑基/热力 自动选型，"
-            "用户可切换视角）. **画图默认走这里** — 数据源两种: "
-            "①`bi_query` 返的 `_ref_artifact_id`; "
-            "②**`python_sandbox` 算出的数据**（code 里 `df.to_csv('out.csv', index=False)`，"
-            "取 `output_artifacts[0].artifact_id` 传进来 — 不要 `savefig` 出 PNG）. "
-            "**不要**把 rows 逐字填进来；数据走 artifact_id 引用. "
-            "The display receipt reports saved dimension types, date patterns and known axis scale; a category axis is not proportional elapsed time."
-        ),
+        description="Present an authorized CSV as a native Table or an explicitly bound plot. Tables default to every original column; exact columns preserve constants and order. Plots require force_kind, exact axes and group_by ([] for no split). Never infer, prune, aggregate, rank or sample content. Check the saved display_receipt before claiming completion.",
         input_schema={
             "type": "object",
             "required": ["data_artifact_id", "title"],
@@ -243,32 +174,6 @@ def _add_chart_schema() -> ToolSchema:
                         "不要填 chart_section_id / chart simple id."
                     ),
                 },
-                "hint": {
-                    "type": "string",
-                    "enum": ["trend", "rank", "share", "compare", "correlation", "composition", "raw", "bridge", "flow"],
-                    "default": "raw",
-                    "description": (
-                        "Optional analysis intent: trend=time trend; rank=ranking; share=share; compare=comparison; "
-                        "correlation=relationship; composition=stacked composition; bridge=signed contributions "
-                        "to a total change (one category and one numeric increment column); flow=source-to-target "
-                        "flow (source, target and flow amount columns); raw=prepared observations without a specific "
-                        "analysis intent. Omitted hint defaults to raw. For an explicitly requested Table, use "
-                        "force_kind=table. "
-                        "The host selects a native chart from the hint and dataset shape; explicit force_kind is preserved."
-                    ),
-                },
-                "series": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "（可选，宽表强烈建议）要画的**数值列名**，按顺序。维度轴（省/日期/分类）"
-                        "服务端自动带上，这里只列数值列。不传时服务端按 hint 猜一列，"
-                        "宽表上很容易猜错——例如 18 列的表里想画「7月 vs 6月」，"
-                        "不传就只会画出 7 月一根柱子。想对比就写全：['营业额', '营业额_6月']. "
-                        "⚠ **用户点名的指标列必须写进来**：数据里有、但没进 series 的列不会进图"
-                        "（真机踩过：artifact 里有『营业额同比变化率』列，series 只写了两条绝对值，用户点名的那项就没了）。"
-                    ),
-                },
                 "title": {
                     "type": "string",
                     "description": "Chart subject (up to 30 characters). Put source units in column_units, not in a global title unit; the renderer discloses actual display units.",
@@ -287,32 +192,8 @@ def _add_chart_schema() -> ToolSchema:
                 },
                 "force_kind": {
                     "type": "string",
-                    # chart-surfacing-fix WP3: match chart/types.py ChartKind; add combo /
-                    # waterfall / sankey / heatmap (already implemented in FE chart-block.tsx SUPPORTED_CHARTJS).
-                    # Deliberately omit geo: chartjs-chart-geo is not installed; requesting it falls back to ChartFallbackTable.
-                    "enum": [
-                        "kpi",
-                        "line",
-                        "bar",
-                        "hbar",
-                        "pie",
-                        "stacked_bar",
-                        "dual_axis",
-                        "combo",
-                        "scatter",
-                        "area_stacked",
-                        "waterfall",
-                        "sankey",
-                        "heatmap",
-                        "table",
-                    ],
-                    "description": (
-                        '（可选）强制图表类型。**用户点名了形态就填**（点名要表格 → `"table"`，'
-                        "不看行数）；用户没点名就别填，让推断引擎按数据形状决定。"
-                        "⚠ `scatter` **会自动给点标名字**：从分类列取身份，挑出互不重叠的一批"
-                        "常驻标注（导出/触屏下必标），其余 hover 可见。"
-                        "所以用户说「每个点标上名字」时用这个，**不要转去 savefig 出图片**。"
-                    ),
+                    "enum": ["table", *sorted(PLOT_KINDS)],
+                    "description": "Omit for an all-column Table. Plots require an explicit kind, axes and group_by.",
                 },
                 "column_units": {
                     "type": "object",
@@ -357,22 +238,6 @@ def _add_chart_schema() -> ToolSchema:
                         "否则两列都会退回普通数。"
                     ),
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": (
-                        "（可选）只画前 N 项，用于排名/Top 榜。按主数值列取真正的前 N（传了 `sort_by` 就按它），"
-                        "图下会写明「仅显示前 N 项 · 共 M 项」。"
-                        "**数据带时间轴时会被忽略**——截时间序列等于丢掉一段时间；"
-                        "只想看最近 N 期就在取数或沙箱里先筛好再画。"
-                    ),
-                },
-                "sort_by": {
-                    "type": "string",
-                    "description": (
-                        "（可选）限行前按此数值列降序排. 例如 fetch 出的全量行里按'金额'拿 top 10 柱状图. "
-                        "⚠️ 它管的是**行怎么排**，不是**画哪几列**——要指定画哪些列请用 `series`."
-                    ),
-                },
                 "anchor_heading": {
                     "type": "string",
                     # canvas-update-turn batch B2-4: old description promised title-matched ordering during compose, but the sole consumer
@@ -389,239 +254,14 @@ def _add_chart_schema() -> ToolSchema:
         },
     )
 
-
-def _chart_request_needs_series(args: dict[str, Any]) -> bool:
-    hint = str(args.get("hint") or "").strip().lower()
-    title = f" {args.get('title') or ''} ".lower()
-    return hint in {"trend", "compare"} or any(h.lower() in title for h in _SERIES_TITLE_HINTS)
-
-
-def _title_implies_time_progression(args: dict[str, Any]) -> bool:
-    """Title/hint implies a temporal PROGRESSION (走势/月度…, or hint='trend') that
-    genuinely needs ≥2 time points. Narrower than _chart_request_needs_series: it
-    excludes 同比/环比/vs and hint='compare', which can legitimately be a single
-    row. Used to (a) enable artifact reselect for an explicit scalar-for-trend
-    mistake and (b) gate the one-row-scalar safety-net — see _add_chart
-    (dingsiyan 2026-07-07)."""
-    if str(args.get("hint") or "").strip().lower() == "trend":
-        return True
-    title = str(args.get("title") or "")
-    return any(h in title for h in _TREND_PROGRESSION_HINTS)
-
-
-def _desired_metric_keys(args: dict[str, Any]) -> tuple[str, ...]:
-    text = f"{args.get('title') or ''} {args.get('subtitle') or ''}".lower()
-    keys: list[str] = []
-    for key, terms in _METRIC_TERMS:
-        if any(_contains_search_term(text, term) for term in terms):
-            keys.append(key)
-    return tuple(keys)
-
-
-def _has_time_axis(cols: list[ChartColumn]) -> bool:
-    for col in cols:
-        key = str(getattr(col, "key", "") or "")
-        header = str(getattr(col, "header", "") or "")
-        lower = f"{key} {header}".lower()
-        if getattr(col, "type", None) == "date":
-            return True
-        if any(h.lower() in lower for h in _TIME_COLUMN_HINTS):
-            return True
-    return False
-
-
-def _artifact_signature(art: Any, cols: list[ChartColumn]) -> str:
-    filename = str(getattr(art, "filename", "") or "")
-    col_text = " ".join(f"{getattr(col, 'key', '')} {getattr(col, 'header', '')}" for col in cols)
-    return f"{filename} {col_text}".lower()
-
-
-def _chart_source_score(
-    *,
-    args: dict[str, Any],
-    art: Any,
-    rows: list[dict[str, Any]],
-    cols: list[ChartColumn],
-) -> int:
-    need_series = _chart_request_needs_series(args)
-    metric_keys = _desired_metric_keys(args)
-    title = str(args.get("title") or "").lower()
-    filename = str(getattr(art, "filename", "") or "").lower()
-    signature = _artifact_signature(art, cols)
-    score = 0
-
-    if metric_keys:
-        desired_terms = {term.lower() for key, terms in _METRIC_TERMS if key in metric_keys for term in terms}
-        for metric_key in metric_keys:
-            wanted_terms = next((terms for key, terms in _METRIC_TERMS if key == metric_key), ())
-            if any(_contains_search_term(signature, term) for term in wanted_terms):
-                score += 80
-            else:
-                score -= 60
-            for bad in _METRIC_EXCLUSION_TERMS.get(metric_key, ()):
-                bad_l = bad.lower()
-                if bad_l in desired_terms:
-                    continue
-                if _contains_search_term(signature, bad_l):
-                    score -= 60
-
-    if need_series:
-        score += 100 if len(rows) >= 2 else -200
-        if _has_time_axis(cols):
-            score += 40
-        if any(h.lower() in filename for h in _MONTHLY_FILENAME_HINTS):
-            score += 45
-        elif "月" in filename and len(rows) <= 1:
-            score -= 20
-
-    years = set(re.findall(r"20\d{2}", title))
-    if years:
-        signature_years = set(re.findall(r"20\d{2}", signature))
-        if years & signature_years:
-            score += 25
-        elif signature_years:
-            score -= 80
-        else:
-            score -= 10
-
-    title_segments = _segments_in_text(title)
-    signature_segments = _segments_in_text(signature)
-    if title_segments:
-        score -= 80 * len(title_segments - signature_segments)
-        score -= 35 * len(signature_segments - title_segments)
-    else:
-        score -= 25 * len(signature_segments)
-    return score
-
-
-def _candidate_filename_allows_reselect(args: dict[str, Any], filename: str) -> bool:
-    """Skip obvious mismatches before reading/parsing candidate CSV files."""
-    name = str(filename or "").lower()
-    if not name:
-        return True
-    title = str(args.get("title") or "").lower()
-    title_years = set(re.findall(r"20\d{2}", title))
-    filename_years = set(re.findall(r"20\d{2}", name))
-    if title_years and filename_years and not (title_years & filename_years):
-        return False
-
-    title_segments = _segments_in_text(title)
-    filename_segments = _segments_in_text(name)
-    if title_segments and filename_segments and not (title_segments & filename_segments):
-        return False
-
-    metric_keys = _desired_metric_keys(args)
-    if metric_keys:
-        desired_terms = {term.lower() for key, terms in _METRIC_TERMS if key in metric_keys for term in terms}
-        has_desired = any(_contains_search_term(name, term) for term in desired_terms)
-        bad_terms = {term.lower() for key in metric_keys for term in _METRIC_EXCLUSION_TERMS.get(key, ()) if term.lower() not in desired_terms}
-        if bad_terms and not has_desired and any(_contains_search_term(name, term) for term in bad_terms):
-            return False
-
-    return True
-
-
-async def _maybe_reselect_artifact_for_chart(
-    *,
-    aid: str,
-    art: Any,
-    rows: list[dict[str, Any]],
-    cols: list[ChartColumn],
-    args: dict[str, Any],
-    ctx: ToolExecutionContext,
-    allow_reselect: bool,
-    selected_bytes: dict[str, bytes] | None = None,
-) -> tuple[str, Any, list[dict[str, Any]], list[ChartColumn], dict[str, Any] | None]:
-    """Recover from stale simple-id refs choosing a scalar/wrong-metric artifact.
-
-    The model often calls ``add_chart(data_artifact_id="1")`` from an
-    allowlist snapshot while newer BI outputs have just arrived. When the title
-    asks for a trend/monthly chart, a one-row scalar artifact is almost certainly
-    the wrong source. Prefer a same-session CSV whose filename/columns match the
-    requested metric and carry a time series.
-    """
-    if not allow_reselect:
-        return aid, art, rows, cols, None
-    need_series = _chart_request_needs_series(args)
-    metric_keys = _desired_metric_keys(args)
-    current_score = _chart_source_score(args=args, art=art, rows=rows, cols=cols)
-    if not ((need_series and len(rows) < 2) or (metric_keys and current_score < 20)):
-        return aid, art, rows, cols, None
-    if ctx.artifact_store is None or not ctx.session_id:
-        return aid, art, rows, cols, None
-
-    try:
-        candidates = await ctx.artifact_store.list_for_session(
-            session_id=ctx.session_id,
-            user_id=ctx.user_id,
-            limit=100,
-        )
-    except Exception as exc:
-        logger.debug("add_chart.reselect_list_failed turn=%s err=%s", ctx.turn_id, exc)
-        return aid, art, rows, cols, None
-
-    best: tuple[int, str, Any, list[dict[str, Any]], list[ChartColumn]] | None = None
-    best_raw: bytes | None = None
-    type_overrides = args.get("column_types") or {}
-    for cand in candidates or []:
-        cand_id = str(getattr(cand, "id", "") or "")
-        cand_path = getattr(cand, "path", None)
-        cand_name = str(getattr(cand, "filename", "") or "")
-        cand_mime = str(getattr(cand, "mime", "") or "")
-        if not cand_id or not cand_path:
-            continue
-        if cand_mime and cand_mime not in {"text/csv", "application/csv"} and not cand_name.endswith(".csv"):
-            continue
-        if not _candidate_filename_allows_reselect(args, cand_name):
-            continue
-        try:
-            raw = await ctx.artifact_store.backend.read(cand_path)
-            cand_rows, cand_cols = _parse_csv_with_types(raw, type_overrides=type_overrides)
-        except Exception:  # noqa: S112
-            continue
-        cand_score = _chart_source_score(
-            args=args,
-            art=cand,
-            rows=cand_rows,
-            cols=cand_cols,
-        )
-        if best is None or cand_score > best[0]:
-            best = (cand_score, cand_id, cand, cand_rows, cand_cols)
-            best_raw = raw
-
-    if best is None:
-        return aid, art, rows, cols, None
-
-    best_score, best_id, best_art, best_rows, best_cols = best
-    min_score = 80 if need_series else 30
-    if best_id != aid and best_score >= max(min_score, current_score + 50):
-        if selected_bytes is not None and best_raw is not None:
-            selected_bytes.clear()
-            selected_bytes[best_id] = best_raw
-        logger.info(
-            "add_chart.reselected_artifact turn=%s title=%r from=%s to=%s score=%s>%s",
-            ctx.turn_id,
-            args.get("title"),
-            aid,
-            best_id,
-            best_score,
-            current_score,
-        )
-        return (
-            best_id,
-            best_art,
-            best_rows,
-            best_cols,
-            {
-                "from_artifact_id": aid,
-                "from_filename": getattr(art, "filename", None),
-                "to_filename": getattr(best_art, "filename", None),
-                "score": best_score,
-                "previous_score": current_score,
-                "reason": "series_metric_mismatch",
-            },
-        )
-    return aid, art, rows, cols, None
+    properties = schema.input_schema["properties"]
+    properties.update(input_properties())
+    properties["force_kind"]["enum"] = ["table", *sorted(PLOT_KINDS)]
+    properties["force_kind"]["description"] = (
+        "Exact native kind. Omit for a Table. With views, put kind/columns/axes/group_by inside each view only. Plot bindings must be explicit; the host never fills missing slots."
+    )
+    schema.input_schema["additionalProperties"] = False
+    return schema
 
 
 #: Valid target values. **No both**: under the intersection model it is equivalent to omission
@@ -700,6 +340,20 @@ async def _apply_surface_target(ctx: Any, bus: Any, section_id: str, raw_target:
     return target == "chat"
 
 
+def _requested_view_binding(plan: dict[str, Any] | None, view_id: str) -> str | None:
+    """Resolve only the caller's declared binding; never choose context fields."""
+    if not plan:
+        return None
+    declared = plan.get("view_bindings", {}).get(view_id)
+    if isinstance(declared, str):
+        return declared
+    for interaction in plan.get("interactions", []):
+        participants = interaction.get("view_ids", [interaction.get("from_view"), *interaction.get("to_views", [])])
+        if view_id in participants and isinstance(interaction.get("binding_id"), str):
+            return interaction["binding_id"]
+    return None
+
+
 async def _add_chart(
     args: dict[str, Any],
     ctx: ToolExecutionContext,
@@ -712,8 +366,22 @@ async def _add_chart(
     _layout: dict[str, Any] | None = None,
     _group_title: str | None = None,
     _dataset_cache: list[_PreparedChartDataset] | None = None,
+    _binding_id: str | None = None,
 ) -> Any:
     from bowhead_core.chart.edit_guard import blocked, denial
+
+    if "views" in args:
+        unsupported = set(args) & {"series", "hint", "limit", "sort_by", "columns", "axes", "group_by", "force_kind"}
+        if unsupported:
+            return {
+                "error": f"Explicit composition does not accept {sorted(unsupported)}; declare each view's columns or axes/group_by.",
+                "error_kind": "invalid_chart_expression",
+            }
+    if "views" not in args:
+        try:
+            validate_request(args, analytical=_analytical is not None)
+        except ExplicitPresentationError as exc:
+            return {"error": str(exc), "error_kind": "invalid_chart_expression", "path": exc.path}
 
     protected = await blocked(ctx)
     if protected:
@@ -754,6 +422,13 @@ async def _add_chart(
             "code": "plan_shape",
             "path": "/" + misplaced[0],
         }
+    unknown = set(args) - set(_add_chart_schema().input_schema["properties"]) - {"_args_parse_error", "auto_charted", "evidence_notes", "guide_steps"}
+    if unknown:
+        return {
+            "error": f"Unknown explicit presentation arguments: {sorted(unknown)}. Use the advertised Tool fields.",
+            "error_kind": "invalid_chart_expression",
+        }
+
     plan_input = None
     if "presentation_plan" in args or args.get("evidence_notes") or "guide_steps" in args:
         try:
@@ -769,10 +444,6 @@ async def _add_chart(
             }
     if "evidence_notes" in args or "guide_steps" in args:
         args = {key: value for key, value in args.items() if key not in {"evidence_notes", "guide_steps"}}
-    if ("views" in args or "derived_columns" in args) and (
-        not isinstance(args.get("hint", "raw"), str) or args.get("hint", "raw") not in VALID_HINTS
-    ):
-        return {"error": "Use an analysis hint such as compare or raw; heatmap belongs in force_kind", "error_kind": "invalid_chart_expression"}
     if ("views" in args or "derived_columns" in args) and args.get("force_kind") is not None and not isinstance(args["force_kind"], str):
         return {"error": "force_kind must be a native chart kind string", "error_kind": "invalid_chart_expression"}
     if "views" in args:
@@ -784,7 +455,22 @@ async def _add_chart(
         base = {
             key: value
             for key, value in args.items()
-            if key not in {"views", "layout", "series", "force_kind", "sort_by", "limit", "hint", "title", "subtitle", "presentation_plan"}
+            if key
+            not in {
+                "views",
+                "layout",
+                "series",
+                "force_kind",
+                "sort_by",
+                "limit",
+                "hint",
+                "title",
+                "subtitle",
+                "presentation_plan",
+                "columns",
+                "axes",
+                "group_by",
+            }
         }
         prepared: list[dict[str, Any]] = []
         dataset_cache: list[_PreparedChartDataset] = []
@@ -802,6 +488,7 @@ async def _add_chart(
                 _prepare_only=True,
                 _dataset_cache=dataset_cache,
                 _prepared_frame=view["id"] in frame_targets,
+                _binding_id=_requested_view_binding(plan_input, view["id"]),
                 _analytical=analytical_targets.get(view["id"]),
                 _preserve_observations=view["id"] in observation_targets,
             )
@@ -841,6 +528,7 @@ async def _add_chart(
                 ctx,
                 _composed_views=prepared,
                 _prepared_frame=views[0]["id"] in frame_targets,
+                _binding_id=_requested_view_binding(plan_input, views[0]["id"]),
                 _analytical=analytical_targets.get(views[0]["id"]),
                 _preserve_observations=views[0]["id"] in observation_targets,
                 _layout=layout,
@@ -864,7 +552,6 @@ async def _add_chart(
     if _BARE_ARTIFACT_HEX_RE.match(aid):
         aid = f"art_{aid}"
     aid, simple_ref_kind = resolve_simple_data_ref(aid, ctx)
-    simple_data_ref_resolved = simple_ref_kind == "data" and _SIMPLE_INT_REF_RE.match(input_aid) is not None and aid != input_aid
     if not _VALID_DATA_ARTIFACT_ID_RE.match(aid):
         logger.info(
             "add_chart.invalid_artifact_id_format turn=%s aid=%r",
@@ -891,6 +578,10 @@ async def _add_chart(
         # if none exist, explicitly require fetching data first, or it assumes a typo and repeatedly retries.
         hint += _available_data_hint(ctx)
         return {
+            "ok": False,
+            "error_kind": "invalid_args",
+            "error": hint,
+            "path": "/data_artifact_id",
             "skipped": "invalid_artifact_id_format",
             "data_artifact_id": input_aid,
             "hint": hint,
@@ -904,7 +595,7 @@ async def _add_chart(
     cached = _dataset_cache[0] if _dataset_cache else None
     art = cached.artifact if cached else await ctx.artifact_store.get(aid, check_created_by=ctx.user_id)
     if art is None:
-        return {"error": f"artifact {aid!r} not found"}
+        return {"error": f"artifact {aid!r} not found", "error_kind": "artifact_not_found", "path": "/data_artifact_id"}
 
     if cached:
         aid = art.id
@@ -913,7 +604,6 @@ async def _add_chart(
         rows, cols = copy.deepcopy((cached.rows, cached.columns))
         raw_bytes = cached.raw_bytes
         _non_finite = cached.non_finite.copy()
-        reselect_meta = cached.reselect_meta
     else:
         # 1. Read CSV and infer types (backend.read routes to local / S3).
         try:
@@ -926,42 +616,6 @@ async def _add_chart(
             )
         except Exception as e:
             return {"error": f"failed to parse artifact CSV: {type(e).__name__}: {e}"}
-        # #5 fix (dingsiyan 2026-07-07): also allow reselect when the title/hint asks
-        # for a time-progression chart (走势/趋势/月度… or hint='trend'). Previously
-        # gated to resolved simple-int refs only, so an analyst passing a REAL artifact
-        # id that happens to be a 1-row scalar (the common prod shape) skipped recovery
-        # and rendered a misleading one-point KPI titled "…走势". The inner trigger +
-        # score threshold still protect a genuinely-good explicit choice from mutation.
-        # Merge (Feishu follow-up #5): explicit art_xxx for non-time-series titles still **must not** be reselected (no evidence tampering;
-        # fixed by test_real_artifact_id_does_not_reselect); such series conflicts use the warning below
-        # for agent self-correction. Only time-series titles enable reselect/error through dingsiyan's gate above.
-        _aid_before_reselect = aid
-        selected_bytes = {aid: raw_bytes}
-        aid, art, rows, cols, reselect_meta = await _maybe_reselect_artifact_for_chart(
-            aid=aid,
-            art=art,
-            rows=rows,
-            cols=cols,
-            args=args,
-            ctx=ctx,
-            allow_reselect=simple_data_ref_resolved or _title_implies_time_progression(args),
-            selected_bytes=selected_bytes,
-        )
-        raw_bytes = selected_bytes[aid]
-        if aid != _aid_before_reselect:
-            _non_finite.clear()  # Count belongs to the replaced file
-
-    unsafe_keys = [column.key for column in cols if column.type == "numeric" and any(_unsafe_integer_token(row.get(column.key)) for row in rows)]
-    if unsafe_keys and (args.get("force_kind") != "table" or args.get("derived_columns") or args.get("presentation_plan")):
-        return {
-            "error": "Exact integers exceed the native chart numeric range in columns "
-            + ", ".join(unsafe_keys)
-            + ". Use force_kind=table with hint=raw and no derived columns or presentation plan to preserve the original integers.",
-            "error_kind": "unsupported_exact_numeric_plot",
-            "columns": unsafe_keys,
-        }
-    if unsafe_keys:
-        hint = "raw"
 
     units = args.get("column_units", {})
     numeric_columns = {column.key: column for column in cols if column.type == "numeric"}
@@ -1023,7 +677,6 @@ async def _add_chart(
                 copy.deepcopy(rows),
                 copy.deepcopy(cols),
                 _non_finite.copy(),
-                reselect_meta,
                 derived_bytes,
                 copy.deepcopy(calculation_metadata),
                 calculation_missing,
@@ -1031,129 +684,18 @@ async def _add_chart(
                 raw_bytes,
             )
         )
-    if _prepare_only or calculation_metadata:
-        numeric_keys = {column.key for column in cols if column.type == "numeric"}
-        requested = args.get("series", [])
-        if not isinstance(requested, list) or any(not isinstance(key, str) or key not in numeric_keys for key in requested):
-            return {"error": f"series must name existing numeric columns: {sorted(numeric_keys)}", "error_kind": "invalid_chart_expression"}
-        if args.get("sort_by") is not None and (not isinstance(args["sort_by"], str) or args["sort_by"] not in numeric_keys):
-            return {"error": f"sort_by must name an existing numeric column: {sorted(numeric_keys)}", "error_kind": "invalid_chart_expression"}
-
     plan_data_columns = copy.deepcopy(cols) if plan_input else None
     plan_data_rows = rows if plan_input else None
-
-    # Apply optional sorting and limits before inference so a large ranking can
-    # remain a chart. Never silently take the first rows as a top-N result or remove
-    # the end of a time series. Disclose truncation and preserve the original row count.
-    sort_by = args.get("sort_by")
-    sorted_by_col = bool(sort_by) and any(c.key == sort_by for c in cols)
-    if sorted_by_col:
-        rows.sort(
-            key=lambda r: r.get(sort_by) if isinstance(r.get(sort_by), (int, float)) else float("-inf"),
-            reverse=True,
-        )
-    limit = args.get("limit")
-    try:
-        limit_n = int(limit) if limit not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        limit_n = None
-    rows_before_limit = len(rows)
-    limit_note: str | None = None
-
-    # 1.6 Wide-table column pruning (#61 + #76): nonempty hint with **too many numeric columns to plot** → (category + numeric).
-    # Covers every nonempty hint (rank/share/compare/trend/correlation/composition/raw).
-    #
-    # Gate changed from total columns >6 to numeric columns ≥ table-fallback threshold (chart-config-ux batch 1 ②).
-    # Previously the gates were independently defined, leaving a gap: pruning checked **total columns >6**, while infer
-    # fell back at **numeric columns >=4** (_MAX_SERIES +1). Wide tables with 4–6 columns missed pruning yet
-    # hit table fallback. 39 charts in the 116 live window suffered, including 26 with ≤30 rows,
-    # fully plottable by row count but rejected solely for column count. A real case had five versions of one metric
-    # （`share_cy` / `share_ly` / `share_cy_pct` / `share_ly_pct` / `delta_pp`），
-    # intended as two bars + one delta, but yielded an 11-row, six-column table.
-    #
-    # Import the threshold directly from infer; do not add a separate constant. Both gates need one source,
-    # or changing one opens another gap.
-    hint = str(args.get("hint") or "raw")
-    title = str(args.get("title") or "数据图表").strip()[:60]
-    # Explicit series takes precedence over heuristic pruning; contract gap found in 116 prod 1.0.79 dogfood:
-    # previously models **could not specify plotted columns** (only sort_by selected one). Four charts from the same
-    # 18-column table differed only in title; backend always pruned to province/revenue. Three promised July vs June
-    # or month-over-month changes but lacked a second series. Accurate heuristics cannot fix inability to express intent,
-    # so provide explicit expression first and demote heuristics to fallback.
-    wide_pivot_cut: SeriesCut | None = None
     if _analytical:
-        from bowhead_core.chart.analytical import MAX_ROWS, analytical_columns
+        from bowhead_core.chart.analytical import MAX_ROWS
 
-        retained = analytical_columns(_analytical)
-        # Explicit extra numeric fields remain available for original-row inspection.
-        # The analytical bindings, not ordinary series inference, select plotted marks.
-        retained.update(args.get("series") or [])
-        missing = retained - {column.key for column in cols}
-        if missing or len(rows) > MAX_ROWS or limit_n:
-            reason = (
-                f"Missing columns: {sorted(missing)}"
-                if missing
-                else f"Prepared rows: {len(rows)}, maximum: {MAX_ROWS}"
-                if len(rows) > MAX_ROWS
-                else "Remove limit to retain complete analytical observations"
-            )
+        if len(rows) > MAX_ROWS:
             return {
-                "error": reason,
+                "error": f"Prepared rows: {len(rows)}, maximum: {MAX_ROWS}",
                 "error_kind": "invalid_chart_expression",
                 "code": "binding_ineligible",
                 "path": "/presentation_plan/analytical_views",
             }
-        cols = [column for column in cols if column.key in retained]
-        rows = [{key: row.get(key) for key in retained} for row in rows]
-    explicit = None if _analytical else _explicit_series(args, rows, cols, preserve_dimensions=_prepared_frame or _preserve_observations)
-    if explicit:
-        rows, cols = explicit
-    elif not _analytical and hint != "raw" and _needs_col_pruning(cols):
-        rows, cols, wide_pivot_cut = _prune_cols_for_hint(rows, cols, hint=hint, sort_by=sort_by)
-
-    # Apply the limit after column pruning so top-N uses the metric actually plotted.
-    # Sorting before pruning could rank by a numeric column that the chart removes.
-    # Do not truncate a time axis as though it were a ranking; disclose any truncation.
-    if limit_n and limit_n > 0 and len(rows) > limit_n:
-        # Time-axis criterion shares infer's source, but here asks only whether this column has multiple values;
-        # _constant_dim_keys returns empty with one dimension, incorrectly treating an entire single-day column as a time axis.
-        has_time_axis = any(c.type == "date" and len({str(r.get(c.key)) for r in rows}) > 1 for c in cols)
-        if has_time_axis:
-            # No correct truncation exists on a time axis: value-based choice disrupts time; original-order truncation cuts recent months.
-            # Table fallback without truncation has a separate time-axis remedy (line family uses time-point count; see _MAX_LINE_POINTS);
-            # do not change chart kind by discarding data.
-            #
-            # ⚠ This must precede sorted_by_col. Previously sort_by bypassed it entirely, so 59 provinces ×12 months
-            # with sort_by + limit=400 were cut to 400 rows (34 provinces) before infer.
-            # The series gate could count only those 34, making the chart caption say 34 total series
-            # instead of the actual 59 provinces (observed in re-review). sort_by is itself meaningless on a time axis:
-            # sorting by value and taking the first N selects high-valued rows scattered across months, destroying the time axis.
-            limit_note = f"数据带时间轴，`limit={limit_n}` 已忽略：截时间序列会丢掉一段时间，图按全部 {len(rows)} 行画。"
-        elif sorted_by_col:
-            rows = rows[:limit_n]  # Already sorted by this column; first N is the requested top N
-        else:
-            # Rankings: take **actual** top N by main numeric column, sharing infer._take_top_n instead of copying it.
-            rows = _take_top_n(rows, [c for c in cols if c.type == "numeric"], limit_n)
-
-    # #5 safety-net (dingsiyan 2026-07-07): a temporal-progression chart (走势/月度…
-    # or hint='trend') whose data is a single scalar row is a wrong-artifact mistake
-    # — the query aggregated to a total and dropped the time dimension. Reselect
-    # above tries to recover a real in-session series; if none exists, refuse to
-    # render a misleading one-point KPI titled "…走势" and hand the analyst an
-    # actionable error so it re-fetches a time series. 同比/环比/vs are excluded via
-    # the narrower _title_implies_time_progression (they can legitimately be 1 row).
-    if len(rows) < 2 and _title_implies_time_progression(args):
-        return {
-            "error": (
-                f"标题 {title!r} 要求时间序列(走势/趋势/月度)，但数据源 {aid} 只有 "
-                f"{len(rows)} 行——这是聚合后的单值/总额，缺少按月或按时间的维度，无法"
-                "画走势。请先用 `bi_query` 取一份带时间粒度的序列(datarc 原生语法, "
-                "1 条即可: '2025年 营业额 每月' / '今年 GMV 每季度'——❌ 禁逐期拆问)，"
-                "再调 add_chart；若只想展示单个总值，请去掉标题里的"
-                "'走势/趋势/月度'改画 KPI。"
-            ),
-            "error_kind": "chart_series_needs_time_dimension",
-        }
 
     # 1.9 Look up source metadata by column name to enrich units/percent shape.
     # CSV carries no units; without enrichment frontend guesses from names/value ranges, but percent shape cannot be inferred from values alone
@@ -1167,66 +709,31 @@ async def _add_chart(
     # valid declarations merely because their observations happen to differ 100x.
     _mark_unknown_percent_shape(cols)
 
-    # 2. Infer ChartSpec.
-    from bowhead_core.chart.prepared_frames import MAX_FRAME_ROWS
+    observation_keys = None
+    if _binding_id and (_prepared_frame or _preserve_observations):
+        from bowhead_core.chart.binding_catalog import build_binding_catalog, source_binding_columns
 
-    if _analytical:
-        from bowhead_core.chart.types import ChartSpec
-
-        spec = ChartSpec(
-            kind=args.get("force_kind"),
-            title=title,
-            subtitle=str(args.get("subtitle") or "").strip() or None,
-            rows=rows,
-            columns=cols,
-            data_artifact_id=aid,
-            row_count=len(rows),
+        catalog = build_binding_catalog(source_binding_columns(cols, rows, raw_bytes), rows, raw=raw_bytes)
+        candidate = next((item for item in catalog["candidates"] if item["id"] == _binding_id), None)
+        if candidate is not None:
+            observation_keys = candidate["observation_keys"]
+    try:
+        spec = compile_view(
+            args,
+            rows,
+            cols,
+            artifact_id=aid,
+            raw=raw_bytes,
+            analytical=_analytical,
+            full_table=_prepared_frame or _preserve_observations or _analytical is not None,
+            observation_keys=observation_keys,
         )
-    else:
-        spec = infer_chart_spec(
-            rows=rows,
-            columns=cols,
-            hint=hint,
-            title=title,
-            subtitle=str(args.get("subtitle") or "").strip() or None,
-            data_artifact_id=aid,
-            force_kind=args.get("force_kind"),
-            **({"inline_rows_limit": MAX_FRAME_ROWS} if _prepared_frame else {}),
-        )
+    except ExplicitPresentationError as exc:
+        return {"error": str(exc), "error_kind": "invalid_chart_expression", "path": exc.path}
 
     for field in ("show_legend", "show_data_labels"):
         if field in args:
             setattr(spec, field, args[field])
-
-    # 2.3 Disclose wide-table pivot series pruning too, under the same rules as long-table _cap_time_series.
-    #
-    # 116 dogfood 2026-09-24 t_b06a7810265a: a 38-category wide table was pruned to 12 columns/lines,
-    # but subtitle and body claimed all 38 first-level categories and their monthly-revenue lines,
-    # KPI card said 38 categories, and analysis described the other 35 lines or 34 overlapping near the bottom.
-    # **Three labels plus two analytical sentences described lines never plotted**. The model was not inventing them:
-    # add_chart output was its sole basis for body text, and pruning only logged without returning any information.
-    #
-    # Populating these two fields restores three consumers together: web captions, Feishu cards, and the model's warning
-    # against calling it the entire dataset (see capped_series(spec) below). Long-table path already did this;
-    # the mechanism existed but this branch was unwired ([[feedback_correct_but_out_of_reach]]).
-    #
-    # ⚠ Do not overwrite infer's existing values; _cap_time_series is the more specific cut and takes precedence.
-    #   This condition is **currently unreachable**: wide pruning leaves numeric columns ≤ _MAX_SERIES_SAME_FAMILY (12),
-    #   while _cap_time_series acts only at seriesCount > _MAX_TIME_SERIES (15); the cuts are mutually exclusive.
-    #   Keep it because exclusion depends only on the two constants' current relative sizes, not a guarantee
-    #   ([[feedback_correctness_by_coincident_constants]]). This premise is fixed by
-    #   test_the_two_series_cuts_cannot_both_fire, which fails if 12 is raised enough.
-    if wide_pivot_cut is not None and spec.series_shown is None and spec.series_total is None:
-        spec.series_shown, spec.series_total = wide_pivot_cut.shown, wide_pivot_cut.total
-        # Same ranking destination as long-table path (not a dataclass field, so neither persisted nor sent to frontend)
-        spec._series_rank = wide_pivot_cut.rank  # type: ignore[attr-defined]
-
-    # 2.4 Disclose limit truncation: restore row_count to original total and set top_n to rows actually plotted;
-    # frontend captions show first N of M items, matching backend top-N selection rules.
-    if rows_before_limit > len(rows):
-        spec.row_count = rows_before_limit
-        if spec.kind != "table":  # Table footer already gives counts; marking repeats them
-            spec.top_n = len(spec.rows or [])
 
     # 2.5 P3.6: inject source_meta for chart's top source row (tool / query / artifact_id / turn_id).
     # Batch C (report-edit-audit P2-3): tool uses the **data artifact's producer** (art.source, e.g. upstream query
@@ -1241,10 +748,6 @@ async def _add_chart(
         "turn_id": ctx.turn_id,
         "tool_call_id": getattr(ctx, "tool_call_id", None),
     }
-    if reselect_meta:
-        spec.source_meta["resolved_from_artifact_id"] = reselect_meta["from_artifact_id"]
-        spec.source_meta["resolved_from_filename"] = reselect_meta.get("from_filename")
-        spec.source_meta["resolved_reason"] = reselect_meta["reason"]
 
     # Sprint ι (PRD §4.C.2): if backend's auto-chart fallback called us, surface
     # uncertainty via subcaption. Caller passes auto_charted=True (see auto_chart.py).
@@ -1361,8 +864,7 @@ async def _add_chart(
             return False
         if any(prior.get(key) != candidate.get(key) for key in ("show_legend", "show_data_labels")):
             return False
-        # Same-source scratch-to-series correction remains valid for a compatible
-        # metric. A shared title alone cannot stand in for a different chart request.
+        # A shared title does not identify a different presentation request.
         if not any(
             (
                 prior.get("views"),
@@ -1373,18 +875,17 @@ async def _add_chart(
                 spec.presentation_plan,
             )
         ):
-            prior_columns = prior.get("columns") or []
-            candidate_columns = candidate.get("columns") or []
             old_rows, new_rows = prior.get("rows") or [], spec.rows or []
-            scratch_pair = (prior.get("kind") == "kpi" and len(old_rows) == 1 and len(new_rows) > 1) or (
-                spec.kind == "kpi" and len(new_rows) == 1 and len(old_rows) > 1
+            presentation_keys = (
+                "kind",
+                "columns",
+                "sort_by",
+                "secondary_axis",
+                "percent_stack",
+                "show_legend",
+                "show_data_labels",
+                "explicit_presentation",
             )
-            if scratch_pair and not args.get("force_kind"):
-                old_metrics = {column["key"]: column for column in prior_columns if column.get("type") == "numeric"}
-                new_metrics = {column["key"]: column for column in candidate_columns if column.get("type") == "numeric"}
-                common = old_metrics.keys() & new_metrics.keys()
-                return bool(common) and all(old_metrics[key] == new_metrics[key] for key in common)
-            presentation_keys = ("kind", "columns", "sort_by", "secondary_axis", "percent_stack", "show_legend", "show_data_labels")
             if any(prior.get(key) != candidate.get(key) for key in presentation_keys):
                 return False
             # Only equivalent retained observations (or an ordered prefix) may
@@ -1481,9 +982,6 @@ async def _add_chart(
     else:
         result_same_data_note = ""
 
-    if limit_note:
-        logger.info("add_chart.limit_ignored_on_time_axis turn=%s limit=%s rows=%s", getattr(ctx, "turn_id", ""), limit_n, len(rows))
-
     payload: dict[str, Any] = {"spec": spec_to_dict(spec)}
     # #112 API-based chart interleave
     anchor_heading = args.get("anchor_heading")
@@ -1565,7 +1063,6 @@ async def _add_chart(
         "kind": spec.kind,
         "row_count": spec.row_count,
         "title": spec.title,
-        "_infer_reason": spec._infer_reason,
     }
     from bowhead_core.chart.display_receipt import chart_display_receipt
 
@@ -1590,42 +1087,7 @@ async def _add_chart(
     if calculation_metadata:
         result["derived_columns"] = calculation_metadata
         result["calculation_missing"] = calculation_missing or {}
-    # Models base body text on this: disclose truncation, selected N items and total, never describe top N as all items.
-    if spec.top_n and spec.row_count > spec.top_n:
-        result["drawn_rows"] = spec.top_n
-        result["note"] = f"图上只画了 {spec.top_n} / {spec.row_count} 项（图下已注明），正文别说成全部。"
-    # Series truncation (chart/infer.py _cap_time_series) is a **separate criterion** with empty top_n,
-    # invisible to the preceding check. Omitting it makes models describe a 15-province chart as all provinces' trends,
-    # erasing 44 provinces (add_chart results are the model's sole basis for body text).
-    sampled = downsampled_points(spec)
-    if sampled is not None:
-        pts_shown, pts_total = sampled
-        result["drawn_points"] = pts_shown
-        result["points_total"] = pts_total
-        pts_note = (
-            f"时间点太多（{pts_total} 个），图上按整体走势降采样到 {pts_shown} 个（首尾时刻保留，"
-            "整段时间没缺）。正文可以照常讲走势，但别把某一天的值说成「图上每天都有」，"
-            "也别据此断言「期间无异常」——挑点看的是各系列合计，量级小的那条的尖峰可能没被画出来。"
-        )
-        result["note"] = f"{result.get('note', '')} {pts_note}".strip()
-    capped = capped_series(spec)
-    if capped is not None:
-        shown_series, total_series = capped
-        result["drawn_series"] = shown_series
-        result["series_total"] = total_series
-        series_note = f"图上只画了合计最大的 {shown_series} / {total_series} 条系列（图下已注明），正文别说成全部；要全部就先在取数侧聚合。"
-        # ★ Return **rankings** too, not just a count.
-        #
-        # 116 dogfood t_f4edf5b877b3: total-based gate correctly selected top 15 (women's wear first at 6.249 billion),
-        # but the model's only named data was bi_query's first ten inline rows (January, category-name pinyin order).
-        # Thermal underwear and kitchenware led those ten, so its final answer called them the absolute sales pillars,
-        # while women's wear was an order of magnitude larger in the chart on the same screen and absent from body text.
-        # The returned warning **already** prohibited conclusions from those ten rows; the model did exactly that.
-        # Merely forbidding it is insufficient: **show the correct answer** (same lesson as _available_data_hint).
-        series_note += _series_rank_note(spec)
-        result["note"] = f"{result.get('note', '')} {series_note}".strip()
-    if limit_note:
-        result["note"] = f"{result.get('note', '')} {limit_note}".strip()
+
     if result_same_data_note:
         result["same_data_as"] = _same_data
         result["note"] = f"{result.get('note', '')} {result_same_data_note}".strip()
@@ -1637,26 +1099,6 @@ async def _add_chart(
             "图上按空值处理、没有画出来；正文别把这些项说成增长最快或排第一，要讲就说明基数为 0。"
         )
         result["note"] = f"{result.get('note', '')} {_nf_note}".strip()
-    # Warn when rows have valid numbers but no distinguishing labels, allowing the
-    # Agent to correct column selection. This guard does not restore lost dimensions;
-    # _lead_dim_col and table projection handle those separately. It also covers data
-    # that genuinely has no distinguishing column and is exclusive with the single-
-    # row fallback below.
-    if (_indistinct := indistinguishable_rows_reason(rows, spec.columns or [])) is not None:
-        result["warning"] = "rows_are_indistinguishable"
-        result["hint"] = (
-            f"这张图/表{_indistinct}——读的人无法知道哪一行对应哪个对象。"
-            "先确认 artifact 里到底有没有一列能区分这些行（大区/品牌/月份…）："
-            "有就把它显式写进 `column_types` 并用同一 title 重画；"
-            "真的没有，就说明上游 groupby 把分组维度聚掉了，回去重取。"
-        )
-    if _chart_request_needs_series(args) and len(rows) < 2:
-        result["warning"] = "series_requested_but_single_row"
-        result["hint"] = (
-            f"标题/意图要求走势序列, 但 {aid} 只有 {len(rows)} 行(已降级为 KPI 卡)。"
-            "请检查 data_artifact_id 是否传错——用包含逐月/逐日多行数据的那个 "
-            "artifact 以同一 title 重新调用本工具, 会自动升级原图。"
-        )
     await _attach_prior_charts_reminder(result, ctx, canvas.id)
     return result
 
@@ -2427,20 +1869,7 @@ async def _flatten_design(args: dict[str, Any], ctx: ToolExecutionContext) -> An
 _BARE_ARTIFACT_HEX_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
-class SeriesCut(NamedTuple):
-    """系列被截了：画了几条、一共几条、留下的那几条按合计从大到小是谁。
-
-    `rank` 两条截断路径都要给——只给数字不给名字，模型就会照内联的头几行推断谁是头部
-    （116 `t_f4edf5b877b3` 实测）。两条路一条给一条不给，等于把 bug 留在另一半场景上。
-    """
-
-    shown: int
-    total: int
-    rank: list[tuple[str, float]]
-
-
 #: Number of named ranking entries in notes: sufficient to identify leaders without bloating note text.
-_SERIES_RANK_NAMED = 5
 
 
 def _prior_chart_with_same_data(prior: list[Any], spec: Any, spec_of: Any) -> str | None:
@@ -2457,30 +1886,6 @@ def _prior_chart_with_same_data(prior: list[Any], spec: Any, spec_of: Any) -> st
         except Exception:  # noqa: S112
             continue
     return None
-
-
-def _series_rank_note(spec: Any) -> str:
-    """「按合计从大到小是：女装 62.5亿、鞋包皮件 24.9亿、…」
-
-    排名是 `_cap_time_series` 挑前 N 时的副产物（挂在 `spec._series_rank` 上，
-    不是 dataclass 字段 ⇒ 不落库、不进前端）。取不到就不说，绝不因为一句提示让 add_chart 失败。
-    """
-    rank = getattr(spec, "_series_rank", None)
-    if not rank:
-        return ""
-    # Reuse the writer's number formatting: same model-readable numbers, no second implementation.
-    # It deliberately uses significant digits for |v|<1; fixed two decimals would turn 0.0064 into 0.01.
-    # Local import avoids the report_writer_loop → canvas_tools cycle.
-    from bowhead_core.report_writer_loop import _fmt_num
-
-    try:
-        named = [f"{label}（{_fmt_num(value)}）" for label, value in rank[:_SERIES_RANK_NAMED]]
-    except Exception:  # noqa: S110
-        return ""
-    if not named:
-        return ""
-    more = "" if len(rank) <= _SERIES_RANK_NAMED else f"，其余 {len(rank) - _SERIES_RANK_NAMED} 条依次递减"
-    return f" 按合计从大到小依次是：{'、'.join(named)}{more}。说「头部/最大/支柱」只能用这个排名，别照内联的头几行推断。"
 
 
 def _available_data_hint(ctx: ToolExecutionContext) -> str:
@@ -3299,309 +2704,6 @@ async def _add_spec_block(args: dict[str, Any], ctx: ToolExecutionContext) -> An
 _ID_COL_SUFFIXES = ("编码", "ID", "id", "序号", "工号", "code", "_id", "_code")
 # Preferred categorical names: these terms indicate grouping/descriptive columns, preferred for axes.
 _CAT_HINT_NAMES = ("名称", "分类", "类型", "category", "type", "name", "group")
-
-
-def _is_true_numeric(col: ChartColumn) -> bool:
-    """是否真数值列（排除 '部门编码' / '申请人工号' 这类 int 编码）."""
-    if col.type != "numeric":
-        return False
-    key = str(col.key)
-    return not any(key.endswith(s) for s in _ID_COL_SUFFIXES)
-
-
-def _sibling_numeric(primary: ChartColumn, true_nums: list[ChartColumn]) -> ChartColumn:
-    """给 `primary` 挑第二条序列：**同族列优先**。
-
-    宽表里同一指标的不同口径共用词根（`营业额` / `营业额_6月` / `营业额环比变化`），
-    而无关指标（`客流量`、`有效门店数`）只是恰好排在前面。按列表顺序取 `true_nums[1]`
-    会把「营业额 vs 6月营业额」配成「营业额 vs 客流量」——量纲都不同，图更误导。
-    """
-    others = [c for c in true_nums if c is not primary]
-    if not others:
-        return primary
-    base = str(primary.key)
-    kin = [c for c in others if str(c.key).startswith(base) or base.startswith(str(c.key))]
-    return kin[0] if kin else others[0]
-
-
-def _lead_dim_col(
-    rows: list[dict[str, Any]],
-    dims: list[ChartColumn],
-    *,
-    prefer: ChartColumn | None = None,
-) -> ChartColumn | None:
-    """Choose the dimension that best distinguishes the rows.
-
-    Prefer the requested column when all its values are unique. Otherwise choose the
-    column with the most distinct values, keeping column order for ties. If every
-    column is constant, retain the preference or first column and let validation
-    report the ambiguity. A single axis cannot represent every compound key; table
-    and pivot handling preserve the additional dimensions separately.
-    """
-    if not dims:
-        return None
-    if not rows:
-        return prefer or dims[0]
-
-    n = len(rows)
-
-    def distinct(col: ChartColumn) -> int:
-        return len({str(r.get(col.key)) for r in rows})
-
-    if prefer is not None and distinct(prefer) == n:
-        return prefer
-    best = max(dims, key=lambda c: (distinct(c), -dims.index(c)))
-    return best if distinct(best) > 1 else (prefer or dims[0])
-
-
-def _pivotable_group_dim(
-    rows: list[dict[str, Any]],
-    dims: list[ChartColumn],
-    lead: ChartColumn | None,
-    picked: list[ChartColumn],
-) -> ChartColumn | None:
-    """Retain a second dimension only when the input is safely pivotable.
-
-    Require exactly one named numeric series, at least two values on each axis, and
-    sufficient cross-product coverage under the shared LongTableFillRatio threshold.
-    Apply the same input-shape contract to explicit and automatic charts without
-    guessing the intended chart kind.
-    """
-    if lead is None or len(picked) != 1:
-        return None
-    candidates = [c for c in dims if c.key != lead.key]
-    if not candidates:
-        return None
-
-    from bowhead_core.chart_style_registry_generated import CHART_STYLE_PRESENTATION_POLICY
-
-    group = _lead_dim_col(rows, candidates)
-    if group is None:
-        return None
-
-    def values(col: ChartColumn) -> set[str]:
-        return {str(r.get(col.key)) for r in rows}
-
-    x_vals, group_vals = values(lead), values(group)
-    if len(x_vals) < 2 or len(group_vals) < 2:
-        return None
-    fill = len(rows) / (len(x_vals) * len(group_vals))
-    if fill < CHART_STYLE_PRESENTATION_POLICY["normalization"]["minimumLongTableFillRatio"]:
-        return None
-    logger.info(
-        "add_chart.kept_group_dim x=%s group=%s fill=%.2f rows=%d",
-        lead.key,
-        group.key,
-        fill,
-        len(rows),
-    )
-    return group
-
-
-def _explicit_series(
-    args: dict[str, Any],
-    rows: list[dict[str, Any]],
-    cols: list[ChartColumn],
-    *,
-    preserve_dimensions: bool = False,
-) -> tuple[list[dict[str, Any]], list[ChartColumn]] | None:
-    """调用方显式点名要画的数值列 → 按点名裁列。没点名 / 一个都对不上 → None（走启发式）。
-
-    维度轴（cat/date/geo）自动保留在最前，模型只需要点数值列。
-    未知 key 忽略并记一行日志——宁可少画一条序列，也不要因为一个错 key 整张图不出。
-    """
-    raw = args.get("series")
-    if not isinstance(raw, list) or not raw:
-        return None
-    wanted = [str(k) for k in raw if isinstance(k, (str, int, float))]
-    by_key = {c.key: c for c in cols}
-    unknown = [k for k in wanted if k not in by_key]
-    if unknown:
-        logger.info("add_chart.series_unknown_keys keys=%s known=%s", unknown[:5], [c.key for c in cols][:12])
-    picked = [by_key[k] for k in wanted if k in by_key]
-    if not picked:
-        return None
-    dims = [c for c in cols if c.type in ("date", "categorical", "geo") and c not in picked]
-    # Do not take dims[:1] indiscriminately. A constant filter column may precede the
-    # actual grouping column. Tables can also require multiple dimensions to identify
-    # a compound key, while a chart axis selects one and may pivot the other.
-    if preserve_dimensions:
-        kept_dims = dims
-    elif str(args.get("force_kind") or "") == "table":
-        kept_dims = [c for c in dims if len({str(r.get(c.key)) for r in rows}) > 1] or dims[:1]
-    else:
-        lead = _lead_dim_col(rows, dims)
-        kept_dims = [lead] if lead is not None else []
-        group = _pivotable_group_dim(rows, dims, lead, picked)
-        if group is not None:
-            kept_dims.append(group)
-    kept_cols = kept_dims + picked
-    kept_keys = [c.key for c in kept_cols]
-    return [{k: r.get(k) for k in kept_keys} for r in rows], kept_cols
-
-
-def _needs_col_pruning(cols: list[ChartColumn]) -> bool:
-    """这份列集合是否宽到必须裁列才画得出.
-
-    判据与 `infer_chart_spec` 的退表闸**同源** —— 按「画不出的两个原因」各写一条，
-    而不是按总列数拍一个数：
-
-    - **序列太多**：多到读不动（上限见下）。
-    - **维度太多**：判定树规则 9 在 `cat >= 3` 时退表，而裁列恰好能把维度压到 1，
-      所以这条归裁列管。
-
-    ⚠ 原来这里写的是 `len(cols) > 6`（总列数）。它与序列上限**会打架**：1 个维度 +
-    6 个数值 = 7 列，恰好在序列上限内、却被总列数闸判成要裁——把一张画得出的
-    六序列图裁成两列。两条子判据必须各自表达自己那件事，别用一个总数糊过去。
-
-    ⚠ 序列这条按**同族上限**放行（`_MAX_SERIES_SAME_FAMILY`），比退表闸松一档：
-    这里拿不到 rows，算不出量纲族，而**裁早了就没法在下游按族分档**了
-    （`各品类月度趋势` 10 列同族，裁到 6 之后退表闸再宽也救不回被丢掉的 4 个品类）。
-    松着放过去，异族那档由退表闸按真实族数收口——**宁可让下游多判一次，
-    也不能在信息不全的上游先砍**。
-    """
-    from bowhead_core.chart.infer import _MAX_SERIES_SAME_FAMILY
-
-    n_num = sum(1 for c in cols if c.type == "numeric")
-    n_dim = len(cols) - n_num
-    return n_num > _MAX_SERIES_SAME_FAMILY or n_dim > 2
-
-
-def _column_total(rows: list[dict[str, Any]], col: ChartColumn) -> float:
-    """一列的合计（绝对值求和）。
-
-    `_cap_time_series` 给长表排名用的也是这条（全部数值列的 |值| 求和），两条截断路径
-    必须同一把尺子——否则同一份数据走长表和走宽表会留下**不同的**前 15 / 前 12。
-    用 |值| 是因为一条全是负数的「利润」序列同样是这张图上最重要的线之一。
-    """
-    acc = 0.0
-    for r in rows:
-        v = r.get(col.key)
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            acc += abs(float(v))
-    return acc
-
-
-def _prune_cols_for_hint(
-    rows: list[dict[str, Any]],
-    cols: list[ChartColumn],
-    *,
-    hint: str,
-    sort_by: str | None,
-) -> tuple[list[dict[str, Any]], list[ChartColumn], SeriesCut | None]:
-    """hint 明确 + 列数太多时，裁列到 [1 个 cat/date, 1 个 num]（或 [cat, sort_by]）.
-
-    #76 扩展：
-    - ID 列黑名单（编码/ID/序号/工号/code）排除出 numeric 候选
-    - cat 优选列名含"名称/分类/类型"的
-    - correlation hint → 保留 2 个 numeric（scatter 需要 x/y 都是数值）
-
-    第三个返回值 `(画了几条, 一共几条)`：**只有宽表 pivot 那一支**会给出来——
-    那一支丢掉的是「同一个指标的其余类目」，用户会把它读成「这就是全部类目」。
-    其余分支丢的是**别的指标**（18 列宽表里挑出 `营业额`），说成「只画了 1/18 条系列」
-    是另一句假话，所以它们一律返回 `None`。判据必须长在**做那一刀的分支上**，
-    不能在调用方按「数值列少了几个」倒推（[[feedback_one_concept_many_implementations]]）。
-    """
-    if len(cols) <= 2:
-        return rows, cols, None
-
-    # correlation / compare both require **two** numeric series.
-    #   - correlation → scatter x/y axes
-    #   - compare → A vs B by definition; one column gives a ranking, not a comparison.
-    #
-    # compare previously entered the generic branch below and was pruned to one column; observed in 116 prod 1.0.79:
-    # an 18-column table containing revenue / June revenue / month-over-month revenue change produced a chart titled
-    # provincial revenue/profit comparison (July vs June) with only province/revenue, identical to the adjacent revenue ranking.
-    # Title promised comparison; data had no comparison column.
-    # composition likewise (chart-config-ux batch 1): stacked structure by definition combines multiple components.
-    # Pruning to one column invalidates _kind_from_intent's composition guard (≥2 numeric columns),
-    # so upstream pruning defeats its own intent. Pruning policy must follow intent or the two undermine each other.
-    if hint in ("correlation", "compare", "composition"):
-        true_nums = [c for c in cols if _is_true_numeric(c)]
-        if len(true_nums) >= 2:
-            # Prefer sort_by as the first series.
-            primary = next((c for c in true_nums if c.key == sort_by), None) or true_nums[0]
-            secondary = _sibling_numeric(primary, true_nums)
-            kept_cols = [primary, secondary]
-            kept_keys = [primary.key, secondary.key]
-            # compare/composition retain a dimension axis; otherwise infer interprets two pure numeric columns as a KPI card.
-            # correlation is scatter with numeric x/y, so keep its existing dimensionless behavior.
-            if hint in ("compare", "composition"):
-                dims = [c for c in cols if c.type in ("date", "categorical", "geo")]
-                # Like _explicit_series, name-based preference counts only if it **actually distinguishes rows**;
-                # otherwise use the first distinguishing column (both pruning branches require the same criterion).
-                named = next((c for c in dims if any(h in str(c.key) for h in _CAT_HINT_NAMES)), None)
-                preferred_dim = _lead_dim_col(rows, dims, prefer=named)
-                if preferred_dim is not None:
-                    kept_cols = [preferred_dim, *kept_cols]
-                    kept_keys = [preferred_dim.key, *kept_keys]
-            new_rows = [{k: r.get(k) for k in kept_keys} for r in rows]
-            return new_rows, kept_cols, None
-
-    # Find cat/date/geo axis: prefer a name containing categorical hint terms.
-    cat_candidates = [c for c in cols if c.type in ("date", "categorical", "geo")]
-    if not cat_candidates:
-        return rows, cols, None
-    # ⚠ Fallback is not cat_candidates[0]: like _explicit_series (see _lead_dim_col),
-    # name preference counts only if it truly identifies rows; otherwise choose the dimension with most distinct values,
-    # not the first column (often a constant filtering dimension). compare/composition above already changed this,
-    # but this generic branch was missed: the recurring problem of two implementations for one concept.
-    named = next((c for c in cat_candidates if any(h in str(c.key) for h in _CAT_HINT_NAMES)), None)
-    preferred_cat = _lead_dim_col(rows, cat_candidates, prefer=named) or cat_candidates[0]
-
-    # Find numeric axis.
-    true_nums = [c for c in cols if _is_true_numeric(c)]
-    if not true_nums:
-        return rows, cols, None
-
-    from bowhead_core.chart.infer import _MAX_SERIES_SAME_FAMILY, _axis_groups
-
-    # Wide-table pivot: numeric columns exceed series capacity, but are **one metric expanded across categories**
-    # (typical sandbox df.pivot_table(index='月份', columns='种类大类', …) output).
-    #
-    # Keeping a main metric is invalid here: there is none; each column is a category.
-    # true_nums[0] below retains **the first category in column order**; 116 dogfood
-    # t_da7397e4d95c requested each category's monthly revenue trend; its 9×38 wide table became
-    # 9×1, retaining disposable products averaging 15,000 monthly, while the largest, women's wear, was 456 million:
-    # a 30,000-fold gap. The plotted line was the smallest category, while the subtitle still claimed grouping by major category.
-    #
-    # ⚠ Change the criterion **only above the series limit**. Observations from 81 charts matched to source CSV:
-    # all 16 cases with ≤5 numeric columns that did not retain the largest column **were correct**; highest refund-rate Top10
-    # needs refund rate, not much larger revenue. Magnitude-based choice cannot generalize;
-    # it applies only when all candidate columns expand categories of one metric.
-    if (
-        len(true_nums) > _MAX_SERIES_SAME_FAMILY
-        and len(cat_candidates) == 1  # Pivot has one index column
-        and len(_axis_groups(rows, true_nums)) == 1  # All share one family, hence one metric
-    ):
-        # ★ Rank by **total**, not _column_magnitude (the **mean** of nonzero absolute values).
-        # Captions and model notes explicitly promise first N by total; rankings must match or captions lie.
-        # Both measures nearly agree when categories have equal month counts, but reverse when one category
-        # has high values for only two months: its mean ranks high,
-        # while its yearly total is tiny ([[feedback_same_metric_new_subject_needs_revalidation]]).
-        ordered = sorted(true_nums, key=lambda c: -_column_total(rows, c))[:_MAX_SERIES_SAME_FAMILY]
-        ranked = {c.key for c in ordered}
-        kept_nums = [c for c in true_nums if c.key in ranked]  # Preserve original column order
-        kept_cols = [preferred_cat, *kept_nums]
-        kept_keys = [c.key for c in kept_cols]
-        logger.info(
-            "add_chart.wide_pivot_kept_top_series total=%d kept=%d dropped=%s",
-            len(true_nums),
-            len(kept_nums),
-            [c.key for c in true_nums if c.key not in ranked][:8],
-        )
-        return (
-            [{k: r.get(k) for k in kept_keys} for r in rows],
-            kept_cols,
-            SeriesCut(len(kept_nums), len(true_nums), [(c.key, _column_total(rows, c)) for c in ordered]),
-        )
-
-    primary_num = (next((c for c in true_nums if c.key == sort_by), None) if sort_by else None) or true_nums[0]
-
-    kept_keys = [preferred_cat.key, primary_num.key]
-    kept_cols = [preferred_cat, primary_num]
-    new_rows = [{k: r.get(k) for k in kept_keys} for r in rows]
-    return new_rows, kept_cols, None
 
 
 #: Marking moved to chart/units_enrich (same home as unit enrichment; both add column metadata,

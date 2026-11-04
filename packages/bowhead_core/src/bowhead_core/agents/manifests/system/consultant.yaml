@@ -1,5 +1,5 @@
 name: consultant
-version: 1
+version: 2
 model: analyst
 trust_class: read-mostly
 max_iterations: 100
@@ -77,3 +77,10 @@ callable_peers: []
 produces:
   - pptx
 primary_capability: cap_presentation
+
+listing:
+  listed: true
+  order: 60
+  display_name: "Strategy Deck Consultant"
+  summary: "Shape complex business analysis into a structured, board-ready presentation."
+  capabilities: [cap_presentation, cap_data_query]

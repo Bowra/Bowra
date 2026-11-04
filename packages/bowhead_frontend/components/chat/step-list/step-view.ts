@@ -27,6 +27,15 @@ import { inferFailureUiKind, type PeerTerminal, type Step } from "@/lib/turn-sto
 
 import type { StepView } from "./types";
 
+/** Native result packing and delivery review are not business steps. Exceptional outcomes stay visible. */
+export function isInternalCloseoutStep(step: StepView): boolean {
+  if ((step.toolName !== "subagent_return" && step.toolName !== "review_delivery") || step.state === "cancelled") return false;
+  if (step.state === "failed") {
+    return (step.error?.code === "tool_delivery_review_required" || step.error?.code === "tool_arguments_invalid") && step.error.kind !== "unknown";
+  }
+  return !step.error;
+}
+
 /**
  * A failed spawn with a failed or absent peer terminal must remain a hard
  * failure even when the original Tool error was transient. Keep this severity

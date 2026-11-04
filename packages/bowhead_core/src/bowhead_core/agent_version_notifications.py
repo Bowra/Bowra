@@ -22,6 +22,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domains import domain_database_path
 
 MAX_ATTEMPTS = 8
 _BASE_BACKOFF_SECONDS = 30
@@ -136,7 +137,7 @@ class AgentVersionNotificationStore:
     """Lease, project and settle Owner version notifications."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def claim_version_notification(
         self,

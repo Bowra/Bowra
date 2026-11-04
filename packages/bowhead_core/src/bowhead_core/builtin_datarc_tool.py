@@ -14,6 +14,7 @@ from bowhead_router.types import ToolSchema
 from bowhead_bi_bridge import DatarcClient
 from bowhead_core.builtin_datarc_scope import supported_datarc_operations
 from bowhead_core.datarc_selection import DatarcConnectionBinding
+from bowhead_core.tool_outcome import _extract_result_error, classify_tool_outcome
 from bowhead_core.tool_registry import TeamToolExecutionBinding, ToolExecutionContext, ToolRegistry, ToolSpec
 from bowhead_core.types import ToolAnnotations
 
@@ -176,17 +177,31 @@ def build_builtin_datarc_specs(*, team_id: str, tools: list[Any], store: Any, ba
                         bound_ctx.member_uid = member_uid
                         delegate_args = {"queries": [str(args.get("question") or "").strip()]} if _operation == "datarc_query" else {}
                         result = await delegates[_operation].handler(delegate_args, bound_ctx)
-                        status = "ok"
-                        return {
-                            "ok": True,
+                        outcome = classify_tool_outcome(result)
+                        status = "ok" if outcome.state == "success" else "error"
+                        response: dict[str, Any] = {
+                            "ok": outcome.state != "failure",
                             "connection": datarc_source_label(live_tool.display_name),
                             "workspace": workspace,
                             "result": result,
                         }
+                        if outcome.state == "partial":
+                            response["completion"] = "partial"
+                            error_kind = "datarc_partial_result"
+                        elif outcome.state == "failure":
+                            native_kind, message = _extract_result_error(result)
+                            error_kind = (
+                                "tool_outcome_unknown" if outcome.code == "tool_execution_unknown" else native_kind or "datarc_operation_failed"
+                            )
+                            response["error_kind"] = error_kind
+                            if message:
+                                response["error_message"] = message
+                        return response
                     finally:
                         await client.aclose()
                 except Exception as exc:  # upstream details remain server-side
                     logger.warning("builtin_datarc.call_failed operation=%s err=%s", _operation, type(exc).__name__)
+                    status = "error"
                     error_kind = type(exc).__name__
                     return {"ok": False, "error_kind": "datarc_operation_failed"}
                 finally:

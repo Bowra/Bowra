@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from bowhead_core.share_service import is_visible
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from bowhead_core.team_subagent_access import (
     TeamSubagentAccessFacts as AccessFacts,
 )
@@ -52,7 +53,7 @@ def run_subagent_access_spike() -> SubagentAccessSpikeReport:
     with tempfile.TemporaryDirectory(prefix="bowhead-subagent-access-spike-") as temp_dir:
         db_path = Path(temp_dir) / "access-spike.db"
         _create_fixture(db_path)
-        connection = sqlite3.connect(db_path)
+        connection = connect_sync(db_path)
         connection.row_factory = sqlite3.Row
         try:
             scenarios = [_run_scenario(connection, scenario) for scenario in _ACCESS_SCENARIOS]
@@ -276,7 +277,7 @@ def _plan_issues(query_plan: list[str]) -> list[str]:
 
 
 def _create_fixture(db_path: Path) -> None:
-    connection = sqlite3.connect(db_path)
+    connection = connect_sync(db_path)
     try:
         connection.executescript(_SCHEMA)
         connection.executescript(_FIXTURE_SQL)

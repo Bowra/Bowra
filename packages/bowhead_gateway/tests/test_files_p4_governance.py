@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_gateway.routes import files as files_routes
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -41,7 +42,7 @@ async def app_client(tmp_path: Path):
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     ss = SessionStore(db_path)
     await ss.initialize()
     store = ArtifactStore(backend=LocalBackend(root_dir=tmp_path / "f"), db_path=db_path)

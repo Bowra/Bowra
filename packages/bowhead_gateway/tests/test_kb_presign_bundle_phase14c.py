@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.artifact_store import TEAM_SCOPE_WORKSPACE_ID, LocalBackend, ObjectHead, PresignPostResult
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.migrations.baseline_schema import initial_schema
@@ -38,6 +37,7 @@ from bowhead_core.user_store import User
 from bowhead_gateway.routes import kb_presign
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 from bowhead_core import ArtifactStore
 
@@ -151,7 +151,7 @@ async def app(initialize_migrated_kb_files_database, tmp_path: Path, monkeypatch
     with sqlite3.connect(artifact_db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{artifact_db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(artifact_db_path).with_name('bowhead.db')}", target="core")
     artifact_store = ArtifactStore(
         db_path=str(artifact_db_path),
         backend=LocalBackend(root_dir=tmp_path / "blobs"),

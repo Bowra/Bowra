@@ -16,6 +16,7 @@ from bowhead_core.audit_actions import AuditAction
 from bowhead_core.chart_style_store import ChartStyleStore
 from bowhead_core.chart_style_uow import ChartStyleUnitOfWork
 from bowhead_core.entitlements import CommunityResolver
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.team_settings_store import TeamSettingsStore
 from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import auth as auth_routes
@@ -74,7 +75,7 @@ async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     auth_routes._RATE_BUCKET.clear()
 
     db_path = tmp_path / "chart-style-routes.db"
-    command.upgrade(_config(db_path), "head")
+    command.upgrade(_config(db_path), SOURCE_REVISION)
     users = UserStore(db_path)
     await users.initialize()
     settings = TeamSettingsStore(db_path)

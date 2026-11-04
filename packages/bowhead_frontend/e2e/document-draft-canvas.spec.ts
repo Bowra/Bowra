@@ -1,11 +1,48 @@
 import { expect, test, type Page } from "@playwright/test";
 import fixture from "../__tests__/fixtures/document-draft-canvas.json";
+import wordFixture from "../__tests__/fixtures/document-word-canvas.json";
 import { installReferenceComponent } from "./_composer-reference-component-modules";
 
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1cAAAAASUVORK5CYII=",
   "base64",
 );
+
+for (const [prefix, width] of [["", 1280], ["/bowhead", 390]] as const) {
+  test(`reviews and opens the original Word-only publication at ${prefix || "root"} / ${width}px`, async ({ page }, testInfo) => {
+    const value = wordFixture.source;
+    let published = false;
+    const commands: unknown[] = [];
+    await page.setViewportSize({ width, height: 900 });
+    await page.route(`**/api/v1/sessions/${value.context.sessionId}/documents/${value.context.jobId}`, (route) => route.fulfill({ json: published ? value.published : value.review }));
+    await page.route(`**/api/v1/documents/${value.context.jobId}/preview/page-1.png`, (route) => route.fulfill({ contentType: "image/png", body: png }));
+    await page.route(`**/api/v1/documents/${value.context.jobId}/confirm`, (route) => {
+      commands.push(route.request().postDataJSON());
+      published = true;
+      return route.fulfill({ json: value.published });
+    });
+    await installReferenceComponent(page, prefix, "_document-draft-canvas-entry.tsx");
+    await page.goto(`${prefix}/__reference_component_test#word`);
+    await expect(page.getByRole("heading", { name: "report - Updated.docx" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "Page 1 of 1" })).toBeVisible();
+    await expect(page.getByText("Body · paragraph 1", { exact: true })).toBeVisible();
+    await page.getByRole("checkbox").check();
+    await expect(page.getByRole("button", { name: "Confirm and publish" })).toBeEnabled();
+    await page.getByRole("button", { name: "Confirm and publish" }).click();
+    await expect(page.getByLabel("Published source")).toHaveText(value.published.draft.files["candidate.docx"].artifact_id);
+    await expect(page.getByRole("button", { name: "Open PDF", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Open Word", exact: true }).click();
+    await expect(page.getByLabel("Opened result")).toHaveText(value.published.draft.files["candidate.docx"].artifact_id);
+    await page.getByRole("button", { name: "Close view", exact: true }).click();
+    await page.getByRole("button", { name: "Reopen view", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Open Word", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Unsent input")).toHaveValue("Keep my input");
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ draft_digest: value.review.draft_digest });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("word-source-only.png"), fullPage: true });
+  });
+}
 async function start(page: Page, prefix: string, reviewing = true) {
   await page.route(
     "**/api/v1/documents/djob_canvas_fixture/preview/page-1.png",

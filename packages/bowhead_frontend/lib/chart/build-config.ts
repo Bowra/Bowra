@@ -71,6 +71,7 @@ import {
 import {
   deriveNormalizedChartRenderShapeV1,
   dualAxisColumns,
+  explicitPlotColumns,
   normalizeChartForRenderingV1,
 } from "./normalize-chart-for-rendering";
 import type { ChartColumn, ChartSpec } from "./types";
@@ -132,7 +133,7 @@ function renderRecipe(
   opts: BuildOpts,
 ): ChartRenderRecipe | null {
   if (!opts.renderContext) return null;
-  return resolveChartRenderRecipe(opts.renderContext, renderShape(spec, opts));
+  return resolveChartRenderRecipe(opts.renderContext, renderShape(spec, opts), spec.explicit_presentation);
 }
 
 /** Batch 1 2.2 (P1-5): honor explicit spec.show_data_labels; without an explicit value,
@@ -221,6 +222,7 @@ function themeWithEffectiveSeriesPalette(theme: ChartTheme): ChartTheme {
 
 /** The same selected dimension drives category data and its display format. */
 function categoryColumn(spec: ChartSpec): ChartColumn | undefined {
+  if (spec.explicit_presentation?.mode === "plot") return spec.columns.find((column) => column.key === spec.explicit_presentation!.axes?.x);
   const dims = spec.columns.filter((c) => c.type === "date" || c.type === "categorical" || c.type === "geo");
   if (["bar", "stacked_bar", "hbar"].includes(spec.kind)) {
     const categories = roleOrderedDims(dims.filter((c) => c.type === "categorical" || c.type === "geo"));
@@ -236,7 +238,7 @@ function categoryColumn(spec: ChartSpec): ChartColumn | undefined {
 
 /** Entry point: dispatch by kind. kpi / table / geo use their own components and bypass this function. */
 export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: BuildOpts = {}): ChartJSConfig {
-  if (spec.columns.some((column) => column.type === "numeric" && (spec.rows ?? []).some((row) => isUnsafeIntegerCell(row[column.key])))) {
+  if (explicitPlotColumns(spec).columns.some((column) => column.type === "numeric" && (spec.rows ?? []).some((row) => isUnsafeIntegerCell(row[column.key])))) {
     throw new Error("Exact integers exceed the native chart numeric range; use Table to preserve them.");
   }
   const axisDomains = opts.axisDomains ?? spec._export_axis_domains;
@@ -1393,8 +1395,9 @@ function buildBar(
   if (!opts.horizontal && showLabels && recipe?.widthClass === "compact") {
     options.layout = { padding: { left: 12, right: 16 } };
   }
-  // Plugin adjustment: hide legend for a single series (per design).
-  if (datasets.length === 1) {
+  // A declared group carries identity even when only one group is present.
+  const declaredGrouping = spec.explicit_presentation?.mode === "plot" && (spec.explicit_presentation.group_by?.length ?? 0) > 0;
+  if (datasets.length === 1 && !declaredGrouping) {
     options.plugins = {
       ...options.plugins,
       legend: { ...options.plugins?.legend, display: false },
@@ -1824,8 +1827,13 @@ function buildScatter(
   // with column order `[省(geo), 门店(categorical), …]`, one find selects "省", coloring 40
   // stores as five provinces and losing store names entirely, worse than unnamed points (apparent identities
   // cannot distinguish points). geo serves as identity only when categorical is absent.
-  const catCol = spec.columns.find((c) => c.type === "categorical")
-    ?? spec.columns.find((c) => c.type === "geo");
+  const binding = spec.explicit_presentation?.mode === "plot" ? spec.explicit_presentation : undefined;
+  const groupKey = binding?.group_by?.[0];
+  const entityKey = spec._export_frame_entities?.key;
+  const catCol = binding
+    ? groupKey ? spec.columns.find((column) => column.key === groupKey)
+      : entityKey ? { key: entityKey, header: entityKey, type: "categorical" as const } : undefined
+    : spec.columns.find((c) => c.type === "categorical") ?? spec.columns.find((c) => c.type === "geo");
   if (numCols.length < 2) {
     throw new Error("scatter requires ≥2 numeric");
   }
@@ -1856,7 +1864,9 @@ function buildScatter(
   // `_pointLabels` carries identity into tooltips; protagonist remains highlighted, changing from a cluster to one point.
   //   ⚠ Per-point custom keys cannot live on `data` (react-chartjs-2 cloneData drops them;
   //     see `_fmtCtx` comment), so attach **parallel arrays** to dataset, indexed by dataIndex.
-  const identityMode = catCol !== undefined && (spec._export_frame_entities?.values.length ?? groupNames.length) > theme.palette.length;
+  const identityMode = binding
+    ? !!entityKey && !groupKey
+    : catCol !== undefined && (spec._export_frame_entities?.values.length ?? groupNames.length) > theme.palette.length;
 
   // Group categories into multiple series; no category / categorical row identity → single series.
   const datasets: ChartData["datasets"] = [];

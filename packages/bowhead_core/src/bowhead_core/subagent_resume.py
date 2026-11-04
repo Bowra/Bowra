@@ -33,6 +33,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_knowledge_policy import KnowledgeScope
 from bowhead_core.datarc_selection import DatarcSelectionSnapshot, require_datarc_context_migration
 from bowhead_core.kb_search_budget import KnowledgeReadState
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ class ResumeMaterial:
     knowledge_scope: KnowledgeScope | None = None
     knowledge_sources: dict[str, str | None] | None = None
     datarc_selection: DatarcSelectionSnapshot | None = None
+    knowledge_navigation: dict[str, dict] | None = None
 
 
 @dataclass
@@ -185,6 +187,7 @@ def encode_material(
     knowledge_read: KnowledgeReadState | None = None,
     knowledge_scope: KnowledgeScope | None = None,
     knowledge_sources: dict[str, str | None] | None = None,
+    knowledge_navigation: dict[str, dict] | None = None,
     datarc_selection: DatarcSelectionSnapshot | None = None,
     segmented: bool = False,
 ) -> tuple[bytes, int]:
@@ -204,13 +207,22 @@ def encode_material(
         plain = json.dumps(
             {
                 **({"storage_format": "segmented.v1"} if segmented else {}),
-                "schema_version": 4 if datarc_selection is not None else 3 if knowledge_scope is not None else 2 if knowledge_read is not None else 1,
+                "schema_version": 5
+                if knowledge_navigation is not None
+                else 4
+                if datarc_selection is not None
+                else 3
+                if knowledge_scope is not None
+                else 2
+                if knowledge_read is not None
+                else 1,
                 **({"datarc_selection": datarc_selection.model_dump(mode="json")} if datarc_selection is not None else {}),
                 **(
                     {"knowledge_scope": knowledge_scope.model_dump(mode="json"), "knowledge_sources": knowledge_sources or {}}
                     if knowledge_scope is not None
                     else {}
                 ),
+                **({"knowledge_navigation": knowledge_navigation} if knowledge_navigation is not None else {}),
                 "messages": items,
                 "reference_inventory": reference_inventory,
                 **({"knowledge_read": knowledge_read.model_dump()} if knowledge_read is not None else {}),
@@ -248,17 +260,17 @@ def decode_material(packed: bytes, *, segmented: bool = False) -> ResumeMaterial
         storage_format = value.pop("storage_format", None)
         if storage_format not in (None, "segmented.v1") or (storage_format is not None) != segmented:
             raise ValueError("resume_checkpoint_storage_format")
-    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3, 4}:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3, 4, 5}:
         raise ValueError("resume_checkpoint_version")
     knowledge_read = (
         KnowledgeReadState.model_validate(value.get("knowledge_read"))
-        if value["schema_version"] == 2 or (value["schema_version"] in {3, 4} and "knowledge_read" in value)
+        if value["schema_version"] == 2 or (value["schema_version"] in {3, 4, 5} and "knowledge_read" in value)
         else None
     )
     if value["schema_version"] == 3:
         knowledge_scope = KnowledgeScope.model_validate_json(json.dumps(value.get("knowledge_scope")))
         knowledge_sources = value.get("knowledge_sources")
-    elif value["schema_version"] == 4:
+    elif value["schema_version"] in {4, 5}:
         if type(value["schema_version"]) is not int:
             raise ValueError("resume_checkpoint_version")
         knowledge_scope = (
@@ -267,24 +279,39 @@ def decode_material(packed: bytes, *, segmented: bool = False) -> ResumeMaterial
         knowledge_sources = value.get("knowledge_sources", {})
     else:
         knowledge_scope = knowledge_sources = None
-    if value["schema_version"] not in {3, 4} and ("knowledge_scope" in value or "knowledge_sources" in value):
+    if value["schema_version"] not in {3, 4, 5} and ("knowledge_scope" in value or "knowledge_sources" in value):
         raise ValueError("resume_checkpoint_version")
-    if value["schema_version"] in {3, 4} and (
+    if value["schema_version"] in {3, 4, 5} and (
         not isinstance(knowledge_sources, dict)
         or any(not isinstance(k, str) or (v is not None and not isinstance(v, str)) for k, v in knowledge_sources.items())
     ):
         raise ValueError("resume_checkpoint_shape")
     if value["schema_version"] == 1 and "knowledge_read" in value:
         raise ValueError("resume_checkpoint_version")
-    if value["schema_version"] != 4 and "datarc_selection" in value:
+    if value["schema_version"] not in {4, 5} and "datarc_selection" in value:
         raise ValueError("resume_checkpoint_version")
-    datarc_selection = DatarcSelectionSnapshot.model_validate(value.get("datarc_selection")) if value["schema_version"] == 4 else None
-    if value["schema_version"] == 4 and not set(value) <= {
+    datarc_selection = (
+        DatarcSelectionSnapshot.model_validate(value.get("datarc_selection"))
+        if value["schema_version"] == 4 or (value["schema_version"] == 5 and value.get("datarc_selection") is not None)
+        else None
+    )
+    knowledge_navigation = value.get("knowledge_navigation")
+    if (value["schema_version"] == 5) != (knowledge_navigation is not None):
+        raise ValueError("resume_checkpoint_version")
+    if knowledge_navigation is not None:
+        from bowhead_core.kb.source_navigation import NavigationDependency
+
+        if not isinstance(knowledge_navigation, dict):
+            raise ValueError("resume_checkpoint_shape")
+        for proof in knowledge_navigation.values():
+            NavigationDependency.model_validate(proof)
+    if value["schema_version"] in {4, 5} and not set(value) <= {
         "schema_version",
         "messages",
         "reference_inventory",
         "knowledge_scope",
         "knowledge_sources",
+        *({"knowledge_navigation"} if value["schema_version"] == 5 else set()),
         "knowledge_read",
         "datarc_selection",
     }:
@@ -344,6 +371,7 @@ def decode_material(packed: bytes, *, segmented: bool = False) -> ResumeMaterial
         knowledge_scope=knowledge_scope,
         knowledge_sources=knowledge_sources,
         datarc_selection=datarc_selection,
+        knowledge_navigation=knowledge_navigation,
     )
 
 
@@ -421,6 +449,7 @@ async def capture(
     knowledge_read: KnowledgeReadState | None = None,
     knowledge_scope: KnowledgeScope | None = None,
     knowledge_sources: dict[str, str | None] | None = None,
+    knowledge_navigation: dict[str, dict] | None = None,
     datarc_selection: DatarcSelectionSnapshot | None = None,
     segmented: bool = False,
 ) -> str:
@@ -444,6 +473,7 @@ async def capture(
             knowledge_read=knowledge_read,
             knowledge_scope=knowledge_scope,
             knowledge_sources=knowledge_sources,
+            knowledge_navigation=knowledge_navigation,
             datarc_selection=datarc_selection,
             segmented=segmented,
         )
@@ -459,7 +489,7 @@ async def capture(
     # Serializing and compressing a long transcript takes long enough to stall other turns.
     ciphertext, plain_bytes, manifest, parts = await asyncio.to_thread(_seal)
     now = _now()
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             if datarc_selection is not None:
@@ -520,7 +550,7 @@ async def list_resumable(
 ) -> list[ResumeCheckpoint]:
     """Newest resumable runs of this user's session (not ones captured in ``exclude_turn_id``)."""
     async with (
-        open_shared_ctx(db_path) as db,
+        open_shared_ctx(domain_database_path(db_path, "execution")) as db,
         db.execute(
             f"SELECT {_COLUMNS.removesuffix(', ciphertext')} FROM subagent_resume_checkpoints "  # noqa: S608
             f"WHERE session_id=? AND user_id=? AND turn_id<>? AND {_RESUMABLE} "
@@ -539,7 +569,7 @@ async def record_requests(db_path: str, *, turn_id: str, checkpoint_ids: Sequenc
     if not ids:
         return
     now = _iso(_now())
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         await db.executemany(
             "INSERT OR IGNORE INTO subagent_resume_requests(turn_id, seq, checkpoint_id, created_at) VALUES (?,?,?,?)",
             [(turn_id, seq, checkpoint_id, now) for seq, checkpoint_id in enumerate(ids)],
@@ -549,7 +579,7 @@ async def record_requests(db_path: str, *, turn_id: str, checkpoint_ids: Sequenc
 
 async def requested_checkpoint_ids(db_path: str, *, turn_id: str) -> list[str]:
     async with (
-        open_shared_ctx(db_path) as db,
+        open_shared_ctx(domain_database_path(db_path, "execution")) as db,
         db.execute("SELECT checkpoint_id FROM subagent_resume_requests WHERE turn_id=? ORDER BY seq", (turn_id,)) as cursor,
     ):
         return [str(row[0]) for row in await cursor.fetchall()]
@@ -558,7 +588,7 @@ async def requested_checkpoint_ids(db_path: str, *, turn_id: str) -> list[str]:
 async def claim(db_path: str, *, checkpoint_id: str, session_id: str, user_id: str, turn_id: str) -> ResumeCheckpoint:
     """Reserve a checkpoint for ``turn_id``; idempotent for the same turn (recovery)."""
     now = _iso(_now())
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             async with db.execute(
@@ -595,7 +625,7 @@ async def claim(db_path: str, *, checkpoint_id: str, session_id: str, user_id: s
 
 async def release(db_path: str, *, checkpoint_id: str, turn_id: str) -> None:
     """Return a claimed checkpoint when its resumed run produced no newer one."""
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         await db.execute(
             "UPDATE subagent_resume_checkpoints SET state='live', claimed_by_turn_id=NULL WHERE id=? AND state='claimed' AND claimed_by_turn_id=?",
             (checkpoint_id, turn_id),
@@ -605,7 +635,7 @@ async def release(db_path: str, *, checkpoint_id: str, turn_id: str) -> None:
 
 async def retire(db_path: str, *, checkpoint_id: str) -> None:
     """Stop offering a run whose saved work the current Agent can no longer use."""
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         await db.execute(
             "UPDATE subagent_resume_checkpoints SET state='superseded', ciphertext=NULL WHERE id=? AND state IN ('live','claimed')",
             (checkpoint_id,),
@@ -659,7 +689,7 @@ def resume_refusal_for(checkpoint: ResumeCheckpoint, *, profile: str, agent_revi
 
 async def purge_expired(db_path: str) -> int:
     """Drop the transcript of expired checkpoints; the metadata stays with its session."""
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         cursor = await db.execute(
             "UPDATE subagent_resume_checkpoints SET state='purged', ciphertext=NULL WHERE ciphertext IS NOT NULL AND expires_at<=?",
             (_iso(_now()),),

@@ -369,6 +369,19 @@ describe("第 4b 批余项：写作中导出不可用、窄工具条、手机阅
 });
 
 describe("report toolbar share and status", () => {
+  it("puts desktop report actions and source-summary hosts in one header and opens existing History", async () => {
+    media.matches = false;
+    renderWorkbench();
+    await waitFor(() => expect(toolbar()).not.toBeNull());
+    expect(document.querySelectorAll(".results-report-object-toolbar")).toHaveLength(1);
+    expect(toolbar()).toHaveClass("v2-ws-right-head", "results-report-unified-toolbar");
+    expect(reportViewProps.last?.sourceLinkageHost).toBe(toolbar()!.querySelector(".results-report-source-summary"));
+    expect(reportViewProps.last?.hideHistoryControl).toBe(true);
+    fireEvent.click(screen.getAllByRole("button", { name: "更多操作" })[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "历史" }));
+    expect(reportViewProps.openHistory).toHaveBeenCalled();
+  });
+
   it("有「分享」图标按钮，点开是这份报告的分享弹窗，回焦目标是这个按钮；「复制权限链接」仍在「更多」", async () => {
     renderWorkbench();
     const share = await screen.findByRole("button", { name: "分享报告" });

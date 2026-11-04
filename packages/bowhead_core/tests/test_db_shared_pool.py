@@ -6,6 +6,7 @@ is closed rather than handing the previous borrower's state to the next one.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,28 @@ from bowhead_core import _db
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+
+@pytest.mark.parametrize("begin", ["BEGIN", "BEGIN IMMEDIATE"])
+async def test_long_shared_transactions_report_only_code_locations(tmp_path, monkeypatch, caplog, begin):
+    import anyio
+
+    monkeypatch.setattr(_db, "_TRANSACTION_WARNING_SECONDS", 0.01)
+    private_value = "synthetic-private-value-not-for-logs"
+    with caplog.at_level(logging.WARNING, logger="bowhead_core._db"):
+        async with open_shared_ctx(str(tmp_path / "diagnostic.db")) as db:
+            await db.execute("CREATE TABLE private_payload (value TEXT)")
+            await db.commit()
+            await db.execute(begin)
+            await db.execute("SELECT ?", (private_value,))
+            await anyio.sleep(0.04)
+            await db.rollback()
+    records = [record.getMessage() for record in caplog.records if "sqlite.shared_transaction_open" in record.getMessage()]
+    assert len(records) == 1
+    assert "test_long_shared_transactions_report_only_code_locations" in records[0]
+    assert private_value not in records[0]
+    assert "SELECT" not in records[0]
+    assert "private_payload" not in records[0]
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +204,7 @@ async def test_reused_connection_skips_the_schema_parse(tmp_path: Path) -> None:
     """复用的意义：同一个库第二次借用不再开新连接（116 上每次新开要解析整库 schema ≈12ms CPU）。"""
     db_path = tmp_path / "bowhead.db"
     _make_db(db_path)
-    real_connect = aiosqlite.connect
+    real_connect = _db.diagnostic_connect
     opened = {"n": 0}
 
     def counting(*args, **kwargs):
@@ -189,12 +212,12 @@ async def test_reused_connection_skips_the_schema_parse(tmp_path: Path) -> None:
         return real_connect(*args, **kwargs)
 
     await _value(db_path)
-    _db.aiosqlite.connect = counting  # type: ignore[assignment]
+    _db.diagnostic_connect = counting  # type: ignore[assignment]
     try:
         for key in ("a", "b", "c", "a", "b"):
             await _value(db_path, key)
     finally:
-        _db.aiosqlite.connect = real_connect  # type: ignore[assignment]
+        _db.diagnostic_connect = real_connect  # type: ignore[assignment]
     assert opened["n"] == 0
 
 
@@ -223,3 +246,63 @@ async def test_callbacks_are_cleared_before_the_scrub_runs_its_own_statements(tm
     assert again is first  # The authorizer did not block cleanup; the connection is reused normally.
     assert value == "1"
     assert traced == []
+
+
+async def test_cancelled_release_rolls_back_a_writer_before_returning(tmp_path: Path) -> None:
+    import anyio
+
+    db_path = tmp_path / "cancelled-writer.db"
+    with sqlite3.connect(db_path) as fresh:
+        fresh.execute("CREATE TABLE probe(value TEXT)")
+    borrowed = None
+    try:
+        with anyio.CancelScope() as scope:
+            async with open_shared_ctx(str(db_path)) as conn:
+                borrowed = conn
+                await conn.execute("INSERT INTO probe VALUES ('uncommitted')")
+                scope.cancel()
+        with sqlite3.connect(db_path, timeout=0) as fresh:
+            fresh.execute("BEGIN IMMEDIATE")
+            assert fresh.execute("SELECT COUNT(*) FROM probe").fetchone()[0] == 0
+            fresh.rollback()
+    finally:
+        if borrowed is not None:
+            await borrowed.close()
+
+
+async def test_task_cancellation_during_release_does_not_strand_a_writer(tmp_path: Path, monkeypatch) -> None:
+    import asyncio
+
+    db_path = tmp_path / "cancelled-release.db"
+    with sqlite3.connect(db_path) as fresh:
+        fresh.execute("CREATE TABLE probe(value TEXT)")
+    entered, proceed = asyncio.Event(), asyncio.Event()
+    original = _db._scrub_for_reuse
+    borrowed = []
+
+    async def pause_release(conn):
+        entered.set()
+        await proceed.wait()
+        return await original(conn)
+
+    async def write():
+        async with open_shared_ctx(str(db_path)) as conn:
+            borrowed.append(conn)
+            await conn.execute("INSERT INTO probe VALUES ('uncommitted')")
+
+    monkeypatch.setattr(_db, "_scrub_for_reuse", pause_release)
+    task = asyncio.create_task(write())
+    try:
+        await entered.wait()
+        task.cancel()
+        proceed.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with sqlite3.connect(db_path, timeout=0) as fresh:
+            fresh.execute("BEGIN IMMEDIATE")
+            assert fresh.execute("SELECT COUNT(*) FROM probe").fetchone()[0] == 0
+            fresh.rollback()
+    finally:
+        proceed.set()
+        for conn in borrowed:
+            await conn.close()

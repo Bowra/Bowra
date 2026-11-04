@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.user_store import _id
 
 if TYPE_CHECKING:
@@ -120,7 +121,7 @@ async def teams_due_for_monthly_reset(db_path: str, now: datetime | None = None)
     now = now or datetime.now(UTC)
     current = now.astimezone(UTC).strftime("%Y-%m")
     due: list[str] = []
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT id, team_credit_period_start FROM teams WHERE status = 'active'",
@@ -162,7 +163,7 @@ async def monthly_credit_reset(db_path: str, *, team_ids: Sequence[str] | None =
     tier_key_missing = 0
     quota_changed = 0
     ledger_rows = 0
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         # All active teams (if team_ids is supplied, only those listed).
         if team_ids is None:

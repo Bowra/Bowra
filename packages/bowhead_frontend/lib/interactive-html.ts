@@ -1,7 +1,10 @@
 import { parse as parseJavaScript } from "acorn";
-import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
+import { defaultTreeAdapter, parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 
 import { sha256Hex } from "./sha256-fallback";
+import { randomUuid } from "./random-id";
+
+import { HTML_PREVIEW_BUDGET, HtmlPreviewBudgetError } from "./html-preview-budget";
 
 import { INTERACTIVE_HTML_PERMISSIONS, INTERACTIVE_HTML_SANDBOX, type InteractiveHtmlDocument } from "./html-preview-contract";
 
@@ -53,9 +56,79 @@ async function hash(source: string): Promise<string> {
   return `'sha256-${btoa(hex.match(/../g)!.map((pair) => String.fromCharCode(parseInt(pair, 16))).join(""))}'`;
 }
 
+/** Parse inert text only; this function never evaluates authored JavaScript. */
+export function validateHtmlComplexity(raw: string) {
+  if (raw.length > HTML_PREVIEW_BUDGET.inputBytes || new TextEncoder().encode(raw).length > HTML_PREVIEW_BUDGET.inputBytes) {
+    throw new HtmlPreviewBudgetError();
+  }
+  let allocations = 0;
+  const allocate = () => {
+    if (++allocations > HTML_PREVIEW_BUDGET.nodes) throw new HtmlPreviewBudgetError();
+  };
+  const treeAdapter: typeof defaultTreeAdapter = {
+    ...defaultTreeAdapter,
+    createDocument() {
+      allocate();
+      return defaultTreeAdapter.createDocument();
+    },
+    createDocumentFragment() {
+      allocate();
+      return defaultTreeAdapter.createDocumentFragment();
+    },
+    createElement(tagName, namespaceURI, attrs) {
+      allocate();
+      return defaultTreeAdapter.createElement(tagName, namespaceURI, attrs);
+    },
+    createCommentNode(data) {
+      allocate();
+      return defaultTreeAdapter.createCommentNode(data);
+    },
+    insertText(parentNode, text) {
+      const previous = defaultTreeAdapter.getChildNodes(parentNode).at(-1);
+      if (!previous || !defaultTreeAdapter.isTextNode(previous)) allocate();
+      defaultTreeAdapter.insertText(parentNode, text);
+    },
+    insertTextBefore(parentNode, text, referenceNode) {
+      const children = defaultTreeAdapter.getChildNodes(parentNode);
+      const previous = children[children.indexOf(referenceNode) - 1];
+      if (!previous || !defaultTreeAdapter.isTextNode(previous)) allocate();
+      defaultTreeAdapter.insertTextBefore(parentNode, text, referenceNode);
+    },
+    setDocumentType(document, name, publicId, systemId) {
+      if (!defaultTreeAdapter.getChildNodes(document).some(defaultTreeAdapter.isDocumentTypeNode)) allocate();
+      defaultTreeAdapter.setDocumentType(document, name, publicId, systemId);
+    },
+  };
+  const tree = parse(raw, { treeAdapter });
+  const pending: Array<{ node: Node; depth: number }> = [{ node: tree, depth: 0 }];
+  let nodes = 0;
+  let handlers = 0;
+  let scriptBytes = 0;
+  while (pending.length) {
+    const { node, depth } = pending.pop()!;
+    if (++nodes > HTML_PREVIEW_BUDGET.nodes || depth > HTML_PREVIEW_BUDGET.depth) throw new HtmlPreviewBudgetError();
+    if ("tagName" in node) {
+      for (const attribute of node.attrs) {
+        if (attribute.name.startsWith("on")) {
+          handlers++;
+          scriptBytes += new TextEncoder().encode(attribute.value).length;
+        }
+      }
+      if (node.tagName === "script") {
+        scriptBytes += node.childNodes.reduce((total, child) => total + (child.nodeName === "#text"
+          ? new TextEncoder().encode((child as DefaultTreeAdapterMap["textNode"]).value).length : 0), 0);
+      }
+      if ("content" in node) pending.push({ node: node.content as Node, depth: depth + 1 });
+    }
+    if (handlers > HTML_PREVIEW_BUDGET.handlers || scriptBytes > HTML_PREVIEW_BUDGET.scriptBytes) throw new HtmlPreviewBudgetError();
+    if ("childNodes" in node) for (const child of node.childNodes) pending.push({ node: child, depth: depth + 1 });
+  }
+  return tree;
+}
+
 /** Prepare executable HTML without parsing it in the authenticated DOM. */
 export async function buildInteractiveHtmlDocument(raw: string): Promise<InteractiveHtmlDocument> {
-  const tree = parse(raw);
+  const tree = validateHtmlComplexity(raw);
   const scripts: string[] = [];
   const handlers: string[] = [];
   let externalResources = false;
@@ -87,6 +160,12 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
           attribute.value = guarded(attribute.value, false, true);
           handlers.push(attribute.value);
         }
+        if (attribute.name === "href" && ["a", "area"].includes(element.tagName)
+          && attribute.value.trim().startsWith("#")) {
+          // A bare fragment in srcdoc otherwise resolves against the host URL.
+          attribute.value = `about:srcdoc${attribute.value.trim()}`;
+          continue;
+        }
         if (["src", "href", "action", "poster", "srcset"].includes(attribute.name)
           && attribute.value && !/^(?:#|data:)/i.test(attribute.value)) externalResources = true;
       }
@@ -100,10 +179,14 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
     }
   }
   visit(tree);
-  const channel = globalThis.crypto?.randomUUID?.() ?? `html-${Date.now()}-${Math.random()}`;
+  const channel = randomUuid();
   const relay = guarded(`const child=document.querySelector("iframe");
+    const reported=new Set();let lastEscape=-Infinity;
     addEventListener("message",event=>{
       if(event.source===child.contentWindow&&["bowhead-html-escape","bowhead-html-runtime","bowhead-html-blocked"].includes(event.data)){
+        if(event.data==="bowhead-html-escape"){
+          const now=performance.now();if(now-lastEscape<250)return;lastEscape=now;
+        }else{if(reported.has(event.data))return;reported.add(event.data)}
         parent.postMessage({type:event.data,channel:${JSON.stringify(channel)}},"*");
       }
     });`);
@@ -116,8 +199,8 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
   addEventListener("unhandledrejection",()=>report("runtime"));
   addEventListener("securitypolicyviolation",()=>report("blocked"));`);
   scripts.push(relay, keyboard);
-  const scriptHashes = [...new Set(await Promise.all(scripts.map(hash)))];
-  const handlerHashes = [...new Set(await Promise.all(handlers.map(hash)))];
+  const scriptHashes = await Promise.all([...new Set(scripts)].map(hash));
+  const handlerHashes = await Promise.all([...new Set(handlers)].map(hash));
   const csp = [
     "default-src 'none'", `script-src 'unsafe-eval' ${scriptHashes.join(" ")}`,
     `script-src-attr ${handlerHashes.length ? `'unsafe-hashes' ${handlerHashes.join(" ")}` : "'none'"}`,
@@ -130,5 +213,8 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
   // A trusted parent with frame-src 'none' prevents the executable child from
   // navigating itself to a network URL. Initial srcdoc documents inherit CSP.
   const document = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(csp)}"><meta http-equiv="x-dns-prefetch-control" content="off"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style></head><body><iframe title="HTML content" sandbox="${INTERACTIVE_HTML_SANDBOX}" allow="${INTERACTIVE_HTML_PERMISSIONS}" referrerpolicy="no-referrer" srcdoc="${escapeAttribute(content)}"></iframe><script>${relay}</script></body></html>`;
+  if (document.length > HTML_PREVIEW_BUDGET.outputBytes || new TextEncoder().encode(document).length > HTML_PREVIEW_BUDGET.outputBytes) {
+    throw new HtmlPreviewBudgetError();
+  }
   return { document, channel, externalResources };
 }

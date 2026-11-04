@@ -29,6 +29,7 @@ from bowhead_core.agent_eval_store import AgentEvalStore, AgentEvalStoreError, E
 from bowhead_core.agent_version_automation import AgentVersionAutomationError
 from bowhead_core.agent_version_eval import AttemptEvidence, ComparisonCase, ReadinessDecision, project_readiness
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 ComparisonStatus = Literal["queued", "running", "finalizing", "completed", "failed", "cancelled"]
@@ -177,7 +178,7 @@ class AgentEvalComparisonStore:
     """Own the comparison aggregate; Agent execution remains in the existing worker."""
 
     def __init__(self, db_path: str | Path, *, clock: _Clock | None = None, runtime_check: Callable[[str], Awaitable[None]] | None = None) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self.runtime_check = runtime_check
         self._clock = clock or _SystemClock()
         self._eval_store = AgentEvalStore(self.db_path)

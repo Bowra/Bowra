@@ -151,7 +151,7 @@ describe("SettingsSidebarNav", () => {
     space.items = [{ id: "ws_1", name: "零售经营分析", desc: "", role: "member" }];
     renderIntl(<Harness me={user("member", { access_requests: true })} />);
     expect(groupTitles()).toEqual(["个人", "空间 · 零售经营分析"]);
-    expect(screen.getByRole("link", { name: "空间说明" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "AI 工作说明" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "成员" })).toBeNull();
     await waitFor(() => expect(screen.getByRole("link", { name: /访问申请/ }).textContent).toContain("1 个待处理"));
     expect(api.fetchApprovals).not.toHaveBeenCalled();
@@ -213,9 +213,8 @@ describe("SettingsSidebarNav", () => {
   it("highlights an administration page by its route", () => {
     mockData();
     space.items = [{ id: "ws_1", name: "零售经营分析", desc: "", role: "viewer" }];
-    renderIntl(<Harness me={user("audit_admin")} active={{ tab: null, admin: "audit" }} context="administration" />);
-    expect(groupTitles()).toEqual(["审计"]);
-    expect(screen.getByRole("link", { current: "page" }).textContent).toBe("审计日志");
+    renderIntl(<Harness me={user("owner")} active={{ tab: null, admin: "approvals" }} context="administration" />);
+    expect(screen.getByRole("link", { current: "page" }).getAttribute("href")).toBe("/admin/approvals/");
   });
 
   it("shows the suggestion inbox pending pill for admins with the feedback loop", async () => {

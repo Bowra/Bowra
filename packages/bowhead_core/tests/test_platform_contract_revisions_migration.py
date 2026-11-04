@@ -4,10 +4,9 @@ from pathlib import Path
 
 import pytest
 from alembic import command
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from test_agent_eval_policy_plan_store import NOW, _seed
 from test_office_upload_confirmation_migration import _config
-
-from bowhead_core import migrations
 
 REVISION = import_module("bowhead_core.migrations.versions.0176_platform_contract_revisions")
 pytestmark = pytest.mark.integration
@@ -36,10 +35,10 @@ def test_only_the_agent_owner_can_append_a_platform_contract_revision(tmp_path: 
         with pytest.raises(sqlite3.IntegrityError, match="suite revision scope mismatch"):
             _append_platform_revision(db, revision_id="aev_platform_2", created_by="user_owner")
 
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
         # A Team admin still can't change an Agent's platform contract.
         with pytest.raises(sqlite3.IntegrityError, match="suite revision scope mismatch"):
             _append_platform_revision(db, revision_id="aev_platform_admin", created_by="user_other")
@@ -54,6 +53,6 @@ def test_other_targets_only_advance_the_ledger(tmp_path: Path, target: str) -> N
     command.upgrade(config, REVISION.down_revision)
     with sqlite3.connect(path) as db:
         before = db.execute("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()
-    command.upgrade(config, "head")
+    command.upgrade(config, REVISION.revision)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").fetchall() == before

@@ -18,7 +18,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -59,6 +60,7 @@ class DeepDigest:
 @dataclass
 class DreamingEngine:
     db_path: str  # SQLite path (shared with TurnLogStore; legacy skill_observations uses the same database).
+    connect_factory: Callable[[str], aiosqlite.Connection] = field(default=aiosqlite.connect, repr=False, compare=False, kw_only=True)
 
     # ─── REM ──────────────────────────────────────────────
     async def rem_digest(
@@ -70,7 +72,7 @@ class DreamingEngine:
         since_iso = (datetime.now(tz=UTC) - timedelta(days=window_days)).isoformat(timespec="seconds")
 
         try:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with self.connect_factory(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
 
                 # total turns in window
@@ -132,7 +134,7 @@ class DreamingEngine:
     ) -> DeepDigest:
         since_iso = (datetime.now(tz=UTC) - timedelta(hours=window_hours)).isoformat(timespec="seconds")
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
             async with db.execute(

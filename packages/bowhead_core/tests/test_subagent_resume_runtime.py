@@ -440,3 +440,30 @@ async def test_the_lead_loop_passes_the_click_to_its_runner(tmp_path, monkeypatc
 
     forced = runner.kwargs["forced_tool_calls"]
     assert [call.arguments["resume_checkpoint_id"] for call in forced] == [clicked]
+
+
+async def test_required_source_contract_survives_real_checkpoint_resume(tmp_path, monkeypatch):
+    from bowhead_core.source_obligations import retained_sources
+
+    db_path = await _db(tmp_path)
+    first, _ = await _run(
+        monkeypatch,
+        _Router(reads=6),
+        _ctx(db_path, "t_1", required_web_sources=("https://example.com",)),
+        step_limit=3,
+        pre_minted_subagent_id="sub_a",
+    )
+    checkpoint = await sr.claim(db_path, checkpoint_id=first.resume_checkpoint_id, session_id="s_1", user_id="u_1", turn_id="t_2")
+    material = sr.open_material(checkpoint, db_path=db_path)
+    assert retained_sources(material.messages) == {"https://example.com"}
+    grant = sr.ResumeGrant(checkpoint=checkpoint, material=material, instruction="Finish.")
+    second, _ = await _run(
+        monkeypatch,
+        _Router(reads=0),
+        _ctx(db_path, "t_2"),
+        step_limit=None,
+        pre_minted_subagent_id="sub_a",
+        resume_grant=grant,
+    )
+    assert not second.ok
+    assert second.error == "subagent_source_unverified"

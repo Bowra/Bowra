@@ -22,13 +22,14 @@ import json
 import logging
 import os
 import re
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-import aiosqlite
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.credit_admin_store import cache_invalidate_team
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.team_llm_config import (
     TeamLlmConfigError,
     build_catalog,
@@ -38,7 +39,7 @@ from bowhead_core.team_llm_config import (
     redact_config,
     validate_v2_config,
 )
-from bowhead_core.team_llm_flags import model_runtime_parameters_enabled, runtime_parameter_changes_admitted
+from bowhead_core.team_llm_flags import model_assignment_reconciliation_enabled, model_runtime_parameters_enabled, runtime_parameter_changes_admitted
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
@@ -50,6 +51,7 @@ from bowhead_gateway.team_llm_apply_service import (
     TeamLlmApplyError,
     apply_team_llm_v2,
 )
+from bowhead_gateway.team_llm_assignment_service import prepare_assignment_changes
 from bowhead_gateway.team_llm_readiness_service import (
     ProviderIdentityRequiredError,
     catalog_verification_entries,
@@ -118,6 +120,7 @@ def _llm_config_features(request: Request) -> dict[str, Any]:
     """Feature flags the model settings page reads; GET and PUT return the same set."""
     return {
         "model_discovery_v2": True,
+        "model_assignment_reconciliation": model_assignment_reconciliation_enabled(),
         "bowra_connect": bool(os.environ.get("BOWRA_URL", "").strip()),
         "model_runtime_parameters": model_runtime_parameters_enabled(),
         "capability_probes": True,
@@ -1253,6 +1256,12 @@ async def validate_llm_config(
         )
 
     incoming_config = _preserve_provider_secrets(old_config, body.config)
+    assignment_changes: list[dict[str, Any]] = []
+    # Missing identity is reported by the original connection precheck validation.
+    with suppress(ProviderIdentityRequiredError):
+        incoming_config, assignment_changes = await prepare_assignment_changes(
+            db_path=store.db_path, team_id=caller.team_id, current=old_config or {}, draft=incoming_config
+        )
     issues: list[dict[str, Any]] = []
     if not runtime_parameter_changes_admitted(old_config or {}, incoming_config):
         issues.append(
@@ -1295,6 +1304,7 @@ async def validate_llm_config(
         "has_changes": bool(changed_sections),
         "changed_sections": changed_sections,
         "impact": impact,
+        "assignment_changes": assignment_changes,
     }
     if not issues:
         try:
@@ -1371,6 +1381,12 @@ async def update_llm_config(
             current_version=current_version,
         )
     incoming_config = _preserve_provider_secrets(old_config, body.config)
+    assignment_changes: list[dict[str, Any]] = []
+    # Missing identity is reported by the original connection precheck validation.
+    with suppress(ProviderIdentityRequiredError):
+        incoming_config, assignment_changes = await prepare_assignment_changes(
+            db_path=store.db_path, team_id=caller.team_id, current=old_config or {}, draft=incoming_config
+        )
     # The retry setting has its own endpoint; a full save that omits it keeps it.
     if "retry" not in incoming_config and isinstance(old_config, dict) and "retry" in old_config:
         incoming_config = {**incoming_config, "retry": old_config["retry"]}
@@ -1460,9 +1476,10 @@ async def update_llm_config(
             raise HTTPException(409, {"code": "configuration_receipt_conflict"})
 
     cfg, version = await store.get_team_llm_config_with_version(caller.team_id)
-    return {
+    response = {
         "ok": True,
         "version": version,
+        "assignment_changes": assignment_changes,
         "config": redact_config(cfg),
         "providers": compatibility_provider_list(cfg),
         "reindex": reindex,
@@ -1472,6 +1489,58 @@ async def update_llm_config(
         "features": _llm_config_features(request),
         **_llm_config_field_guidance(),
     }
+    if v2_apply_result is not None:
+        response["provider_identities"] = v2_apply_result.provider_ids
+        try:
+            response["verification"] = {
+                "as_of": datetime.now(UTC).isoformat(),
+                "entries": await catalog_verification_entries(
+                    db_path=store.db_path, team_id=caller.team_id, config=cfg, provider_ids=v2_apply_result.provider_ids
+                ),
+            }
+        except Exception:
+            # Evidence presentation must not turn a committed save into a failure.
+            logger.exception("team_llm.post_save_evidence_unavailable team_id=%s", caller.team_id)
+    if model_runtime_parameters_enabled():
+        from bowhead_router.runtime_parameters import PROFILES
+
+        response["parameter_profiles"] = list(PROFILES.values())
+    return response
+
+
+@router.post("/api/v1/admin/llm-config/reconcile-assignments", dependencies=[Depends(require_not_readonly)])
+async def reconcile_verified_assignments(
+    request: Request,
+    caller: User = Depends(_REQUIRE_TEAM_ADMIN),
+    store: UserStore = Depends(_store),
+) -> dict:
+    """After verification, fill saved empty assignments through the original Apply gate."""
+    current, version = await store.get_team_llm_config_with_version(caller.team_id)
+    if not model_assignment_reconciliation_enabled() or not current:
+        return await get_llm_config(request, caller, store)
+    candidate, changes = await prepare_assignment_changes(
+        db_path=store.db_path, team_id=caller.team_id, current=current, draft=current, verification_completed=True
+    )
+    if not changes:
+        return await get_llm_config(request, caller, store)
+    checked = await validate_llm_config(LLMConfigValidateBody(config=candidate, expected_version=version), request, caller, store)
+    readiness = checked.get("readiness") or {}
+    if not checked["valid"] or not readiness.get("may_apply"):
+        response = await get_llm_config(request, caller, store)
+        response["assignment_review_required"] = True
+        return response
+    response = await update_llm_config(
+        LLMConfigPutBody(
+            config=candidate,
+            expected_version=version,
+            readiness=LLMConfigApplyReadiness(draft_semantic_hash=readiness["draft_semantic_hash"]),
+        ),
+        request,
+        caller,
+        store,
+    )
+    response["assignment_changes"] = changes
+    return response
 
 
 class LLMRetryPutBody(BaseModel):
@@ -1989,7 +2058,7 @@ async def change_credit_quota(
     new_balance = max(0, min(body.new_quota, body.new_quota - used_credits))
 
     # Preserve consumed credits: raising quota adds usable team pool, lowering quota caps remaining pool.
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         cur = await db.execute(
             "UPDATE teams SET team_credit_quota = ?, team_credit_balance = ? WHERE id = ?",
             (body.new_quota, new_balance, caller.team_id),

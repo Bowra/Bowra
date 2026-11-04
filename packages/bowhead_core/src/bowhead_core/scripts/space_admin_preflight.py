@@ -25,6 +25,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from bowhead_core.sqlite_domain_runtime import connect_sync
+
 SCHEMA_VERSION = "space-admin-preflight/v1"
 SPACE_ADMIN_ROLES = ("admin", "owner", "workspace_admin", "ws_admin")
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -47,7 +49,7 @@ def open_read_only(db_path: Path) -> sqlite3.Connection:
     path = db_path.expanduser().resolve(strict=True)
     if not path.is_file():
         raise ValueError(f"database path is not a file: {path}")
-    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    conn = connect_sync(f"{path.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only = ON")
     return conn

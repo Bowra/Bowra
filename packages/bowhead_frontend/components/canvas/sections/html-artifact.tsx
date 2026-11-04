@@ -54,7 +54,7 @@ function WarnGlyph({ size = 9 }: { size?: number }) {
 export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
   const t = useTranslations("html_artifact");
   const viewerT = useTranslations("artifact_viewer");
-  const htmlMode = useHtmlPreviewMode();
+  const htmlMode = useHtmlPreviewMode(data.artifact_id);
   const [issue, setIssue] = useState<HtmlPreviewIssue | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -63,7 +63,7 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
   const rawHref = useArtifactHref(data.artifact_id);
   const safeHtml = useSafeHtmlDocument({
     presentation: htmlMode.mode,
-    enabled: true,
+    enabled: !htmlMode.paused,
     href: rawHref,
     reloadToken,
   });
@@ -182,9 +182,12 @@ export function HtmlArtifactSection({ data }: { data: HtmlArtifact }) {
 
       {htmlMode.available ? <div className="safe-html-preview-status">
         <HtmlPreviewModeControl value={htmlMode.mode} onChange={htmlMode.select} />
+        {htmlMode.mode === "interactive" ? <button type="button" onClick={htmlMode.togglePaused}>
+          {viewerT(htmlMode.paused ? "html_restart" : "html_stop")}
+        </button> : null}
       </div> : null}
 
-      {isMobile && !expanded && htmlMode.mode === "static" ? (
+      {htmlMode.paused ? <div role="status" className="rc-embed-error">{viewerT("html_paused")}</div> : isMobile && !expanded && htmlMode.mode === "static" ? (
         <div className="rc-embed-mobile-cta">
           <p>{t("mobile_safe_hint")}</p>
           <button type="button" className="rc-pill-btn accept" onClick={() => setExpanded(true)}>

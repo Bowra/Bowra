@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import aiosqlite
@@ -313,14 +314,14 @@ async def store(tmp_path):
     s = UserStore(str(tmp_path / "bowhead.db"))
     import sqlite3
 
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.migrations.baseline_schema import initial_schema
+    from gateway_legacy_database import upgrade
 
     with sqlite3.connect(s.db_path) as connection:
         connection.executescript(initial_schema("core"))
 
     upgrade(
-        f"sqlite+aiosqlite:///{s.db_path}",
+        f"sqlite+aiosqlite:///{Path(s.db_path).with_name('bowhead.db')}",
         target="core",
     )
     await s.initialize()
@@ -778,6 +779,24 @@ async def test_model_verification_v2_plan_then_batch_is_confirmed_and_persisted(
     )
     assert status.status_code == 200, status.text
     assert status.json()["counts"] == {"queued": 2}
+
+    from bowhead_core.llm_config_crypto import encrypt_llm_config
+
+    diagnostic = {"response_body": "screened response", "response_truncated": False}
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute(
+            "UPDATE team_llm_verification_items SET diagnostics_ciphertext = ? WHERE batch_id = ?",
+            (encrypt_llm_config(diagnostic), batch_body["batch_id"]),
+        )
+        await db.commit()
+    batch_url = f"/api/v1/admin/llm-config/verification-batches/{batch_body['batch_id']}"
+    refreshed = client.get(batch_url, cookies={"bowhead_jwt": jwt})
+    assert refreshed.json()["items"][0]["diagnostics"] == diagnostic
+    await _seed_user(store, "u_member", "member@t.com")
+    assert client.get(batch_url, cookies={"bowhead_jwt": _jwt_cookie("u_member")}).status_code == 403
+    await _seed_team(store, "team_other")
+    await _seed_user(store, "u_other_owner", "other@t.com", team_id="team_other", is_creator=True)
+    assert client.get(batch_url, cookies={"bowhead_jwt": _jwt_cookie("u_other_owner")}).status_code == 404
 
     replay = client.post(
         "/api/v1/admin/llm-config/verification-batches",

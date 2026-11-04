@@ -52,8 +52,8 @@ async def prepared(tmp_path: Path):
     args = {
         "data_artifact_id": data.id,
         "title": "Regions",
-        "hint": "compare",
-        "series": ["revenue"],
+        "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+        "group_by": [],
         "force_kind": "bar",
         "presentation_plan": {
             "version": 1,
@@ -183,7 +183,7 @@ async def test_stale_or_restricted_dependencies_remove_quote_and_dependent_copy(
         assert "verified_content_digest" not in plan["evidence_notes"][0]
     else:
         assert plan["dataset"] == {"artifact_id": plan["dataset"]["artifact_id"], "availability": "unavailable"}
-    root["kind"] = "table"
+    root["show_legend"] = False
     merged = merge_viewer_patch_preserving_provenance(
         section_id=section.id,
         section_kind="chart",
@@ -196,7 +196,7 @@ async def test_stale_or_restricted_dependencies_remove_quote_and_dependent_copy(
     )
     assert merged["spec"]["title"] == "Regions"
     assert merged["spec"]["presentation_plan"] == section.payload["spec"]["presentation_plan"]
-    assert merged["spec"]["kind"] == "table"
+    assert merged["spec"]["show_legend"] is False
 
 
 async def test_echo_preserves_canonical_evidence_and_rejects_literal_forgery(prepared):
@@ -222,9 +222,17 @@ async def test_echo_preserves_canonical_evidence_and_rejects_literal_forgery(pre
 @pytest.mark.parametrize("composed", [False, True])
 async def test_snapshot_requires_current_projection_and_materializes_notes_once(prepared, denied, composed):
     if composed:
+        for field in ("force_kind", "axes", "group_by", "columns"):
+            prepared[4].pop(field, None)
         prepared[4]["views"] = [
-            {"id": "comparison", "title": "Comparison", "hint": "compare", "series": ["revenue"], "force_kind": "bar"},
-            {"id": "details", "title": "Values", "hint": "raw", "series": ["revenue"], "force_kind": "table"},
+            {
+                "id": "comparison",
+                "title": "Comparison",
+                "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+                "group_by": [],
+                "force_kind": "bar",
+            },
+            {"id": "details", "title": "Values", "force_kind": "table"},
         ]
     section = await create(prepared)
     artifacts, canvas, snapshots, _, _, data, note, _ = prepared
@@ -258,7 +266,7 @@ async def test_snapshot_requires_current_projection_and_materializes_notes_once(
 
 async def test_calculation_notes_seal_the_materialized_dataset_once(prepared):
     prepared[4]["derived_columns"] = [{"key": "double", "header": "Double revenue", "expression": "revenue * 2", "unit": "USD"}]
-    prepared[4]["series"] = ["double"]
+    prepared[4]["axes"]["y"] = ["double"]
     prepared[4]["presentation_plan"]["evidence_notes"][0]["measure_keys"] = ["double"]
     section = await create(prepared)
     artifacts = prepared[0]

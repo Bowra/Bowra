@@ -678,11 +678,11 @@ async def test_executor_rechecks_resource_grants_before_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("BOWHEAD_RESOURCE_GRANTS_ENFORCE", "1")
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.session_store import SessionStore
+    from core_legacy_database import upgrade
 
     db = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db)
     await users.initialize()
     access = AccessControlStore(db)

@@ -8,6 +8,8 @@ from typing import Literal
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from bowhead_core.sqlite_readable_schema import readable_table_exists
+
 
 class ContextActivity(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -46,9 +48,8 @@ async def missing_context_completions_in_connection(db, *, turn_id: str, generat
     """Read immutable completion evidence for the original Terminal recovery owner."""
     from bowhead_core.context_store import ContextCompletion, ContextStoreError
 
-    async with db.execute("SELECT 1 FROM sqlite_master WHERE name='model_context_generations'") as cursor:
-        if await cursor.fetchone() is None:
-            return ()
+    if not await readable_table_exists(db, "model_context_generations"):
+        return ()
     async with db.execute(
         "SELECT id,execution_id,lane,parent_id,completion_json FROM model_context_generations "
         "WHERE turn_id=? AND worker_generation=? AND kind='compact' ORDER BY created_at,id",
@@ -94,9 +95,8 @@ async def recover_context_publications_in_connection(db: aiosqlite.Connection, *
 
     if not db.in_transaction:
         raise ContextStoreError("context_recovery_transaction_required")
-    async with db.execute("SELECT 1 FROM sqlite_master WHERE name='model_context_generations'") as cursor:
-        if await cursor.fetchone() is None:
-            return 0
+    if not await readable_table_exists(db, "model_context_generations"):
+        return 0
     async with db.execute(
         "SELECT id,execution_id,lane,parent_id,completion_json,created_at FROM model_context_generations "
         "WHERE turn_id=? AND kind='compact' ORDER BY created_at,id",

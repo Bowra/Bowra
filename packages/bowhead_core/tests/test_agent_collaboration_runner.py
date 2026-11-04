@@ -123,7 +123,7 @@ class RunnerFixture:
             ToolSpec(schema=ToolSchema(name=name, description="Controlled business operation", input_schema={"type": "object"}), handler=handler)
         )
 
-    async def run(self, execution_id, *, permit=None, exact=True, context_changes=None):
+    async def run(self, execution_id, *, permit=None, exact=True, context_changes=None, tool_deny=frozenset()):
         worker = self.collab.worker
         context = ToolExecutionContext(
             workspace_id=worker.workspace_id,
@@ -150,6 +150,7 @@ class RunnerFixture:
             parent_bus=self.bus,
             parent_ctx=context,
             exact_binding=binding if exact else None,
+            tool_deny=tool_deny,
         )
 
 
@@ -351,23 +352,42 @@ async def test_collaboration_barrier_never_trips_the_cross_tool_failure_cap(coll
         refusals.extend(value for value in receipts(request)[-1:] if value.get("error") == "collaboration_unresolved")
         if rounds == 5:
             collab.clock[0] += 61  # The peer never answers; expiry records the limitation.
-        return LLMResponse(content="", tool_calls=[ToolCall(id=f"return-{rounds}", name="subagent_return", arguments=payload)])
+        arguments = copy.deepcopy(payload)
+        last_receipt = receipts(request)[-1]
+        if last_receipt.get("error_kind") == "tool_delivery_review_required":
+            arguments["payload"]["delivery_review"] = {
+                "requirements": [{"requirement": "Confirm the ledger period", "status": "unfulfilled", "evidence_call_ids": []}],
+                "issues": [
+                    {
+                        "call_id": item["call_id"],
+                        "resolution": "unfulfilled",
+                        "explanation": "The ledger period remains unconfirmed after the peer deadline.",
+                        "evidence_call_ids": [],
+                    }
+                    for item in last_receipt["review_context"]["failed_calls"]
+                ],
+            }
+        return LLMResponse(content="", tool_calls=[ToolCall(id=f"return-{rounds}", name="subagent_return", arguments=arguments)])
 
     harness = RunnerFixture(collab, provider)
     register_subagent_return_tool(harness.registry)
     result = await asyncio.wait_for(harness.run(collab.requester), 10)
     assert result.ok, result.error
-    assert len(refusals) == 3 and rounds == 5
+    assert len(refusals) == 3 and rounds == 6
+    assert result.completion == "partial"
 
 
 @pytest.mark.parametrize("runtime_limit", [None, 3, 4])
 @pytest.mark.parametrize("invalid_first_reply", [False, True])
-async def test_lead_answers_child_before_original_spawn_completes(collab, invalid_first_reply, runtime_limit):
+async def test_lead_answers_child_before_original_spawn_completes(collab, invalid_first_reply, runtime_limit, monkeypatch):
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     child_returned = asyncio.Event()
     base_round = 0
     child_round = 0
     coordinated = []
     rejected_reply = False
+    review_contexts = []
+    spawn_count = 0
 
     async def provider(request):
         nonlocal base_round, child_round, rejected_reply
@@ -402,7 +422,23 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
             assert f"- {question['operation_id']} from " in brief and f"({collab.requester}), required" in brief
             if invalid_first_reply and not rejected_reply:
                 rejected_reply = True
-                return tool("reply", to=collab.requester, question_id=question["operation_id"], body="Use the original quarter.")
+                # Review evidence needs distinct attempt IDs. The child still
+                # exercises repeated provider IDs in separate model frames.
+                return LLMResponse(
+                    content="",
+                    tool_calls=[
+                        ToolCall(
+                            id="coordination-rejected",
+                            name="agent_message",
+                            arguments={
+                                "action": "reply",
+                                "to": collab.requester,
+                                "question_id": question["operation_id"],
+                                "body": "Use the original quarter.",
+                            },
+                        )
+                    ],
+                )
             if invalid_first_reply and not coordinated:
                 assert receipts(request)[-1]["error"] == "collaboration_arguments_invalid"
                 assert receipts(request)[-1]["required_fields"] == ["action", "question_id", "body"]
@@ -411,18 +447,38 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
                     "Later help retains the owner's prior decisions"
                 )
             coordinated.append(question["operation_id"])
-            return tool("reply", question_id=question["operation_id"], body="Use the original quarter; report evidence gaps.")
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id=f"coordination-reply-{len(coordinated)}",
+                        name="agent_message",
+                        arguments={
+                            "action": "reply",
+                            "question_id": question["operation_id"],
+                            "body": "Use the original quarter; report evidence gaps.",
+                        },
+                    )
+                ],
+            )
         base_round += 1
         if base_round == 1:
             return LLMResponse(content="", tool_calls=[ToolCall(id="spawn-original", name="subagent_spawn", arguments={})])
         assert child_returned.is_set()
         assert any(message.role == "tool" and message.tool_call_id == "spawn-original" for message in request.messages)
         assert any("coordination_input" in message.content for message in request.messages)
+        if base_round > 2:
+            assert base_round == 3 and invalid_first_reply and runtime_limit is None
+            reviews = [message for message in request.messages if "review_context (JSON data): " in message.content]
+            assert len(reviews) == 1 and reviews[0].role == "user"
+            review_contexts.append(json.loads(reviews[0].content.split("review_context (JSON data): ", 1)[1]))
         return LLMResponse(content="Completed within the confirmed scope.")
 
     harness = RunnerFixture(collab, provider)
 
     async def spawn(_arguments, _context):
+        nonlocal spawn_count
+        spawn_count += 1
         result = await harness.run(collab.requester)
         assert result.ok, result.error
         child_returned.set()
@@ -443,15 +499,46 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
             "agent_runtime_budget": AgentRuntimeControls(system_step_limit=runtime_limit + int(invalid_first_reply)).budget(AgentRunLimits()),
         }
     result = await asyncio.wait_for(harness.run(collab.lead, context_changes=context_changes), 10)
+    assert harness.provider.failures == []
+    assert spawn_count == 1 and child_returned.is_set() and child_round == 7
+    assert len(coordinated) == len(set(coordinated)) == 2
+    for question_id in coordinated:
+        question = await collab.read({"operation_id": question_id})
+        assert question["response_status"] == "answered" and question["dependency_status"] == "resolved"
+    async with open_shared_ctx(collab.path) as db:
+        replies = await (await db.execute("SELECT question_id FROM agent_collaboration_operation WHERE action='reply'")).fetchall()
+    assert sorted(row[0] for row in replies) == sorted(coordinated), "Accepted replies must not be repeated during correction or review"
+    if runtime_limit is not None:
+        lead_requests = [request for request in harness.provider.requests if request.invocation_execution_id == collab.lead]
+        assert len(lead_requests) == runtime_limit + int(invalid_first_reply), "Coordination and closeout share the original model-step budget"
     if runtime_limit == 3:
         assert result.completion == "partial" and result.stop_reason == "step_limit"
         assert result.step_usage == {"used": 3 + int(invalid_first_reply), "limit": 3 + int(invalid_first_reply)}
         assert base_round == 1 and child_returned.is_set() and len(coordinated) == 2
+        assert review_contexts == []
         return
     assert result.ok, result.error
-    assert len(coordinated) == 2
-    assert result.tokens_input == (36 if invalid_first_reply else 33), "Root usage includes coordination corrections and the original child"
-    assert result.tokens_output == (24 if invalid_first_reply else 22)
+    assert result.completion == ("partial" if invalid_first_reply else "complete")
+    review_rounds = int(invalid_first_reply and runtime_limit is None)
+    assert base_round == 2 + review_rounds and len(review_contexts) == review_rounds
+    if review_contexts:
+        failed = [
+            inv for inv in result.tool_invocations if isinstance(inv.result, dict) and inv.result.get("error") == "collaboration_arguments_invalid"
+        ]
+        assert len(failed) == 1
+        assert review_contexts[0]["failed_calls"] == [
+            {"call_id": failed[0].call_id, "tool": "agent_message", "state": "failure", "failure_code": "tool_execution_failed"}
+        ]
+        assert failed[0].call_id == "coordination-rejected"
+        spawned = [inv for inv in result.tool_invocations if inv.tool_name == "subagent_spawn"]
+        assert len(spawned) == 1
+        assert {"coordination-reply-1", "coordination-reply-2", spawned[0].call_id} == {
+            item["call_id"] for item in review_contexts[0]["successful_calls"]
+        }
+        assert failed[0].call_id not in {item["call_id"] for item in review_contexts[0]["successful_calls"]}
+    assert result.tokens_input == (36 if invalid_first_reply else 33) + 3 * review_rounds
+    assert result.tokens_output == (24 if invalid_first_reply else 22) + 2 * review_rounds
+    assert result.tokens_input == 3 * len(harness.provider.requests), "Usage includes the original child, coordination correction and bounded review"
 
 
 async def test_wait_in_a_business_batch_is_refused_before_yielding(collab):
@@ -608,12 +695,24 @@ async def test_native_parallel_spawn_admits_queued_recipient_before_waiting_for_
                         ToolCall(
                             id="analyze",
                             name="subagent_spawn",
-                            arguments={"profile": "compute", "task": "Analyze refunds.", "delivery": "chat", "canvas_mode": "none"},
+                            arguments={
+                                "profile": "compute",
+                                "task": "Analyze refunds.",
+                                "delivery": "chat",
+                                "canvas_mode": "none",
+                                "required_source_urls": [],
+                            },
                         ),
                         ToolCall(
                             id="verify",
                             name="subagent_spawn",
-                            arguments={"profile": "compute", "task": "Verify refund rules.", "delivery": "chat", "canvas_mode": "none"},
+                            arguments={
+                                "profile": "compute",
+                                "task": "Verify refund rules.",
+                                "delivery": "chat",
+                                "canvas_mode": "none",
+                                "required_source_urls": [],
+                            },
                         ),
                     ],
                 )

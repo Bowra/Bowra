@@ -124,12 +124,14 @@ async def test_explicit_add_replay_remove_status_and_original_bytes(env):
     assert replay.result == first.result
     assert env.app.state.kb_worker.parse_and_index.await_count == 1
     packet = json.loads(ctx.router.invoke.call_args.args[1].messages[0].content)
+    assert ctx.router.invoke.call_args.args[1].response_format == {"type": "json_object"}
     assert packet["user_input"]["original_request"] == "Add this file to my knowledge base"
     assert "document text" not in json.dumps(packet)
     file_id = first.result["file_id"]
     remove_ctx = await request(env, text=f"Remove {env.artifact.id} from my knowledge base", target="named")
     removed = await env.registry.get("kb_remove_file").handler({"file_id": file_id}, remove_ctx)
     assert removed.result["ok"] and removed.result["status"] == "removed"
+    assert remove_ctx.router.invoke.call_args.args[1].response_format == {"type": "json_object"}
     assert "no longer searchable" in removed.result["hint"]
     assert "Processing must finish" not in removed.result["hint"]
     assert (await add(env, ctx)).result["ok"]  # A reconciled receipt reports removed, never recreates.
@@ -140,6 +142,16 @@ async def test_explicit_add_replay_remove_status_and_original_bytes(env):
     assert await env.artifacts.get(env.artifact.id) is not None
     fresh_ctx = await request(env)
     assert (await add(env, fresh_ctx)).result["file_id"] != file_id
+
+
+async def test_malformed_intent_response_cannot_authorize_membership(env):
+    ctx = await request(env)
+    valid = ctx.router.invoke.return_value.content
+    ctx.router.invoke.return_value.content = f"```json\n{valid}\n```"
+    result = await add(env, ctx)
+    assert result.result["ok"] is False
+    assert result.result["error"] == "knowledge_request_needs_clarification"
+    assert await env.files.find_active_by_artifact(env.artifact.id) is None
 
 
 @pytest.mark.parametrize(
@@ -421,3 +433,22 @@ async def test_only_the_actual_clarification_answer_selects_a_named_attachment(e
                 "scope": "personal",
             }
         )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Delegate adding Policy.md to the current space knowledge base to the helper.",
+        "Add the previously uploaded Policy.md to the current space knowledge base.",
+    ],
+)
+async def test_explicit_named_prior_upload_keeps_original_scope_and_identity_guards(env, text):
+    ctx = await request(env, text=text, scope="space", target="named", attached=[])
+    result = await add(env, ctx, scope="space")
+    assert result.result["ok"]
+    stored = await env.files.get(result.result["file_id"])
+    assert stored.artifact_id == env.artifact.id
+    assert stored.scope == "space" and stored.scope_id == env.workspace
+    packet = json.loads(ctx.router.invoke.call_args.args[1].messages[0].content)
+    assert packet["user_input"]["original_request"] == text
+    assert packet["original_attachment_ids"] == []

@@ -265,16 +265,17 @@ async def build_deliverable_ledger(
         # Reuse lookup failure must not erase verified new-output evidence.
         if session_id and user_id:
             try:
-                # Only successful current-task inputs can establish reuse.
+                reused = {}
+                presented = getattr(artifact_store, "list_presented_result_artifacts_for_turn", None)
+                if callable(presented):
+                    reused.update((a.id, a) for a in await presented(turn_id, session_id=session_id, user_id=user_id))
+                # Plain model metadata cannot establish native presentation reuse.
                 for artifact_id in _reused_sandbox_inputs(invocations):
                     artifact = await artifact_store.get_result_artifact_for_scope(artifact_id=artifact_id, session_id=session_id, user_id=user_id)
-                    if (
-                        artifact is not None
-                        and artifact.created_by_turn != turn_id
-                        and artifact.kind != "user_upload"
-                        and artifact.source != "upload"
-                        and artifact.filename
-                    ):
+                    if artifact is not None:
+                        reused[artifact_id] = artifact
+                for artifact in reused.values():
+                    if artifact.created_by_turn != turn_id and artifact.kind != "user_upload" and artifact.source != "upload" and artifact.filename:
                         reused_names.append(artifact.filename)
             except Exception as e:  # noqa: BLE001 — best-effort
                 reused_names = []

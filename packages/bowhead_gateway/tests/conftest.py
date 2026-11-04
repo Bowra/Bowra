@@ -17,6 +17,7 @@ import os
 
 import pytest
 from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentResult
+from community_http_fixture import complete_community_http_installation as complete_community_http_installation
 
 
 def _use_plain_structlog_tracebacks() -> None:
@@ -58,10 +59,10 @@ _AUTH_ENV_BASELINE = {key: os.environ.get(key) for key in _AUTH_ENV_DEFAULTS}
 
 @pytest.fixture(scope="module")
 def community_installation_template(tmp_path_factory):
-    from bowhead_cli.migrate import upgrade
+    from gateway_legacy_database import upgrade
 
     path = tmp_path_factory.mktemp("community-installation-template") / "bowhead.db"
-    upgrade(f"sqlite:///{path}", target="core")
+    upgrade(f"sqlite:///{(path).with_name('bowhead.db')}", target="core")
     return path
 
 
@@ -172,8 +173,8 @@ def make_subagent_result(
 
 @pytest.fixture(scope="session")
 def migrated_core_snapshot(tmp_path_factory):
-    """Pristine current core schema for route fixtures that bypass lifespan."""
-    from bowhead_cli.migrate import upgrade
+    """Pristine pre-split core schema for historical route fixtures that bypass lifespan."""
+    from gateway_legacy_database import upgrade
 
     directory = tmp_path_factory.mktemp("usage-core-schema")
     upgrade(f"sqlite+aiosqlite:///{directory / 'bowhead.db'}", target="core")
@@ -194,8 +195,8 @@ def initialize_migrated_core_database(migrated_core_snapshot):
 
 @pytest.fixture(scope="session")
 def migrated_kb_files_snapshot(tmp_path_factory):
-    """Pristine current ``files`` schema (Alembic head) for tests that build a KbFilesStore directly."""
-    from bowhead_cli.migrate import upgrade
+    """Pristine pre-split ``files`` schema for tests that build a KbFilesStore directly."""
+    from gateway_legacy_database import upgrade
 
     directory = tmp_path_factory.mktemp("kb-files-schema")
     upgrade(f"sqlite+aiosqlite:///{directory / 'bowhead.db'}", target="files")

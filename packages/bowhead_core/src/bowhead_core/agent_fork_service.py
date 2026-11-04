@@ -21,6 +21,7 @@ from bowhead_core.agent_revision_store import (
     DeterministicAgentPublicationValidator,
 )
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import TeamSubagentAccessResolver
 from bowhead_core.team_subagent_store import (
     TeamSubagentForkAdmissionError,
@@ -181,7 +182,7 @@ class AgentForkService:
         validator: DeterministicAgentPublicationValidator,
         revision_store: AgentRevisionStore,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._validator = validator
         self._revision_store = revision_store
         self._aggregate_store = TeamSubagentStore(self.db_path)

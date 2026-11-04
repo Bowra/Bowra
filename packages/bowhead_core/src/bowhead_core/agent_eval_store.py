@@ -21,6 +21,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_points import suite_revision_grades_points_sql
+from bowhead_core.sqlite_domains import domain_database_path
 
 AgentSourceKind = Literal["team", "system"]
 EvalSuiteKind = Literal["platform_contract", "owner_quality", "category_benchmark"]
@@ -283,7 +284,7 @@ class AgentEvalStore:
     """Persist Agent Eval authoring and execution identities."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def ensure_platform_contract_suite(
         self,

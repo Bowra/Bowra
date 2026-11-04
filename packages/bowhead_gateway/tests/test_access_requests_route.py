@@ -325,3 +325,21 @@ def test_decide_when_resource_gone_hides_request_and_clears_owner_nudge(tmp_path
     assert row.status == "pending" and row.shadow is True
     assert env._pending(env.alice) == 0
     assert _run(env.notif.notification_count(user_id=env.alice.id)).action_required == 0
+
+
+def test_disabled_sharing_preserves_pending_request_and_notifications(tmp_path, monkeypatch):
+    from bowhead_core import share_service
+
+    env = _Env(tmp_path)
+    env._enqueue(env.bob, "ses_1")
+    _items, rid = _first_pending_id(env, env.alice)
+    before = _run(env.notif.notification_count(user_id=env.bob.id)).updates_unread
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    response = env.client(env.alice).post(f"/api/v1/access-requests/{rid}/decide", json={"action": "approve"})
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"]["code"] == "content_sharing_disabled"
+    assert _run(env.acr.get(rid, team_id=env.team.id)).status == "pending"
+    assert _run(env.access.list_resource_grants(env.team.id, resource_kind="report", resource_id="ses_1")) == []
+    assert _run(env.notif.notification_count(user_id=env.bob.id)).updates_unread == before
+    assert env.client(env.bob).post("/api/v1/access-requests", json={"kind": "report", "resource_id": "ses_other"}).status_code == 403
+    assert env.client(env.alice).post(f"/api/v1/access-requests/{rid}/decide", json={"action": "deny"}).status_code == 200

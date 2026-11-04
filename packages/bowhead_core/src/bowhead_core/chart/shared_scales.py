@@ -52,8 +52,9 @@ def validate_scale_input(groups: Any, *, compiled: bool = False) -> None:
 
 
 def _axis_columns(chart: Mapping[str, Any], axis: str) -> list[dict[str, Any]]:
-    from bowhead_core.chart_style_presentation import normalize_chart_for_rendering_v1
+    from bowhead_core.chart_style_presentation import explicit_plot_columns, normalize_chart_for_rendering_v1
 
+    chart = explicit_plot_columns(chart)
     kind = chart.get("kind")
     numeric = [column for column in chart.get("columns", []) if column.get("type") == "numeric"]
     dims = [column for column in chart.get("columns", []) if column.get("type") in {"date", "categorical", "geo"}]

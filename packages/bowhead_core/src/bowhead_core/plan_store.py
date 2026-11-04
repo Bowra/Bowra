@@ -29,6 +29,9 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+
 from ._db import open_shared_ctx
 from .agent_role_candidates import ExactAgentRoleChoice
 
@@ -351,11 +354,15 @@ def new_step(
 
 class PlanStore:
     def __init__(self, db_path: str) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "execution"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with diagnostic_connect(domain_database_path(self._db_path, "execution")) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.executescript(SCHEMA)
             await db.commit()
             # Add-column migration: executescript `CREATE TABLE IF NOT EXISTS` never changes existing tables,
@@ -436,7 +443,7 @@ class PlanStore:
             updated_at=_now(),
         )
         steps = [replace(step, plan_id=plan.id) for step in initial_steps or ()]
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute(
                 "INSERT INTO plans(id, session_id, workspace_id, user_id, title, "
                 "objective, deliverable_kind, status, spec_json, current_rev, "
@@ -474,7 +481,7 @@ class PlanStore:
         workspace_id: str,
     ) -> Plan | None:
         """租户进 WHERE — 不同 workspace/user 拿不到别人的 plan (review P1-K)."""
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM plans WHERE id = ? AND user_id = ? AND workspace_id = ?",
@@ -485,7 +492,7 @@ class PlanStore:
 
     async def get_plan_with_steps(self, plan_id: str, *, user_id: str, workspace_id: str) -> tuple[Plan, list[PlanStep]] | None:
         """Read the displayed revision and its steps from one authorized snapshot."""
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             try:
@@ -509,7 +516,7 @@ class PlanStore:
         user_id: str,
         workspace_id: str,
     ) -> list[Plan]:
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM plans WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC",
@@ -523,7 +530,7 @@ class PlanStore:
         durable-cancel (D-D6) 依赖 cancelled 不可逆. 返回 False 若被拒/未命中."""
         if status not in set(PlanStatus):
             raise ValueError(f"invalid plan status: {status}")
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE plans SET status = ?, updated_at = ? WHERE id = ? AND status NOT IN (?, ?, ?)",
                 (status, _now(), plan_id, *_TERMINAL_PLAN),
@@ -539,7 +546,7 @@ class PlanStore:
         重试态(completed 卡没有重试按钮, 文案「可在计划卡重试」才不撒谎)。
         cancelled/failed 照旧不可转出(durable-cancel D-D6 依赖不变)。
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE plans SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
                 (PlanStatus.BLOCKED, _now(), plan_id, PlanStatus.COMPLETED),
@@ -554,7 +561,7 @@ class PlanStore:
         之下自停, CTO P2-6)。原 `IS NULL` 守卫(只设一次)让隔天补料重试的 plan
         因老锚点瞬间 wallclock 越界 → 终态 FAILED, 重试永不可能成功。
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute(
                 "UPDATE plans SET execution_started_at = ?, updated_at = ? WHERE id = ?",
                 (_now(), _now(), plan_id),
@@ -570,7 +577,7 @@ class PlanStore:
         不允许先写 RUNNING、稍后再 bind 的无主窗口。审批入口传入读取时的
         expected_rev，避免准备执行期间保存的新步骤被旧请求认领。
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE plans SET status=?,execution_turn_id=?,updated_at=? WHERE id=? AND status IN (?,?) "
                 "AND execution_turn_id IS NULL AND (? IS NULL OR current_rev=?)",
@@ -590,7 +597,7 @@ class PlanStore:
 
     async def bind_execution_turn(self, plan_id: str, turn_id: str) -> bool:
         """Renew/revalidate one exact execution identity before worker spawn."""
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE plans SET updated_at=? WHERE id=? AND status=? AND execution_turn_id=?",
                 (_now(), plan_id, PlanStatus.RUNNING, turn_id),
@@ -611,7 +618,7 @@ class PlanStore:
         means orphan recovery or a newer executor has fenced this worker out.
         """
         async with (
-            open_shared_ctx(self._db_path) as db,
+            open_shared_ctx(domain_database_path(self._db_path, "execution")) as db,
             db.execute(
                 "SELECT status FROM plans WHERE id=? AND execution_turn_id=?",
                 (plan_id, turn_id),
@@ -628,7 +635,7 @@ class PlanStore:
         orphan retry after the 30-second freshness window. Cancellation is
         intentionally excluded and exact-token CAS fences a replaced owner.
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE plans SET updated_at=? WHERE id=? AND execution_turn_id=? AND status IN (?,?,?,?)",
                 (
@@ -651,7 +658,7 @@ class PlanStore:
         a crashed worker must stay fenced until orphan recovery reconciles the
         Plan, rather than opening a second execution against unfinished work.
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE plans SET execution_turn_id=NULL,updated_at=? WHERE id=? AND execution_turn_id=? AND status!=?",
                 (_now(), plan_id, turn_id, PlanStatus.RUNNING),
@@ -666,7 +673,7 @@ class PlanStore:
         the immutable start request cannot carry it. ``execution_turn_id`` is
         unique and remains the durable ownership token for that path.
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE plans SET execution_turn_id=NULL,updated_at=? WHERE execution_turn_id=? AND status!=?",
                 (_now(), turn_id, PlanStatus.RUNNING),
@@ -689,7 +696,7 @@ class PlanStore:
         """
         if next_status not in (PlanStatus.PROPOSED, PlanStatus.BLOCKED):
             raise ValueError("invalid_plan_release_status")
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cursor = await db.execute(
                 "UPDATE plans SET status=?,execution_turn_id=NULL,updated_at=? WHERE id=? AND status=? AND execution_turn_id=?",
                 (
@@ -705,7 +712,7 @@ class PlanStore:
 
     async def cancel_execution_for_turn(self, turn_id: str) -> bool:
         """Durably cancel a running Plan from any Gateway process."""
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -781,7 +788,7 @@ class PlanStore:
         if not steps:
             return
         ts = _now()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             from bowhead_core.chat_reference_plan import read_requirements
 
@@ -798,7 +805,7 @@ class PlanStore:
         if not steps or any(step.plan_id != plan_id for step in steps):
             raise ValueError("steps must belong to plan_id and must not be empty")
         ts = _now()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(
@@ -836,7 +843,7 @@ class PlanStore:
     async def skip_blocked_step(self, plan_id: str, step_id: str, *, expected_rev: int) -> bool:
         """Skip and advance the reviewed graph in the same idle-Plan transaction."""
         ts = _now()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 changed = await db.execute(
@@ -879,7 +886,7 @@ class PlanStore:
         if new_step.plan_id != plan_id:
             raise ValueError("new_step.plan_id 与 plan_id 不一致")
         ts = _now()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(
@@ -933,7 +940,7 @@ class PlanStore:
         """全量 replan commit: 旧非 done 行标 SUPERSEDED(世代哨兵 replan:rev{N},
         非 ps_ 前缀不被别名链跟进)+新子图插入+活行 level 回写。done 行不动(D3.5)。"""
         ts = _now()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(
@@ -979,7 +986,7 @@ class PlanStore:
                 raise
 
     async def list_steps(self, plan_id: str) -> list[PlanStep]:
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY level, seq",
@@ -1064,7 +1071,7 @@ class PlanStore:
         sets.append("updated_at = ?")
         vals.append(_now())
         vals.append(step_id)
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             # Batch 3 review R1-F5: SUPERSEDED is sticky step terminal (symmetrical with plans
             # _TERMINAL_PLAN); SQL guard prevents concurrent approve writeback
             # /preflight/render sentinel reviving dead rows. Superseding itself uses supersede_step CAS.
@@ -1083,7 +1090,7 @@ class PlanStore:
         (用户补料/跳过 blocked 步后) 返回该 blocked level, done 步跳过、其
         payload 从 payload_json 取 (m1-execution-tech-design v2 §3.2/§3.4).
         """
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT MIN(level) AS lvl FROM plan_steps WHERE plan_id = ? AND status NOT IN (?, ?, ?)",
@@ -1125,7 +1132,7 @@ class PlanStore:
         # request outlives this grace and a retry wins, the stale request cannot
         # bind or release the newer claim.
         fresh_claim_cutoff = (datetime.now(tz=UTC) - timedelta(seconds=30)).isoformat()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -1295,7 +1302,7 @@ class PlanStore:
         from datetime import timedelta
 
         cutoff = (datetime.now(tz=UTC) - timedelta(days=max(older_than_days, 1))).isoformat()
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cur = await db.execute(
                 "SELECT id FROM plans WHERE status = ? AND created_at < ?",
                 (PlanStatus.PROPOSED, cutoff),

@@ -52,6 +52,13 @@ export function isDefaultShapeName(name: string): boolean {
 function useChangeLocation() {
   const t = useTranslations("documents");
   return useCallback((change: Change) => {
+    if ("location" in change) {
+      const place = change.location;
+      const parts = [t("word_location", { story: t(`word_story_${place.story}`), paragraph: place.block_index + 1 })];
+      if (place.sections.length) parts.push(t("word_sections", { sections: place.sections.join(", ") }));
+      if (place.row !== null && place.column !== null) parts.push(t("change_cell", { row: place.row + 1, column: place.column + 1 }));
+      return parts.join(" · ");
+    }
     const name = change.shape_name?.trim();
     if (name && isDefaultShapeName(name)) {
       const parts = [t("change_generic_shape", { page: change.slide })];
@@ -106,6 +113,7 @@ function DocumentDraftReviewVersion({
   const pages = useMemo(() => job.draft?.preview.pages ?? [], [job.draft]);
   const changes = useMemo(() => job.draft?.manifest.changes ?? [], [job.draft]);
   const comparisonAvailable = job.draft?.manifest.comparison !== "unavailable";
+  const word = job.draft?.descriptor?.format === "docx";
   const [acknowledged, setAcknowledged] = useState(false);
   const [page, setPage] = useState(0);
   const [viewed, setViewed] = useState<ReadonlySet<number>>(() => new Set());
@@ -182,7 +190,7 @@ function DocumentDraftReviewVersion({
 
   const changeCounts = useMemo(() => {
     const counts = new Map<number, number>();
-    for (const change of changes) counts.set(change.slide, (counts.get(change.slide) ?? 0) + 1);
+    for (const change of changes) if ("slide" in change) counts.set(change.slide, (counts.get(change.slide) ?? 0) + 1);
     return counts;
   }, [changes]);
   const reviewPages: ReviewPage[] = pages.map((item, index) => ({
@@ -214,22 +222,22 @@ function DocumentDraftReviewVersion({
     else if ((event.key === "n" || event.key === "N") && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); nextChange(); }
   };
 
-  const pageChanges = changes.filter((change) => change.slide === page + 1);
-  const shownChanges = showAll ? [...changes].sort((a, b) => a.slide - b.slide) : pageChanges;
+  const pageChanges = changes.filter((change) => "slide" in change && change.slide === page + 1);
+  const shownChanges = word ? changes : showAll ? [...changes].sort((a, b) => ("slide" in a ? a.slide : 0) - ("slide" in b ? b.slide : 0)) : pageChanges;
   const fonts = job.draft?.preview.declared_font_fallbacks ?? [];
   const retained = job.draft?.manifest.retained_unsupported_text ?? [];
-  const pageLabel = t("page", { page: page + 1, total: pages.length });
+  const pageLabel = t(word ? "document_page" : "page", { page: page + 1, total: pages.length });
   const reviewing = job.state === "review";
 
   const blocker = !reviewing || !job.can_confirm ? null
     : previewFailed || !pages.length ? t("publish_needs_preview")
-      : requiredLeft.length ? t(requireAllPages ? "publish_pages_left" : "publish_changed_left", { count: requiredLeft.length })
+      : requiredLeft.length ? t(word ? "document_publish_pages_left" : requireAllPages ? "publish_pages_left" : "publish_changed_left", { count: requiredLeft.length })
         : !acknowledged ? t("publish_check_first") : null;
 
   return (
     <div className={styles.root} onKeyDown={onKeyDown}>
       {reviewing ? (
-        <ReviewProgress pages={reviewPages} current={page + 1} onSelect={(n) => goTo(n - 1)} onNextChange={nextChange} onThumbsVisible={showThumbs} status={status} requireAllPages={requireAllPages} />
+        <ReviewProgress pages={reviewPages} current={page + 1} onSelect={(n) => goTo(n - 1)} onNextChange={nextChange} onThumbsVisible={showThumbs} status={status} requireAllPages={requireAllPages} orientation={word ? "page" : "slide"} />
       ) : null}
       <div className={styles.preview}>
         <div className={styles.previewFrame}>
@@ -278,15 +286,16 @@ function DocumentDraftReviewVersion({
         <CanvasSection labelledBy={`${sectionId}-changes`}>
           <SectionHeading
             id={`${sectionId}-changes`}
-            title={showAll ? t("changes_title") : t("changes_on_page")}
-            count={comparisonAvailable ? (showAll ? changes.length : pageChanges.length) : undefined}
-            action={changes.length > pageChanges.length || showAll ? (
+            title={word || showAll ? t("changes_title") : t("changes_on_page")}
+            count={comparisonAvailable ? (word || showAll ? changes.length : pageChanges.length) : undefined}
+            action={!word && (changes.length > pageChanges.length || showAll) ? (
               <Button size="sm" variant="ghost" onClick={() => setShowAll((value) => !value)}>
                 {showAll ? t("changes_on_page") : t("changes_view_all", { count: changes.length })}
               </Button>
             ) : undefined}
           />
-          {!comparisonAvailable ? <p className={styles.plain}>{t("comparison_unavailable")}</p> : shownChanges.length ? <ChangeList changes={shownChanges} clarificationSources={job.clarification_evidence_sources} /> : <p className={styles.plain}>{t("changes_none_on_page")}</p>}
+          {word ? <p className={styles.plain}>{t("word_source_locations")}</p> : null}
+          {!comparisonAvailable ? <p className={styles.plain}>{t("comparison_unavailable")}</p> : shownChanges.length ? <ChangeList changes={shownChanges} clarificationSources={job.clarification_evidence_sources} /> : <p className={styles.plain}>{t(word ? "word_changes_none" : "changes_none_on_page")}</p>}
         </CanvasSection>
       ) : (
         <CanvasSection labelledBy={`${sectionId}-changes`}>
@@ -296,6 +305,7 @@ function DocumentDraftReviewVersion({
         </CanvasSection>
       )}
 
+      {word ? <p className={styles.plain}>{t("word_font_scope")}</p> : null}
       {fonts.length ? (
         <CanvasSection labelledBy={`${sectionId}-fonts`}>
           <SectionHeading id={`${sectionId}-fonts`} title={t("font_substitutions")} count={fonts.length} collapsible open={open.fonts}

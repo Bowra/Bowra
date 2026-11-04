@@ -43,6 +43,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from bowhead_core.sqlite_readable_schema import readable_table_exists
+
 if TYPE_CHECKING:
     import aiosqlite
 
@@ -63,25 +65,18 @@ def is_user_intent_pin(artifact: object) -> bool:
 
 
 async def _table_exists(db: aiosqlite.Connection, name: str) -> bool:
-    """表在不在 —— **只判存在，不吞查询错误**。
+    """Read optional business tables across managed domains without hiding errors.
 
-    表不存在 ⇒ 它一行都没有 ⇒ 这条边确实没有引用（与
-    `documents.retention.active_ref_sql` 对老库返字面量 "0" 同一条推理）。
-    只有 store 单独初始化的库（部分单测、只跑 artifact 的部署）会缺表。
-
-    ⚠ 刻意**不**用 try/except 包真正的查询：那样一次锁库或损坏就会被读成
-    「没有引用」，把仍被引用的数据送进回收站。存在性判定是确定的，查询失败要炸出来。
+    Isolated legacy stores may omit a table. Failed metadata reads must never
+    turn an existing reference into permission to reclaim its artifact.
     """
-    async with db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (name,)) as cur:
-        return await cur.fetchone() is not None
+    return await readable_table_exists(db, name)
 
 
 async def active_reference_sql(db: aiosqlite.Connection, *, alias: str = "artifacts") -> str:
-    """返回一个 SQL 布尔表达式：该行**是否还被引用**。
+    """Build the active-reference expression across readable managed databases.
 
-    只含本库里 join 得到的边。画布正文那条走
-    :func:`canvas_referenced_artifact_ids`（正文是 JSON，SQL 里判不了），
-    `kb_files` 那条由 gateway 的 GC 循环合流。
+    Canvas JSON references and separate KB targets retain their own collectors.
     """
     from bowhead_core.documents.retention import active_ref_sql as _document_ref_sql
 

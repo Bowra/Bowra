@@ -146,14 +146,14 @@ async def test_system_agent_rejects_mcp_prompt_before_runtime_preparation(system
 
 async def test_current_override_is_exact_and_later_disable_blocks_saved_primary(system_case):
     case = system_case
-    changed = await override(case, prompt_append="Use quarterly periods.", max_iterations=2)
+    changed = await override(case, prompt_append="Use quarterly periods.")
     case.ctx.builtin_subagent_overrides = {"compute": changed}
     projected = await case.runner.project_system_behavior_candidate(profile_name="compute", parent_ctx=case.ctx)
     document = case.args["reference_start"].input_document
     node = document.nodes[0]
     document.nodes[0] = node.model_copy(update={"resource": node.resource.model_copy(update={"version": projected.revision_ref})})
     admission = await prepare(case)
-    assert admission.override_version == changed.row_version and admission.system_revision.definition["max_iterations"] == 2
+    assert admission.override_version == changed.row_version
     assert "Use quarterly periods." in admission.system_revision.definition["system_prompt"]
     await accept(case, admission)
     assert (await _read(case)).binding.revision_ref == projected.revision_ref

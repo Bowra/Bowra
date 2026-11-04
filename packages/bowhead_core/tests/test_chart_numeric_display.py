@@ -37,7 +37,6 @@ async def test_real_tool_retains_valid_precision_and_reports_only_invalid_entrie
     result = await _add_chart(
         {
             "data_artifact_id": "art_333333333333",
-            "hint": "raw",
             "force_kind": "table",
             "title": "Prepared values",
             "column_units": {"销售金额": "USD"},

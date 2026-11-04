@@ -11,10 +11,12 @@ from bowhead_router.invocation import PhysicalInvocationSpec
 from bowhead_router.types import TokenUsage
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES
 from bowhead_core.documents.delivery import _execution, _fence, _now
 from bowhead_core.documents.pptx_planning import REPAIRABLE_ERRORS
 from bowhead_core.documents.request import DocumentModelSelection, DocumentRequestError, DocumentScope
 from bowhead_core.rate_card import ModelCreditRates, ModelTokenUsage, ModelUsageLine, credits_for_tokens_at_version
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.user_store import _deduct_credit_with_stable_id_in_tx
 
 
@@ -28,7 +30,7 @@ class DocumentModelHook:
     attempt_no: int = 1
 
     async def begin(self, spec: PhysicalInvocationSpec):
-        async with open_shared_ctx(self.path) as db:
+        async with open_shared_ctx(domain_database_path(self.path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             execution = await _fence(db, self.scope, self.job_id, self.owner)
             if (
@@ -41,7 +43,7 @@ class DocumentModelHook:
                 raise InvocationOutcomeUnknownError("document_execution_fenced")
             async with db.execute("SELECT model_selection_json,profile FROM document_dispatches WHERE job_id=?", (self.job_id,)) as cursor:
                 dispatch = await cursor.fetchone()
-            authoring = dispatch is not None and dispatch[1] == "pptx-script-worker-v1"
+            authoring = dispatch is not None and dispatch[1] in AUTHORING_PROFILES
             if not authoring and self.call_no not in (1, 2):
                 raise InvocationOutcomeUnknownError("document_execution_fenced")
             if dispatch is not None and dispatch[0] is not None:
@@ -96,7 +98,7 @@ class DocumentModelHook:
         return self
 
     async def confirmed_not_applied(self, *, evidence_code: str, evidence_digest: str) -> bool:
-        async with open_shared_ctx(self.path) as db:
+        async with open_shared_ctx(domain_database_path(self.path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
                 "UPDATE document_model_calls SET state='not_applied',error_code=?,response_digest=? WHERE job_id=? AND attempt_no=? AND call_no=? AND state='dispatched'",
@@ -107,7 +109,7 @@ class DocumentModelHook:
         return False
 
     async def unknown(self, *, reason_code: str) -> None:
-        async with open_shared_ctx(self.path) as db:
+        async with open_shared_ctx(domain_database_path(self.path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
                 "UPDATE document_model_calls SET state='unknown',error_code=? WHERE job_id=? AND attempt_no=? AND call_no=? AND state='dispatched'",
@@ -118,7 +120,7 @@ class DocumentModelHook:
     async def complete(self, *, usage: TokenUsage, response_digest: str) -> bool:
         if any(type(value) is not int or value < 0 for value in (usage.input_tokens, usage.output_tokens, usage.cached_tokens)):
             raise ValueError("Authoritative document usage is required")
-        async with open_shared_ctx(self.path) as db:
+        async with open_shared_ctx(domain_database_path(self.path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             execution = await _execution(db, self.job_id)
             async with db.execute(
@@ -162,7 +164,10 @@ class DocumentModelHook:
 
 async def settle_document_usage(path: str, job_id: str) -> None:
     """Settle only durable known receipts; never invoke or resume a model."""
-    async with open_shared_ctx(path) as db:
+    if domain_layout_active(path):
+        await _settle_domain_usage(path, job_id)
+        return
+    async with open_shared_ctx(domain_database_path(path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         execution = await _execution(db, job_id)
         async with db.execute("SELECT * FROM document_jobs WHERE id=?", (job_id,)) as cursor:
@@ -244,9 +249,129 @@ async def settle_document_usage(path: str, job_id: str) -> None:
         await db.commit()
 
 
+async def _usage_snapshot(db, job_id: str):
+    execution = await _execution(db, job_id)
+    async with db.execute("SELECT requested_by,team_id,workspace_id FROM document_jobs WHERE id=?", (job_id,)) as cursor:
+        job = await cursor.fetchone()
+    if execution is None or job is None:
+        raise DocumentRequestError("document_not_found")
+    async with db.execute(
+        "SELECT r.*,c.provider,c.model FROM document_usage_receipts r JOIN document_model_calls c "
+        "ON c.job_id=r.job_id AND c.attempt_no=r.attempt_no AND c.call_no=r.call_no "
+        "WHERE r.job_id=? ORDER BY r.attempt_no,r.call_no",
+        (job_id,),
+    ) as cursor:
+        receipts = [dict(row) for row in await cursor.fetchall()]
+    return tuple(job), execution["rate_card_version"], receipts
+
+
+def _receipt_identity(receipt):
+    return {key: value for key, value in receipt.items() if key not in {"settled_at", "retry_after"}}
+
+
+async def _settle_domain_usage(path: str, job_id: str) -> None:
+    # Frozen receipt prefixes determine stable charges independently of mutable
+    # execution acknowledgements, including concurrent maintenance retries.
+    async with open_shared_ctx(domain_database_path(path, "execution")) as db:
+        await db.execute("BEGIN")
+        identity, version, receipts = await _usage_snapshot(db, job_id)
+    pending = [receipt for receipt in receipts if receipt["settled_at"] is None]
+    if not pending:
+        return
+    input_total = output_total = cumulative = 0
+    lines: list[ModelUsageLine] = []
+    charges = []
+    for receipt in receipts:
+        input_total += receipt["tokens_input"]
+        output_total += receipt["tokens_output"]
+        line = None
+        if version == "v2":
+            if receipt["credit_rates_json"] is None:
+                raise DocumentRequestError("document_usage_settlement_pending")
+            line = ModelUsageLine(
+                receipt["provider"],
+                receipt["model"],
+                ModelTokenUsage.from_provider_counts(
+                    receipt["tokens_input"],
+                    receipt["tokens_cached"],
+                    receipt["tokens_output"],
+                    cached_in_input=receipt["usage_family"] != "anthropic",
+                    rates=ModelCreditRates.from_config(json.loads(receipt["credit_rates_json"])),
+                ),
+            )
+            lines.append(line)
+        total = credits_for_tokens_at_version(
+            version, input_total, output_total, model_usage=[item.usage for item in lines] if line is not None else None
+        )
+        if total < cumulative:
+            raise ValueError("Document settlement must be monotonic")
+        if receipt["settled_at"] is None:
+            charges.append((receipt, total - cumulative, line))
+        cumulative = total
+    async with open_shared_ctx(domain_database_path(path, "core")) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        current_identity, current_version, current_receipts = await _usage_snapshot(db, job_id)
+        if (current_identity, current_version, [_receipt_identity(row) for row in current_receipts]) != (
+            identity,
+            version,
+            [_receipt_identity(row) for row in receipts],
+        ):
+            raise DocumentRequestError("document_usage_settlement_pending")
+        for receipt, delta, line in charges:
+            result, _ = await _deduct_credit_with_stable_id_in_tx(
+                db,
+                ledger_id=(
+                    f"document:{job_id}:{receipt['call_no']}"
+                    if receipt["attempt_no"] == 1
+                    else f"document:{job_id}:attempt:{receipt['attempt_no']}:call:{receipt['call_no']}"
+                ),
+                user_id=identity[0],
+                team_id=identity[1],
+                workspace_id=identity[2],
+                turn_id=None,
+                cost_credits=delta,
+                tokens_input=receipt["tokens_input"],
+                tokens_output=receipt["tokens_output"],
+                reason="template_document",
+                rate_card_version=version,
+                model_usage=(line,) if line is not None else (),
+                cumulative_v2=line is not None,
+            )
+            if result != "confirmed_applied":
+                raise DocumentRequestError("document_usage_settlement_pending")
+        await db.commit()
+    # A crash after this core commit is repaired through the same stable IDs.
+    # Never acquire the core writer while holding the execution writer.
+    async with open_shared_ctx(domain_database_path(path, "execution")) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        current_identity, current_version, current_receipts = await _usage_snapshot(db, job_id)
+        known = {(row["attempt_no"], row["call_no"]): _receipt_identity(row) for row in current_receipts}
+        if (
+            current_identity != identity
+            or current_version != version
+            or any(known.get((row["attempt_no"], row["call_no"])) != _receipt_identity(row) for row in receipts)
+        ):
+            raise DocumentRequestError("document_usage_settlement_pending")
+        for receipt in pending:
+            await db.execute(
+                "UPDATE document_usage_receipts SET settled_at=COALESCE(settled_at,?) WHERE job_id=? AND attempt_no=? AND call_no=?",
+                (_now(), job_id, receipt["attempt_no"], receipt["call_no"]),
+            )
+        await db.execute(
+            """UPDATE document_executions SET settled_credits=MAX(settled_credits,?),error_code=CASE
+            WHEN error_code IN ('document_usage_settlement_pending','document_usage_unresolved') AND NOT EXISTS(
+              SELECT 1 FROM document_model_calls c LEFT JOIN document_usage_receipts r
+              ON r.job_id=c.job_id AND r.attempt_no=c.attempt_no AND r.call_no=c.call_no
+              WHERE c.job_id=document_executions.job_id AND c.state IN ('dispatched','unknown') AND r.job_id IS NULL)
+            THEN 'document_execution_interrupted' ELSE error_code END WHERE job_id=?""",
+            (cumulative, job_id),
+        )
+        await db.commit()
+
+
 async def settle_pending_usage(path: str) -> None:
     """A bounded, feature-independent sweep; retry only the settlement ledger."""
-    async with open_shared_ctx(path) as db:
+    async with open_shared_ctx(domain_database_path(path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
             "SELECT job_id FROM document_usage_receipts WHERE settled_at IS NULL AND retry_after<=? GROUP BY job_id ORDER BY MIN(retry_after),job_id LIMIT 25",

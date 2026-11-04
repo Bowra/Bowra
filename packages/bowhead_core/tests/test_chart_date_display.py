@@ -95,6 +95,8 @@ async def test_tool_persists_date_format_and_keeps_source_values(tmp_path: Path)
             "data_artifact_id": artifact.id,
             "title": "Values",
             "force_kind": "line",
+            "axes": {"x": "date", "y": ["value"], "x_scale": "category"},
+            "group_by": [],
             "column_types": {"date": "date"},
             "column_date_formats": {"date": "yyyyMMdd", "value": "yyyy", "missing": "yyyy"},
         },
@@ -110,7 +112,7 @@ async def test_tool_persists_date_format_and_keeps_source_values(tmp_path: Path)
         "date_pattern": "yyyyMMdd",
     }
     assert result["display_receipt"]["dimensions"] == [{"key": "date", "type": "date", "date_pattern": "yyyyMMdd"}]
-    assert result["display_receipt"]["value_display"]["actual_axis_unit"] == "not_available_in_tool_receipt"
+    assert result["display_receipt"]["value_display"]["axis_magnitude"] == "renderer_selected_may_change"
     assert {item["path"] for item in result["presentation_fallbacks"]} == {"/column_date_formats/value", "/column_date_formats/missing"}
     section = (await store.list_sections(result["canvas_id"]))[0]
     spec = section.payload["spec"]
@@ -124,7 +126,14 @@ async def test_tool_uses_valid_presets_and_reports_incompatible_patterns(tmp_pat
     artifact = _FakeArtifact(id="art_aaaaaaaaaaaa", filename="values.csv", path="values.csv")
     artifacts = _RichArtifactStore([artifact], {artifact.path: b"date,value\n2026-10-28,12\n2026-10-29,21\n"})
     context = _StubCtx(artifact_store=artifacts, canvas_store=store)
-    base = {"data_artifact_id": artifact.id, "title": "Values", "force_kind": "line", "column_types": {"date": "date"}}
+    base = {
+        "data_artifact_id": artifact.id,
+        "title": "Values",
+        "force_kind": "line",
+        "axes": {"x": "date", "y": ["value"], "x_scale": "category"},
+        "group_by": [],
+        "column_types": {"date": "date"},
+    }
     valid = await _add_chart({**base, "column_date_formats": {"date": "compact_date"}}, context)
     first = next(section for section in await store.list_sections(valid["canvas_id"]) if section.id == valid["section_id"])
     assert next(column for column in first.payload["spec"]["columns"] if column["key"] == "date")["date_pattern"] == "yyyyMMdd"
@@ -143,7 +152,14 @@ async def test_compact_source_dates_keep_format_and_reject_collisions(tmp_path: 
     artifact = _FakeArtifact(id="art_aaaaaaaaaaaa", filename="values.csv", path="values.csv")
     artifacts = _RichArtifactStore([artifact], {artifact.path: b"date,value\n20260102,12\n20260128,21\n"})
     context = _StubCtx(artifact_store=artifacts, canvas_store=store)
-    base = {"data_artifact_id": artifact.id, "title": "Values", "force_kind": "line", "column_types": {"date": "date"}}
+    base = {
+        "data_artifact_id": artifact.id,
+        "title": "Values",
+        "force_kind": "line",
+        "axes": {"x": "date", "y": ["value"], "x_scale": "category"},
+        "group_by": [],
+        "column_types": {"date": "date"},
+    }
     result = await _add_chart({**base, "column_date_formats": {"date": "yyyy-MM-dd"}}, context)
     assert not result.get("presentation_fallbacks")
     section = next(section for section in await store.list_sections(result["canvas_id"]) if section.id == result["section_id"])

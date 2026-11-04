@@ -16,26 +16,16 @@ const llmConfigMocks = vi.hoisted(() => ({
   verifyDraftProvider: vi.fn(),
   verifyProvider: vi.fn(),
 }));
-vi.mock("@/lib/llm-config-api", () => llmConfigMocks);
-
-const llmConfigV2Mocks = vi.hoisted(() => ({
-  precheckProvider: vi.fn(),
-  discoverProviderModels: vi.fn(),
-  discoverDraftProviderModels: vi.fn(),
-  createVerificationPlan: vi.fn(),
-  // Outbound-parameter automatic-adaptation observations: normally empty (keeping the page quiet by default).
+vi.mock("@/lib/llm-config-api", async (original) => ({ ...await original<typeof import("@/lib/llm-config-api")>(), ...llmConfigMocks }));
+vi.mock("@/lib/llm-config-v2-api", async (original) => ({
+  ...await original<typeof import("@/lib/llm-config-v2-api")>(),
   fetchOutboundAdaptations: vi.fn().mockResolvedValue({ items: [] }),
-  createVerificationBatch: vi.fn(),
-  getVerificationBatch: vi.fn(),
-  listVerificationBatches: vi.fn(),
-  cancelVerificationBatch: vi.fn(),
-  listVerificationEvidence: vi.fn(),
+  fetchActiveVerificationBatches: vi.fn().mockResolvedValue({ batches: [] }),
 }));
-vi.mock("@/lib/llm-config-v2-api", () => llmConfigV2Mocks);
 
 // 2026-08-18: gating removed; Copilot always enabled—the old premise mocked off here no longer exists.
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), useSearchParams: () => new URLSearchParams(window.location.search) }));
 
 import { SettingsModels } from "@/components/settings/models";
 import messagesZh from "@/messages/zh-CN.json";
@@ -59,28 +49,27 @@ const CONFIG = {
 };
 
 async function openEditDraft() {
-  llmConfigMocks.fetchAdminLlmConfig.mockResolvedValue({ config: CONFIG, version: 2, features: {} });
+  window.history.replaceState({}, "", "/team/settings/models/connections/edit/?id=llmp_qwen");
+  llmConfigMocks.fetchAdminLlmConfig.mockResolvedValue({ config: CONFIG, version: 2, providers: [], provider_identities: { qwen: "llmp_qwen" }, features: { model_discovery_v2: true } });
   render(
     <NextIntlClientProvider locale="zh-CN" messages={messagesZh}>
-      <SettingsModels />
+      <SettingsModels section="connection" />
     </NextIntlClientProvider>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "qwen 的更多操作" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
   await waitFor(() => expect(document.querySelector(".connect-body")).toBeTruthy());
 }
 
 const saveButton = () =>
-  [...document.querySelectorAll(".connect-foot button")].find((b) => b.textContent?.includes("保存")) as HTMLButtonElement | undefined;
+  [...document.querySelectorAll(".ui-savebar button")].find((b) => b.textContent?.includes("保存")) as HTMLButtonElement | undefined;
 
-describe("saveEnabled 把非法 overrides 算进去（使用点，不是谓词）", () => {
-  it("overrides 打成非法 JSON → 保存按钮禁用", async () => {
+describe("connection save validation at the editor", () => {
+  it("blocks saving invalid override JSON", async () => {
     await openEditDraft();
     const box = document.querySelector("textarea[name^='provider_model_overrides']") as HTMLTextAreaElement | null;
-    if (!box) return; // Skip if this protocol has no editor (a separate guard covers rendering).
+    expect(box).toBeTruthy();
     const before = saveButton();
     expect(before?.disabled).toBe(false);
-    fireEvent.change(box, { target: { value: "{ 这不是 JSON" } });
+    fireEvent.change(box!, { target: { value: "{ invalid JSON" } });
     await waitFor(() => expect(saveButton()?.disabled).toBe(true));
   });
 });

@@ -169,11 +169,14 @@ async def receiver_case(start_case, tmp_path, monkeypatch, request):
     if "office" in mode:
         definition["tool_refs"] = ["attachment_read"]
     optional = None
-    if "extension" in mode:
+    if "extension" in mode or "temporary" in mode:
         from test_skill_read_extensions import policy_for
 
         optional = package(root, "optional_method", (child,), parameter_schema=parameter_schema, executable=True)
-        definition["runtime_extensions"] = policy_for(optional).canonical_value()
+        if "extension" in mode:
+            definition["runtime_extensions"] = policy_for(optional).canonical_value()
+            if mode == "admission_extension_wildcard":
+                definition["runtime_extensions"]["skill_read"]["resource_allowlist"][0]["version"] = None
     dependency = await AgentDependencyCompiler(builtin_skills=SkillCatalog(roots=[root]), team_skill_store=case.fixture.users).compile(
         definition,
         context=replace(_context(audience="teamwide"), agent_id="osa_exact", team_id=case.fixture.team_id, owner_user_id=case.fixture.owner_id),

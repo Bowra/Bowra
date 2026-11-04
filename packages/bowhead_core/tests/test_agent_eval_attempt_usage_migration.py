@@ -4,7 +4,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -124,13 +125,13 @@ def test_upgrade_preserves_rows_and_adds_usage_columns_only_to_core(tmp_path, ta
 
 def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_usage_columns(tmp_path):
     empty = tmp_path / "empty.db"
-    _upgrade(empty, "head")
+    _upgrade(empty, SQLITE_LEGACY_REVISION)
     baseline = tmp_path / "baseline.db"
     _upgrade(baseline, BASELINE.revision)
     with sqlite3.connect(baseline) as db:
         db.execute("INSERT INTO teams(id,name,created_at) VALUES('team_old','Old team','2026-01-01')")
-    _upgrade(baseline, "head")
-    _upgrade(baseline, "head")
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
+    _upgrade(baseline, SQLITE_LEGACY_REVISION)
     for path in (empty, baseline):
         assert _columns(path)[-4:] == list(USAGE_COLUMNS)
     with sqlite3.connect(baseline) as db:
@@ -153,7 +154,7 @@ def test_empty_database_and_the_1_0_0_baseline_both_reach_head_with_usage_column
 )
 def test_partial_or_negative_usage_is_rejected(tmp_path, usage):
     path = tmp_path / "core.db"
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     with sqlite3.connect(path) as db:
         # Positive control: the same seed path accepts a complete usage row.
         _seed_result(db, attempt=1, usage=(1, 1, 0, 1))
@@ -163,7 +164,7 @@ def test_partial_or_negative_usage_is_rejected(tmp_path, usage):
 
 def test_complete_usage_is_accepted_and_the_row_stays_immutable(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     with sqlite3.connect(path) as db:
         _seed_result(db, attempt=1, usage=(120, 30, 40, 3))
         _seed_result(db, attempt=2, usage=None)

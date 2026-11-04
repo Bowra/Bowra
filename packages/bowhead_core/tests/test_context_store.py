@@ -79,6 +79,51 @@ async def test_compact_adopts_only_committed_generation_and_retries_identically(
         assert json.loads((await cursor.fetchone())[0])["operation_id"] == compact.operation_id
 
 
+@pytest.mark.parametrize("revoked", [False, True])
+async def test_repeated_compaction_uses_prepared_history_and_rechecks_authority(collab, monkeypatch, revoked):
+    from bowhead_core.chat_reference_storage import ReferenceScope
+    from bowhead_core.context_ownership import context_scope
+    from bowhead_core.context_store import PreparedContextAncestry, read_context_graph_in_tx
+
+    from bowhead_core import context_store
+
+    source = await write(collab)
+    compact = ContextCompletion(operation_id="mco_" + uuid4().hex, trigger="threshold", input_before=1000, input_after=600)
+    args = {"expected_generation": source, "messages": [Message(role="user", content="Historical summary.")], "completion": compact}
+    adopted = await write(collab, **args)
+    ancestry = PreparedContextAncestry(ReferenceScope(**context_scope(collab.worker).model_dump(), policy_epoch=0), collab.store.cipher)
+    async with open_shared_ctx(collab.path) as db:
+        await db.execute("BEGIN")
+        await read_context_graph_in_tx(
+            db,
+            worker=collab.worker,
+            execution_id=collab.requester,
+            lane="ordinary",
+            generation_id=adopted,
+            cipher=collab.store.cipher,
+            validate_sources=readable,
+            preparation=ancestry,
+        )
+        await db.rollback()
+    checks = []
+
+    async def authority(messages):
+        checks.append(True)
+        if revoked:
+            raise PermissionError("source_revoked")
+
+    def unexpected_decode(*args, **kwargs):
+        raise AssertionError("A prepared retry must not decode history while holding the writer")
+
+    monkeypatch.setattr(context_store, "open_context_messages", unexpected_decode)
+    if revoked:
+        with pytest.raises(PermissionError, match="source_revoked"):
+            await write(collab, **args, prepared_ancestry=ancestry.for_transaction(), validate_sources=authority)
+    else:
+        assert await write(collab, **args, prepared_ancestry=ancestry.for_transaction(), validate_sources=authority) == adopted
+    assert checks
+
+
 async def test_failed_transaction_keeps_prior_head_and_no_completion(collab):
     source = await write(collab)
     compact = ContextCompletion(operation_id="mco_" + uuid4().hex, trigger="capacity", input_before=1000, input_after=600)
@@ -90,6 +135,26 @@ async def test_failed_transaction_keeps_prior_head_and_no_completion(collab):
             assert (await cursor.fetchone())[0] == source
         async with db.execute("SELECT id FROM model_context_generations WHERE id=?", (candidate,)) as cursor:
             assert await cursor.fetchone() is None
+
+
+async def test_batched_segments_preserve_large_context_with_repeated_content(collab):
+    from bowhead_core.context_segments import CONTEXT_SEGMENT_BYTES
+    from bowhead_core.context_store import prepare_context_messages
+
+    messages = [Message(role="user", content="x" * (3 * CONTEXT_SEGMENT_BYTES))]
+    prepared = await prepare_context_messages(
+        messages, worker=collab.worker, execution_id=collab.requester, lane="ordinary", cipher=collab.store.cipher, db_path=collab.path
+    )
+    identity = await write(collab, messages=messages, prepared_messages=prepared)
+    restored = await read(collab, identity)
+    assert restored.messages == messages
+    unique = {segment.digest for segment in restored.snapshot.segments}
+    assert len(unique) < len(restored.snapshot.segments)
+    async with (
+        open_shared_ctx(collab.path) as db,
+        db.execute("SELECT COUNT(*) FROM model_context_segments WHERE execution_id=?", (collab.requester,)) as cursor,
+    ):
+        assert (await cursor.fetchone())[0] == len(unique)
 
 
 @pytest.mark.parametrize("change", ["sibling", "lane", "worker", "session"])

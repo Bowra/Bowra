@@ -6,7 +6,6 @@ from typing import Any
 
 import jwt as jwt_lib
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.effective_theme import DefaultThemeResolver, ResolvedThemeBundle
 from bowhead_core.legacy_theme_registry import legacy_m1_compiled_scheme
 from bowhead_core.personal_appearance_service import (
@@ -26,6 +25,7 @@ from bowhead_gateway.routes import auth as auth_routes
 from bowhead_gateway.routes import theme, user_settings
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 SECRET = "personal-theme-routes-secret-long-enough-for-hs256"
 
@@ -98,7 +98,7 @@ async def app_ctx(tmp_path, monkeypatch):
     auth_routes._RATE_BUCKET.clear()
 
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     users = UserStore(db_path)
     await users.initialize()
     user_store = UserSettingsStore(db_path)
@@ -333,7 +333,7 @@ async def test_weakened_etag_still_drives_the_real_personal_route(app_ctx) -> No
     strong = current.headers["etag"]
     weak = f"W/{strong}"
 
-    # Positive control: without the middleware this is the observed production failure.
+    # Reads refresh the current field contract even when appearance values are unchanged.
     bare = TestClient(app_ctx.app).get(
         "/api/v1/theme/personal",
         headers={"If-None-Match": weak},
@@ -346,7 +346,9 @@ async def test_weakened_etag_still_drives_the_real_personal_route(app_ctx) -> No
         headers={"If-None-Match": weak},
         cookies=_as(app_ctx.member),
     )
-    assert revalidated.status_code == 304
+    assert revalidated.status_code == 200
+    assert revalidated.headers["etag"] == strong
+    assert revalidated.json() == current.json()
 
     saved = wrapped.patch(
         "/api/v1/theme/personal",

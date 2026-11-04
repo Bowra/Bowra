@@ -1,17 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Segment, SegmentedControl } from "@/components/ui/segmented-control";
 import { useResultsCapabilitiesSnapshot } from "@/lib/use-results-capabilities";
 
 export type HtmlPreviewMode = "static" | "interactive";
 
-export function useHtmlPreviewMode() {
+export function useHtmlPreviewMode(sourceKey?: string) {
   const capabilities = useResultsCapabilitiesSnapshot();
   const available = capabilities.interactiveHtml === true;
   const [selection, select] = useState<HtmlPreviewMode>("interactive");
-  return { available, mode: available ? selection : "static" as HtmlPreviewMode, select };
+  const [paused, setPaused] = useState(false);
+  useEffect(() => setPaused(false), [sourceKey]);
+  return {
+    available, mode: available ? selection : "static" as HtmlPreviewMode, paused,
+    select: (mode: HtmlPreviewMode) => { setPaused(false); select(mode); },
+    togglePaused: () => setPaused((value) => !value),
+  };
 }
 
 export function HtmlPreviewModeControl({ value, onChange }: {

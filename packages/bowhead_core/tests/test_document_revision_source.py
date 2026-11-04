@@ -6,10 +6,11 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection, snapshot_chat_turn_user_source
 from bowhead_core.document_revision_target import DocumentRevisionTarget
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from pydantic import ValidationError
 from test_chat_input_document_storage import NOW, _seed_turn, _source
 from test_chat_reference_storage import _upgrade, assert_rows_survive_upgrade
@@ -86,7 +87,7 @@ def test_revision_source_upgrade_preserves_history_and_all_targets(tmp_path, tar
 @pytest.fixture
 def revision_db(tmp_path):
     path = tmp_path / "core.db"
-    _upgrade(path, "head", "core")
+    _upgrade(path, SQLITE_LEGACY_REVISION, "core")
     _seed_turn(path, _source(with_document=False))
     return path
 

@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,9 +46,13 @@ def _now() -> str:
 
 class WorkspaceSettingsStore:
     def __init__(self, path: str | Path) -> None:
-        self._path = str(path)
+        self._path = str(domain_database_path(path, "core"))
 
     async def init(self) -> None:
+        if domain_layout_active(self._path):
+            async with open_shared_ctx(self._path) as db:
+                await require_domain_schema(db, "core")
+            return
         async with open_shared_ctx(self._path) as db:
             await db.executescript(SCHEMA)
             await db.commit()

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -172,3 +173,57 @@ async def test_count_mismatch_failure_leaves_no_searchable_chunks(files_store, k
     assert row is not None and row.parse_status == "failed"
     assert (await _stored(kb_store, files_store, file_id))["ids"] == []
     assert await _search(kb_store, "user_a") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["upload", "explicit_rebuild", "admitted_rebuild", "disabled", "denied"])
+async def test_description_jobs_retain_publication_admission(files_store: KbFilesStore, kb_store: KbStore, tmp_path: Path, entry: str) -> None:
+    from bowhead_core.kb.ingestion import KnowledgeAction
+    from bowhead_core.kb.source_description import DescriptionAssignment
+    from bowhead_core.kb.source_navigation_store import SourceNavigationStore
+
+    path = tmp_path / "source.md"
+    path.write_text("# Synthetic onboarding\n\nThe handoff color is amber.\n", encoding="utf-8")
+    action = KnowledgeAction("upload-source", "kb_ui", "user_a", "team_5", "ws_42")
+    file_id, _, _ = await files_store.create_admitted(
+        action=action,
+        source_fingerprint="source-one",
+        artifact_id=str(path),
+        filename=path.name,
+        mime_type="text/markdown",
+        size_bytes=path.stat().st_size,
+        scope="space",
+        scope_id="ws_42",
+        workspace_id="ws_42",
+        team_id="team_5",
+        uploaded_by="user_a",
+        use_llm_marker=False,
+    )
+    assignment = DescriptionAssignment("provider", "model", "assignment-fingerprint")
+    resolver = AsyncMock(return_value=None if entry == "disabled" else assignment)
+    ingestion_authorizer = AsyncMock(return_value=entry != "denied")
+    explicit_authorizer = AsyncMock(return_value=True) if entry in {"explicit_rebuild", "admitted_rebuild"} else None
+    rebuild_action = KnowledgeAction("rebuild-source", "kb_ui", "maintainer", "team_5", "ws_42") if entry == "admitted_rebuild" else None
+    worker = KbWorker(
+        files_store=files_store,
+        store=kb_store,
+        embedder=_embedder(),
+        ingestion_authorizer=ingestion_authorizer,
+        description_assignment_resolver=resolver,
+    )
+    await worker.parse_and_index(file_id, authorize=explicit_authorizer, description_action=rebuild_action)
+
+    job = await SourceNavigationStore(files_store._db_path).latest_job(file_id)
+    file = await files_store.get(file_id)
+    assert file is not None
+    if entry in {"upload", "admitted_rebuild"}:
+        assert job is not None, "A verified, explicitly admitted publication must enqueue automatic source description work"
+        assert job["actor_user_id"] == ("maintainer" if entry == "admitted_rebuild" else "user_a")
+        assert (job["workspace_id"], job["source_version"], job["generation_id"]) == ("ws_42", file.version, file.active_generation_id)
+    else:
+        assert job is None
+    if entry == "denied":
+        resolver.assert_not_awaited()
+        assert file.active_generation_id is None
+    else:
+        assert file.parse_status == "done"

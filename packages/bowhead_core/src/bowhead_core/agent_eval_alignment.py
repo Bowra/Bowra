@@ -36,6 +36,7 @@ from bowhead_core.agent_eval_point_calibration import (
 from bowhead_core.agent_eval_points import ExpectedPoint, is_held_out
 from bowhead_core.agent_eval_product import _require_agent_owner
 from bowhead_core.agent_eval_store import AgentEvalStoreError, EvalCaseDraft, append_eval_suite_cases_conn
+from bowhead_core.sqlite_domains import domain_database_path
 
 _log = logging.getLogger(__name__)
 
@@ -459,7 +460,7 @@ class AgentEvalAlignmentStore:
     """Loops, question rows and the Owner's labels; every read and write is the loop Owner's."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def start(
         self,

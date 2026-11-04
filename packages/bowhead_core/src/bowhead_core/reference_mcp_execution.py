@@ -46,6 +46,7 @@ from bowhead_core.reference_mcp_preparation import (
     prepare_reference_mcp_selection,
     revalidate_reference_mcp_selection_in_connection,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 class ReferenceMcpAdmissionComposition(BaseModel):
@@ -201,7 +202,7 @@ class McpReferenceWorkerPreparation:
         expected_scope = ReferenceRequestScope(**scope.identity())
         if self.prepared.scope != expected_scope or self.prepared.policy_epoch != scope.policy_epoch:
             raise ValueError("reference_mcp_source_scope_changed")
-        if Path(self.index.db_path).resolve() != Path(self.access.db_path).resolve():
+        if Path(domain_database_path(self.index.db_path, "core")).resolve() != Path(domain_database_path(self.access.db_path, "core")).resolve():
             raise ValueError("reference_mcp_source_scope_changed")
         if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_mcp_composition'", ()) is None:
             raise ValueError("reference_mcp_composition_migration_required")
@@ -249,7 +250,7 @@ async def claim_reference_mcp_primary_for_worker(
 ) -> ReferencePrimaryWorkerClaim:
     """Prepare current MCP scope outside the lock, then claim it atomically."""
     scope = ReferenceRequestScope.model_validate(scope.model_dump(mode="python", warnings="error"))
-    if Path(index.db_path).resolve() != Path(access.db_path).resolve():
+    if Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(access.db_path, "core")).resolve():
         raise ValueError("reference_mcp_source_scope_changed")
     bindings = AgentExecutionBindingStore(index.db_path)
     async with open_shared_ctx(index.db_path) as db:

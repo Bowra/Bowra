@@ -10,7 +10,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.config_draft_store import (
     FORM_STATUS_CONSUMED,
     FORM_STATUS_DISCARDED,
@@ -24,6 +23,7 @@ from bowhead_core.config_draft_store import (
     ConfigDraftStore,
 )
 from bowhead_core.migrations.baseline_schema import initial_schema
+from core_legacy_database import upgrade
 
 _ROWS = [{"field": "mode", "from": "light", "to": "dark", "from_unset": True}]
 
@@ -34,7 +34,7 @@ def db_path(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     return str(path)
 
 

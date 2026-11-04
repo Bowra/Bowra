@@ -66,7 +66,8 @@ async def ensure_team_skill_grantable(user_store: Any, *, team_id: str, resource
 def content_sharing_enabled() -> bool:
     """Feature switch (default ON; set BOWHEAD_CONTENT_SHARING=0 to disable).
 
-    Gates the share API mount and the grant overlays on read paths. It NEVER
+    Gates sharing expansion and delegated reads. Inspection and revocation
+    remain available for reports while disabled. It NEVER
     gates the B1/B2 security fixes (tech-design §4 flag table) — those are
     unconditional. Cached per process (env is immutable at runtime in prod).
     """
@@ -74,6 +75,18 @@ def content_sharing_enabled() -> bool:
     if _content_sharing_cache is None:
         _content_sharing_cache = os.environ.get(_CONTENT_SHARING_ENV, "1").strip() != "0"
     return _content_sharing_cache
+
+
+class ContentSharingDisabledError(ValueError):
+    """Report and file sharing is suspended by deployment policy."""
+
+    code = "content_sharing_disabled"
+
+
+def require_content_sharing(kind: str) -> None:
+    """Check expansion policy without changing unrelated resource grants."""
+    if kind in {"report", "artifact"} and not content_sharing_enabled():
+        raise ContentSharingDisabledError(ContentSharingDisabledError.code)
 
 
 def reset_content_sharing_cache() -> None:
@@ -245,6 +258,8 @@ async def set_audience(
     if target not in AUDIENCES:
         raise ValueError(f"invalid audience: {target}")
     reject_obsolete_team_subagent_write(kind)
+    if target != "private":
+        require_content_sharing(kind)
     if kind == "team_skill" and target == "team_wide":
         # Stronger than the approval check: the row must **already be** team_wide+approved; set_audience only writes grants through
         # for an approved broadcast state, never transitions visibility. Otherwise a creator_only row (always approved
@@ -294,6 +309,7 @@ async def add_grant(
     if kind not in SHAREABLE_KINDS:
         raise ValueError(f"kind not shareable: {kind}")
     reject_obsolete_team_subagent_write(kind)
+    require_content_sharing(kind)
     if principal_type not in ("user", "group"):
         raise ValueError("principal_type must be 'user' or 'group'")
     if kind == "team_skill":

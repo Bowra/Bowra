@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
+from bowhead_core.sqlite_domains import domain_database_path
+
 if TYPE_CHECKING:
     from bowhead_core.access_control import AccessControlStore
     from bowhead_core.reference_mcp_metadata import ReferenceMcpMetadataIndex
@@ -656,7 +658,10 @@ async def materialize_reference_steer_head(
     sources = source_factory(request_scope)
     if inspect.isawaitable(sources):
         sources = await sources
-    if type(sources) is not SkillReadSourceResolver or Path(sources.db_path).resolve() != Path(db_path).resolve():
+    if (
+        type(sources) is not SkillReadSourceResolver
+        or Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+    ):
         raise ValueError("reference_skill_source_scope_changed")
     kwargs = {
         "input_document": payload.input_document,
@@ -678,8 +683,8 @@ async def materialize_reference_steer_head(
             type(mcp_index) is not ReferenceMcpMetadataIndex
             or not mcp_index.ready
             or type(mcp_access) is not AccessControlStore
-            or Path(mcp_index.db_path).resolve() != Path(db_path).resolve()
-            or Path(mcp_access.db_path).resolve() != Path(db_path).resolve()
+            or Path(domain_database_path(mcp_index.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+            or Path(domain_database_path(mcp_access.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
         ):
             raise ValueError("reference_mcp_source_scope_changed")
         kwargs.update(mcp_index=mcp_index, mcp_access=mcp_access)
@@ -861,6 +866,20 @@ async def handoff_legacy_spawn_failure_to_recovery(
     return "recovered" if projection == "settled" else "recovery_pending"
 
 
+async def shutdown_turn_workers(orchestrator: Any) -> None:
+    """Finish this Gateway's workers and durable tails before storage closes."""
+    orchestrator._gateway_turns_stopping = True
+    tasks = getattr(orchestrator, "_gateway_turn_tasks", {})
+    while tasks:
+        pending = tuple(tasks)
+        for task in pending:
+            if tasks[task] and not task.done():
+                task.cancel("gateway_shutdown")
+        # Monitors and exact-generation bus retirement finish their original
+        # persistence/recovery checks after the worker has stopped.
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 async def spawn_turn(
     orchestrator: Any,
     turn_req: Any,
@@ -906,6 +925,15 @@ async def spawn_turn(
         _inflight_tasks,
         _run_turn_and_cleanup,
     )
+
+    if getattr(orchestrator, "_gateway_turns_stopping", False):
+        raise RuntimeError("gateway_turn_workers_stopping")
+    owned_tasks = getattr(orchestrator, "_gateway_turn_tasks", None)
+
+    def observe_task(task: asyncio.Task[Any], *, worker: bool = False) -> None:
+        if owned_tasks is not None:
+            owned_tasks[task] = worker
+            task.add_done_callback(lambda completed: owned_tasks.pop(completed, None))
 
     # Publish the cancel fence before scheduling the coroutine. A user can click
     # Stop immediately after the accepted response; without this pre-registration
@@ -1234,8 +1262,10 @@ async def spawn_turn(
                     if (
                         type(reference_mcp_index) is not ReferenceMcpMetadataIndex
                         or type(reference_mcp_access) is not AccessControlStore
-                        or Path(reference_mcp_index.db_path).resolve() != Path(bindings.db_path).resolve()
-                        or Path(reference_mcp_access.db_path).resolve() != Path(bindings.db_path).resolve()
+                        or Path(domain_database_path(reference_mcp_index.db_path, "core")).resolve()
+                        != Path(domain_database_path(bindings.db_path, "core")).resolve()
+                        or Path(domain_database_path(reference_mcp_access.db_path, "core")).resolve()
+                        != Path(domain_database_path(bindings.db_path, "core")).resolve()
                     ):
                         raise ValueError("reference_mcp_source_scope_changed")
                     claim_mcp = claim_reference_mcp_primary_for_worker
@@ -1275,7 +1305,8 @@ async def spawn_turn(
 
                     if (
                         type(reference_skill_sources) is not SkillReadSourceResolver
-                        or Path(reference_skill_sources.db_path).resolve() != Path(bindings.db_path).resolve()
+                        or Path(domain_database_path(reference_skill_sources.db_path, "core")).resolve()
+                        != Path(domain_database_path(bindings.db_path, "core")).resolve()
                     ):
                         raise ValueError("reference_skill_source_scope_changed")
                     claim = await claim_reference_skill_primary_for_worker(
@@ -1429,6 +1460,9 @@ async def spawn_turn(
                 raise
 
     def create_worker() -> asyncio.Task[Any]:
+        if getattr(orchestrator, "_gateway_turns_stopping", False):
+            raise RuntimeError("gateway_turn_workers_stopping")
+
         async def _run_worker() -> Any:
             try:
                 return await _run_turn_and_cleanup(
@@ -1456,6 +1490,7 @@ async def spawn_turn(
             worker.close()
             raise
         _inflight_tasks.add(task)
+        observe_task(task, worker=True)
 
         async def _retire_worker_generation() -> None:
             # Normal completion retires the producer in the worker tail before
@@ -1476,6 +1511,7 @@ async def spawn_turn(
                     name=f"legacy_worker_generation_retire:{turn_req.turn_id}",
                 )
                 _inflight_tasks.add(retire_task)
+                observe_task(retire_task)
                 retire_task.add_done_callback(_inflight_tasks.discard)
             if done.cancelled():
                 return
@@ -1858,6 +1894,7 @@ async def spawn_turn(
         worker_ready.set_result(None)
         assert monitor is not None
         _inflight_tasks.add(monitor)
+        observe_task(monitor)
         monitor.add_done_callback(_inflight_tasks.discard)
     return task
 
@@ -2077,7 +2114,10 @@ async def _prepare_reference_bi_resume(orchestrator: Any, turn_req: Any):
         if not callable(factory):
             raise ValueError("reference_continuation_unavailable")
         sources = factory(ReferenceRequestScope(**scope.model_dump(exclude={"policy_epoch"})))
-        if type(sources) is not SkillReadSourceResolver or Path(sources.db_path).resolve() != Path(db_path).resolve():
+        if (
+            type(sources) is not SkillReadSourceResolver
+            or Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+        ):
             raise ValueError("reference_skill_source_scope_changed")
         await sources.access_factory()
         inputs["reference_skill_sources"] = sources
@@ -2095,8 +2135,8 @@ async def _prepare_reference_bi_resume(orchestrator: Any, turn_req: Any):
             type(index) is not ReferenceMcpMetadataIndex
             or not index.ready
             or type(access) is not AccessControlStore
-            or Path(index.db_path).resolve() != Path(db_path).resolve()
-            or Path(access.db_path).resolve() != Path(db_path).resolve()
+            or Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+            or Path(domain_database_path(access.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
         ):
             raise ValueError("reference_mcp_source_scope_changed")
         # The original acceptance owns the writer decision. Resuming consumes
@@ -2247,6 +2287,7 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
             "ordinary-lead-loop.v11",
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
+            "ordinary-lead-loop.v14",
         }
         else None
     )

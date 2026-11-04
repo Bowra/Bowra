@@ -20,6 +20,8 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.user_store import UserStore
 
 PersonalState = Literal["active", "disabled", "removed"]
@@ -426,7 +428,7 @@ class AgentAssignmentStore:
     """SQLite command/read store for a user's hired Agent roster."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
         """Verify Alembic-owned schema; never create post-baseline tables here."""
@@ -566,7 +568,7 @@ class AgentAssignmentStore:
         if not self.db_path.is_file():
             raise FileNotFoundError(f"database not found: {self.db_path}")
         uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
-        async with aiosqlite.connect(uri, uri=True) as db:
+        async with diagnostic_connect(uri, uri=True) as db:
             await db.execute("PRAGMA query_only=ON")
             async with db.execute(
                 "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='alembic_version'",
@@ -2498,6 +2500,9 @@ class AgentAssignmentStore:
             except BaseException:
                 await db.rollback()
                 raise
+        await self._apply_split_schedule_status(
+            job_ids=paused_ids, status="paused", pause_reason=f"agent_personal_disabled:{assignment.id}", timestamp=timestamp
+        )
         return AgentAssignmentMutation(assignment, paused_schedule_ids=paused_ids)
 
     async def unhire_impact(self, *, team_id: str, user_id: str, agent_id: str) -> AgentUnhireImpact:
@@ -2605,6 +2610,12 @@ class AgentAssignmentStore:
             except BaseException:
                 await db.rollback()
                 raise
+        await self._apply_split_schedule_status(
+            job_ids=paused_ids, status="paused", pause_reason=f"agent_unhired:{assignment.id}", timestamp=timestamp
+        )
+        await self._apply_split_schedule_status(
+            job_ids=expired_ids, status="expired", pause_reason=f"agent_unhired:{assignment.id}", timestamp=timestamp
+        )
         return AgentAssignmentMutation(
             assignment,
             paused_schedule_ids=paused_ids,
@@ -3207,9 +3218,13 @@ class AgentAssignmentStore:
         status: Literal["paused", "expired"],
         pause_reason: str,
         timestamp: str,
+        apply_split: bool = False,
     ) -> tuple[str, ...]:
         if not job_ids:
             return ()
+        if domain_layout_active(self.db_path) and not apply_split:
+            # The authoritative preference commits before its ordinary schedule followup.
+            return job_ids
         placeholders = ",".join("?" for _ in job_ids)
         await db.execute(
             f"""
@@ -3219,6 +3234,15 @@ class AgentAssignmentStore:
             (status, pause_reason, timestamp, *job_ids),
         )
         return job_ids
+
+    async def _apply_split_schedule_status(
+        self, *, job_ids: tuple[str, ...], status: Literal["paused", "expired"], pause_reason: str, timestamp: str
+    ) -> None:
+        if not job_ids or not domain_layout_active(self.db_path):
+            return
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
+            await self._set_schedule_status_conn(db, job_ids=job_ids, status=status, pause_reason=pause_reason, timestamp=timestamp, apply_split=True)
+            await db.commit()
 
     async def _write_audit_conn(
         self,

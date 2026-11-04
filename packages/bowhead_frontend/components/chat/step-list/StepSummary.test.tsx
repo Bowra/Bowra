@@ -32,10 +32,10 @@ function step(over: Partial<StepView>): StepView {
 }
 
 describe("StepSummary", () => {
-  it("renders '{N} 步完成' with steps count", () => {
+  it("renders a neutral execution-ended heading", () => {
     const steps = [step({ stepId: "a", durationText: "0.4s" }), step({ stepId: "b", durationText: "1.0s" })];
     renderIntl(<StepSummary steps={steps} onExpand={() => {}} />);
-    expect(screen.getByText(/2 步完成/)).toBeTruthy();
+    expect(screen.getByText(/执行已结束/)).toBeTruthy();
   });
 
   it("renders derived total duration when steps carry durationText", () => {
@@ -142,7 +142,7 @@ describe("StepSummary", () => {
     expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
-  it("is one row card button with a muted check, no inline root style", () => {
+  it("keeps the original row disclosure with a neutral history icon", () => {
     const steps = [step({ stepId: "a", durationText: "0.4s" })];
     renderIntl(<StepSummary steps={steps} onExpand={() => {}} />);
 
@@ -151,8 +151,8 @@ describe("StepSummary", () => {
     expect(summary.className).toContain("ui-card--row");
     expect(summary.className).toContain("ui-card--icon-muted");
     expect(summary.getAttribute("style")).toBeNull();
-    expect(summary.querySelector(".ui-card__icon svg")?.getAttribute("class")).toContain("lucide-circle-check");
-    expect(summary.querySelector(".ui-card__line")?.textContent).toContain("1 步完成");
+    expect(summary.querySelector(".ui-card__icon svg")?.getAttribute("class")).toContain("lucide-list-tree");
+    expect(summary.querySelector(".ui-card__line")?.textContent).toContain("执行已结束");
     expect(summary.querySelector('[data-testid="step-summary-duration"]')?.textContent).toContain("不到 1 秒");
     expect(summary.querySelector(".ui-card__trailing-label")?.textContent).toContain("展开运行过程");
   });
@@ -162,14 +162,14 @@ describe("StepSummary", () => {
     renderIntl(<StepSummary steps={steps} onExpand={() => {}} />);
     // Should NOT have any "· X.Xs" text since no durations.
     const summary = screen.getByTestId("step-summary");
-    expect(summary.textContent).toContain("2 步完成");
+    expect(summary.textContent).toContain("执行已结束");
     expect(summary.textContent).not.toMatch(/· \d+(\.\d+)?s/);
   });
 
   it("renders single-step case correctly", () => {
     const steps = [step({ stepId: "a", durationText: "0.4s" })];
     renderIntl(<StepSummary steps={steps} onExpand={() => {}} />);
-    expect(screen.getByText(/1 步完成/)).toBeTruthy();
+    expect(screen.getByText(/执行已结束/)).toBeTruthy();
   });
 
   it("does not claim zero steps for a peer-only execution", () => {
@@ -182,7 +182,7 @@ describe("StepSummary", () => {
     );
 
     const summary = screen.getByTestId("step-summary");
-    expect(summary.textContent).toContain("执行完成");
+    expect(summary.textContent).toContain("执行已结束");
     expect(summary.textContent).not.toContain("0 步完成");
     // Agent colour badges are replaced by the Agent count (spec §8).
     expect(summary.querySelectorAll(".ag-badge")).toHaveLength(0);
@@ -216,7 +216,7 @@ describe("StepSummary", () => {
 
     const summary = screen.getByTestId("step-summary");
     expect(summary.querySelectorAll(".ag-badge")).toHaveLength(0);
-    expect(summary.textContent).toContain("11 步完成 · 调用 10 个智能体");
+    expect(summary.textContent).toContain("执行已结束 · 调用 10 个智能体");
     expect(summary.textContent).not.toMatch(/\+\d+/);
   });
 
@@ -231,35 +231,29 @@ describe("StepSummary", () => {
       ...over,
     });
 
-    it("succeeded turn with nothing affecting the answer: secondary 'handled' copy", () => {
+    it("keeps recovered execution counts out of the result summary", () => {
       renderIntl(<StepSummary steps={issues} stepOutcome={outcome({})} onExpand={() => {}} />);
-      const badge = screen.getByTestId("step-summary-issues");
-      expect(badge.textContent).toBe("2 个步骤曾失败，后续调用已成功");
-      expect(badge.getAttribute("data-tone")).toBe("secondary");
+      expect(screen.queryByTestId("step-summary-issues")).toBeNull();
     });
 
-    it("warning tone only when an unresolved issue affected the answer", () => {
+    it("does not infer missing user requirements from execution counts", () => {
       renderIntl(
         <StepSummary steps={issues} stepOutcome={outcome({ recoveredSteps: 1, unresolvedSteps: 1, answerAffected: true })} onExpand={() => {}} />,
         { locale: "en-US" },
       );
-      const badge = screen.getByTestId("step-summary-issues");
-      expect(badge.textContent).toBe("1 step didn't finish, so the answer may be incomplete");
-      expect(badge.getAttribute("data-tone")).toBe("warning");
-      expect(badge.className).toBe("ui-card__line-warn");
-      expect(screen.getByTestId("step-summary").className).toContain("ui-card--icon-warning");
+      expect(screen.queryByTestId("step-summary-issues")).toBeNull();
+      expect(screen.getByTestId("step-summary").textContent).toContain("Execution ended");
+      expect(screen.getByTestId("step-summary").className).not.toContain("ui-card--icon-warning");
     });
 
-    it("old turns without the field keep the neutral local count", () => {
+    it("keeps old issue history inside the original process", () => {
       renderIntl(<StepSummary steps={issues} onExpand={() => {}} />);
-      const badge = screen.getByTestId("step-summary-issues");
-      expect(badge.textContent).toBe("2 个步骤遇到问题");
-      expect(badge.getAttribute("data-tone")).toBe("secondary");
+      expect(screen.queryByTestId("step-summary-issues")).toBeNull();
     });
 
-    it("pluralizes the handled copy in English", () => {
+    it("keeps the English result summary free of historical failure warnings", () => {
       renderIntl(<StepSummary steps={issues} stepOutcome={outcome({})} onExpand={() => {}} />, { locale: "en-US" });
-      expect(screen.getByTestId("step-summary-issues").textContent).toBe("Later calls succeeded after 2 earlier steps failed");
+      expect(screen.queryByTestId("step-summary-issues")).toBeNull();
     });
   });
 

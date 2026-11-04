@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 
 def _now() -> str:
@@ -76,7 +77,7 @@ class SlackStore:
             fields.update({key: getattr(existing, key) for key in fields})
         fields.update(values)
         connection_id = existing.id if existing else f"slc_{secrets.token_hex(12)}"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO slack_connections(id,team_id,slack_team_id,slack_app_id,client_id,client_secret_ref,signing_secret_ref,bot_token_ref,bot_user_id,channel_answers_enabled,status,created_by_user_id,updated_by_user_id,created_at,updated_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team_id) DO UPDATE SET slack_team_id=excluded.slack_team_id,slack_app_id=excluded.slack_app_id,client_id=excluded.client_id,client_secret_ref=excluded.client_secret_ref,signing_secret_ref=excluded.signing_secret_ref,bot_token_ref=excluded.bot_token_ref,bot_user_id=excluded.bot_user_id,channel_answers_enabled=excluded.channel_answers_enabled,status=excluded.status,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at""",
@@ -90,7 +91,7 @@ class SlackStore:
     async def create_oauth_state(self, connection_id: str, *, redirect_uri: str | None = None) -> str:
         state = secrets.token_urlsafe(32)
         expiry = (datetime.now(tz=UTC) + timedelta(minutes=10)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO slack_oauth_states(state,connection_id,expires_at,created_at,redirect_uri) VALUES(?,?,?,?,?)",
                 (state, connection_id, expiry, _now(), redirect_uri),
@@ -99,7 +100,7 @@ class SlackStore:
         return state
 
     async def consume_oauth_state(self, state: str) -> SlackOAuthState | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute("DELETE FROM slack_oauth_states WHERE state=? RETURNING connection_id,expires_at,redirect_uri", (state,)) as cur:
                 row = await cur.fetchone()
             await db.commit()
@@ -115,7 +116,7 @@ class SlackStore:
     ) -> str:
         state = secrets.token_urlsafe(32)
         expiry = (datetime.now(tz=UTC) + timedelta(minutes=10)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO personal_slack_oauth_states(state,connection_id,owner_user_id,team_id,expires_at,created_at,redirect_uri) VALUES(?,?,?,?,?,?,?)",
                 (state, connection_id, owner_user_id, team_id, expiry, _now(), redirect_uri),
@@ -124,7 +125,7 @@ class SlackStore:
         return state
 
     async def consume_personal_oauth_state(self, state: str) -> PersonalSlackOAuthState | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "DELETE FROM personal_slack_oauth_states WHERE state=? RETURNING connection_id,owner_user_id,team_id,expires_at,redirect_uri",
                 (state,),
@@ -137,7 +138,7 @@ class SlackStore:
 
     async def get_identity(self, connection_id: str, slack_user_id: str) -> str | None:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT bowhead_user_id FROM slack_identity_bindings WHERE connection_id=? AND slack_user_id=?",
                 (connection_id, slack_user_id),
@@ -147,7 +148,7 @@ class SlackStore:
         return str(row[0]) if row else None
 
     async def bind_identity(self, connection_id: str, slack_user_id: str, user_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO slack_identity_bindings(connection_id,slack_user_id,bowhead_user_id,created_at,updated_at) VALUES(?,?,?,?,?)
             ON CONFLICT(connection_id,slack_user_id) DO UPDATE SET bowhead_user_id=excluded.bowhead_user_id,updated_at=excluded.updated_at""",
@@ -157,7 +158,7 @@ class SlackStore:
 
     async def workspace(self, connection_id: str, conversation_id: str, slack_user_id: str) -> str | None:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT workspace_id FROM slack_workspace_bindings WHERE connection_id=? AND conversation_id=? AND slack_user_id=?",
                 (connection_id, conversation_id, slack_user_id),
@@ -167,7 +168,7 @@ class SlackStore:
         return str(row[0]) if row else None
 
     async def set_workspace(self, connection_id: str, conversation_id: str, slack_user_id: str, workspace_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO slack_workspace_bindings(connection_id,conversation_id,slack_user_id,workspace_id,updated_at) VALUES(?,?,?,?,?)
             ON CONFLICT(connection_id,conversation_id,slack_user_id) DO UPDATE SET workspace_id=excluded.workspace_id,updated_at=excluded.updated_at""",
@@ -178,7 +179,7 @@ class SlackStore:
     async def claim_event(self, connection_id: str, event_id: str) -> bool:
         if not event_id:
             return True
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             try:
                 await db.execute("INSERT INTO slack_event_dedup(connection_id,event_id,received_at) VALUES(?,?,?)", (connection_id, event_id, _now()))
                 await db.commit()
@@ -187,7 +188,7 @@ class SlackStore:
                 return False
 
     async def _one(self, sql: str, params: tuple[str, ...]) -> SlackConnection | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 row = await cur.fetchone()

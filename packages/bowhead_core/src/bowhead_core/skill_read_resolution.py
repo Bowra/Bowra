@@ -35,6 +35,7 @@ from bowhead_core.skill_package_material import (
 )
 from bowhead_core.skill_read_material import PreparedSkillRead, SkillReadMaterialError, prepare_skill_read
 from bowhead_core.skill_reference_metadata import BuiltinSkillMetadataIndex
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 from bowhead_skill.catalog import builtin_catalog_dir
 
@@ -130,7 +131,7 @@ class SkillReadSourceResolver:
         self.honor_member_preference = honor_member_preference
         # All stores read the same server-selected database. No initialize DDL or
         # separate default team/workspace source is created for this adapter.
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self.users = UserStore(db_path)
         self.instances = SkillInstanceStore(db_path)
         self.access = AccessControlStore(db_path)

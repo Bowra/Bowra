@@ -198,7 +198,9 @@ async def test_existing_layout_alias_and_implicit_guide_declaration_compile_to_o
     _, canvas, _, ctx, _, _, _, _ = value
     args = guide_args(value)
     args["presentation_plan"].pop("interactions")
-    args["views"].append({"id": "cost", "title": "Cost", "hint": "compare", "force_kind": "bar", "series": ["cost"]})
+    args["views"].append(
+        {"id": "cost", "title": "Cost", "force_kind": "bar", "axes": {"x": "month", "y": ["cost"], "x_scale": "category"}, "group_by": []}
+    )
     layout = {"type": "primary_aside", "children": [{"view": "trend"}, {"type": "stack", "children": [{"view": "cost"}, {"view": "detail"}]}]}
     args["layout"] = json.dumps(layout) if encoded else layout
     jsonschema.validate(args, _add_chart_schema().input_schema)

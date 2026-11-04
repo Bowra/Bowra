@@ -20,6 +20,7 @@ import anyio
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.access_control import AccessControlStore
+from bowhead_core.agent_behavior_contract import supports_skill_method_input
 from bowhead_core.agent_dependency_compiler import ExactSkillGrant
 from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
 from bowhead_core.chat_reference_admission import ReferenceStartAdmission, reference_start_receiver
@@ -37,10 +38,13 @@ from bowhead_core.chat_references import (
 )
 from bowhead_core.reference_mcp_metadata import ReferenceMcpMetadataIndex
 from bowhead_core.reference_mcp_preparation import prepare_reference_mcp_prompt_selection, prepare_reference_mcp_selection
+from bowhead_core.skill_method_policy import TaskMethodReadPolicy, selected_method_policy, task_method_policy, task_method_reads_ready
 from bowhead_core.skill_read_closure import prepare_skill_read_closure
 from bowhead_core.skill_read_extensions import ExtensionReadSources, published_extension_policy, require_extension_roots, skill_read_provenance
+from bowhead_core.skill_read_material import SkillReadMaterialError
 from bowhead_core.skill_read_receiver import exact_reference_skill_grants, require_supported_skill_grants
 from bowhead_core.skill_read_resolution import ResolvedSkillRead, SkillReadSourceProof, SkillReadSourceResolver
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.subagent import SubagentRunner
@@ -142,7 +146,10 @@ async def prepare_reference_team_start_admission(
         receiver_resource = reference_start_receiver(document, automatic_receiver)
         if receiver_resource.source_kind != "team":
             raise ReferenceStartPreparationError("reference_start_unsupported")
-        if (skills or sources is not None) and (not isinstance(sources, SkillReadSourceResolver) or Path(sources.db_path) != Path(db_path)):
+        if (skills or sources is not None) and (
+            not isinstance(sources, SkillReadSourceResolver)
+            or Path(domain_database_path(sources.db_path, "core")) != Path(domain_database_path(db_path, "core"))
+        ):
             raise ReferenceStartPreparationError("reference_skill_preparation_required")
         if prompts and len(refs) != 1 + len(prompts):
             raise ReferenceStartPreparationError("reference_mcp_prompt_selection_unsupported")
@@ -150,8 +157,8 @@ async def prepare_reference_team_start_admission(
             automatic_receiver is not None
             or not isinstance(mcp_index, ReferenceMcpMetadataIndex)
             or not isinstance(mcp_access, AccessControlStore)
-            or Path(mcp_index.db_path).resolve() != Path(db_path).resolve()
-            or Path(mcp_access.db_path).resolve() != Path(db_path).resolve()
+            or Path(domain_database_path(mcp_index.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
+            or Path(domain_database_path(mcp_access.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
         ):
             raise ReferenceStartPreparationError("reference_mcp_preparation_required")
         if not mcp and not prompts and (mcp_index is not None or mcp_access is not None):
@@ -167,6 +174,10 @@ async def prepare_reference_team_start_admission(
                     grants, proofs, policy = (), [], None
                     if sources is not None:
                         definition = decode_reference_json(candidate.definition_json, max_bytes=1024 * 1024)
+                        if skills and not supports_skill_method_input(
+                            candidate.behavior_descriptor, allow_unproven_primary=True, declared_primary=definition.get("primary_capability_ref")
+                        ):
+                            raise ReferenceStartPreparationError("reference_skill_receiver_unavailable")
                         grants = exact_reference_skill_grants(definition)
                         require_supported_skill_grants(grants)
                         policy = await published_extension_policy(
@@ -177,6 +188,7 @@ async def prepare_reference_team_start_admission(
                             release_id=candidate.expected.release_id,
                             definition=definition,
                         )
+                        policy = selected_method_policy(document, grants, policy)
                         if policy is not None:
                             require_extension_roots(grants, [node.resource for node in skills], policy)
                         else:
@@ -193,6 +205,7 @@ async def prepare_reference_team_start_admission(
                     await db.rollback()
 
         before, grants, proofs, policy = await project()
+        candidate_policy = policy
         capability = prepare_reference_capability(document, before.behavior_descriptor)
         mcp_selection = (
             await prepare_reference_mcp_selection(
@@ -225,7 +238,15 @@ async def prepare_reference_team_start_admission(
                 if policy is not None
                 else _CandidateReadSources(sources, scope, grants)
             )
-            closure = await prepare_skill_read_closure(narrowed, [node.resource for node in skills], scope=scope)
+            try:
+                closure = await prepare_skill_read_closure(narrowed, [node.resource for node in skills], scope=scope)
+            except SkillReadMaterialError:
+                if policy is None or isinstance(policy, TaskMethodReadPolicy):
+                    raise
+                policy = task_method_policy(document)
+                closure = await prepare_skill_read_closure(
+                    ExtensionReadSources(sources, scope=scope, grants=grants, policy=policy), [node.resource for node in skills], scope=scope
+                )
             if any(item.proof not in proofs for item in closure.items if skill_read_provenance(grants, item.proof.resource, policy) == "baseline"):
                 raise ReferenceStartPreparationError("reference_start_preparation_changed")
             # Optional execution requires actual current use, including when
@@ -240,8 +261,10 @@ async def prepare_reference_team_start_admission(
             else:
                 for item in closure.items:
                     await sources.revalidate(item.proof)
-        if await project() != (before, grants, proofs, policy):
+        if await project() != (before, grants, proofs, candidate_policy):
             raise ReferenceStartPreparationError("reference_start_preparation_changed")
+        if isinstance(policy, TaskMethodReadPolicy) and not await task_method_reads_ready(db_path):
+            raise ReferenceStartPreparationError("reference_skill_extension_migration_required")
         return ReferenceStartAdmission(
             input_document=document,
             automatic_receiver=receiver_resource if automatic_receiver is not None else None,
@@ -250,6 +273,7 @@ async def prepare_reference_team_start_admission(
             expected=before.expected,
             skill_reads=closure,
             skill_sources=sources,
+            task_method_reference=isinstance(policy, TaskMethodReadPolicy),
             capability=capability,
             mcp_selection=mcp_selection,
             mcp_prompt_selection=mcp_prompt_selection,
@@ -287,6 +311,7 @@ async def prepare_reference_system_start_admission(
         ExactAgentBindingExpectation,
         _require_current_system_override,
         _system_revision_projection_base,
+        persist_prepared_system_revision,
         project_system_agent_revision,
     )
     from bowhead_core.builtin_subagent_override_store import _row_to_override
@@ -308,14 +333,17 @@ async def prepare_reference_system_start_admission(
         if resource.source_kind != "system":
             raise ReferenceStartPreparationError("reference_start_unsupported")
         if (skills or sources is not None) and (
-            type(sources) is not SkillReadSourceResolver or Path(sources.db_path).resolve() != Path(db_path).resolve()
+            type(sources) is not SkillReadSourceResolver
+            or Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(db_path, "core")).resolve()
         ):
             raise ReferenceStartPreparationError("reference_skill_preparation_required")
         name = resource.id.removeprefix("system:")
 
         if resource.id != "system:" + name or name not in SYSTEM_AGENT_LISTINGS:
             raise ReferenceStartPreparationError("reference_start_unsupported")
-        if not isinstance(runner, SubagentRunner) or Path(getattr(runner.team_subagent_store, "db_path", "")) != Path(db_path):
+        if not isinstance(runner, SubagentRunner) or Path(domain_database_path(getattr(runner.team_subagent_store, "db_path", ""), "core")) != Path(
+            domain_database_path(db_path, "core")
+        ):
             raise ReferenceStartPreparationError("reference_start_preparation_unavailable")
         runtime = copy.copy(runner)
         runtime._shadow_workspace_id = scope.workspace_id
@@ -359,6 +387,10 @@ async def prepare_reference_system_start_admission(
             partial(project_system_agent_revision, team_id=scope.team_id, profile_name=name, definition=definition)
         )
         capability = prepare_reference_capability(document, prepared.behavior_descriptor)
+        if skills and not supports_skill_method_input(
+            prepared.behavior_descriptor, allow_unproven_primary=capability is None, declared_primary=definition.get("primary_capability_ref")
+        ):
+            raise ReferenceStartPreparationError("reference_skill_receiver_unavailable")
         closure = None
         from bowhead_core.system_skill_snapshot import has_ordinary_system_skill_scope
 
@@ -372,8 +404,10 @@ async def prepare_reference_system_start_admission(
             # demand, as in delegated runs. Their exact read scope still applies;
             # no package is promoted to mandatory input or granted new rights.
             sources = None
+        policy = None
         if sources is not None:
-            grants = exact_reference_skill_grants(definition)
+            grants = () if has_ordinary_system_skill_scope(definition) else exact_reference_skill_grants(definition)
+            policy = selected_method_policy(document, grants, None)
             require_supported_skill_grants(grants)
 
             async def describe():
@@ -393,17 +427,38 @@ async def prepare_reference_system_start_admission(
             proofs = await describe()
             if skills:
                 closure = await prepare_skill_read_closure(
-                    _CandidateReadSources(sources, scope, grants), [node.resource for node in skills], scope=scope
+                    ExtensionReadSources(sources, scope=scope, grants=grants, policy=policy)
+                    if policy is not None
+                    else _CandidateReadSources(sources, scope, grants),
+                    [node.resource for node in skills],
+                    scope=scope,
                 )
-                if any(item.proof not in proofs for item in closure.items):
+                if any(
+                    item.proof not in proofs for item in closure.items if skill_read_provenance(grants, item.proof.resource, policy) == "baseline"
+                ):
                     raise ReferenceStartPreparationError("reference_start_preparation_changed")
+                if policy is not None:
+                    async with open_shared_ctx(db_path) as db:
+                        await db.execute("PRAGMA query_only=ON")
+                        await db.execute("BEGIN")
+                        for item in closure.items:
+                            await sources.revalidate_retained_in_connection(db, item.proof)
             if await describe() != proofs:
                 raise ReferenceStartPreparationError("reference_start_preparation_changed")
+        if isinstance(policy, TaskMethodReadPolicy) and not await task_method_reads_ready(db_path):
+            raise ReferenceStartPreparationError("reference_skill_extension_migration_required")
         # An unproven Capability descriptor does not disable the existing
         # single-Agent runtime. Preserve it unchanged; actual capability roles
         # and mixed Skill baselines retain their own admission checks.
         if await anyio.to_thread.run_sync(definitions, before) != original or await current_policy() != before:
             raise ReferenceStartPreparationError("reference_start_preparation_changed")
+        await persist_prepared_system_revision(
+            db_path,
+            team_id=scope.team_id,
+            prepared=prepared,
+            manifest_fingerprint="sha256:" + hashlib.sha256(base_json.encode()).hexdigest(),
+            override_version=override_version,
+        )
         return ReferenceStartAdmission(
             input_document=document,
             automatic_receiver=resource if automatic_receiver is not None else None,
@@ -423,7 +478,10 @@ async def prepare_reference_system_start_admission(
             skill_reads=closure,
             skill_sources=sources,
             capability=capability,
-            required_skill_modes=("baseline",) if closure is not None else (),
+            required_skill_modes=tuple(sorted({skill_read_provenance(grants, item.proof.resource, policy) for item in closure.items}))
+            if closure is not None
+            else (),
+            task_method_reference=isinstance(policy, TaskMethodReadPolicy),
             has_attachments=has_attachments,
         ).snapshot()
     except ReferenceStartPreparationError:

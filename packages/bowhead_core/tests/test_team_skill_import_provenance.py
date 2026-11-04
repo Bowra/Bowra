@@ -14,6 +14,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.skill_import_provenance import build_import_provenance, public_import_provenance
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -25,7 +26,7 @@ def _upgrade(path: Path, target: str = "core") -> None:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = target
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
 
 
 def _columns(path: Path, table: str) -> set[str]:

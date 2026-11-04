@@ -577,14 +577,21 @@ def test_azure_non_gpt5_chat_probe_omits_model_level_parameters() -> None:
 @pytest.mark.parametrize(
     ("model_id", "expected_budget", "expected_contract"),
     [
-        ("gpt-51", 128, "custom-http-gpt5-chat-v3"),
-        ("gpt-4o", 1, "chat-v2"),
+        ("gpt-51", 1024, "custom-http-chat-v4"),
+        ("gpt-4o", 1024, "custom-http-chat-v4"),
+        ("eu.anthropic.claude-sonnet-5-5", 1024, "custom-http-chat-v4"),
     ],
 )
+@pytest.mark.parametrize("runtime_parameters", [False, True])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("output_field", ["max_tokens", "max_completion_tokens"])
 def test_custom_http_probe_renders_model_appropriate_output_budget(
     model_id: str,
     expected_budget: int,
     expected_contract: str,
+    stream: bool,
+    output_field: str,
+    runtime_parameters: bool,
 ) -> None:
     provider = {
         "type": "custom_http",
@@ -593,7 +600,7 @@ def test_custom_http_probe_renders_model_appropriate_output_budget(
         "auth": {"type": "bearer"},
         "transports": {
             "chat": {
-                "contract": "openai_chat_completions_sse",
+                "contract": "openai_chat_completions_sse" if stream else "openai_chat_completions",
                 "request": {
                     "method": "POST",
                     "url_template": "{base_url}/deployments/{deployment}/chat",
@@ -601,7 +608,7 @@ def test_custom_http_probe_renders_model_appropriate_output_budget(
                         "model": {"$bowhead": "model"},
                         "messages": {"$bowhead": "messages"},
                         "stream": {"$bowhead": "stream"},
-                        "max_completion_tokens": {
+                        output_field: {
                             "$bowhead": "max_output_tokens",
                         },
                     },
@@ -617,6 +624,9 @@ def test_custom_http_probe_renders_model_appropriate_output_budget(
         ],
     }
 
+    if runtime_parameters:
+        provider["models"][0]["runtime_parameters"] = {"profile": "dashscope-mixed-chat-v1", "defaults": {}}
+
     plan = CompatibleProbeRegistry().plan(
         provider,
         provider_id="llmp_00000000000000000000000000000000",
@@ -626,10 +636,10 @@ def test_custom_http_probe_renders_model_appropriate_output_budget(
     )
 
     assert isinstance(plan, ProbeRequestPlan)
-    assert plan.body_shape["max_completion_tokens"] == expected_budget
-    # chat-v2 streams like runtime calls.
-    assert plan.body_shape["stream"] is True
-    assert plan.probe_contract_version == expected_contract
+    assert plan.body_shape[output_field] == expected_budget
+    if not runtime_parameters:
+        assert plan.body_shape["stream"] is stream
+    assert plan.probe_contract_version == expected_contract + ("/runtime-parameters-v1" if runtime_parameters else "")
 
 
 @pytest.mark.unit

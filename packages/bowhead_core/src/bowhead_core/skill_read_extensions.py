@@ -23,6 +23,7 @@ from bowhead_core.agent_runtime_extensions import AgentRuntimeExtensions
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceScope, _row
 from bowhead_core.chat_references import ContentHash, Identity, SkillResourceRef, decode_reference_json
+from bowhead_core.skill_method_policy import METHOD_REFERENCE_CONTRACT, TaskMethodReadPolicy, selected_method_policy, task_method_policy
 from bowhead_core.skill_read_closure import PreparedSkillReadClosure, prepare_skill_read_closure, snapshot_prepared_skill_read_closure
 from bowhead_core.skill_read_receiver import (
     PreparedReceiverSkillReads,
@@ -46,13 +47,24 @@ def _fail() -> NoReturn:
 class SkillReadExtensionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    schema_version: StrictInt = Field(default=1, ge=1, le=1)
+    schema_version: StrictInt = Field(default=1, ge=1, le=2)
     receiver_digest: ContentHash
-    policy: AgentRuntimeExtensions = Field(repr=False)
+    policy: AgentRuntimeExtensions | TaskMethodReadPolicy = Field(repr=False)
+    source_hash: ContentHash | None = None
+
+    @model_validator(mode="after")
+    def selection_authority(self):
+        temporary = isinstance(self.policy, TaskMethodReadPolicy)
+        if temporary != (self.schema_version == 2) or temporary != (self.source_hash is not None):
+            raise ValueError("reference_method_authority_invalid")
+        return self
 
     @property
     def digest(self) -> str:
-        return canonical_fingerprint({"schema_version": 1, "receiver_digest": self.receiver_digest, "policy_digest": self.policy.digest})
+        value = {"schema_version": self.schema_version, "receiver_digest": self.receiver_digest, "policy_digest": self.policy.digest}
+        if self.source_hash is not None:
+            value["source_hash"] = self.source_hash
+        return canonical_fingerprint(value)
 
 
 async def published_extension_policy(
@@ -83,27 +95,46 @@ async def published_extension_policy(
 
 
 async def primary_extension_policy(
-    db: aiosqlite.Connection, primary: ReferencePrimaryInput, receiver: SkillReadReceiverBaseline
+    db: aiosqlite.Connection, primary: ReferencePrimaryInput, receiver: SkillReadReceiverBaseline, *, prefer_task_method: bool = False
 ) -> SkillReadExtensionPolicy | None:
     binding = primary.binding
-    if binding.agent_source_kind != "team":
-        return None
     original = replace(primary, binding=replace(binding, status=receiver.status))
     if primary_skill_read_receiver(original, receiver.scope, receiver.turn_id) != receiver:
         _fail()
-    policy = await published_extension_policy(
-        db,
-        team_id=binding.team_id,
-        agent_id=binding.agent_id,
-        revision_ref=binding.revision_ref,
-        release_id=binding.release_id,
-        definition=binding.definition,
+    policy = (
+        await published_extension_policy(
+            db,
+            team_id=binding.team_id,
+            agent_id=binding.agent_id,
+            revision_ref=binding.revision_ref,
+            release_id=binding.release_id,
+            definition=binding.definition,
+        )
+        if binding.agent_source_kind == "team"
+        else None
     )
-    return SkillReadExtensionPolicy(receiver_digest=receiver.digest, policy=policy) if policy is not None else None
+    row = await _row(db, "SELECT composition_json FROM chat_reference_resolutions WHERE turn_id=? AND resolution_seq=1", (receiver.turn_id,))
+    if row is None:
+        policy = (
+            task_method_policy(primary.source.input_document)
+            if prefer_task_method
+            else selected_method_policy(primary.source.input_document, receiver.grants, policy)
+        )
+    elif decode_reference_json(row["composition_json"], max_bytes=1024 * 1024).get("method_reference") == METHOD_REFERENCE_CONTRACT:
+        policy = task_method_policy(primary.source.input_document)
+    if policy is None:
+        return None
+    temporary = isinstance(policy, TaskMethodReadPolicy)
+    return SkillReadExtensionPolicy(
+        schema_version=2 if temporary else 1,
+        receiver_digest=receiver.digest,
+        policy=policy,
+        source_hash=receiver.source_hash if temporary else None,
+    )
 
 
 def skill_read_provenance(
-    grants: tuple[ExactSkillGrant, ...], resource: SkillResourceRef, policy: AgentRuntimeExtensions | None
+    grants: tuple[ExactSkillGrant, ...], resource: SkillResourceRef, policy: AgentRuntimeExtensions | TaskMethodReadPolicy | None
 ) -> Literal["baseline", "readonly_extension"]:
     original = next((item for item in grants if (item.kind, item.id) == (resource.source_kind, resource.id)), None)
     if original is not None:
@@ -118,7 +149,7 @@ def skill_read_provenance(
 
 
 def require_extension_roots(
-    grants: tuple[ExactSkillGrant, ...], resources: Sequence[SkillResourceRef], policy: AgentRuntimeExtensions | None
+    grants: tuple[ExactSkillGrant, ...], resources: Sequence[SkillResourceRef], policy: AgentRuntimeExtensions | TaskMethodReadPolicy | None
 ) -> bool:
     extensions = [resource for resource in resources if skill_read_provenance(grants, resource, policy) == "readonly_extension"]
     if extensions:
@@ -137,7 +168,10 @@ def require_extension_member_name(grants: tuple[ExactSkillGrant, ...], resource:
 
 def validate_extension_closure(receiver: SkillReadReceiverBaseline, closure: PreparedSkillReadClosure, extension: SkillReadExtensionPolicy) -> None:
     snapshot_prepared_skill_read_closure(closure)
-    if receiver.agent_source_kind != "team" or extension.receiver_digest != receiver.digest or closure.scope != receiver.scope:
+    temporary = isinstance(extension.policy, TaskMethodReadPolicy)
+    if (not temporary and receiver.agent_source_kind != "team") or extension.receiver_digest != receiver.digest or closure.scope != receiver.scope:
+        _fail()
+    if temporary and extension.source_hash != receiver.source_hash:
         _fail()
     require_extension_roots(receiver.grants, closure.roots, extension.policy)
     names: dict[str, SkillResourceRef] = {}
@@ -159,19 +193,22 @@ class SkillExtensionPolicyCheck(BaseModel):
     """Safe evidence of which live policy constrained one original selection."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-    schema_version: StrictInt = Field(default=2, ge=1, le=2)
+    schema_version: StrictInt = Field(default=2, ge=1, le=3)
     current_access_epoch: StrictInt | None = Field(default=None, ge=0)
     receiver_digest: ContentHash
     original_extension_digest: ContentHash
     current_revision_ref: Identity
-    current_release_id: Identity
+    current_release_id: Identity | None
     current_definition_hash: ContentHash
     current_extension_policy_digest: ContentHash
     closure_digest: ContentHash
+    source_hash: ContentHash | None = None
 
     @model_validator(mode="after")
     def epoch_contract(self):
-        if (self.schema_version == 2) != (self.current_access_epoch is not None):
+        if (self.schema_version >= 2) != (self.current_access_epoch is not None):
+            raise ValueError("reference_extension_policy_check_invalid")
+        if (self.schema_version == 3) != (self.source_hash is not None) or (self.schema_version < 3 and self.current_release_id is None):
             raise ValueError("reference_extension_policy_check_invalid")
         return self
 
@@ -192,8 +229,38 @@ async def require_current_extension_policy(
     from bowhead_core.agent_execution_binding import team_agent_dispatchable_state_sql
 
     if not db.in_transaction or receiver.agent_source_kind != "team":
-        _fail()
+        if not db.in_transaction or not isinstance(extension.policy, TaskMethodReadPolicy):
+            _fail()
     validate_extension_closure(receiver, closure, extension)
+    if isinstance(extension.policy, TaskMethodReadPolicy):
+        from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
+        from bowhead_core.chat_reference_execution import read_reference_skill_primary_in_connection
+
+        epoch = await require_reference_request_scope(db, receiver.scope)
+        database = await _row(db, "PRAGMA database_list", ())
+        if database is None or database["name"] != "main" or not database["file"]:
+            _fail()
+        primary = await read_reference_skill_primary_in_connection(
+            db,
+            scope=ReferenceScope(**receiver.scope.model_dump(), policy_epoch=epoch),
+            turn_id=receiver.turn_id,
+            bindings=AgentExecutionBindingStore(database["file"]),
+            read_output=True,
+        )
+        if await primary_extension_policy(db, primary, receiver, prefer_task_method=True) != extension:
+            _fail()
+        return SkillExtensionPolicyCheck(
+            schema_version=3,
+            current_access_epoch=epoch,
+            receiver_digest=receiver.digest,
+            original_extension_digest=extension.digest,
+            current_revision_ref=receiver.revision_ref,
+            current_release_id=receiver.release_id,
+            current_definition_hash=receiver.baseline.source_definition_hash,
+            current_extension_policy_digest=extension.policy.digest,
+            closure_digest=closure.closure_digest,
+            source_hash=receiver.source_hash,
+        )
     async with db.execute(
         "SELECT r.id,l.id,r.definition_hash,r.definition_json FROM team_subagent a "
         "JOIN team_subagent_release l ON l.team_id=a.team_id AND l.subagent_id=a.id AND l.id=a.live_release_id "
@@ -254,7 +321,9 @@ class ExtensionReadSources:
                 _fail()
             resolved = ResolvedSkillRead(package.proof, package.material.selected_read())
         else:
-            resolved = await self.sources.prepare(resource, scope=scope, require_declaration=provenance == "readonly_extension")
+            resolved = await self.sources.prepare(
+                resource, scope=scope, require_declaration=provenance == "readonly_extension" and not isinstance(self.policy, TaskMethodReadPolicy)
+            )
         require_extension_member_name(self.grants, resource, resolved.proof.name)
         return resolved
 

@@ -54,6 +54,19 @@ afterEach(() => {
 const article = () => document.querySelector<HTMLElement>("article.canvas-report-article");
 
 describe("with a toolbar status group", () => {
+  it("moves the existing source summary into its toolbar host without duplicating it", async () => {
+    const sourceHost = document.createElement("div");
+    document.body.appendChild(sourceHost);
+    try {
+      renderIntl(<ReportView sections={[...SECTIONS, { id: "sources", kind: "sources", entries: [{ label: "Synthetic source" }] } as ReportSection]} canvasId="cv_1" statusHost={host} sourceLinkageHost={sourceHost} />);
+      await waitFor(() => expect(sourceHost.querySelector("[data-testid='source-linkage-strip']")).not.toBeNull());
+      expect(document.querySelectorAll("[data-testid='source-linkage-strip']")).toHaveLength(1);
+      expect(document.querySelector(".canvas-report-shell [data-testid='source-linkage-strip']")).toBeNull();
+    } finally {
+      cleanup();
+      sourceHost.remove();
+    }
+  });
   it("写作中：没有吸顶横幅，写作进度在状态组；正文不整体变暗、aria-busy", async () => {
     renderIntl(<ReportView sections={SECTIONS} canvasId="cv_1" isStreaming statusHost={host} />);
     await waitFor(() => expect(host.querySelector("[data-testid='report-toolbar-streaming']")).not.toBeNull());

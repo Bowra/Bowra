@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from bowhead_core.agent_behavior_contract import AgentBehaviorDescriptor, canonical_fingerprint
 from bowhead_core.chat_reference_storage import ReferenceScope, _row, _time, _transaction
 from bowhead_core.chat_references import AgentResourceRef, ContentHash, Identity, NodeId, ReferenceNode
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from bowhead_core.chat_reference_execution import ReferencePrimaryInput
@@ -487,7 +488,7 @@ def _late_lead_postdispatch_resume_sql() -> str:
 
 async def is_reference_runtime_in_connection(db: aiosqlite.Connection, *, turn_id: str) -> bool:
     _transaction(db)
-    if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_resolutions'", ()) is None:
+    if not await readable_table_exists(db, "chat_reference_resolutions"):
         return False
     if await _row(db, f"SELECT 1 FROM turns t WHERE t.id=? AND {REFERENCE_RUNTIME_SQL}", (turn_id,)) is not None:
         return True
@@ -513,7 +514,7 @@ async def is_reference_runtime_in_connection(db: aiosqlite.Connection, *, turn_i
 
 async def is_reference_recoverable_in_connection(db: aiosqlite.Connection, *, turn_id: str) -> bool:
     _transaction(db)
-    if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_resolutions'", ()) is None:
+    if not await readable_table_exists(db, "chat_reference_resolutions"):
         return False
     return (
         await is_reference_runtime_in_connection(db, turn_id=turn_id)
@@ -522,8 +523,7 @@ async def is_reference_recoverable_in_connection(db: aiosqlite.Connection, *, tu
 
 
 async def primary_continuations_installed(db: aiosqlite.Connection) -> bool:
-    async with db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_primary_continuations'") as cursor:
-        return await cursor.fetchone() is not None
+    return await readable_table_exists(db, "chat_reference_primary_continuations")
 
 
 async def primary_continuation_count_in_connection(db: aiosqlite.Connection, turn_id: str) -> int:

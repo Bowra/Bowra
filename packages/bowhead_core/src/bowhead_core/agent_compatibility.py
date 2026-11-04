@@ -12,6 +12,7 @@ from typing import Any, Literal
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 AGENT_COMPATIBILITY_COMPILER_VERSION = "agent-compatibility-v1"
 CompatibilityVerdict = Literal["compatible", "breaking", "unknown"]
@@ -137,7 +138,7 @@ class AgentCompatibilityStore:
         *,
         compiler: AgentCompatibilityCompiler | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._compiler = compiler or AgentCompatibilityCompiler()
 
     async def compile_and_store(

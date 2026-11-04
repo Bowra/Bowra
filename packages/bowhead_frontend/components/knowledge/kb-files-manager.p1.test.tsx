@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   fetchMe: vi.fn(),
   listDocTypes: vi.fn(),
   handoff: vi.fn(),
+  prepareChat: vi.fn(),
   reparse: vi.fn(),
   deleteFile: vi.fn(),
   bulkDelete: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("@/lib/kb-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/kb-api")>();
   return {
     ...actual,
+    prepareKbChatAttachment: (...args: unknown[]) => mocks.prepareChat(...args),
     fetchKbFiles: (...args: unknown[]) => mocks.fetchFiles(...args),
     uploadKbFile: (...args: unknown[]) => mocks.uploadFile(...args),
     searchKb: (...args: unknown[]) => mocks.searchKb(...args),
@@ -291,13 +293,23 @@ describe("内容深搜", () => {
 });
 
 describe("在对话中使用", () => {
-  it("本人在当前空间上传的可用文件：走资料库文件同一交接，带上 artifact", async () => {
+  it("prepares the owned source before handing canonical metadata to chat", async () => {
+    const canonical = { fileId: "art_1", filename: "Canonical source.md", size: 17, mime: "text/markdown" };
+    mocks.prepareChat.mockResolvedValueOnce(canonical);
     renderManager();
     fireEvent.click(await screen.findByTestId("kb-files-row"));
     fireEvent.click(await screen.findByTestId("kb-drawer-use-in-chat"));
-    expect(mocks.handoff).toHaveBeenCalledWith([
-      { fileId: "art_1", filename: "供应商合同-华东区.pdf", size: 3_200_000, mime: "application/pdf" },
-    ]);
+    await waitFor(() => expect(mocks.prepareChat).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.handoff).toHaveBeenCalledWith([canonical]));
+  });
+
+  it("keeps a rejected source out of chat", async () => {
+    mocks.prepareChat.mockRejectedValueOnce(new Error("Source admission failed"));
+    renderManager();
+    fireEvent.click(await screen.findByTestId("kb-files-row"));
+    fireEvent.click(await screen.findByTestId("kb-drawer-use-in-chat"));
+    await waitFor(() => expect(screen.queryByTestId("kb-file-drawer")).not.toBeInTheDocument());
+    expect(mocks.handoff).not.toHaveBeenCalled();
   });
 
   it("别人上传的文件不给这个入口（附件校验只收本人上传）", async () => {

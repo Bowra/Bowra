@@ -19,6 +19,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 _DEFAULT_LEASE = timedelta(seconds=30)
@@ -85,7 +86,7 @@ class AgentReleaseNotificationOutbox:
             raise ValueError("Agent release outbox lease must be positive")
         if max_attempts < 1:
             raise ValueError("Agent release outbox max attempts must be positive")
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._notifications = notification_store
         self._clock = clock or SystemClock()
         self._lease_duration = lease_duration

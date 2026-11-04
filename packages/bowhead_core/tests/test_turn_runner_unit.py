@@ -92,6 +92,9 @@ class FakeRouter:
 
 
 class FakeToolRegistry:
+    def list_names(self) -> list[str]:
+        return ["subagent_spawn"]
+
     def to_schemas(self) -> list[Any]:
         return []
 

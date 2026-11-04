@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import anyio
 from bowhead_core.kb.eligibility import KbUseDecision, KbUseEligibility
 from bowhead_core.kb.generations import KbGenerationStore, now_iso, use_guard_enabled
+from bowhead_core.kb.ingestion import KnowledgeAction
 from bowhead_core.kb.maintenance import KbMaintenanceStore
 from bowhead_core.kb.permission import KbPermission, ScopeContext
 
@@ -166,7 +167,11 @@ async def run_rebuild_job(app, job_id):
                     raise ValueError("worker unavailable")
                 if await jobs.claim_file(job_id, position, file):
                     try:
-                        await runtime.worker.parse_and_index(file.file_id, authorize=allowed)
+                        await runtime.worker.parse_and_index(
+                            file.file_id,
+                            authorize=allowed,
+                            description_action=KnowledgeAction(f"rebuild:{job_id}", "kb_ui", job["user_id"], job["team_id"], job["workspace_id"]),
+                        )
                     finally:
                         await jobs.interrupt_file(job_id)
                     latest = await files.get(file.file_id)

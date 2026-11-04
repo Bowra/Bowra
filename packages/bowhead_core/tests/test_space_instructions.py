@@ -14,6 +14,7 @@ from bowhead_core.space_instructions import (
     SpaceInstructionsStore,
     render_block,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from test_office_upload_confirmation_migration import _config
 
 REVISION = import_module("bowhead_core.migrations.versions.0178_space_instructions")
@@ -23,7 +24,7 @@ TARGETS = ["core", "files", "doc_types", "extracted_records", "extracted_rows", 
 @pytest.fixture
 def store(tmp_path: Path) -> SpaceInstructionsStore:
     path = tmp_path / "bowhead.db"
-    command.upgrade(_config(path, "core"), "head")
+    command.upgrade(_config(path, "core"), SQLITE_LEGACY_REVISION)
     return SpaceInstructionsStore(path)
 
 
@@ -140,30 +141,17 @@ async def test_the_real_runner_gives_executors_the_block_and_lead_no_second_copy
         assert system.index("<space_instructions>") < system.index("- unit: k")
 
 
-def test_report_scribe_receives_the_block() -> None:
-    from types import SimpleNamespace
-
-    from bowhead_core.report_writer_loop import _with_memory
-
-    ctx = SimpleNamespace(
-        memory_pack=None,
-        space_instructions=SpaceInstructionsSnapshot(workspace_id="ws_a", version=1, block=render_block("Formal tone.")),
-    )
-    assert "Formal tone." in _with_memory("SYS", ctx)
-    assert _with_memory("SYS", SimpleNamespace(memory_pack=None, space_instructions=None)) == "SYS"
-
-
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_real_turn_gives_lead_the_instructions_and_records_the_version(tmp_path: Path) -> None:
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.session_store import SessionStore
+    from core_legacy_database import upgrade
 
     from bowhead_core import EventBusRegistry, Orchestrator, OrchestratorConfig, TurnRequest, build_default_registry
     from bowhead_router import AgentBinding, LLMResponse, MockAdapter, ProviderConfig, ProviderRegistry, Router
 
     db = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     sessions = SessionStore(db)
     await sessions.initialize()
     store = SpaceInstructionsStore(db)

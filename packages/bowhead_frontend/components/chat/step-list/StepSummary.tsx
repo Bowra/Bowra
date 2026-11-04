@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
+import { ChevronDown, CircleAlert, ListTree } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { LucideGlyph } from "@/components/icon-refresh";
@@ -9,16 +9,13 @@ import { ChatCard } from "@/components/ui/card";
 import { buildAgentGrouping } from "./agent-grouping";
 // Duration copy is human-readable and localized (`16 步完成 · 4 分 30 秒`, en `4 min 30 s`), never `270s` or
 // raw milliseconds: see `formatSummaryDuration` below.
-import { countStepIssues } from "./self-healing";
 import type { StepView } from "./types";
-import { stepIssueSummary, type StepOutcome } from "@/lib/turn-feedback";
+import type { StepOutcome } from "@/lib/turn-feedback";
 
 export interface StepSummaryProps {
-  /** Steps that have run this turn. Length drives the N completed steps count. */
+  /** Original execution records, retained for Agent grouping and duration fallback. */
   steps: StepView[];
-  /** Peer identities (agent_spawned.profile). When the turn ran ≥1 peer, the
-   *  fold shows the participating agents as colour badges (agent shape) instead
-   *  of a flat step count — the design's "folded state keeps the agent shape". */
+  /** Captured peer identities, used by the original Agent grouping and count. */
   peerNames?: Record<string, string>;
   /** This turn's **wall-time** total duration (ms), authoritative backend `done.duration_ms`, arriving through
    *  turn-store `totalDurationMs`. Live and archive/F5 read the same store field, rendering
@@ -29,8 +26,7 @@ export interface StepSummaryProps {
    *  `· 15s`, read as running 15 seconds); overcounts concurrent peers by adding parallel durations.
    *  Use only when wall time is unavailable. */
   totalDurationMs?: number | null;
-  /** Backend `done.step_outcome` from turn-store (chat turn feedback D6). Live and archive/F5
-   *  read the same store field. Absent (old turns) keeps the neutral locally counted copy. */
+  /** Original execution receipt, not proof that user requirements remain unmet. */
   stepOutcome?: StepOutcome | null;
   /** The turn ended without an answer (failed or cancelled): the row reads "Not finished · 3 / 5 steps · 1 min"
    *  (spec §8). `plannedTotal` is the announced plan length; without it the "/ N" part is left out. */
@@ -41,13 +37,12 @@ export interface StepSummaryProps {
 
 /**
  * StepSummary — the folded trace of a finished turn (Chat Cards Spec §8, D6): a row ChatCard whose whole row
- * is the "Expand trace" button. "N steps done · used N Agents", then (secondary) whether recorded issues were
- * handled automatically or (warning) affected the answer, then the wall-clock duration. Agent colour badges are
+ * is the "Expand trace" button. Execution ended, participating Agents and wall-clock duration.
+ * The original final answer owns delivery caveats. Agent colour badges are
  * replaced by the Agent count. State lives in the parent (TurnContainer / ArchivedTurnView).
  */
-export function StepSummary({ steps, peerNames, totalDurationMs, stepOutcome, failed, onExpand }: StepSummaryProps) {
+export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpand }: StepSummaryProps) {
   const tStep = useTranslations("step_list");
-  const total = steps.length;
   if (failed) {
     return (
       <FailedStepSummary
@@ -58,54 +53,27 @@ export function StepSummary({ steps, peerNames, totalDurationMs, stepOutcome, fa
       />
     );
   }
-  const completionLabel = total === 0
-    ? tStep("execution_done")
-    : tStep("steps_done", { count: total });
+  const completionLabel = tStep("execution_ended");
   const durText = formatDurationText(totalDurationMs, tStep)
     ?? deriveTotalDurationText(steps, tStep);
   const { peerBlocks } = buildAgentGrouping(steps, peerNames ?? {}, {}, {});
   const agentCount = peerBlocks.length;
   const hasPeerStep = peerBlocks.length > 0 || steps.some((s) => s.stepType === "subagent");
-  // Recorded step issues remain discoverable after completion. Only the backend's structural
-  // `step_outcome` may claim they were handled or that they affected the answer (D6); without it
-  // the locally counted issues are shown neutrally.
-  const issues = stepIssueSummary(stepOutcome, countStepIssues(steps));
-  const issueText = issues ? tStep(issues.key, { count: issues.count }) : "";
-  const warning = issues?.tone === "warning";
   const lead = agentCount > 0 ? `${completionLabel} · ${tStep("summary_agents", { count: agentCount })}` : completionLabel;
 
   return (
     <ChatCard
       intent="info"
       size="row"
-      icon={warning ? TriangleAlert : CircleCheck}
-      iconTone={warning ? "warning" : "muted"}
+      icon={ListTree}
+      iconTone="muted"
       data-testid="step-summary"
       data-state={hasPeerStep ? "peer" : undefined}
       onActivate={onExpand}
-      activateLabel={[
-        total <= 1 ? tStep("expand_trace") : tStep("expand_trace_steps", { count: total }),
-        issueText,
-      ].filter(Boolean).join(" · ")}
-      title={
-        <>
-          {lead}
-          {warning ? (
-            <>
-              {" · "}
-              <span className="ui-card__line-warn" data-testid="step-summary-issues" data-tone="warning">{issueText}</span>
-            </>
-          ) : null}
-        </>
-      }
+      activateLabel={tStep("expand_trace")}
+      title={lead}
       meta={
         <>
-          {issues && !warning ? (
-            <>
-              {" · "}
-              <span data-testid="step-summary-issues" data-tone={issues.tone}>{issueText}</span>
-            </>
-          ) : null}
           {durText ? <span data-testid="step-summary-duration">{` · ${durText}`}</span> : null}
         </>
       }

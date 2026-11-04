@@ -10,7 +10,6 @@ from typing import Any
 
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_comparison import AgentEvalComparisonStore
 from bowhead_core.agent_eval_insights import AgentEvalInsightsError
@@ -20,6 +19,7 @@ from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import agents
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI
+from gateway_legacy_database import upgrade
 
 pytestmark = pytest.mark.integration
 
@@ -67,7 +67,7 @@ def _seed(db_path) -> None:
 async def client(tmp_path, monkeypatch):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-insights-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     _seed(db_path)
     user_store = UserStore(db_path)
     current = {"user": _USERS["owner"]}
@@ -339,7 +339,7 @@ async def _queued_comparison(db_path) -> str:
 async def real_client(tmp_path, monkeypatch):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-insights-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     _seed_real(db_path)
     execution_id = await _queued_comparison(db_path)
     user_store = UserStore(db_path)

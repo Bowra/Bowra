@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import AgentAssignmentStore
 from bowhead_core.agent_behavior_contract import (
     AgentBehaviorDescriptor,
@@ -26,6 +25,7 @@ from bowhead_core.agent_role_preference import (
     AgentRolePreferenceStore,
 )
 from bowhead_core.user_store import TeamSubagent, UserStore
+from core_legacy_database import upgrade
 
 _NOW = "2026-09-07T00:00:00+00:00"
 _DEPENDENCY = "sha256:" + "d" * 64
@@ -232,7 +232,7 @@ async def _install_release(fixture: _Fixture, *, sequence: int, role: str) -> No
 
 async def _setup(tmp_path: Path) -> _Fixture:
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     await users.initialize()
     team = await users.create_team(name="Role preference", max_seats=4)

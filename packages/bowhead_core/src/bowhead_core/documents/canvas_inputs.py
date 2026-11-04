@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -18,6 +18,8 @@ from bowhead_core.artifact_store import ArtifactStore
 from bowhead_core.documents.canvas_material import FILENAME, MAX_BYTES
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope, Identity
 from bowhead_core.documents.retention import INTERNAL_PRODUCER
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 log = structlog.get_logger(__name__)
 
@@ -48,6 +50,7 @@ class CanvasInputAdmission:
     artifact_id: str
     path: str
     source_job_id: str | None = None
+    content_prepared: bool = False
 
 
 async def validate_current_canvas_in_tx(db: aiosqlite.Connection, *, scope: DocumentScope, manifest: CanvasInputManifest, section_ids) -> None:
@@ -140,13 +143,67 @@ async def inherit_canvas_input_in_tx(db: aiosqlite.Connection, *, scope: Documen
     return CanvasInputAdmission(manifest, row["artifact_id"], row["path"], job_id)
 
 
+async def _validate_prepared_canvas_artifact(db: aiosqlite.Connection, *, scope: DocumentScope, admission: CanvasInputAdmission) -> None:
+    async with db.execute(
+        "SELECT path,size,created_by,workspace_id,filename,mime,source,producer_kind,deleted_at,status FROM artifacts WHERE id=?",
+        (admission.artifact_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    expected = (
+        admission.path,
+        admission.manifest.size_bytes,
+        scope.user_id,
+        scope.workspace_id,
+        FILENAME,
+        "application/json",
+        "document_canvas_input",
+        INTERNAL_PRODUCER,
+        None,
+    )
+    if row is None or tuple(row[:9]) != expected or row[9] not in {"document_staging", "ready"}:
+        raise DocumentRequestError("document_canvas_input_unavailable")
+
+
+async def prepare_canvas_input_artifact(db_path: str, *, scope: DocumentScope, admission: CanvasInputAdmission, now: str) -> CanvasInputAdmission:
+    """Prepare private content before the execution job transaction begins."""
+    if admission.source_job_id is not None or not domain_layout_active(db_path):
+        return admission
+    from bowhead_core.documents.store import _authorize
+
+    manifest = admission.manifest
+    async with open_shared_ctx(domain_database_path(db_path, "content")) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        await _authorize(db, scope, write=True)
+        await validate_current_canvas_in_tx(db, scope=scope, manifest=manifest, section_ids=tuple(item.section_id for item in manifest.sections))
+        await db.execute(
+            """INSERT OR IGNORE INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id)
+            VALUES (?,?,?,?,'document_canvas_input',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)""",
+            (
+                admission.artifact_id,
+                FILENAME,
+                "application/json",
+                manifest.size_bytes,
+                admission.path,
+                scope.user_id,
+                now,
+                INTERNAL_PRODUCER,
+                scope.workspace_id,
+            ),
+        )
+        await _validate_prepared_canvas_artifact(db, scope=scope, admission=admission)
+        await db.commit()
+    return replace(admission, content_prepared=True)
+
+
 async def commit_canvas_input_in_tx(
     db: aiosqlite.Connection, *, scope: DocumentScope, job_id: str, admission: CanvasInputAdmission, now: str
 ) -> None:
     from bowhead_core.documents.store import _json
 
     manifest = CanvasInputManifest.model_validate_json(admission.manifest.model_dump_json())
-    if admission.source_job_id is None:
+    if admission.content_prepared:
+        await _validate_prepared_canvas_artifact(db, scope=scope, admission=admission)
+    if admission.source_job_id is None and not admission.content_prepared:
         await db.execute(
             """INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id)
             VALUES (?,?,?,?,'document_canvas_input',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)""",
@@ -187,11 +244,12 @@ async def commit_canvas_input_in_tx(
 class CanvasInputStore:
     def __init__(self, artifacts: ArtifactStore):
         self.artifacts = artifacts
+        self._execution_db_path = domain_database_path(artifacts.db_path, "execution")
 
     async def get(
         self, *, scope: DocumentScope, job_id: str, frozen: bool = True, write: bool = False
     ) -> tuple[aiosqlite.Row, CanvasInputManifest] | None:
-        async with open_shared_ctx(self.artifacts.db_path) as db:
+        async with open_shared_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN")
             row = await read_canvas_input_in_tx(db, scope=scope, job_id=job_id, write=write)
             if row is None:
@@ -227,7 +285,7 @@ class CanvasInputStore:
         if len(content) != manifest.size_bytes or digest(content) != manifest.sha256:
             raise DocumentRequestError("document_frozen_hash_mismatch")
         await authorize(manifest)
-        async with open_shared_ctx(self.artifacts.db_path) as db:
+        async with open_shared_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             current = await read_canvas_input_in_tx(db, scope=scope, job_id=job_id, write=True)
             if current is None:
@@ -235,8 +293,13 @@ class CanvasInputStore:
             validate_canvas_row(current, scope, frozen=False)
             now = datetime.now(UTC).isoformat()
             await db.execute("UPDATE document_canvas_inputs SET verified_at=? WHERE job_id=? AND verified_at IS NULL", (now, job_id))
-            await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (row["artifact_id"],))
+            if not domain_layout_active(self.artifacts.db_path):
+                await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (row["artifact_id"],))
             await db.commit()
+        if domain_layout_active(self.artifacts.db_path):
+            async with open_shared_ctx(self.artifacts.db_path) as content_db:
+                await content_db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (row["artifact_id"],))
+                await content_db.commit()
 
     async def read(self, *, scope: DocumentScope, job_id: str) -> bytes | None:
         from bowhead_core.documents.authoring_protocol import digest
@@ -262,10 +325,9 @@ async def cleanup_canvas_inputs(artifacts: ArtifactStore, *, now: float, limit: 
 
     if not 1 <= limit <= 200:
         raise ValueError("Invalid Canvas input cleanup limit")
-    async with open_shared_ctx(artifacts.db_path) as db:
-        async with db.execute("SELECT 1 FROM sqlite_schema WHERE name='document_canvas_inputs' AND type='table'") as cursor:
-            if await cursor.fetchone() is None:
-                return 0
+    async with open_shared_ctx(domain_database_path(artifacts.db_path, "execution")) as db:
+        if not await readable_table_exists(db, "document_canvas_inputs"):
+            return 0
         async with db.execute(
             "SELECT job_id FROM document_canvas_inputs WHERE cleanup_after<=? ORDER BY cleanup_after,job_id LIMIT ?", (now, limit)
         ) as cursor:
@@ -273,7 +335,7 @@ async def cleanup_canvas_inputs(artifacts: ArtifactStore, *, now: float, limit: 
     removed = 0
     timestamp = datetime.fromtimestamp(now, UTC).isoformat()
     for job_id in jobs:
-        async with open_shared_ctx(artifacts.db_path) as db:
+        async with open_shared_ctx(domain_database_path(artifacts.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
                 """SELECT c.artifact_id,c.path,c.cleanup_claimed_at,j.status,j.updated_at
@@ -295,16 +357,25 @@ async def cleanup_canvas_inputs(artifacts: ArtifactStore, *, now: float, limit: 
                     "UPDATE document_artifact_refs SET released_at=? WHERE owner_kind='job' AND owner_id=? AND ref_key='canvas' AND released_at IS NULL",
                     (timestamp, job_id),
                 )
-            await db.execute(
-                """UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL
-                AND NOT EXISTS(SELECT 1 FROM document_artifact_refs WHERE artifact_id=artifacts.id AND released_at IS NULL)""",
-                (timestamp, artifact_id),
-            )
+            if not domain_layout_active(artifacts.db_path):
+                await db.execute(
+                    """UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM document_artifact_refs WHERE artifact_id=artifacts.id AND released_at IS NULL)""",
+                    (timestamp, artifact_id),
+                )
             await db.commit()
+        if domain_layout_active(artifacts.db_path):
+            async with open_shared_ctx(artifacts.db_path) as db:
+                await db.execute(
+                    """UPDATE artifacts SET deleted_at=? WHERE id=? AND deleted_at IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM document_artifact_refs WHERE artifact_id=artifacts.id AND released_at IS NULL)""",
+                    (timestamp, artifact_id),
+                )
+                await db.commit()
         result = await purge_artifacts(artifacts.db_path, artifacts.backend, [artifact_id], user_id=None)
         removed += result.rows_removed
         async with (
-            open_shared_ctx(artifacts.db_path) as db,
+            open_shared_ctx(domain_database_path(artifacts.db_path, "execution")) as db,
             db.execute(
                 "SELECT 1 FROM artifact_purge_claims WHERE artifact_id=? AND path=? AND completed_at IS NOT NULL", (artifact_id, path)
             ) as cursor,

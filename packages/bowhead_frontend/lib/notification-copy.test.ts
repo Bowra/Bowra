@@ -18,6 +18,13 @@ const expiring = {
 };
 
 describe("localizeNotification", () => {
+  it("names the member requesting a space and keeps unnamed legacy notices readable", () => {
+    const item = { type: "space_assignment_requested", title: "Old title", body: null, metadata: { requesterName: "Alice" } };
+    expect(localizeNotification(item, tZh, "zh-CN").title).toBe("Alice 需要分配空间");
+    expect(localizeNotification(item, tEn, "en-US").title).toBe("Alice needs a space");
+    expect(localizeNotification({ ...item, metadata: {} }, tZh, "zh-CN").title).toBe("有成员需要分配空间");
+  });
+
   it("uses the same neutral copy for every way an access request stops being active", () => {
     const neutralEn = "This request is no longer active. Request access again if you still need it.";
     const expired = { type: "access_request_expired", title: "x", body: null, metadata: { outcome: "expired" } };

@@ -1,7 +1,4 @@
-requested_metrics:
-  "   - Inclure chaque champ et indicateur demandé dans la réponse. Si un livrable est requis, inclure ses colonnes dans `add_chart.series`
-  : les colonnes omises ne sont pas affichées. Fusionner les fichiers uniquement si le livrable demandé le nécessite. Une simple consultation
-  peut présenter les indicateurs dans un résumé sourcé."
+requested_metrics: "   - Répondre avec chaque champ et indicateur demandé. Les tableaux affichent toutes les colonnes avec columns=all par défaut; limiter aux clés exactes et dans leur ordre seulement pour un sous-ensemble demandé. Les graphiques déclarent type, axes, échelle et group_by ([] sans groupe). Préparer agrégation et Top N en amont. Fusionner les entrées uniquement pour le livrable demandé; les consultations simples peuvent utiliser des résumés sourcés."
 requested_artifacts: "   - Pour un tableau, graphique, détail ou rapport explicitement demandé, le texte seul ne livre pas les indicateurs requis.
   Une simple consultation sans livrable demandé peut utiliser `exec_summary` avec toutes les valeurs vérifiées et leur source. Signaler chaque
   élément manquant et sa raison dans `caveats[]`."

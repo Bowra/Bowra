@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_llm_evidence import (
     SIGNATURE_VERSION,
     AttemptRecord,
@@ -106,7 +107,7 @@ class TeamLlmVerificationStore:
     """Narrow store; schema ownership remains with Alembic revision 0004."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def assert_schema(self) -> None:
         required = {

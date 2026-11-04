@@ -286,7 +286,7 @@ USER_VISIBLE = {
     "write_report", "read_report", "add_chart", "read_chart", "edit_chart", "remove_chart", "add_image", "canvas_add_insight",
     "canvas_add_spec_block", "canvas_add_html_artifact", "canvas_add_external_iframe",
     "canvas_create_design", "canvas_update_design_text", "canvas_flatten_design",
-    "kb_search", "kb_query_records", "kb_get_record", "kb_list_tables", "kb_add_file", "kb_remove_file", "kb_operation_status", "attachment_read",
+    "kb_search", "kb_list_sources", "kb_query_records", "kb_get_record", "kb_list_tables", "kb_add_file", "kb_remove_file", "kb_operation_status", "attachment_read",
     "web_search", "web_fetch", "web_extract", "web_map", "web_crawl", "web_deep_research",
     "python_sandbox", "image_generate",
     "google_doc_write", "google_sheet_write", "google_slides_write", "send_email",
@@ -301,7 +301,7 @@ def test_user_visible_tools_match_the_product_list() -> None:
 
     assert set(TOOL_KINDS) == ALL_TOOL_NAMES
     assert USER_VISIBLE_TOOLS == USER_VISIBLE
-    assert len(USER_VISIBLE_TOOLS) == 42
+    assert len(USER_VISIBLE_TOOLS) == 43
     assert set(TOOL_RISKS) >= USER_VISIBLE_TOOLS
     parts = ALL_TOOL_NAMES - USER_VISIBLE_TOOLS
     assert {"subagent_spawn", "subagent_return", "skill_read", "skill_invoke", "skill_list", "python_exec", "tool_switch_context"} <= parts

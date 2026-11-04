@@ -5,18 +5,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import bowhead_gateway.terminal_protocol_rollout as terminal_rollout
 import httpx2
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from bowhead_core.terminal_protocol import (
     AdmissionContext,
     TerminalAdmissionRequest,
 )
+from community_http_fixture import prepare_gateway_fixture
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 pytestmark = pytest.mark.anyio
 
@@ -43,7 +44,7 @@ def _lifespan_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-terminal-restart-jwt-secret-32bytes")
 
 
-async def _deploy_startup_cutover(db_path) -> None:
+async def _deploy_startup_cutover(db_path, monkeypatch) -> None:
     """复刻 deploy/start-app.sh 在 uvicorn 之前做的一次性 Agent 市场 cutover。
 
     /readyz 自 4906143b9 起把 ``agent_marketplace`` 计入就绪判定，而 cutover 只由启动脚本
@@ -53,6 +54,7 @@ async def _deploy_startup_cutover(db_path) -> None:
     from bowhead_core.agent_assignment_store import AgentAssignmentStore
 
     await AgentAssignmentStore(db_path).ensure_marketplace_cutover(source_build="test")
+    await prepare_gateway_fixture(db_path, monkeypatch)
 
 
 @pytest.mark.integration
@@ -63,8 +65,8 @@ async def test_retired_writer_ignores_stale_env_but_keeps_recovery_lifecycle(
     """A legacy env value cannot revive fresh admission after an upgrade."""
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}") == tuple(TARGET_FILES), "迁移未跑到 head"
-    await _deploy_startup_cutover(db_path)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    await _deploy_startup_cutover(db_path, monkeypatch)
     monkeypatch.setenv(
         "BOWHEAD_DB_URL",
         f"sqlite+aiosqlite:///{db_path}",
@@ -116,8 +118,8 @@ async def test_gateway_restart_converges_kill_after_open_without_runner(
 
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}") == tuple(TARGET_FILES), "迁移未跑到 head"
-    await _deploy_startup_cutover(db_path)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    await _deploy_startup_cutover(db_path, monkeypatch)
     monkeypatch.setenv(
         "BOWHEAD_DB_URL",
         f"sqlite+aiosqlite:///{db_path}",
@@ -168,18 +170,9 @@ async def test_gateway_restart_converges_kill_after_open_without_runner(
                 )
                 """
             )
-            await connection.execute(
-                """
-                INSERT INTO sessions(
-                  id,workspace_id,user_id,title,started_at,last_active_at,
-                  status,cost_usd,tokens_total,intents
-                ) VALUES (
-                  's_restart','ws_restart','u_restart','Restart','t','t',
-                  'active',0,0,'[]'
-                )
-                """
-            )
             await connection.commit()
+
+        await first.state.session_store.ensure_session(session_id="s_restart", workspace_id="ws_restart", user_id="u_restart")
 
         factory = first.state.terminal_runtime_factory
         writer = first.state.terminal_writer_service.writer_snapshot()
@@ -222,7 +215,7 @@ async def test_gateway_restart_converges_kill_after_open_without_runner(
             )
         )
         assert admitted.disposition is AdmissionDisposition.ADMITTED
-        with sqlite3.connect(db_path) as connection:
+        with connect_sync(db_path) as connection:
             assert connection.execute(
                 """
                 SELECT state,claim_epoch,execution_started_at
@@ -232,7 +225,7 @@ async def test_gateway_restart_converges_kill_after_open_without_runner(
 
     second = create_app()
     async with second.router.lifespan_context(second):
-        with sqlite3.connect(db_path) as connection:
+        with connect_sync(db_path) as connection:
             assert connection.execute(
                 """
                 SELECT state,execution_started_at,terminal_receipt_id
@@ -264,8 +257,8 @@ async def test_second_gateway_stays_unready_until_writer_lease_is_released(
     # ``bowhead migrate --target core`` always resolves the canonical
     # ``bowhead.db`` filename within the configured database directory.
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}") == tuple(TARGET_FILES), "迁移未跑到 head"
-    await _deploy_startup_cutover(db_path)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    await _deploy_startup_cutover(db_path, monkeypatch)
     monkeypatch.setenv(
         "BOWHEAD_DB_URL",
         f"sqlite+aiosqlite:///{db_path}",

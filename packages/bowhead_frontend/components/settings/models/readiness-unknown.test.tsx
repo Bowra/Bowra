@@ -103,7 +103,7 @@ describe("静置态不出现就绪判决", () => {
     renderOverview({ readiness: { ...READY, may_apply: false, rows: [AGED_ROW] } });
 
     const line = document.querySelector(".overview-quiet");
-    expect(line?.textContent).toContain("1 条依据时间较早");
+    expect(line?.textContent).toContain("1 项模型分工建议重新验证");
     expect(line?.className).not.toContain("is-error");
     expectNoVerdict();
   });
@@ -111,7 +111,7 @@ describe("静置态不出现就绪判决", () => {
   it("提示里给得着的入口，指向下面那张逐条依据表", () => {
     renderOverview({ readiness: { ...READY, may_apply: false, rows: [AGED_ROW] } });
 
-    const jump = screen.getByRole("link", { name: "去验证" });
+    const jump = screen.getByRole("link", { name: "前往验证" });
     expect(jump.getAttribute("href")).toBe("#mset-overview-evidence");
   });
 });

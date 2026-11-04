@@ -13,7 +13,7 @@ from typing import Any
 from bowhead_router.tool_args import loads_tool_arguments
 
 from bowhead_core.chart.numeric_display import currency_identity
-from bowhead_core.chart.types import VALID_HINTS, ChartColumn
+from bowhead_core.chart.types import ChartColumn
 
 MAX_VIEWS = 6
 KINDS = {
@@ -32,7 +32,17 @@ KINDS = {
     "heatmap",
     "table",
 }
-VIEW_FIELDS = {"id", "title", "subtitle", "hint", "force_kind", "series", "sort_by", "limit", "show_legend", "show_data_labels"}
+VIEW_FIELDS = {
+    "id",
+    "title",
+    "subtitle",
+    "force_kind",
+    "show_legend",
+    "show_data_labels",
+    "columns",
+    "axes",
+    "group_by",
+}
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
 
@@ -43,16 +53,16 @@ class ChartExpressionError(ValueError):
 
 def schema_properties() -> dict[str, Any]:
     """Optional fields on the existing add_chart tool, using its native vocabulary."""
-    return {
+    properties = {
         "views": {
             "type": "array",
             "minItems": 1,
             "maxItems": MAX_VIEWS,
-            "description": "Optional 1-6 native views of this SAME dataset; one view becomes an ordinary chart. Every intended plot, including the primary, MUST be in views. Root force_kind does NOT add another plot. Use precomputed columns. Each view needs id, title and explicit numeric series. An omitted hint defaults to raw; an explicit force_kind is preserved. No HTML, CSS or code. Omit views for a single chart when possible.",
+            "description": "One to six explicit native views of the same dataset. Tables default to all columns; plots require force_kind, axes and group_by. No implicit binding, pruning or aggregation.",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["id", "title", "series"],
+                "required": ["id", "title"],
                 "properties": {
                     "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
                     "title": {
@@ -68,11 +78,7 @@ def schema_properties() -> dict[str, Any]:
                         "type": "boolean",
                         "description": "Optional view-specific data-label visibility; omit for responsive defaults.",
                     },
-                    "hint": {"type": "string", "enum": sorted(VALID_HINTS), "default": "raw"},
                     "force_kind": {"type": "string", "enum": sorted(KINDS)},
-                    "series": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "string"}},
-                    "sort_by": {"type": "string"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50000},
                 },
             },
         },
@@ -110,6 +116,13 @@ def schema_properties() -> dict[str, Any]:
         },
     }
 
+    from bowhead_core.chart.explicit import PLOT_KINDS, input_properties
+
+    fields = properties["views"]["items"]["properties"]
+    fields.update(input_properties())
+    fields["force_kind"]["enum"] = ["table", *sorted(PLOT_KINDS)]
+    return properties
+
 
 def structured(value: Any, field: str) -> Any:
     """Decode one bounded JSON layer, optionally in one complete JSON fence."""
@@ -129,15 +142,15 @@ def structured(value: Any, field: str) -> Any:
 def composition(args: dict[str, Any], *, fallbacks: list[dict[str, str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate all views; authoring may recover presentation without losing a view.
 
-    Passing a fallback receipt opts the existing tool into deterministic hint and
-    layout recovery. Stored edits and strict callers keep their original guards.
+    Passing a fallback receipt permits bounded layout recovery. Stored edits and
+    strict callers retain their original guards.
     """
     views = structured(args.get("views"), "views")
     if not isinstance(views, list) or not 1 <= len(views) <= MAX_VIEWS:
         raise ValueError("views must contain 1 to 6 native chart views")
     ids: list[str] = []
     normalized: list[dict[str, Any]] = []
-    for index, view in enumerate(views):
+    for view in views:
         if not isinstance(view, dict) or set(view) - VIEW_FIELDS:
             raise ValueError("each view must use only the declared view fields")
         vid = view.get("id")
@@ -149,24 +162,11 @@ def composition(args: dict[str, Any], *, fallbacks: list[dict[str, str]] | None 
         for field in ("show_legend", "show_data_labels"):
             if field in view and type(view[field]) is not bool:
                 raise ValueError(f"view {vid}: {field} must be true or false")
-        if "hint" not in view and fallbacks is not None:
-            view = {**view, "hint": "raw"}
-            fallbacks.append({"code": "hint_defaulted", "path": f"/views/{index}/hint"})
-        if not isinstance(view.get("hint"), str) or view["hint"] not in VALID_HINTS:
-            raise ValueError(f"view {vid}: hint must be one of {sorted(VALID_HINTS)}; heatmap is a force_kind, not a hint")
         if view.get("force_kind") is not None and (not isinstance(view["force_kind"], str) or view["force_kind"] not in KINDS):
             raise ValueError(f"view {vid}: unsupported force_kind")
-        if not isinstance(view.get("series"), list) or not view["series"] or any(not isinstance(key, str) for key in view["series"]):
-            raise ValueError(f"view {vid}: series must explicitly name the numeric columns to show")
-        if len(view["series"]) > 12 or len(set(view["series"])) != len(view["series"]):
-            raise ValueError(f"view {vid}: series contains duplicate columns")
-        if "limit" in view and (type(view["limit"]) is not int or not 1 <= view["limit"] <= 50_000):
-            raise ValueError(f"view {vid}: limit must be a positive integer at most 50000")
         normalized.append(view)
     views = normalized
     layout = args.get("layout", "grid2" if len(ids) > 1 else "stack")
-    if args.get("force_kind") and not any(view.get("force_kind") == args["force_kind"] for view in views):
-        raise ValueError("views omits the primary force_kind: put every plot inside views; root parameters do not add a plot")
     # Resource/nonfinite limits remain errors even when geometry can degrade.
     if len((layout if isinstance(layout, str) else json.dumps(layout, allow_nan=False)).encode()) > 20_000:
         raise ValueError("layout exceeds the 20 KB limit")

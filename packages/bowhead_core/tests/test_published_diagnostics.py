@@ -31,6 +31,7 @@ from bowhead_core import published_diagnostics as diagnostics
         ("access_context_missing", "access", True),
         ("plan_runtime_unavailable", "configuration", False),
         ("reference_continuation_unavailable", "configuration", False),
+        ("knowledge_source_changed", "access", False),
         ("reference_policy_changed", "access", False),
         ("lead_internal_error", "internal", True),
         ("document_information_incomplete", "content", False),
@@ -785,6 +786,8 @@ def test_runtime_policy_and_documented_policy_have_identical_code_sets() -> None
             diagnostics.publish_skill_workflow_failure,
         }:
             assert parameters == ("reason_code",)
+        elif publisher is diagnostics.publish_tool_failure:
+            assert parameters == ("outcome",)
         elif publisher is diagnostics.publish_chat_llm_failure:
             assert parameters == ("projection",)
         else:

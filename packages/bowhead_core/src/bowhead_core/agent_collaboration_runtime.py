@@ -33,6 +33,7 @@ from bowhead_core.agent_collaboration import (
 )
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.events import OrchestratorEvent, TurnEventBus
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
 
 if TYPE_CHECKING:
@@ -42,6 +43,12 @@ if TYPE_CHECKING:
 COLLABORATION_INSTRUCTIONS = """You can contact already assigned participants through agent_message.
 Use the current responsibility cards' exact execution_id, not a profile name.
 These cards list already assigned executions, not all callable Agent profiles.
+excerpted=true marks partial assignment, output, or assistance text;
+omitted_participants>0 means the roster is incomplete. Do not infer missing
+scope or the absence of helpers from these markers. Only if omitted details
+are needed to proceed, ask a bounded question through agent_message (action=ask)
+using the retained owner's exact execution_id, and keep your own assignment.
+Otherwise continue your work without an extra question.
 The task owner still assigns helpers through its existing advertised delegation
 tools; specialists do not gain permission to create helpers from these cards.
 Prefer the owner of the needed task or evidence. Ask a bounded question, retain
@@ -707,9 +714,8 @@ async def prepare_lead_collaboration(
         from bowhead_core._db import open_shared_ctx
 
         async with open_shared_ctx(ctx.session_store.db_path) as db:
-            async with db.execute("SELECT 1 FROM sqlite_master WHERE name='agent_collaboration_turn'") as cursor:
-                if await cursor.fetchone() is None:
-                    return None
+            if not await readable_table_exists(db, "agent_collaboration_turn"):
+                return None
             async with db.execute("SELECT 1 FROM agent_collaboration_turn WHERE turn_id=?", (ctx.turn_id,)) as cursor:
                 if await cursor.fetchone() is None:
                     return None

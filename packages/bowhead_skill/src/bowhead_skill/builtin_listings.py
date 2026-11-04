@@ -251,7 +251,7 @@ BUILTIN_LISTING_DESCRIPTIONS: dict[str, dict[str, str]] = {
     },
     "settings-space-instructions": {
         "en-US": "Explains or changes the instructions every conversation in the current Space follows, after you confirm. Used only by the system settings assistant.",
-        "zh-CN": "说明或修改当前空间里每段对话都会遵循的空间说明，经你确认后生效。只供系统设置助手使用。",
+        "zh-CN": "说明或修改当前空间里每段对话都会遵循的 AI 工作说明，经你确认后生效。只供系统设置助手使用。",
         "de-DE": "Erklärt oder ändert nach Ihrer Bestätigung die Anweisungen, denen jede Unterhaltung im aktuellen Bereich folgt. Wird nur vom Systemeinstellungs-Assistenten verwendet.",
         "fr-FR": "Explique ou modifie, après votre confirmation, les instructions que suit chaque conversation de l’espace actuel. Utilisé uniquement par l’assistant des paramètres système.",
     },

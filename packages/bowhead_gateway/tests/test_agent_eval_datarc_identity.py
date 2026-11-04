@@ -14,13 +14,13 @@ from typing import Any
 
 import pytest
 from bowhead_bi_bridge.errors import BIConnectionError, BIPermissionError
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_eval_datarc import EvalDatarcLiveRun, EvalDatarcUnavailable
 from bowhead_core.datarc_connection_store import DatarcConnectionStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.agent_eval_datarc import TeamOwnerDatarcResolver
 from bowhead_gateway.member_resolver import MemberUidResolver
 from cryptography.fernet import Fernet
+from gateway_legacy_database import upgrade
 
 from bowhead_gateway import datarc_context
 
@@ -62,7 +62,7 @@ class Untouchable:
 async def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, verified: bool = True, connection: bool = True) -> SimpleNamespace:
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     team = await users.create_team(name="Datarc eval", max_seats=5)
     owner = await users.create_user(team_id=team.id, email="owner@example.com", display_name="Olivia", email_verified=verified)

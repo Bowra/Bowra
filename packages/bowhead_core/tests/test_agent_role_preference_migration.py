@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -33,8 +34,8 @@ def test_0053_upgrade_is_empty_repeatable_and_at_head(tmp_path: Path) -> None:
     path = tmp_path / "core.db"
     config = _config(path)
     command.upgrade(config, MIGRATION.down_revision)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore the ledger to head; later historical revisions (e.g. 0063 table creation) may not rerun on upgraded DBs.
     command.upgrade(config, MIGRATION.revision)
@@ -74,7 +75,7 @@ def test_0053_upgrade_is_empty_repeatable_and_at_head(tmp_path: Path) -> None:
 )
 def test_0053_is_noop_for_non_core_targets(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert (
             db.execute(
@@ -112,4 +113,4 @@ def test_0053_rejects_same_name_schema_drift(
             )
 
     with pytest.raises(RuntimeError, match="Agent role preference schema drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)

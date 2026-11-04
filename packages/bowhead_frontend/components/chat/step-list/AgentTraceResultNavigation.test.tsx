@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("AgentTrace Results navigation", () => {
-  it("opens the exact sandbox stdout/Markdown objects from a completed step", () => {
+  it.each(["done", "failed"] as const)("downloads retained diagnostics and opens delivered Markdown from a %s step", (state) => {
     renderIntl(
       <AgentTrace
         steps={[
@@ -31,7 +31,7 @@ describe("AgentTrace Results navigation", () => {
             stepType: "tool_run",
             toolName: "python_sandbox",
             headerZh: "运行代码",
-            state: "done",
+            state,
             detail: { kind: "stdout", text: "19×29=551" },
             outputArtifacts: [
               {
@@ -49,14 +49,11 @@ describe("AgentTrace Results navigation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /运行代码/ }));
-    fireEvent.click(screen.getByRole("button", {
-      name: "在成果中打开 sandbox-stdout.txt",
-    }));
-
-    expect(mocks.focus).toHaveBeenCalledWith("art_stdout", {
-      entryPoint: "chat",
-    });
+    if (state === "done") fireEvent.click(screen.getByRole("button", { name: /运行代码/ }));
+    const log = screen.getByRole("link", { name: "下载 sandbox-stdout.txt" });
+    expect(log).toHaveAttribute("href", "/api/v1/files/art_stdout");
+    expect(log).toHaveAttribute("download", "sandbox-stdout.txt");
+    expect(mocks.focus).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", {
       name: "在成果中打开 Calculation · calc.md",

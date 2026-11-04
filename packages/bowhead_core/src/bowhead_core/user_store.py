@@ -39,6 +39,8 @@ from bowhead_core.space_governance import (
     normalize_space_name,
     normalize_space_role,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1782,7 +1784,7 @@ class UserStore:
         *,
         terminal_auth_fence_enabled: bool = False,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = domain_database_path(db_path, "core")
         self._terminal_auth_fence_enabled = terminal_auth_fence_enabled
         # Licensing §4.2 two-phase wiring: the resolver needs UserStore, the funnel needs the resolver.
         # Injected via set_seat_guard() in lifespan AFTER initialize(). None ⇒ create_user skips the seat check.
@@ -1853,8 +1855,12 @@ class UserStore:
         self._seat_guard = guard
 
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with diagnostic_connect(domain_database_path(self.db_path, "core")) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.executescript(SCHEMA)
             await self._migrate_credit_exhaustion_code_check(db)
             # Idempotent column addition (SQLite lacks column-level IF NOT EXISTS)
@@ -2102,7 +2108,7 @@ class UserStore:
             team_credit_period_start=_now(),
             created_at=_now(),
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 # Persist team_credit_period_start too: already calculated above; omitting it leaves new teams'
                 # period start NULL, unknown until first reset, while monthly cron uses
@@ -2173,7 +2179,7 @@ class UserStore:
             credit_period_start=now,
             created_at=now,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -2278,7 +2284,7 @@ class UserStore:
         capped_limit = max(1, min(int(limit), 5_000))
         safe_offset = max(0, int(offset))
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT id FROM teams WHERE status = 'active' ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (capped_limit, safe_offset),
@@ -2292,7 +2298,7 @@ class UserStore:
         from bowhead_core.llm_config_crypto import encrypt_llm_config
 
         encrypted = encrypt_llm_config(config)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE teams SET llm_config_encrypted = ?,     llm_config_version = llm_config_version + 1 WHERE id = ?",
                 (encrypted, team_id),
@@ -2310,7 +2316,7 @@ class UserStore:
         from bowhead_core.llm_config_crypto import encrypt_llm_config
 
         encrypted = encrypt_llm_config(config)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cursor = await db.execute(
                 "UPDATE teams SET llm_config_encrypted = ?, llm_config_version = llm_config_version + 1 WHERE id = ? AND llm_config_version = ?",
                 (encrypted, team_id, expected_version),
@@ -2322,7 +2328,7 @@ class UserStore:
         """P4.5.2: read + decrypt. 返 {} 如果没配."""
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT llm_config_encrypted FROM teams WHERE id = ?",
@@ -2337,7 +2343,7 @@ class UserStore:
         """Read decrypted team LLM config with the OCC/cache version."""
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT llm_config_encrypted, llm_config_version FROM teams WHERE id = ?",
@@ -2357,7 +2363,7 @@ class UserStore:
         from bowhead_core.llm_config_crypto import encrypt_llm_config
 
         encrypted = encrypt_llm_config(config)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE teams SET email_config_encrypted = ?,     email_config_version = email_config_version + 1 WHERE id = ?",
                 (encrypted, team_id),
@@ -2366,7 +2372,7 @@ class UserStore:
 
     async def clear_team_email_config(self, team_id: str) -> None:
         """清 team SMTP config(回落 env)。version+1 让缓存失效。"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE teams SET email_config_encrypted = '',     email_config_version = email_config_version + 1 WHERE id = ?",
                 (team_id,),
@@ -2377,7 +2383,7 @@ class UserStore:
         """read + decrypt team SMTP config。返 {} 如果没配。"""
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT email_config_encrypted FROM teams WHERE id = ?",
@@ -2395,7 +2401,7 @@ class UserStore:
         """read decrypted team SMTP config + OCC/cache version。"""
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT email_config_encrypted, email_config_version FROM teams WHERE id = ?",
@@ -2415,7 +2421,7 @@ class UserStore:
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
         out: list[tuple[str, dict[str, Any], int, dict[str, Any]]] = []
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id, llm_config_encrypted, llm_config_version FROM teams WHERE llm_config_encrypted != ''",
@@ -2446,7 +2452,7 @@ class UserStore:
         prompt_cache = validate_mcp_prompt_cache(src.prompts_schema)
         if prompt_cache and src.kind != "mcp":
             raise ValueError("MCP Prompt metadata requires an MCP source")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
                 "SELECT 1 FROM team_tool_source WHERE team_id=? AND name=?",
@@ -2511,7 +2517,7 @@ class UserStore:
 
     async def get_team_tool_source(self, team_id: str, source_id: str) -> TeamToolSource | None:
         """team-bound read (id AND team_id) — cross-team access returns None (§6.3)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM team_tool_source WHERE id=? AND team_id=?",
@@ -2531,7 +2537,7 @@ class UserStore:
         if only_enabled:
             sql += " AND status='enabled'"
         sql += " ORDER BY created_at ASC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
@@ -2573,7 +2579,7 @@ class UserStore:
             params.append(status)
         if not sets and prompt_cache is None:
             return None
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             if prompt_cache is not None:
                 if prompt_cache:
                     async with db.execute(
@@ -2632,7 +2638,7 @@ class UserStore:
                     "BOWHEAD_FERNET_KEY required to store tool auth credentials (refusing to persist plaintext for auth_type != 'none')",
                 )
             auth_ref = token
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE team_tool_source SET auth_type=?, auth_ref=?, updated_at=? WHERE id=? AND team_id=?",
                 (auth_type, auth_ref, _now(), source_id, team_id),
@@ -2643,7 +2649,7 @@ class UserStore:
         """Decrypt upstream creds for execute-time header injection. {} if none. team-bound read."""
         from bowhead_core.llm_config_crypto import decrypt_llm_config
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT auth_ref FROM team_tool_source WHERE id=? AND team_id=?",
@@ -2655,7 +2661,7 @@ class UserStore:
         return decrypt_llm_config(row["auth_ref"])
 
     async def get_team_builtin_tool(self, team_id: str, provider: str) -> TeamBuiltinTool | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM team_builtin_tool WHERE team_id=? AND provider=? ORDER BY created_at,id LIMIT 1",
@@ -2665,7 +2671,7 @@ class UserStore:
         return _row_to_team_builtin_tool(row) if row else None
 
     async def list_team_builtin_tools(self, team_id: str) -> list[TeamBuiltinTool]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM team_builtin_tool WHERE team_id=? ORDER BY provider,display_name", (team_id,)) as cur:
                 rows = await cur.fetchall()
@@ -2681,7 +2687,7 @@ class UserStore:
         if token.startswith("PLAIN:"):
             raise RuntimeError("BOWHEAD_FERNET_KEY required to store built-in tool credentials")
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id FROM team_builtin_tool WHERE team_id=? AND provider=? ORDER BY created_at,id LIMIT 1",
@@ -2733,7 +2739,7 @@ class UserStore:
             raise RuntimeError("BOWHEAD_FERNET_KEY required to store built-in tool credentials")
         now = _now()
         tool_id = _id("ibt")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute(
                 """INSERT INTO team_builtin_tool(
@@ -2766,7 +2772,7 @@ class UserStore:
         return _row_to_team_builtin_tool(row)
 
     async def get_team_builtin_tool_instance(self, team_id: str, tool_id: str) -> TeamBuiltinTool | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM team_builtin_tool WHERE id=? AND team_id=?", (tool_id, team_id)) as cur:
                 row = await cur.fetchone()
@@ -2831,7 +2837,7 @@ class UserStore:
         if expected_revision is not None:
             guard = " AND connection_revision=?"
             values.append(expected_revision)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 f"UPDATE team_builtin_tool SET {','.join(updates)} WHERE id=? AND team_id=?{guard}",  # noqa: S608 - columns and guard are static
@@ -2845,14 +2851,14 @@ class UserStore:
         return _row_to_team_builtin_tool(row) if row else None
 
     async def delete_team_builtin_tool_instance(self, team_id: str, tool_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             cursor = await db.execute("DELETE FROM team_builtin_tool WHERE id=? AND team_id=?", (tool_id, team_id))
             await db.commit()
         return cursor.rowcount == 1
 
     async def list_builtin_pbi_templates(self, team_id: str, tool_id: str) -> list[dict[str, str]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,name,dax_template FROM builtin_pbi_template WHERE team_id=? AND tool_id=? ORDER BY name",
@@ -2863,7 +2869,7 @@ class UserStore:
     async def create_builtin_pbi_template(self, team_id: str, tool_id: str, name: str, dax_template: str) -> dict[str, str]:
         template_id = _id("pbit")
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute(
                 "INSERT INTO builtin_pbi_template(id,team_id,tool_id,name,dax_template,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
@@ -2873,7 +2879,7 @@ class UserStore:
         return {"id": template_id, "name": name, "dax_template": dax_template}
 
     async def delete_builtin_pbi_template(self, team_id: str, tool_id: str, template_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cursor = await db.execute(
                 "DELETE FROM builtin_pbi_template WHERE id=? AND team_id=? AND tool_id=?",
                 (template_id, team_id, tool_id),
@@ -2882,7 +2888,7 @@ class UserStore:
         return cursor.rowcount == 1
 
     async def update_team_builtin_tool_status(self, team_id: str, provider: str, status: str) -> TeamBuiltinTool | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "UPDATE team_builtin_tool SET status=?,updated_at=? WHERE team_id=? AND provider=?", (status, _now(), team_id, provider)
@@ -2924,7 +2930,7 @@ class UserStore:
         """Persist one pending OAuth authorization (WP2b-2). Keyed by opaque random ``state``;
         consumed once by ``take_mcp_oauth_pending`` in the callback. Short TTL (default 10 min)."""
         expires_at = (datetime.now(UTC) + timedelta(seconds=ttl_seconds)).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             # review P3: opportunistic sweep of expired rows (no dedicated sweeper) — ISO-UTC strings
             # sort chronologically, so a lexicographic compare is correct.
             await db.execute("DELETE FROM mcp_oauth_pending WHERE expires_at < ?", (_now(),))
@@ -2956,7 +2962,7 @@ class UserStore:
         ``DELETE … RETURNING`` so the consume is ATOMIC (review P2) — two concurrent callbacks with the
         same ``state`` can't both read the row before it's deleted; only one gets the record, the
         other gets None. Replay of a used ``state`` is a no-op."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("DELETE FROM mcp_oauth_pending WHERE state=? RETURNING *", (state,)) as cur:
                 row = await cur.fetchone()
@@ -2974,7 +2980,7 @@ class UserStore:
 
     async def delete_team_tool_source(self, team_id: str, source_id: str) -> bool:
         """team-bound delete. Runtime effect = next turn's per-turn view no longer includes it (§6.10)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "DELETE FROM team_tool_source WHERE id=? AND team_id=?",
                 (source_id, team_id),
@@ -3005,7 +3011,7 @@ class UserStore:
         sql = "SELECT * FROM team_subagent WHERE id=? AND team_id=?"
         if only_enabled:
             sql += " AND status='enabled'"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (subagent_id, team_id)) as cur:
                 row = await cur.fetchone()
@@ -3023,7 +3029,7 @@ class UserStore:
         sql = "SELECT * FROM team_subagent WHERE team_id=? AND name=?"
         if only_enabled:
             sql += " AND status='enabled'"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id, name)) as cur:
                 row = await cur.fetchone()
@@ -3045,7 +3051,7 @@ class UserStore:
         if only_enabled:
             sql += " AND status='enabled'"
         sql += " ORDER BY created_at ASC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id,)) as cur:
                 rows = await cur.fetchall()
@@ -3057,7 +3063,7 @@ class UserStore:
     ) -> list[TeamSubagentSummaryRecord]:
         """Read only fields and aggregate counts approved for summary mapping."""
         sql = _TEAM_SUBAGENT_SUMMARY_SELECT + " WHERE team_id=? ORDER BY created_at ASC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id,)) as cur:
                 rows = await cur.fetchall()
@@ -3070,7 +3076,7 @@ class UserStore:
     ) -> TeamSubagentSummaryRecord | None:
         """Read one field-safe summary without loading definition content."""
         sql = _TEAM_SUBAGENT_SUMMARY_SELECT + " WHERE team_id=? AND id=?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id, subagent_id)) as cur:
                 row = await cur.fetchone()
@@ -3125,7 +3131,7 @@ class UserStore:
     # ─── workflow-solidify S4: team_skill CRUD (clone team_subagent; all team_id-keyed, IDOR-safe) ───
     async def create_team_skill(self, sk: TeamSkill) -> TeamSkill:
         """Insert a new team skill. BEGIN IMMEDIATE makes (team_id, name) check + INSERT atomic (TOCTOU)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
                 "SELECT 1 FROM team_skill WHERE team_id=? AND name=?",
@@ -3186,7 +3192,7 @@ class UserStore:
         的干净出处瞒过审批（跨 session 定案，见迁移 0064 docstring）。
         """
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             # Databases created before migration 0064 (including all initialize()-created test dbs) lack this column; bare UPDATE
             # raises OperationalError. Reader `_row_opt` tolerates absence; writes likewise return False to tell callers
             # no write occurred (extra provenance must not block promotion), with a log rather than silent failure.
@@ -3215,7 +3221,7 @@ class UserStore:
         if only_enabled:
             sql += " AND status='enabled'"
         async with (
-            nullcontext(connection) if connection is not None else aiosqlite.connect(self.db_path) as db,
+            nullcontext(connection) if connection is not None else diagnostic_connect(self.db_path) as db,
             db.execute(sql, (skill_id, team_id)) as cur,
         ):
             cur.row_factory = aiosqlite.Row
@@ -3241,7 +3247,7 @@ class UserStore:
             sql += " AND status='enabled'"
         if only_approved:
             sql += " AND approval='approved'"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id, name)) as cur:
                 row = await cur.fetchone()
@@ -3262,7 +3268,7 @@ class UserStore:
         if only_approved:
             sql += " AND approval='approved'"
         sql += " ORDER BY created_at ASC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id,)) as cur:
                 rows = await cur.fetchall()
@@ -3303,7 +3309,7 @@ class UserStore:
         sets.append("updated_at=?")
         params.append(_now())
         params += [skill_id, team_id]
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 f"UPDATE team_skill SET {', '.join(sets)} WHERE id=? AND team_id=?",
                 params,
@@ -3324,7 +3330,7 @@ class UserStore:
     ) -> bool:
         """L1 提交：creator_only(approved) → team_wide/pending（PATCH 门 2 / promote 本人
         creator_only 腿——不建候选槽，杜绝「creator_only+candidate」怪态）。"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "UPDATE team_skill SET visibility='team_wide', approval='pending', submitted_by=?, "
                 "rejected_reason=NULL, rejected_at=NULL, updated_at=? "
@@ -3344,7 +3350,7 @@ class UserStore:
     ) -> bool:
         """L1 重提（rejected → pending，清拒因）/ L1 等审重提（pending 保持 pending——CAS 键
         =盘 hash，作者覆盖 source_path 后自然刷新 → admin 旧键 409）。"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "UPDATE team_skill SET approval='pending', submitted_by=?, "
                 "rejected_reason=NULL, rejected_at=NULL, updated_at=? "
@@ -3370,7 +3376,7 @@ class UserStore:
         WHERE 含 visibility 守卫，结构性杜绝「creator_only+candidate」怪态（r3 P1-2：
         promote 的本人 creator_only 腿=L1 提交，不建候选槽）。"""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "UPDATE team_skill SET candidate_path=?, candidate_submitted_at=?, candidate_sha256=?, "
                 "candidate_state='pending', candidate_rejected_reason=NULL, submitted_by=?, updated_at=? "
@@ -3396,7 +3402,7 @@ class UserStore:
         （approved→__old→candidate 换名）成功后调，BEGIN IMMEDIATE 内候选双键二次 CAS——
         0 行命中=锁外理论竞态，路由回滚盘（反向 rename）+ 409。"""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             if expected_candidate_submitted_at is None:
                 cur = await db.execute(
@@ -3440,7 +3446,7 @@ class UserStore:
         source_path 仅作者可见。L2：candidate_state=rejected+候选拒因，live 不动照跑；
         候选保留供作者查看（重提覆盖、删 skill 清理）。"""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             if expected_candidate_submitted_at is None:
                 cur = await db.execute(
                     "UPDATE team_skill SET approval='rejected', rejected_reason=?, rejected_at=?, updated_at=? "
@@ -3464,7 +3470,7 @@ class UserStore:
         visibility=creator_only + approval=approved（自用态），清 rejected_*/submitted_by
         ——兼作「拒后收回」转移。返回 'candidate' / 'submission' / None（无可撤）。"""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -3505,7 +3511,7 @@ class UserStore:
         verdict_json: str | None = None,
     ) -> bool:
         """workflow-solidify S4 (§4.1): write team recipe dry-run verdict. team-bound."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "UPDATE team_skill SET verdict=?, verdict_json=?, updated_at=? WHERE id=? AND team_id=?",
                 (verdict, verdict_json, _now(), skill_id, team_id),
@@ -3535,7 +3541,7 @@ class UserStore:
             sets.insert(1, "approved_sha256=?")
             params.insert(1, approved_sha256)
         params += [skill_id, team_id]
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 f"UPDATE team_skill SET {', '.join(sets)} WHERE id=? AND team_id=?",
                 params,
@@ -3546,7 +3552,7 @@ class UserStore:
 
     async def delete_team_skill(self, team_id: str, skill_id: str) -> bool:
         """team-bound delete."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             async with db.execute(
                 "DELETE FROM team_skill WHERE id=? AND team_id=?",
                 (skill_id, team_id),
@@ -3571,7 +3577,7 @@ class UserStore:
         bytes_out: int | None = None,
     ) -> None:
         """PRD §6.8/F22 exec-audit. NO decrypted secret / NO raw args (digest only)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO team_tool_call_log(id,team_id,user_id,source_id,tool_name,args_digest,"
                 "status,error_kind,ssrf_verdict,duration_ms,upstream_status,bytes_out,created_at) "
@@ -3595,7 +3601,7 @@ class UserStore:
             await db.commit()
 
     async def get_team(self, team_id: str) -> Team | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM teams WHERE id = ?",
@@ -3606,7 +3612,7 @@ class UserStore:
 
     async def list_teams(self) -> list[Team]:
         """List team identities for the pre-license local activation screen."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM teams ORDER BY created_at, id") as cur:
                 rows = await cur.fetchall()
@@ -3615,7 +3621,7 @@ class UserStore:
     # ─── licensing (on-prem, §6.1/§7.4) ──────────────────
 
     async def get_team_license(self, team_id: str) -> TeamLicense | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM team_license WHERE team_id = ?", (team_id,)) as cur:
                 row = await cur.fetchone()
@@ -3624,7 +3630,7 @@ class UserStore:
     async def get_single_team_license(self) -> TeamLicense | None:
         """The single license row (an on-prem/local deployment is single-team). Used as the startup team anchor
         when ``BOWHEAD_LICENSE_TEAM_ID`` is not pinned (§6.4)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM team_license ORDER BY team_id LIMIT 1") as cur:
                 row = await cur.fetchone()
@@ -3632,7 +3638,7 @@ class UserStore:
 
     async def upsert_team_license(self, lic: TeamLicense) -> None:
         """Persist/replace the durable license mirror (§6.5 upload accept path). Idempotent per team_id."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO team_license(team_id, license_token, license_id, key_id, issued_at, expires_at, "
                 "grace_period_days, max_seats, default_user_tier, tier_credits_json, features_json, "
@@ -3692,7 +3698,7 @@ class UserStore:
         这种意图，所以保留现有值 + ERROR 告警，与 `monthly_credit_reset` 的缺键 fail-safe 同口径。
         （签发侧现已拒签这种 license，但这一层要能挡住已经签出去的。）
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 if tier_credits:
@@ -3722,7 +3728,7 @@ class UserStore:
     async def get_highest_seen_ts(self) -> str | None:
         """ClockGuard read (§7.4): the monotonic highest wall-clock the local deployment has ever verified at."""
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT highest_seen_ts FROM entitlement_clock WHERE id = 'singleton'",
             ) as cur,
@@ -3734,7 +3740,7 @@ class UserStore:
         """ClockGuard advance (§7.4): bump ``highest_seen_ts`` to ``now_iso`` if it is newer. Returns False
         (and does NOT raise) if the monotonic trigger detected a rollback (``now_iso`` < highest seen) — the
         caller (verify/recheck) treats that as clock-tamper. Written ONLY on startup-verify + recheck."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO entitlement_clock(id, highest_seen_ts) VALUES ('singleton', ?)",
                 (now_iso,),
@@ -3768,7 +3774,7 @@ class UserStore:
             async with conn.execute(sql, (team_id,)) as cur:
                 row = await cur.fetchone()
             return int(row[0]) if row else 0
-        async with aiosqlite.connect(self.db_path) as db, db.execute(sql, (team_id,)) as cur:
+        async with diagnostic_connect(self.db_path) as db, db.execute(sql, (team_id,)) as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
 
@@ -3790,7 +3796,7 @@ class UserStore:
         # concurrent same-team registrations cannot both read `max_seats-1` and both insert (TOCTOU/LIC-3).
         # The team read also moves onto this conn (was a separate short-lived conn). The seat gate is the
         # injected resolver; in shadow mode (101 default) it logs a would-deny and returns — zero behavior change.
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row  # _row_to_team needs key access
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -3936,7 +3942,7 @@ class UserStore:
         ``team_members`` row.  Orphaned identities therefore consume no local license seat.
         """
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -3993,7 +3999,7 @@ class UserStore:
     ) -> str:
         secret_hash = hashlib.sha256(raw_secret.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO invite_intents(secret_hash,invite_type,invite_id,"
                 "token_version,created_at,expires_at,last_seen_at) VALUES (?,?,?,?,?,?,?)",
@@ -4027,7 +4033,7 @@ class UserStore:
         secret_hash: str,
     ) -> dict[str, Any] | None:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT secret_hash,invite_type,invite_id,token_version,created_at,"
@@ -4047,7 +4053,7 @@ class UserStore:
 
     async def invalidate_invite_intent(self, raw_secret: str) -> bool:
         secret_hash = hashlib.sha256(raw_secret.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE invite_intents SET invalidated_at = ? WHERE secret_hash = ? AND consumed_at IS NULL AND invalidated_at IS NULL",
                 (_now(), secret_hash),
@@ -4079,7 +4085,7 @@ class UserStore:
         invite_type = invite_type.strip().lower()
         email_norm = email.lower().strip()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4271,7 +4277,7 @@ class UserStore:
         invite_type = invite_type.strip().lower()
         email_norm = email.lower().strip()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4401,7 +4407,7 @@ class UserStore:
         invite_type = invite_type.strip().lower()
         email_norm = email.lower().strip()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4489,7 +4495,7 @@ class UserStore:
     ) -> dict[str, Any]:
         """Accept an invitation for an authenticated identity in one write lock."""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4679,7 +4685,7 @@ class UserStore:
         return _row_to_user(row) if row else None
 
     async def get_user_by_email(self, email: str) -> User | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM users WHERE email = ?",
@@ -4693,7 +4699,7 @@ class UserStore:
         provider: str,
         subject: str,
     ) -> User | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT u.* FROM user_federated_identities f JOIN users u ON u.id=f.user_id WHERE f.provider=? AND f.subject=?",
@@ -4712,7 +4718,7 @@ class UserStore:
     ) -> None:
         now = _now()
         email_norm = verified_email.lower().strip()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4752,7 +4758,7 @@ class UserStore:
         self,
         user_id: str,
     ) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,role,status,created_at,removed_at,removed_by FROM team_members WHERE user_id=? ORDER BY created_at",
@@ -4772,7 +4778,7 @@ class UserStore:
     ) -> None:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4827,7 +4833,7 @@ class UserStore:
         raw_token: str,
     ) -> dict[str, Any] | None:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT token_hash,user_id,team_id,purpose,status,created_by_user_id,"
@@ -4846,7 +4852,7 @@ class UserStore:
     ) -> str:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -4889,7 +4895,7 @@ class UserStore:
         user_id: str,
         team_id: str,
     ) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE credential_recovery_tokens SET status='revoked',revoked_at=? WHERE user_id=? AND team_id=? AND status='active'",
                 (_now(), user_id, team_id),
@@ -4906,7 +4912,7 @@ class UserStore:
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT id, display_name, email FROM users WHERE id IN ({placeholders})",  # noqa: S608 — placeholders only, values bound
@@ -4932,7 +4938,7 @@ class UserStore:
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT id, display_name FROM users WHERE id IN ({placeholders})",  # noqa: S608 — placeholders only, values bound
@@ -4951,7 +4957,7 @@ class UserStore:
         if not team_id or not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT DISTINCT u.id, u.display_name, u.email FROM users AS u "
@@ -4968,7 +4974,7 @@ class UserStore:
         return labels
 
     async def update_last_active(self, user_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE users SET last_active_at = ? WHERE id = ?",
                 (_now(), user_id),
@@ -4986,7 +4992,7 @@ class UserStore:
         invited_by: str | None = None,
     ) -> None:
         canonical_role = _canonical_workspace_member_role(role) or "member"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -5015,7 +5021,7 @@ class UserStore:
             await db.commit()
 
     async def remove_member(self, workspace_id: str, user_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             team_id = await self._workspace_team_id_conn(db, workspace_id)
             cur = await db.execute(
@@ -5027,12 +5033,68 @@ class UserStore:
             await db.commit()
             return cur.rowcount > 0
 
+    async def _can_leave_workspace_conn(
+        self,
+        db: aiosqlite.Connection,
+        team_id: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> bool:
+        async with db.execute(
+            "SELECT wm.role, w.status FROM workspace_members wm "
+            "JOIN workspaces w ON w.id=wm.workspace_id "
+            "JOIN users u ON u.id=wm.user_id AND u.status='active' "
+            "JOIN team_members tm ON tm.user_id=u.id AND tm.team_id=w.team_id AND tm.status='active' "
+            "WHERE w.id=? AND w.team_id=? AND wm.user_id=? AND wm.status='active'",
+            (workspace_id, team_id, user_id),
+        ) as cur:
+            member = await cur.fetchone()
+        if member is None:
+            raise SpaceGovernanceError("not_workspace_member")
+        if member[1] != "active":
+            raise SpaceGovernanceError("workspace_archived")
+        if _canonical_workspace_member_role(member[0]) != "admin":
+            return True
+        async with db.execute(
+            "SELECT COUNT(*) FROM workspace_members wm "
+            "JOIN users u ON u.id=wm.user_id AND u.status='active' "
+            "JOIN team_members tm ON tm.user_id=u.id AND tm.team_id=? AND tm.status='active' "
+            "WHERE wm.workspace_id=? AND wm.status='active' "
+            "AND wm.role IN ('admin','ws_admin','owner','workspace_admin')",
+            (team_id, workspace_id),
+        ) as cur:
+            count = await cur.fetchone()
+        return bool(count and count[0] > 1)
+
+    async def can_leave_workspace(self, team_id: str, workspace_id: str, user_id: str) -> bool:
+        """Preview self-exit eligibility without granting management permissions."""
+        async with diagnostic_connect(self.db_path) as db:
+            return await self._can_leave_workspace_conn(db, team_id, workspace_id, user_id)
+
+    async def leave_workspace(self, team_id: str, workspace_id: str, user_id: str) -> None:
+        """Remove only the caller's membership, retaining an effective administrator."""
+        async with diagnostic_connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            if not await self._can_leave_workspace_conn(db, team_id, workspace_id, user_id):
+                raise SpaceGovernanceError("last_workspace_admin")
+            await db.execute(
+                "UPDATE workspace_members SET status='removed' WHERE workspace_id=? AND user_id=? AND status='active'",
+                (workspace_id, user_id),
+            )
+            await db.execute(
+                "UPDATE users SET preferences_json=json_remove(coalesce(preferences_json,'{}'),'$.last_workspace_id') "
+                "WHERE id=? AND json_extract(coalesce(preferences_json,'{}'),'$.last_workspace_id')=?",
+                (user_id, workspace_id),
+            )
+            await self._bump_team_membership_epoch_conn(db, team_id)
+            await db.commit()
+
     async def get_member_role(
         self,
         workspace_id: str,
         user_id: str,
     ) -> str | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND status = 'active'",
@@ -5048,7 +5110,7 @@ class UserStore:
         enrollment cannot silently restore a deliberately removed member.
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
                 (workspace_id, user_id),
@@ -5064,7 +5126,7 @@ class UserStore:
         的调用方（全局搜索）用，免得每个空间各开一次库。
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT workspace_id, role FROM workspace_members WHERE user_id = ? AND status = 'active'",
                 (user_id,),
@@ -5075,7 +5137,7 @@ class UserStore:
 
     async def workspaces_for_team(self, team_id: str) -> dict[str, dict[str, Any]]:
         """`get_workspace` 的批量版：某团队全部空间行（列与 `get_workspace` 相同）→ ``{workspace_id: 行}``。"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id, team_id, name, name_key, description, status, revision, "
@@ -5092,7 +5154,7 @@ class UserStore:
         real ws_team_id to reject a stale/cross-team member row under enforce. Returns None when no
         ``workspaces`` row exists (legacy datarc id / pre-migration) → caller passes ws_team_id=None,
         which skips ONLY the team-equality leg (membership is still required)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT team_id FROM workspaces WHERE id = ?",
@@ -5122,7 +5184,7 @@ class UserStore:
             where.append("(u.display_name LIKE ? OR u.email LIKE ?)")
             params.extend([f"%{q}%", f"{q}%"])
         params.extend([max(1, min(200, limit)), max(0, offset)])
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT u.id, u.display_name, u.email "
@@ -5154,7 +5216,7 @@ class UserStore:
         if not team_id:
             return set()
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT email FROM users WHERE team_id = ? AND status = 'active' AND email IS NOT NULL",
                 (team_id,),
@@ -5180,7 +5242,7 @@ class UserStore:
         if active_only:
             query += " AND status = 'active'"
         query += " LIMIT 1"
-        async with aiosqlite.connect(self.db_path) as db, db.execute(query, (team_id, workspace_ref, workspace_ref)) as cur:
+        async with diagnostic_connect(self.db_path) as db, db.execute(query, (team_id, workspace_ref, workspace_ref)) as cur:
             row = await cur.fetchone()
         return row is not None
 
@@ -5194,7 +5256,7 @@ class UserStore:
         if not team_id or not workspace_ref:
             return None
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT id FROM workspaces WHERE team_id = ? AND (id = ? OR datarc_workspace_id = ?) LIMIT 1",
                 (team_id, workspace_ref, workspace_ref),
@@ -5204,7 +5266,7 @@ class UserStore:
         return str(row[0]) if row else None
 
     async def list_members(self, workspace_id: str) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT m.user_id, m.role, m.joined_at, u.email, u.display_name "
@@ -5227,7 +5289,7 @@ class UserStore:
     async def list_workspace_member_candidates(self, team_id: str, workspace_id: str) -> list[dict[str, Any]]:
         """Return active Team members that do not already belong to the Space."""
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT u.id AS user_id, u.email, u.display_name "
@@ -5251,7 +5313,7 @@ class UserStore:
         administrators may assign a Space administrator, but that does not
         grant the Team administrator content access to the Space.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT u.id AS user_id, u.email, u.display_name "
@@ -5265,7 +5327,7 @@ class UserStore:
 
     async def list_member_workspaces(self, user_id: str) -> list[dict[str, Any]]:
         """P4.5.23: list workspaces this user is active member of."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT workspace_id, role, joined_at FROM workspace_members WHERE user_id = ? AND status = 'active' ORDER BY joined_at",
@@ -5283,7 +5345,7 @@ class UserStore:
         canonical_role = _canonical_workspace_member_role(new_role)
         if canonical_role not in ("admin", "member", "viewer"):
             return False
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             team_id = await self._workspace_team_id_conn(db, workspace_id)
             cur = await db.execute(
@@ -5302,7 +5364,7 @@ class UserStore:
         remove_member 的 last-admin 保护: 不让最后一个 admin
         被降级/移除, 否则 workspace 0 admin → 谁都过不了 _require_workspace_admin,
         再没人能管理成员 (mirror team 级 is_only_remaining_team_admin)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT COUNT(*) AS n "
@@ -5324,7 +5386,7 @@ class UserStore:
         Sprint α: returns True if THIS call actually set creator,
         False if creator was already set (race lost). PRD r4 G6.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(
@@ -5350,7 +5412,7 @@ class UserStore:
         """
         if not team_id:
             return False
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             query = (
                 "SELECT o.created_by_user_id, om.role AS team_member_role FROM teams o "
@@ -5369,7 +5431,7 @@ class UserStore:
         if "@" not in email:
             return None
         domain = email.rsplit("@", 1)[-1].lower().strip()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM teams WHERE LOWER(domain) = ? AND status = 'active' ORDER BY created_at ASC LIMIT 1",
@@ -5383,7 +5445,7 @@ class UserStore:
     async def get_user_team_id(self, user_id: str) -> str | None:
         """Sprint α G9 Sec P0-S-6: re-SELECT user.team_id from DB (不信 JWT stale claim)."""
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            open_pooled_read_ctx(self.db_path) as db,
             db.execute(
                 "SELECT team_id FROM users WHERE id = ? AND status = 'active'",
                 (user_id,),
@@ -5394,7 +5456,7 @@ class UserStore:
 
     async def list_active_teams_for_user(self, user_id: str) -> list[dict[str, str]]:
         """Return the active Team memberships for a global User identity."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT o.id, o.name, CASE WHEN o.created_by_user_id = ? THEN 'owner' ELSE om.role END AS role "
@@ -5409,7 +5471,7 @@ class UserStore:
 
     async def user_has_active_team_membership(self, user_id: str, team_id: str) -> bool:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT 1 FROM team_members WHERE user_id = ? AND team_id = ? AND status = 'active'",
                 (user_id, team_id),
@@ -5420,7 +5482,7 @@ class UserStore:
     async def set_active_team(self, user_id: str, team_id: str) -> bool:
         if not await self.user_has_active_team_membership(user_id, team_id):
             return False
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute("UPDATE users SET active_team_id = ? WHERE id = ?", (team_id, user_id))
             await db.commit()
         return cur.rowcount == 1
@@ -5432,7 +5494,7 @@ class UserStore:
         ensures fresh DB read (not cached).
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT created_by_user_id FROM teams WHERE id = ?",
                 (team_id,),
@@ -5447,7 +5509,7 @@ class UserStore:
         SP-AUTH-6 (概念术语审计 P1-1): 目标校验按本团队 active team_members 行判,
         不再按 users.team_id(主队) — 多团队下 owner 可转给「主队在别处」的成员。
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(
@@ -5479,7 +5541,7 @@ class UserStore:
 
         Used by G3 resend (set new jti, supersede old) + consume (clear after success).
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE users SET verify_token_jti = ? WHERE id = ?",
                 (jti, user_id),
@@ -5489,7 +5551,7 @@ class UserStore:
 
     async def get_verify_token_jti(self, user_id: str) -> str | None:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT verify_token_jti FROM users WHERE id = ?",
                 (user_id,),
@@ -5510,7 +5572,7 @@ class UserStore:
 
         After success, jti is cleared (set to NULL).
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             if jti is None:
                 # Old user compat — verify token without jti claim
                 cur = await db.execute(
@@ -5535,7 +5597,7 @@ class UserStore:
         member_uid: str,
     ) -> bool:
         """G4: write datarc member_uid to users column after lookup success."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE users SET datarc_member_uid = ? WHERE id = ?",
                 (member_uid, user_id),
@@ -5564,7 +5626,7 @@ class UserStore:
         Returns outbox_id.
         """
         oid = _id("smtp")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO smtp_outbox "
                 "(id, to_email, subject, body, purpose, status, "
@@ -5602,7 +5664,7 @@ class UserStore:
         from datetime import datetime, timedelta
 
         cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             if team_id is None:
                 cur = await db.execute(
                     "UPDATE smtp_outbox SET status = 'failed_retry', attempts = 0, "
@@ -5631,7 +5693,7 @@ class UserStore:
         """
         now = _now()
         rows: list[dict[str, Any]] = []
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -5656,7 +5718,7 @@ class UserStore:
         return rows
 
     async def mark_smtp_sent(self, outbox_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE smtp_outbox SET status = 'sent', sent_at = ?, last_error = NULL WHERE id = ?",
                 (_now(), outbox_id),
@@ -5672,7 +5734,7 @@ class UserStore:
     ) -> bool:
         """Mark failed_retry (if next_attempt_at given) or dead (None)."""
         new_status = "failed_retry" if next_attempt_at else "dead"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE smtp_outbox SET status = ?, last_error = ?, next_attempt_at = ? WHERE id = ?",
                 (new_status, error, next_attempt_at, outbox_id),
@@ -5704,7 +5766,7 @@ class UserStore:
 
         now = int(time.time())
         window_start = (now // window_s) * window_s
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             # BEGIN IMMEDIATE — acquire write-lock before SELECT to prevent race
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -5846,7 +5908,7 @@ class UserStore:
 
         # Best-effort mode
         try:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with diagnostic_connect(self.db_path) as db:
                 await db.execute(sql, params)
                 await db.commit()
             return True
@@ -5908,7 +5970,7 @@ class UserStore:
         if not is_critical(action):
             raise ValueError(f"audit_critical_action requires CRITICAL_ACTIONS member; got {action!r}")
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(main_op_sql, main_op_params)
@@ -5939,7 +6001,7 @@ class UserStore:
 
         The team owner wins over team_members.role.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             return await _read_team_role_in_tx(
                 db,
@@ -5959,7 +6021,7 @@ class UserStore:
             return []
         role_values = {r for r in roles if r != "owner"}
         out: list[str] = []
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if include_creator and "owner" in roles:
                 async with db.execute(
@@ -5996,7 +6058,7 @@ class UserStore:
         (this method is non-atomic — caller decides isolation).
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT COUNT(*) "
                 "FROM team_members om "
@@ -6023,7 +6085,7 @@ class UserStore:
         """
         if new_role not in {"team_admin", "audit_admin", "member"}:
             raise ValueError("invalid team role")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 db.row_factory = aiosqlite.Row
@@ -6063,7 +6125,7 @@ class UserStore:
         P1-O-2 fix: dropped COUNT(*) > 0 short-circuit (re-runs need check).
         Uses Python utc_now_iso() for consistency.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "INSERT INTO team_members(id, user_id, team_id, role, "
                 "promoted_by, promoted_at, status, created_at) "
@@ -6093,7 +6155,7 @@ class UserStore:
     ) -> str:
         """D-1=B: upsert Bowhead workspaces from datarc. Returns Bowhead ws_id."""
         display_name, name_key = normalize_space_name(name)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id FROM workspaces WHERE datarc_workspace_id = ? AND team_id = ?",
@@ -6133,7 +6195,7 @@ class UserStore:
         self,
         workspace_id: str,
     ) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id, team_id, name, name_key, description, status, revision, "
@@ -6154,7 +6216,7 @@ class UserStore:
         Returns list of {workspace_id, name, description, role, last_active_at, team_id,
         datarc_workspace_id}.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             query = (
                 "SELECT w.id AS workspace_id, w.name, w.description, w.datarc_workspace_id, "
@@ -6175,7 +6237,7 @@ class UserStore:
     async def count_active_workspaces(self, team_id: str) -> int:
         """Count active Bowhead spaces for one Team without loading memberships."""
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM workspaces WHERE team_id = ? AND status = 'active'",
                 (team_id,),
@@ -6187,7 +6249,7 @@ class UserStore:
     async def list_active_workspace_ids(self, team_id: str) -> list[str]:
         """List active Space ids for internal team-scoped aggregate queries."""
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT id FROM workspaces WHERE team_id = ? AND status = 'active' ORDER BY id",
                 (team_id,),
@@ -6264,7 +6326,7 @@ class UserStore:
         workspace_id: str,
         require_team_governance: bool,
     ) -> dict[str, Any]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if require_team_governance:
                 role = await self._team_governance_role_in_tx(
@@ -6315,7 +6377,7 @@ class UserStore:
         if status not in {"active", "archived", "all"}:
             raise SpaceGovernanceError("invalid_workspace_status")
         limit = max(1, min(100, page_size))
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             role = await self._team_governance_role_in_tx(
                 db,
@@ -6400,7 +6462,7 @@ class UserStore:
             raise SpaceGovernanceError("workspace_name_too_long")
         workspace_id = _id("ws")
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -6488,7 +6550,7 @@ class UserStore:
             display_name, name_key = normalize_space_name(name)
             if len(display_name) > 120:
                 raise SpaceGovernanceError("workspace_name_too_long")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -6576,7 +6638,7 @@ class UserStore:
     ) -> dict[str, Any]:
         """Archive a Space while serializing the last-active-Space invariant."""
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -6655,7 +6717,7 @@ class UserStore:
     ) -> dict[str, Any]:
         """Restore a Space and repair a missing administrator atomically."""
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -6780,7 +6842,7 @@ class UserStore:
         preserves the Space invariant that an active Space has an active admin.
         """
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -6856,7 +6918,7 @@ class UserStore:
         regardless. The creator is enrolled as ``admin``. Returns the new ``ws_*`` id."""
         display_name, name_key = normalize_space_name(name)
         ws_id = _id("ws")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO workspaces(id, team_id, name, name_key, datarc_workspace_id, "
                 "description, status, revision, created_at, updated_at) "
@@ -6886,7 +6948,7 @@ class UserStore:
         name_key: str | None = None
         if name is not None:
             display_name, name_key = normalize_space_name(name)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE workspaces SET name = COALESCE(?, name), "
                 "name_key = COALESCE(?, name_key), "
@@ -6915,7 +6977,7 @@ class UserStore:
         Archived workspaces drop out of ``list_workspaces_for_user`` (which filters active)."""
         if status not in ("active", "archived"):
             raise ValueError(f"invalid status: {status!r}")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 now = _now()
@@ -6950,7 +7012,7 @@ class UserStore:
         legacy memberships to canonical workspaces and leaves the legacy rows in place.
         Feishu message handling must not call this automatically.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             wm_cols = await _table_columns(db, "workspace_members")
             optional_selects = [col for col in ("last_active_at", "cached_name") if col in wm_cols]
@@ -7086,7 +7148,7 @@ class UserStore:
         user_id: str,
     ) -> bool:
         """Update wm.last_active_at to now. Called from /me/last-workspace + ws-scoped ops."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE workspace_members SET last_active_at = ? WHERE workspace_id = ? AND user_id = ? AND status = 'active'",
                 (_now(), workspace_id, user_id),
@@ -7109,7 +7171,7 @@ class UserStore:
         # Sanitize key (alphanumeric + underscore only — defense against path injection)
         if not key.replace("_", "").isalnum():
             raise ValueError(f"invalid preference key: {key!r}")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE users SET preferences_json = json_set(  coalesce(preferences_json, '{}'), ?, ?) WHERE id = ?",
                 (f"$.{key}", value, user_id),
@@ -7132,7 +7194,7 @@ class UserStore:
         import time as _time
 
         deadline = int(_time.time()) + ttl_s
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 db.row_factory = aiosqlite.Row
@@ -7166,7 +7228,7 @@ class UserStore:
                 raise
 
     async def release_pwd_change_lock(self, user_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "UPDATE users SET password_change_in_progress = NULL WHERE id = ?",
                 (user_id,),
@@ -7179,7 +7241,7 @@ class UserStore:
         new_hash: str,
     ) -> bool:
         """G10 P0-S-3 atomic password update with pwd_version + session_token_version bump."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 now = _now()
@@ -7202,7 +7264,7 @@ class UserStore:
 
     async def get_pwd_version(self, user_id: str) -> int:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT pwd_version FROM users WHERE id = ?",
                 (user_id,),
@@ -7213,7 +7275,7 @@ class UserStore:
 
     async def get_session_token_version(self, user_id: str) -> int:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT session_token_version FROM users WHERE id = ?",
                 (user_id,),
@@ -7229,7 +7291,7 @@ class UserStore:
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         """G10 active sessions list."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = "SELECT id, user_id, expires_at, created_at, last_used_at, revoked_at, user_agent, ip FROM refresh_tokens WHERE user_id = ?"
             params: list = [user_id]
@@ -7250,7 +7312,7 @@ class UserStore:
 
         Returns False (404 semantics) if session doesn't exist OR belongs to other user.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE refresh_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
                 (_now(), session_id, user_id),
@@ -7272,7 +7334,7 @@ class UserStore:
         """存 refresh token hash. 返 row id (不是 raw token)."""
         tid = _id("rfh")
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO refresh_tokens(id,user_id,token_hash,expires_at,created_at,user_agent,ip) VALUES (?,?,?,?,?,?,?)",
                 (tid, user_id, token_hash, expires_at, _now(), (user_agent or "")[:200], ip),
@@ -7284,7 +7346,7 @@ class UserStore:
         """active + not expired → return user_id; 否则 None."""
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = ?",
@@ -7316,7 +7378,7 @@ class UserStore:
         old_hash = hashlib.sha256(old_raw.encode()).hexdigest()
         new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 cur = await db.execute(
@@ -7349,7 +7411,7 @@ class UserStore:
         """
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT last_used_at, revoked_at FROM refresh_tokens WHERE token_hash = ?",
                 (token_hash,),
@@ -7370,7 +7432,7 @@ class UserStore:
 
     async def revoke_refresh_token(self, raw_token: str) -> bool:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL",
                 (_now(), token_hash),
@@ -7381,7 +7443,7 @@ class UserStore:
     async def revoke_refresh_token_and_get_user(self, raw_token: str) -> str | None:
         """Atomically revoke one active refresh credential and return its owner."""
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -7408,7 +7470,7 @@ class UserStore:
 
     async def revoke_all_refresh_for_user(self, user_id: str) -> int:
         """logout-everywhere / 改密码后用. 返 revoked 数."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 now = _now()
@@ -7444,7 +7506,7 @@ class UserStore:
         """Persist invite token hash for revocation. 返 invite_id."""
         invite_id = invite_id or _id("inv")
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 now = _now()
@@ -7487,7 +7549,7 @@ class UserStore:
         self,
         invite_id: str,
     ) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,workspace_id,team_id,role,invited_email,status,invited_by,"
@@ -7504,7 +7566,7 @@ class UserStore:
         raw_token: str,
     ) -> dict[str, Any] | None:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,workspace_id,team_id,role,invited_email,status,invited_by,"
@@ -7520,7 +7582,7 @@ class UserStore:
         """Verify token still active (not revoked / consumed / expired)."""
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT status, expires_at FROM invite_tokens WHERE token_hash = ?",
@@ -7537,7 +7599,7 @@ class UserStore:
         """Mark invite as consumed (one-shot). 返 True 仅当原本 active."""
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE invite_tokens SET status = 'consumed', consumed_at = ? WHERE token_hash = ? AND status = 'active' AND expires_at >= ?",
                 (now, token_hash, now),
@@ -7557,7 +7619,7 @@ class UserStore:
         this row is the revoke/consume/expiry gate. The partial unique index guarantees one
         active row per (workspace,email)."""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,workspace_id,team_id,role,invited_email,status,invited_by,"
@@ -7576,7 +7638,7 @@ class UserStore:
         现状 list_invites 只有 per-ws admin 视图（review P1：invitee 视角端点不存在）。
         带 workspace 名（引导页展示）；只返 active+未过期。"""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT it.id, it.workspace_id, it.team_id, it.role, it.invited_by, "
@@ -7593,7 +7655,7 @@ class UserStore:
         """Consume a workspace invite by its id (Fix A — validation now matches by email,
         not by the rotated token hash, so consume must key on the resolved row's id)."""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE invite_tokens SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'active'",
                 (now, invite_id),
@@ -7602,7 +7664,7 @@ class UserStore:
             return cur.rowcount > 0
 
     async def revoke_invite(self, invite_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE invite_tokens SET status = 'revoked', revoked_at = ? WHERE id = ? AND status = 'active'",
                 (_now(), invite_id),
@@ -7628,7 +7690,7 @@ class UserStore:
         返 True 仅当命中一行 active。
         """
         new_hash = hashlib.sha256(new_raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             version_clause = ""
             args: tuple[Any, ...]
             if expected_token_version is not None:
@@ -7661,7 +7723,7 @@ class UserStore:
         *,
         include_inactive: bool = False,
     ) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = (
                 "SELECT id,workspace_id,team_id,role,invited_email,status,invited_by,"
@@ -7718,7 +7780,7 @@ class UserStore:
         invite_id = invite_id or _id("oinv")
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         email_norm = invited_email.lower().strip()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -7861,7 +7923,7 @@ class UserStore:
             normalized[workspace_id] = role
         if (assignment_mode == "spaces" and not 1 <= len(normalized) <= 20) or (assignment_mode == "team_only" and normalized):
             raise SpaceGovernanceError("invalid_initial_workspace_grants")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -7940,7 +8002,7 @@ class UserStore:
             raise ValueError("invalid team role")
         invite_id = invite_id or _id("oinv")
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 now = _now()
@@ -7982,7 +8044,7 @@ class UserStore:
         self,
         invite_id: str,
     ) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,team_role,invited_email,status,invited_by,"
@@ -8004,7 +8066,7 @@ class UserStore:
         raw_token: str,
     ) -> dict[str, Any] | None:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,team_role,invited_email,status,invited_by,"
@@ -8023,7 +8085,7 @@ class UserStore:
     ) -> dict[str, Any] | None:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,team_role,invited_email,status,invited_by,"
@@ -8049,7 +8111,7 @@ class UserStore:
         (_decode_jwt_multi); this row is the revoke/consume/expiry gate. At most one active
         invite per (team,email) — invite_team_member short-circuits 'already_invited'."""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,team_role,invited_email,status,invited_by,"
@@ -8068,7 +8130,7 @@ class UserStore:
         """Consume an team invite by its id (Fix A — validation matches by email, not by the
         rotated token hash, so consume keys on the resolved row's id)."""
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE team_invite_tokens SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'active'",
                 (now, invite_id),
@@ -8085,7 +8147,7 @@ class UserStore:
         size: int = 25,
         q: str = "",
     ) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = (
                 "SELECT id,team_id,team_role,invited_email,status,invited_by,"
@@ -8113,7 +8175,7 @@ class UserStore:
             return []
         invite_ids = [str(invite["id"]) for invite in invites]
         placeholders = ",".join("?" for _ in invite_ids)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT invite_id,workspace_id,role,created_at "
@@ -8152,14 +8214,14 @@ class UserStore:
             escaped = q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             sql += " AND LOWER(invited_email) LIKE ? ESCAPE '\\'"
             args.append(f"%{escaped}%")
-        async with aiosqlite.connect(self.db_path) as db, db.execute(sql, args) as cur:
+        async with diagnostic_connect(self.db_path) as db, db.execute(sql, args) as cur:
             return int((await cur.fetchone())[0])
 
     async def list_team_invite_workspace_grants(
         self,
         invite_id: str,
     ) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT workspace_id,role,created_at FROM team_invite_workspace_grants WHERE invite_id=? ORDER BY workspace_id",
@@ -8169,7 +8231,7 @@ class UserStore:
         return [dict(row) for row in rows]
 
     async def revoke_team_invite(self, invite_id: str, team_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE team_invite_tokens SET status = 'revoked', revoked_at = ? WHERE id = ? AND team_id = ? AND status = 'active'",
                 (_now(), invite_id, team_id),
@@ -8188,7 +8250,7 @@ class UserStore:
         public_entry_id: str | None = None,
     ) -> bool:
         new_hash = hashlib.sha256(new_raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             version_clause = ""
             args: tuple[Any, ...] = (
                 new_hash,
@@ -8217,7 +8279,7 @@ class UserStore:
         user_id: str,
     ) -> list[dict[str, Any]]:
         """List all Team Spaces with the target user's active membership role, if any."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT w.id AS workspace_id, w.name, w.description, w.status, "
@@ -8255,7 +8317,7 @@ class UserStore:
         raw = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw.encode()).hexdigest()
         tid = _id("tok")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO api_tokens(id,user_id,name,hash,workspace_id,role_snapshot,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 (tid, user_id, name, token_hash, workspace_id, role_snapshot, expires_at, _now()),
@@ -8264,7 +8326,7 @@ class UserStore:
         return raw, tid
 
     async def list_api_tokens(self, user_id: str) -> list[dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,name,workspace_id,role_snapshot,expires_at,created_at,last_used_at,revoked_at FROM api_tokens WHERE user_id = ?",
@@ -8274,7 +8336,7 @@ class UserStore:
         return [dict(r) for r in rows]
 
     async def revoke_api_token(self, token_id: str, user_id: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND user_id = ?",
                 (_now(), token_id, user_id),
@@ -8290,7 +8352,7 @@ class UserStore:
         (快照只降不升), 禁止直接采信快照 — 否则角色降级后旧 token 永久保留高权限。
         """
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM api_tokens WHERE hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
@@ -8353,7 +8415,7 @@ class UserStore:
         from bowhead_core.audit_actions import AuditAction
         from bowhead_core.team_subagent_store import TeamSubagentStore
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -8513,6 +8575,10 @@ class UserStore:
                     conn=db,  # atomic — audit in the same tx
                 )
                 await db.commit()
+                if delete_identity:
+                    from bowhead_core.account_deletion import finish_account_retirement_execution
+
+                    await finish_account_retirement_execution(self, retirement)
                 return MemberDeactivationResult(True, identity_deleted=delete_identity)
             except Exception:
                 await db.rollback()
@@ -8521,7 +8587,7 @@ class UserStore:
     async def export_user_data(self, user_id: str) -> dict[str, Any]:
         """GDPR data export — return all user-owned rows as dict."""
         export: dict[str, Any] = {"user_id": user_id, "exported_at": _now()}
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             for tbl in ("users", "api_tokens", "credit_ledger", "user_audit_log", "workspace_members"):
                 async with db.execute(f"PRAGMA table_info({tbl})") as cur:
@@ -8558,7 +8624,7 @@ class UserStore:
             raise ValueError(f"invalid credit exhaustion code: {code}")
         event_id = _id("cex")
         ts = created_at or _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO credit_exhaustion_events("
                 "id, team_id, user_id, workspace_id, code, credit_balance, "
@@ -8624,15 +8690,23 @@ class UserStore:
             )
             for r in rows
         ]
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.executemany(
+        privacy_guard = domain_layout_active(self.db_path)
+        if privacy_guard:
+            payload = [(*row, row[2]) for row in payload]
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+            cursor = await db.executemany(
                 "INSERT INTO llm_usage_events(id,team_id,user_id,workspace_id,turn_id,reason,"
                 "agent_type,provider,model,tokens_input,tokens_output,tokens_cached,streamed,created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                + (
+                    "SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM account_deletions WHERE user_id=?)"
+                    if privacy_guard
+                    else "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                ),
                 payload,
             )
+            inserted = cursor.rowcount
             await db.commit()
-        return len(payload)
+        return inserted
 
     async def rollup_llm_usage_daily(self, *, days: tuple[str, ...] | None = None, before: str | None = None) -> int:
         """把 `llm_usage_events` 按天聚合进 `llm_usage_daily`。返回写入的汇总行数。
@@ -8652,7 +8726,32 @@ class UserStore:
         elif before:
             where = " WHERE created_at < ?"
             args = (before,)
-        async with aiosqlite.connect(self.db_path) as db:
+        if domain_layout_active(self.db_path):
+            query = (
+                "SELECT substr(created_at,1,10),COALESCE(team_id,''),COALESCE(user_id,''),"
+                "COALESCE(workspace_id,''),reason,COUNT(*),COALESCE(SUM(tokens_input),0),"
+                "COALESCE(SUM(tokens_output),0),COALESCE(SUM(tokens_cached),0) FROM llm_usage_events"
+                + where
+                + " GROUP BY substr(created_at,1,10),COALESCE(team_id,''),COALESCE(user_id,''),COALESCE(workspace_id,''),reason"
+            )
+            timestamp = _now()
+            written = 0
+            async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as source, source.execute(query, args) as cursor:
+                while rows := await cursor.fetchmany(200):
+                    payload = [(*row, timestamp, row[2]) for row in rows]
+                    async with diagnostic_connect(self.db_path) as target:
+                        written_rows = await target.executemany(
+                            "INSERT INTO llm_usage_daily(day,team_id,user_id,workspace_id,reason,calls,tokens_input,tokens_output,tokens_cached,updated_at) "
+                            "SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM account_deletions WHERE user_id=?) "
+                            "ON CONFLICT(day,team_id,user_id,workspace_id,reason) DO UPDATE SET "
+                            "calls=excluded.calls,tokens_input=excluded.tokens_input,tokens_output=excluded.tokens_output,"
+                            "tokens_cached=excluded.tokens_cached,updated_at=excluded.updated_at",
+                            payload,
+                        )
+                        await target.commit()
+                    written += written_rows.rowcount
+            return written
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "INSERT INTO llm_usage_daily(day,team_id,user_id,workspace_id,reason,"
                 "calls,tokens_input,tokens_output,tokens_cached,updated_at) "
@@ -8677,7 +8776,7 @@ class UserStore:
         里有该天的行才删。这样即使调用方忘了先 rollup，也不会把还没汇总的数据直接删掉——
         裁剪与汇总的顺序错误是这类清理任务最容易造成不可逆数据丢失的地方。
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT DISTINCT substr(created_at,1,10) AS day FROM llm_usage_events WHERE created_at < ?",
@@ -8728,7 +8827,7 @@ class UserStore:
             sql += " WHERE day >= ?"
             args = (since_day,)
         sql += " GROUP BY reason ORDER BY (SUM(tokens_input) + SUM(tokens_output)) DESC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, args) as cur:
                 return [dict(r) for r in await cur.fetchall()]
@@ -8748,7 +8847,7 @@ class UserStore:
             sql += " WHERE created_at >= ?"
             args = (since,)
         sql += " GROUP BY reason ORDER BY (SUM(tokens_input) + SUM(tokens_output)) DESC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, args) as cur:
                 return [dict(r) for r in await cur.fetchall()]
@@ -8775,7 +8874,7 @@ class UserStore:
         chat/scheduled 调用点零改; 矩阵 run 传 "kb_matrix_run" (turn_id 列锚
         mxrun_ 前缀 run_id, 对账反查键).
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 outcome, error_reason = await _deduct_credit_with_stable_id_in_tx(
@@ -8817,7 +8916,7 @@ class UserStore:
 
         返新的 user.credit_balance.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 # 1. user.balance += amount
@@ -8902,7 +9001,7 @@ class UserStore:
           - user 不存在 / team 跨 → ValueError("user_not_found_or_cross_team")
           - user.status='removed' → ValueError("user_removed_cannot_edit")
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -9034,7 +9133,7 @@ class UserStore:
         if mode not in ("balance_only", "balance_and_quota"):
             raise ValueError(f"invalid mode: {mode}")
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
             # cooldown check
@@ -9189,7 +9288,7 @@ class UserStore:
             params.extend([type_filter, f"{type_filter}:%"])
         where_sql = " AND ".join(where)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT COUNT(*) AS n FROM credit_ledger WHERE {where_sql}",
@@ -9274,7 +9373,7 @@ class UserStore:
             params.append(to_ts)
         where_sql = " AND ".join(where)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT COUNT(*) AS n FROM user_audit_log WHERE {where_sql}",
@@ -9328,7 +9427,7 @@ class UserStore:
 
         now_ts = now or _now()
         capped_limit = max(1, min(int(limit), 100))
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT team_credit_balance, team_credit_quota FROM teams WHERE id = ?",
@@ -9474,7 +9573,7 @@ class UserStore:
         expires_at = (datetime.now(UTC) + timedelta(days=_CREDIT_ATTENTION_OPEN_TTL_DAYS)).isoformat()
         events: list[dict[str, Any]] = []
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -9874,7 +9973,7 @@ class UserStore:
             where += " AND state = ?"
             params.append(state)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT attention_item_id, team_id, user_id, workspace_id, policy_key, "
@@ -9943,7 +10042,7 @@ class UserStore:
             await conn.execute(sql, params)
             await conn.commit()
             return
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(sql, params)
             await db.commit()
 
@@ -9978,7 +10077,7 @@ class UserStore:
         assignments.extend(["dismissed_by = ?", "dismissed_at = ?", "expires_at = ?"])
         params.extend([actor_user_id, now_ts, dismiss_expires_at])
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 f"UPDATE credit_attention_state SET {', '.join(assignments)} WHERE team_id = ? AND attention_item_id = ? AND state = 'open'",
@@ -10018,7 +10117,7 @@ class UserStore:
             where += " AND user_id = ?"
             params.append(user_id)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT attention_item_id, user_id, policy_key, payload_json FROM credit_attention_state WHERE {where}",
@@ -10077,7 +10176,7 @@ class UserStore:
         team_id: str,
         attention_item_id: str,
     ) -> dict[str, Any] | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT attention_item_id, team_id, user_id, workspace_id, policy_key, "
@@ -10134,7 +10233,7 @@ class UserStore:
         spend = SUM(-delta) WHERE delta < 0 AND reason='turn' AND created_at >= now-30d.
         post-flight 扣点无 refund, 总扣点 = 净消耗.
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
             # 0. team meta
@@ -10456,7 +10555,7 @@ class UserStore:
 
         count_sql = f"SELECT COUNT(*) AS n FROM users u WHERE {where_sql}"
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(main_sql, all_params) as cur:
                 rows = await cur.fetchall()
@@ -10520,7 +10619,7 @@ class UserStore:
         user_agent: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO user_audit_log(id,user_id,team_id,event_type,ip,user_agent,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 (_id("aud"), user_id, team_id, event_type, ip, user_agent, json.dumps(payload or {}, ensure_ascii=False), _now()),

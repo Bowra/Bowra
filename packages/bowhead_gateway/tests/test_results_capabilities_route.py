@@ -52,6 +52,7 @@ def test_results_capability_route_returns_standard_results_capabilities(monkeypa
         "complete_list": True,
         "scale_nav": True,
         "interactive_html": True,
+        "content_sharing": {"enabled": True, "reason": None},
         "max_page_size": 50,
     }
     assert response.headers["cache-control"] == "private, no-store"
@@ -234,3 +235,26 @@ def test_interactive_html_default_and_explicit_override(monkeypatch, value, expe
     response = TestClient(_app(user)).get("/api/v1/results/capabilities")
     assert response.status_code == 200
     assert response.json()["interactive_html"] is expected
+
+
+@pytest.mark.parametrize("sharing", [True, False])
+@pytest.mark.parametrize("interactive", [True, False])
+def test_sharing_capability_is_independent_of_interaction_and_cursor(monkeypatch, sharing, interactive):
+    from bowhead_core import share_service
+
+    monkeypatch.setattr(share_service, "_content_sharing_cache", sharing)
+    monkeypatch.setenv("FEATURE_INTERACTIVE_HTML_PREVIEW", "1" if interactive else "0")
+    user = SimpleNamespace(id="user_a", team_id="team_a")
+    response = TestClient(_app(user)).get("/api/v1/results/capabilities")
+    assert response.status_code == 200
+    assert response.json()["content_sharing"] == {"enabled": sharing, "reason": None if sharing else "deployment_disabled"}
+    assert response.json()["interactive_html"] is interactive
+
+
+def test_report_management_remains_mounted_when_sharing_disabled(monkeypatch):
+    from bowhead_core import share_service
+
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    paths = create_app().openapi()["paths"]
+    assert "get" in paths["/api/v1/shares/{kind}/{rid}"]
+    assert "delete" in paths["/api/v1/shares/{kind}/{rid}/grants/{grant_id}"]

@@ -7,7 +7,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.terminal_generation_bus import GenerationEventBusRegistry
 from bowhead_core.terminal_protocol import (
     AdmissionContext,
@@ -28,6 +27,7 @@ from bowhead_core.terminal_runtime_factory import (
     terminal_auth_resolve_context_values,
 )
 from bowhead_gateway.terminal_writer_service import TerminalWriterLeaseService
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 
 def _expires() -> str:
@@ -363,7 +363,7 @@ async def test_disabled_writer_real_store_steer_fences_recovery_epoch(
     tmp_path,
 ) -> None:
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "INSERT INTO teams(id,name,status,created_at) VALUES ('team_1','Team','active','t')",

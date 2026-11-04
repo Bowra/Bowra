@@ -124,6 +124,7 @@ class KbFileDTO(BaseModel):
 
     version: int = 1
     ingestion_action_id: str | None = None
+    membership_revision: int = Field(default=1, ge=1)
     active_generation_id: str | None = None
     source_observation_json: str | None = Field(default=None, exclude=True)
     source_health: dict[str, Any] | None = None

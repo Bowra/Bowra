@@ -14,18 +14,25 @@ from bowhead_gateway.source_access_projection import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _authenticated_projection_viewer(monkeypatch):
+    # These unit doubles model the authenticated owner. HTTP identity and
+    # recipient permission boundaries are covered by report-sharing routes.
+    monkeypatch.setattr("bowhead_gateway.routes.auth.resolve_user_id_sync", lambda request: "u")
+
+
 class _ArtifactStore:
     def __init__(self, existing: set[str]) -> None:
         self.existing = existing
         self.requested: list[str] = []
 
-    async def get_many(self, artifact_ids: list[str]) -> list[SimpleNamespace]:
+    async def get_many(self, artifact_ids: list[str], *, include_deleted: bool = False) -> list[SimpleNamespace]:
         self.requested = list(artifact_ids)
-        return [SimpleNamespace(id=value) for value in artifact_ids if value in self.existing]
+        return [SimpleNamespace(id=value, created_by="u") for value in artifact_ids if value in self.existing]
 
 
 class _FailingArtifactStore:
-    async def get_many(self, artifact_ids: list[str]) -> list[SimpleNamespace]:
+    async def get_many(self, artifact_ids: list[str], *, include_deleted: bool = False) -> list[SimpleNamespace]:
         raise RuntimeError("storage unavailable")
 
 
@@ -163,12 +170,14 @@ class _SessionStore:
         return SimpleNamespace(id=turn_id, session_id="ses_1")
 
     async def get_session(self, session_id: str) -> SimpleNamespace | None:
-        return SimpleNamespace(id=session_id, workspace_id="ws_1")
+        return SimpleNamespace(id=session_id, workspace_id="ws_1", user_id="u")
 
 
 class _Section:
     def __init__(self, value: dict[str, object]) -> None:
         self.value = value
+        self.kind = value["kind"]
+        self.payload = {key: item for key, item in value.items() if key not in {"id", "kind"}}
 
     def to_report_section(self) -> dict[str, object]:
         return self.value
@@ -176,7 +185,7 @@ class _Section:
 
 class _CanvasStore:
     def __init__(self, sections: list[dict[str, object]]) -> None:
-        self.canvas = SimpleNamespace(id="cv_1")
+        self.canvas = SimpleNamespace(id="cv_1", user_id="u", workspace_id="ws_1")
         self.sections = [_Section(section) for section in sections]
 
     async def get_canvas_by_session(self, session_id: str) -> SimpleNamespace:
@@ -533,7 +542,7 @@ class _OwnedArtifactStore:
     def __init__(self, owned_by: dict[str, str]) -> None:
         self.owned_by = owned_by
 
-    async def get_many(self, artifact_ids: list[str]) -> list[SimpleNamespace]:
+    async def get_many(self, artifact_ids: list[str], *, include_deleted: bool = False) -> list[SimpleNamespace]:
         return [SimpleNamespace(id=value, created_by_turn=self.owned_by[value]) for value in artifact_ids if value in self.owned_by]
 
 
@@ -656,8 +665,8 @@ class _V2ArtifactStore:
     def __init__(self, arts: dict[str, tuple[str | None, str | None]]) -> None:
         self._arts = arts
 
-    async def get_many(self, ids: list[str]) -> list[SimpleNamespace]:
-        return [SimpleNamespace(id=i, created_by_turn=self._arts[i][0], canvas_id=self._arts[i][1]) for i in ids if i in self._arts]
+    async def get_many(self, ids: list[str], *, include_deleted: bool = False) -> list[SimpleNamespace]:
+        return [SimpleNamespace(id=i, created_by="u", created_by_turn=self._arts[i][0], canvas_id=self._arts[i][1]) for i in ids if i in self._arts]
 
 
 def _v2_request(
@@ -931,3 +940,45 @@ async def test_v2_replay_batch_warms_inflight_for_live_citation(monkeypatch: pyt
     )
     assert row["access_state"] == "linked_labeled"
     assert row["safe_anchor_id"] == "sec_replay"
+
+
+@pytest.mark.anyio
+async def test_persisted_foreign_reference_cannot_mint_live_or_replayed_source_access(tmp_path: Path) -> None:
+    from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+
+    store = ArtifactStore(tmp_path / "foreign.db", LocalBackend(tmp_path / "foreign"))
+    await store.initialize()
+    foreign = await store.put_bytes(content=b"synthetic private source", filename="private.txt", mime="text/plain", created_by="another-user")
+    section = {"id": "sec_sources", "kind": "sources", "entries": [{"artifact_id": foreign.id, "label": "Private source"}]}
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                session_store=_SessionStore(), canvas_store=_CanvasStore([section]), artifact_store=store, artifact_fetch_secret="root-secret"
+            )
+        )
+    )
+    live = await project_live_event_payload_for_viewer(request, "turn_1", "canvas.section_added", {"section": section})
+    replay = (await project_event_payloads_for_viewer(request, "turn_1", [("canvas.section_added", {"section": section})]))[0]
+    assert live == replay
+    assert live["section"]["entries"][0]["access_state"] == "linked_unavailable"
+    assert "Private source" not in repr(live)
+
+
+@pytest.mark.anyio
+async def test_source_metadata_outage_keeps_live_and_replayed_reports_readable() -> None:
+    section = {"id": "sec_sources", "kind": "sources", "entries": [{"artifact_id": "art_private", "label": "Private source"}]}
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                session_store=_SessionStore(),
+                canvas_store=_CanvasStore([section]),
+                artifact_store=_FailingArtifactStore(),
+                artifact_fetch_secret="root-secret",
+            )
+        )
+    )
+    live = await project_live_event_payload_for_viewer(request, "turn_1", "canvas.section_added", {"section": section})
+    replay = (await project_event_payloads_for_viewer(request, "turn_1", [("canvas.section_added", {"section": section})]))[0]
+    assert live == replay
+    assert live["section"]["entries"][0]["access_state"] == "linked_unavailable"
+    assert "Private source" not in repr(live)

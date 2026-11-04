@@ -2,6 +2,7 @@
 
 Les instantanés Community ont leur propre historique. Une version de l’application ne signifie pas que des images ou un service hébergé ont été publiés.
 
+- [v1.6.80](releases/v1.6.80.fr-FR.md) — Navigation autorisée des connaissances, champs de graphiques explicites, modèles plus clairs et partage plus sûr.
 - [v1.6.43](releases/v1.6.43.fr-FR.md)
 - [v1.6.7](releases/v1.6.7.fr-FR.md)
 - [v1.6.3](releases/v1.6.3.fr-FR.md)

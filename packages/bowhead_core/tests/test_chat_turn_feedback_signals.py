@@ -19,10 +19,10 @@ from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
 
 async def _fixture(tmp_path: Path, turn_id: str) -> tuple[SessionStore, TurnLogStore, EventBusRegistry, Any]:
-    from bowhead_cli.migrate import TARGET_FILES, upgrade
+    from core_legacy_database import TARGET_FILES, upgrade
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)

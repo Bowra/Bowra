@@ -168,6 +168,67 @@ async def test_publish_failure_leaves_intent_for_another_gateway(tmp_path: Path)
     assert await clarification_store.count_pending_invalidations() == 0
 
 
+@pytest.mark.parametrize(
+    ("target_status", "reason", "actor"),
+    [("dismissed", "user_rephrase", "user"), ("expired", "clarification_ttl_expired", "system")],
+)
+@pytest.mark.asyncio
+async def test_failed_dispatch_publishes_only_committed_invalidation(tmp_path: Path, target_status, reason, actor) -> None:
+    db_path, clarification_store, turn_log_store = await _stores(tmp_path)
+    turn_id = f"t_failed_invalidation_{uuid4().hex}"
+    request = await _pending(clarification_store, turn_id)
+    uncommitted = await _pending(clarification_store, turn_id)
+    result = await clarification_store.invalidate_one(request.request_id, target_status=target_status, reason=reason, actor=actor)
+    assert result.invalidation is not None
+    payload = result.invalidation.event_payload()
+    event_id = result.invalidation.event_id
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("CREATE TABLE chat_turn_spawn_dispatch(turn_id TEXT PRIMARY KEY,state TEXT NOT NULL)")
+        connection.execute("INSERT INTO chat_turn_spawn_dispatch VALUES (?,'failed')", (turn_id,))
+    for forged_id, forged_payload in (
+        ("evt_forged", payload),
+        (event_id, {**payload, "reason": "forged"}),
+        (event_id, {**payload, "actor": "system" if actor == "user" else "user"}),
+        (event_id, {**payload, "turn_id": "other-turn"}),
+        (event_id, {**payload, "status": "expired" if target_status == "dismissed" else "dismissed"}),
+        (event_id, {**payload, "unexpected": "stale owner data"}),
+        (
+            f"evt_clarification_invalidation_{uncommitted.request_id}",
+            {**payload, "request_id": uncommitted.request_id},
+        ),
+    ):
+        assert await turn_log_store.record(turn_id=turn_id, event_type="clarification.dismissed", event_id=forged_id, payload=forged_payload) is None
+    assert await turn_log_store.record(turn_id=turn_id, event_type="partial_answer", payload={"text": "stale owner"}) is None
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE clarification_requests SET status='pending' WHERE request_id=?", (request.request_id,))
+    assert await turn_log_store.record(turn_id=turn_id, event_type="clarification.dismissed", event_id=event_id, payload=payload) is None
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE clarification_requests SET status=? WHERE request_id=?", (target_status, request.request_id))
+
+    registry = get_event_registry()
+    previous_sink = registry._default_log_sink
+    sink = OrderedTurnLogSink(turn_log_store)
+    registry.set_log_sink(sink)
+    try:
+        app = _app(clarification_store, turn_log_store, "gateway_fenced_recovery")
+        assert await publish_pending_clarification_invalidations(app) == 1
+        assert await publish_pending_clarification_invalidations(app) == 0
+        await sink.drain()
+    finally:
+        registry.set_log_sink(previous_sink)
+    events = await turn_log_store.list_events(turn_id)
+    assert len(events) == 1
+    assert events[0].id == event_id and events[0].event_type == "clarification.dismissed"
+    assert {key: value for key, value in events[0].payload.items() if key not in {"seq", "evt_seq"}} == payload
+    duplicate = await turn_log_store.record(
+        turn_id=turn_id, event_type="clarification.dismissed", event_id=event_id, payload={**payload, "seq": 99, "evt_seq": 99}
+    )
+    assert duplicate is not None and not duplicate.inserted
+    assert await clarification_store.count_pending_invalidations() == 0
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT state FROM chat_turn_spawn_dispatch WHERE turn_id=?", (turn_id,)).fetchone() == ("failed",)
+
+
 @pytest.mark.asyncio
 async def test_retry_after_event_persisted_before_outbox_settlement_is_idempotent(
     tmp_path: Path,

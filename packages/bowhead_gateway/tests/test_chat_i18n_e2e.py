@@ -25,13 +25,13 @@ from dataclasses import dataclass, field
 import httpx2
 import pytest
 from bi_mock.main import app as bi_mock_app
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.product_terms import default_catalog_path, load_catalog
 from bowhead_core.session_store import SessionStore
 from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.workspace_settings_store import WorkspaceSettingsStore
 from bowhead_gateway.main import create_app
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_bi_bridge import DatarcClient
 from bowhead_core import (
@@ -65,6 +65,8 @@ class CapturingAdapter(MockAdapter):
     captured: list[LLMRequest] = field(default_factory=list)
 
     async def invoke(self, req: LLMRequest) -> LLMResponse:
+        if req.invocation_agent_type != "lead":
+            return LLMResponse(content="")
         self.captured.append(req)
         return await super().invoke(req)
 
@@ -82,14 +84,27 @@ def _visible(req: LLMRequest) -> str:
 
 
 @pytest.fixture
-async def gateway_i18n_enabled(tmp_path):
+async def gateway_i18n_enabled(tmp_path, monkeypatch, complete_community_http_installation):
     """构造一个 i18n_v1 启用的 gateway，workspace_id='test-ws'."""
+    monkeypatch.setenv("FEATURE_CHAT_REFERENCE_PRIMARY_RUNTIME", "0")
     app = create_app()
 
     # ─── DB / stores ──────────────────────────────────────
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
     db_path = str(core_path)
+    from bowhead_core.user_store import UserStore
+    from community_http_fixture import (
+        bind_scripted_community_model_runtime,
+        community_http_headers,
+        create_scripted_http_actor,
+        seed_community_http_space,
+    )
+
+    users = UserStore(core_path)
+    owner = await create_scripted_http_actor(users, monkeypatch)
+    if owner is not None:
+        await seed_community_http_space(users, owner, "test-ws")
     user_settings_store = UserSettingsStore(db_path)
     await user_settings_store.init()
     workspace_settings_store = WorkspaceSettingsStore(db_path)
@@ -130,6 +145,8 @@ async def gateway_i18n_enabled(tmp_path):
     for agent_type in ("lead", "modeler", "analyst", "echo", "judge"):
         router.bind(AgentBinding(agent_type=agent_type, primary=("p1", "mock-model")))
 
+    bind_scripted_community_model_runtime(monkeypatch, router)
+
     # ─── product terms catalog ────────────────────────────
     catalog_path = default_catalog_path()
     if not catalog_path.exists():
@@ -159,18 +176,28 @@ async def gateway_i18n_enabled(tmp_path):
     from bowhead_gateway.settings import Settings
 
     app.state.settings = Settings()
+    if owner is not None:
+        app.state.settings.dev_default_user = owner.id
+        app.state.user_store = users
+        await complete_community_http_installation(users, app=app)
     app.state.datarc = datarc
     app.state.provider_registry = registry
     app.state.router = router
     app.state.orchestrator = orchestrator
     app.state.session_store = session_store
     app.state.turn_log_store = turn_log_store
+    app.state.test_headers = community_http_headers(owner)
+    from bowhead_core.terminal_protocol_store import TerminalProtocolStore
+
+    app.state.terminal_protocol_store = TerminalProtocolStore(db_path)
+    await app.state.terminal_protocol_store.initialize()
     app.state.user_settings_store = user_settings_store
     app.state.workspace_settings_store = workspace_settings_store
 
     try:
         yield {
             "app": app,
+            "headers": community_http_headers(owner),
             "adapter": adapter,
             "user_settings_store": user_settings_store,
             "workspace_settings_store": workspace_settings_store,
@@ -187,6 +214,7 @@ async def _wait_for_done(client: httpx2.AsyncClient, stream_url: str, timeout: f
     try:
         async with asyncio.timeout(timeout):
             async with client.stream("GET", stream_url) as stream:
+                assert stream.status_code == 200, (await stream.aread()).decode()
                 async for line in stream.aiter_lines():
                     line = line.strip()
                     if line.startswith("event:"):
@@ -210,7 +238,7 @@ async def test_i18n_directive_in_lead_prompt_when_enabled(gateway_i18n_enabled) 
     adapter = gateway_i18n_enabled["adapter"]
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -220,7 +248,7 @@ async def test_i18n_directive_in_lead_prompt_when_enabled(gateway_i18n_enabled) 
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -260,7 +288,7 @@ async def test_i18n_directive_skipped_when_flag_off(gateway_i18n_enabled) -> Non
     await workspace_settings.set("test-ws", "i18n_v1", "false")
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -270,7 +298,7 @@ async def test_i18n_directive_skipped_when_flag_off(gateway_i18n_enabled) -> Non
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -293,7 +321,7 @@ async def test_kill_switch_overrides_workspace_flag(
     app = gateway_i18n_enabled["app"]
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -303,7 +331,7 @@ async def test_kill_switch_overrides_workspace_flag(
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -349,7 +377,7 @@ async def test_three_axis_matrix(
     await workspace_settings.set("test-ws", "default_data_language", workspace_data_lang)
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -359,7 +387,7 @@ async def test_three_axis_matrix(
                 "user_profile": {"language": user_lang},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -387,7 +415,7 @@ async def test_china_pm_overseas_report_scenario(gateway_i18n_enabled) -> None:
     await user_settings.set(user_id, "output_language", "en-US")  # Explicit en.
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -397,7 +425,7 @@ async def test_china_pm_overseas_report_scenario(gateway_i18n_enabled) -> None:
                 # Omit user_profile so backend uses user_settings.
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -434,7 +462,7 @@ async def test_inline_numbers_directive_when_flag_on(gateway_i18n_enabled) -> No
     adapter._script_index = 0
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -444,7 +472,7 @@ async def test_inline_numbers_directive_when_flag_on(gateway_i18n_enabled) -> No
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         events = await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -486,7 +514,7 @@ async def test_inline_numbers_disabled_when_flag_off(gateway_i18n_enabled) -> No
     adapter._script_index = 0
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -496,7 +524,7 @@ async def test_inline_numbers_disabled_when_flag_off(gateway_i18n_enabled) -> No
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         events = await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -535,7 +563,7 @@ async def test_mixed_language_history_carries_through(gateway_i18n_enabled) -> N
     adapter._script_index = 0
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         # Turn 1: zh
         r1 = await client.post(
             "/api/v1/chat/send",
@@ -562,7 +590,7 @@ async def test_mixed_language_history_carries_through(gateway_i18n_enabled) -> N
                 "user_profile": {"language": "en-US"},
             },
         )
-        assert r2.status_code == 200
+        assert r2.status_code == 200, r2.text
         body2 = r2.json()
         await _wait_for_done(client, body2["stream_url"], timeout=20.0)
 
@@ -596,7 +624,7 @@ async def test_output_language_only_triggers_user_level_fallback(gateway_i18n_en
     await user_settings.set(user_id, "output_language", "en-US")  # Set only output.
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -605,7 +633,7 @@ async def test_output_language_only_triggers_user_level_fallback(gateway_i18n_en
                 "message": "今年的总营收是多少？",
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -630,7 +658,7 @@ async def test_flag_unset_and_no_user_language_now_enabled(gateway_i18n_enabled)
     await workspace_settings.delete("test-ws", "i18n_v1")
 
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=gateway_i18n_enabled["headers"]) as client:
         resp = await client.post(
             "/api/v1/chat/send",
             json={
@@ -639,7 +667,7 @@ async def test_flag_unset_and_no_user_language_now_enabled(gateway_i18n_enabled)
                 "message": "今年的总营收是多少？",
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         body = resp.json()
         await _wait_for_done(client, body["stream_url"], timeout=20.0)
 
@@ -653,7 +681,7 @@ async def test_flag_unset_and_no_user_language_now_enabled(gateway_i18n_enabled)
 
 async def _send(app, message: str, *, accept_language: str | None = None, session_id: str | None = None) -> dict:
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers=app.state.test_headers) as client:
         payload = {
             "workspace_id": "test-ws",
             "member_uid": "aaa95ad475254d8e83566a13135e58fa",

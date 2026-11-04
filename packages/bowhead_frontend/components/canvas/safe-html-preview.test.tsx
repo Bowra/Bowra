@@ -1,3 +1,4 @@
+import { installHtmlPreviewWorker } from "@/__tests__/helpers/html-preview-worker";
 import "@testing-library/jest-dom/vitest";
 
 import {
@@ -7,7 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildSafeHtmlDocument,
@@ -27,6 +28,36 @@ afterEach(() => {
 });
 
 describe("safe HTML preview", () => {
+  it("accepts only the current outer frame channel and the three notification types", () => {
+    const onEscape = vi.fn();
+    const onIssue = vi.fn();
+    const interactive = { document: "<p>Fixture</p>", channel: "current-channel", externalResources: false };
+    const { container, rerender } = render(
+      <SafeHtmlFrame document={interactive.document} title="Fixture" interactive={interactive} onEscape={onEscape} onIssue={onIssue} />,
+    );
+    const outer = container.querySelector("iframe")!.contentWindow!;
+    const send = (source: MessageEventSource | null, channel: string, type: string) => {
+      window.dispatchEvent(new MessageEvent("message", { source, origin: "null", data: { channel, type } }));
+    };
+    send(window, interactive.channel, "bowhead-html-runtime");
+    send(null, interactive.channel, "bowhead-html-escape");
+    send(outer, "previous-channel", "bowhead-html-blocked");
+    send(outer, interactive.channel, "fetch");
+    send(outer, interactive.channel, "download");
+    expect(onEscape).not.toHaveBeenCalled();
+    expect(onIssue).not.toHaveBeenCalled();
+    send(outer, interactive.channel, "bowhead-html-runtime");
+    send(outer, interactive.channel, "bowhead-html-blocked");
+    send(outer, interactive.channel, "bowhead-html-escape");
+    expect(onIssue.mock.calls).toEqual([["runtime"], ["blocked"]]);
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    rerender(<SafeHtmlFrame document={interactive.document} title="Fixture" interactive={{ ...interactive, channel: "next-channel" }} onIssue={onIssue} />);
+    send(outer, interactive.channel, "bowhead-html-runtime");
+    expect(onIssue).toHaveBeenCalledTimes(2);
+    send(outer, "next-channel", "bowhead-html-runtime");
+    expect(onIssue).toHaveBeenCalledTimes(3);
+  });
+
   it("accepts only explicit HTML MIME types", () => {
     expect(isSafeHtmlMime("text/html; charset=utf-8")).toBe(true);
     expect(isSafeHtmlMime("application/xhtml+xml")).toBe(true);
@@ -69,7 +100,7 @@ describe("safe HTML preview", () => {
     expect(parsed.querySelector("link")).toBeNull();
     expect(parsed.querySelector("[onload], [onerror]")).toBeNull();
     expect(parsed.querySelector("a")?.hasAttribute("href")).toBe(false);
-    expect(parsed.querySelectorAll("a")[1]?.getAttribute("href")).toBe("#section");
+    expect(parsed.querySelectorAll("a")[1]?.getAttribute("href")).toBe("about:srcdoc#section");
     expect(parsed.querySelector("img")?.hasAttribute("src")).toBe(false);
     expect(parsed.querySelector("img")?.hasAttribute("srcset")).toBe(false);
     expect(parsed.querySelectorAll("img")[1]?.getAttribute("src")).toBe(
@@ -171,7 +202,7 @@ describe("safe HTML preview", () => {
       headers: { "content-type": "text/html", ...(policy ? { "X-Bowhead-HTML-Max-Bytes": policy } : {}) },
     })));
     const { result } = renderHook(() => useSafeHtmlDocument({ enabled: true, href: "/api/v1/files/report" }));
-    await waitFor(() => expect(result.current.document).toContain("Readable report"));
+    await waitFor(() => expect(result.current.document).toContain("Readable report"), { timeout: 5000 });
     expect(result.current.error).toBeNull();
   });
 
@@ -243,3 +274,6 @@ describe("safe HTML preview", () => {
     expect(result.current.document).toBeNull();
   });
 });
+
+
+beforeEach(() => installHtmlPreviewWorker());

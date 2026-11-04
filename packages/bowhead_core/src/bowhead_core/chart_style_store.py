@@ -21,6 +21,7 @@ from bowhead_core.chart_style_models import (
     resource_etag,
     revision_to_dict,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -183,7 +184,7 @@ def _decode_cursor(value: str, *, length: int) -> list[Any]:
 
 class ChartStyleStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def detail(self, *, team_id: str, style_id: str) -> tuple[TeamChartStyle, TeamChartStyleDraft | None, TeamChartStyleRevision | None]:
         async with open_shared_ctx(self.db_path) as db:

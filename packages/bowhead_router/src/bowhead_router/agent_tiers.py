@@ -183,13 +183,14 @@ def validate_tiers(
     providers: dict[str, Any],
     *,
     allow_legacy_duplicate_fallbacks: bool = False,
+    allow_unassigned_primary: bool = False,
 ) -> None:
     """校验 ``tiers`` 段结构 + provider 引用存在。provider 本身（SSRF/type）由
     ``team_llm_config.validate_v2_config`` 负责，这里只查 tier 形状与交叉引用。"""
     if not isinstance(tiers, dict):
         raise TierConfigError("tiers must be an object")
     # primary is required and explicit.
-    primary = _require_pair(tiers.get(TIER_PRIMARY), providers, "tiers.primary")
+    primary = None if allow_unassigned_primary and not tiers.get(TIER_PRIMARY) else _require_pair(tiers.get(TIER_PRIMARY), providers, "tiers.primary")
     # primary_fallback is an optional list of pairs.
     fb = tiers.get("primary_fallback")
     if fb is not None:

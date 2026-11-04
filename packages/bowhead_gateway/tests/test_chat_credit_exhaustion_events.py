@@ -5,7 +5,6 @@ from typing import Any
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.events import EventBusRegistry
 from bowhead_core.rate_card import RATE_CARD_VERSION
 from bowhead_core.session_store import SessionStore
@@ -25,6 +24,7 @@ from bowhead_gateway.routes import chat as chat_routes
 from bowhead_gateway.turn_service import admit_legacy_chat_execution
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +70,7 @@ class _MetricsLog:
 
 async def _prepare_worker(orchestrator: Any, req: Any, tmp_path: Any) -> Any:
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
     session_store = SessionStore(core_path)
     await session_store.initialize()
     await session_store.ensure_session(
@@ -250,7 +250,7 @@ async def test_turn_that_outspends_balance_blocks_next_send(tmp_path: Any, monke
     from bowhead_core.user_store import UserStore, _now
 
     user_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{user_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(user_path).with_name('bowhead.db')}", target="core") == ("core",)
     user_store = UserStore(str(user_path))
     await user_store.initialize()
     async with aiosqlite.connect(user_store.db_path) as db:

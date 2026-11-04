@@ -14,6 +14,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 AUTOMATION_SCOPES = frozenset({"proposal:create", "candidate:prepare", "eval:run", "gate:read"})
@@ -32,7 +33,7 @@ class AgentVersionAutomationError(RuntimeError):
 
 class AgentVersionAutomationStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def create_grant(
         self,

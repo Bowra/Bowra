@@ -142,6 +142,15 @@ def chrome_lang(language_context: Any) -> str:
     return lang if lang in _CHROME else "en-US"
 
 
+for _locale, _message in {
+    "en-US": "Some requested work remains unfulfilled or unverified. Review the failed steps before relying on a complete result.",
+    "zh-CN": "部分要求尚未完成或核实。请查看失败步骤及其影响，当前成果不能视为完整交付。",
+    "de-DE": "Einige Anforderungen sind noch unerfüllt oder ungeprüft. Prüfen Sie die fehlgeschlagenen Schritte, bevor Sie das Ergebnis als vollständig betrachten.",
+    "fr-FR": "Certaines demandes restent inachevées ou non vérifiées. Consultez les étapes en échec avant de considérer le résultat comme complet.",
+}.items():
+    _CHROME[_locale]["delivery_unverified"] = _message
+
+
 def chrome_text(key: str, lang: str, **fmt: Any) -> str:
     """Render report copy; unsupported locales use English and unknown keys raise."""
     table = _CHROME.get(lang) or _CHROME["en-US"]

@@ -8,6 +8,9 @@ from typing import Any
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
+
 MAX_INVENTORY_JSON_BYTES = 64 * 1024
 
 
@@ -20,7 +23,7 @@ async def save_bundle_inventory(db_path: str, *, bundle_artifact_id: str, create
     if len(inventory_json.encode("utf-8")) > MAX_INVENTORY_JSON_BYTES:
         return False
     now = _now()
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(domain_database_path(db_path, "execution")) as db:
         await db.execute(
             """
             INSERT INTO chat_attachment_bundle_inventory(bundle_artifact_id, created_by, inventory_json, created_at, updated_at)
@@ -35,7 +38,7 @@ async def save_bundle_inventory(db_path: str, *, bundle_artifact_id: str, create
 
 async def get_bundle_inventory(db_path: str, *, bundle_artifact_id: str, created_by: str | None = None) -> dict[str, Any] | None:
     """读回；给了 created_by 就按本人过滤（清点结果只给上传者看）."""
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(domain_database_path(db_path, "execution")) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT created_by, inventory_json FROM chat_attachment_bundle_inventory WHERE bundle_artifact_id=?",

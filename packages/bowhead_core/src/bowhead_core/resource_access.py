@@ -311,7 +311,7 @@ def resource_grant_targets_for_tool(
             )
         return targets
 
-    if tool_name == "kb_search":
+    if tool_name in {"kb_search", "kb_list_sources"}:
         # The handler performs per-scope filtering so a user with workspace KB
         # access but no team KB access can still search the allowed collections.
         return targets

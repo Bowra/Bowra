@@ -16,8 +16,8 @@ from typing import Any, Literal
 
 # Capability vocabulary — used by env override + active block.
 # Sprint 25 added "row_extractor" for per-row PDF → structured rows via LLM.
-Capability = Literal["vision", "embed", "rerank", "row_extractor"]
-CAPABILITIES: tuple[Capability, ...] = ("vision", "embed", "rerank", "row_extractor")
+Capability = Literal["vision", "embed", "rerank", "row_extractor", "source_description"]
+CAPABILITIES: tuple[Capability, ...] = ("vision", "embed", "rerank", "row_extractor", "source_description")
 PROTOCOLS: tuple[str, ...] = ("openai_compat", "dashscope_native")
 
 
@@ -73,6 +73,11 @@ class KbModelRegistry:
 
     def _active_name(self, capability: Capability) -> str:
         # Env override wins so an operator can A/B without editing yaml.
+        if capability == "source_description":
+            name = self.active.get(capability)
+            if not isinstance(name, str) or not name:
+                raise KbModelConfigError("Knowledge source description generation is disabled")
+            return name
         env_var = f"BOWHEAD_KB_{capability.upper()}"
         env_val = os.environ.get(env_var, "").strip()
         if env_val:

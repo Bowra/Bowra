@@ -208,3 +208,20 @@ def test_user_owned_sources_is_a_single_object_not_two_copies() -> None:
     """
     assert _USER_OWNED_SOURCES is model_view.USER_OWNED_SOURCES
     assert _LEAD_USER_OWNED is model_view.USER_OWNED_SOURCES
+
+
+def test_presentation_projection_preserves_native_checks_without_echoed_claims(monkeypatch):
+    import copy
+
+    monkeypatch.setenv("BOWHEAD_MODEL_VIEW_PROJECTION", "1")
+    result = {
+        "ok": True,
+        "artifacts": [{"artifact_id": "art_retained", "description": "All runtime tests passed"}],
+        "output_artifacts": [{"artifact_id": "art_retained", "title": "Verified", "html_static_check": {"runtime_checked": False}}],
+    }
+    original = copy.deepcopy(result)
+    projected = model_view.project_tool_result("present_artifacts", result)
+    assert result == original
+    assert "artifacts" not in projected
+    assert projected["output_artifacts"][0]["html_static_check"] == {"runtime_checked": False}
+    assert "title" not in projected["output_artifacts"][0]

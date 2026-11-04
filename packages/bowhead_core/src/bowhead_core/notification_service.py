@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 if TYPE_CHECKING:
     from bowhead_core.approval_store import Approval, ApprovalStore
@@ -25,6 +26,11 @@ ACCESS_REQUEST_NO_LONGER_ACTIVE = "This request is no longer active. Request acc
 # Canonical personal Memory page. The standalone `/memory` page was folded into Settings; the
 # frontend still maps legacy persisted `/memory` action URLs to this path.
 MEMORY_SETTINGS_PATH = "/settings/memory/"
+
+
+def space_assignment_action_url(requester_user_id: str, team_id: str) -> str:
+    """Open the existing member Space-grant dialog."""
+    return "/team/settings/people/?" + urlencode({"member": requester_user_id, "team": team_id})
 
 
 def _metric_inc(name: str, labels: dict[str, str], value: float = 1.0) -> None:
@@ -140,14 +146,16 @@ class NotificationService:
         if not admin_ids:
             _emit_metric("space_assignment_requested", "no_recipients")
             return None
-        action_url = "/team/settings/spaces/?from=notification"
+        labels = await self.user_store.get_team_member_labels(team_id, [requester_user_id])
+        requester_name = labels.get(requester_user_id, requester_user_id)
+        action_url = space_assignment_action_url(requester_user_id, team_id)
         item = await self.store.upsert_item_with_recipients(
             team_id=team_id,
             category="space_assignment",
             type="space_assignment_requested",
             priority="p1",
-            title="有成员需要分配空间",
-            body="一名团队成员目前没有可用空间，请在空间管理中处理。",
+            title=f"{requester_name} needs a space",
+            body="This team member has no available space. Review their space permissions.",
             subject_type="team_space_assignment",
             subject_id=team_id,
             actor_user_id=requester_user_id,
@@ -155,12 +163,12 @@ class NotificationService:
             actions=[
                 {
                     "id": "review",
-                    "label": "管理空间",
+                    "label": "Manage space permissions",
                     "kind": "link",
                     "url": action_url,
                 }
             ],
-            metadata={"requesterUserId": requester_user_id},
+            metadata={"requesterUserId": requester_user_id, "requesterName": requester_name},
             dedupe_key=(f"space.assignment.requested:{requester_user_id}"),
             recipients=[(user_id, "space_assignment_admin") for user_id in admin_ids],
             reopen_resolved=True,

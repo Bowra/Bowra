@@ -34,6 +34,7 @@ async def _seed_users(users: UserStore) -> tuple[str, str, str]:
     requester = await users.create_user(
         team_id=team.id,
         email="requester@example.com",
+        display_name="Alice",
         password="Passw0rd!",
     )
     await users.set_team_creator(team.id, owner.id)
@@ -52,6 +53,10 @@ async def test_space_assignment_request_is_atomic_action_item_and_idempotent(
     )
     assert first is not None
     assert first.type == "space_assignment_requested"
+    assert first.metadata == {"requesterUserId": requester_id, "requesterName": "Alice"}
+    assert first.title == "Alice needs a space"
+    assert first.action_url == f"/team/settings/people/?member={requester_id}&team={team_id}"
+    assert first.actions[0]["url"] == first.action_url
     assert "space_assignment_requested" in ACTION_REQUIRED_TYPES
     counts = await notifications.notification_count(user_id=owner_id)
     assert counts.action_required == 1

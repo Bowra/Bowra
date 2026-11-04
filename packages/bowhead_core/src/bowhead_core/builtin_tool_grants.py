@@ -27,6 +27,7 @@ import aiosqlite
 from cryptography.fernet import Fernet, InvalidToken
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 _KEY_CONTEXT = "builtin-tool-grant.v1"
 STATE_TTL_SECONDS = 600
@@ -95,7 +96,7 @@ def _grant(row: Any) -> BuiltinToolGrant:
 
 class BuiltinToolGrantStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
 
     def _cipher(self, user_id: str, tool_id: str, purpose: str) -> Fernet:
         root = os.environ.get("BOWHEAD_FERNET_KEY", "")

@@ -12,6 +12,7 @@ from bowhead_core.agents.clarification_tool import make_clarification_sentinel
 from bowhead_core.agents.lead_orchestrator import LeadRuntime, _lead_loop
 from bowhead_core.agents.turn_context import SerializableTurnContext
 from bowhead_core.subagent import PROFILES, SubagentProfile, SubagentResult
+from bowhead_core.tool_registry import ToolRegistry
 from bowhead_core.types import ToolInvocation, TurnStatus
 
 # ─────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ def _make_sctx(turn_id: str = "t_test", user_text: str = "hi") -> SerializableTu
 def _make_ctx(clarification_store: Any = None) -> SimpleNamespace:
     return SimpleNamespace(
         clarification_store=clarification_store,
+        tool_view=None,
         _m137_subagent_payloads=[],
         execution_generation=1,
         execution_owner_id=None,
@@ -193,7 +195,7 @@ async def test_ch2_two_sentinels_merge_into_single_emit(
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=ToolRegistry(),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -268,7 +270,7 @@ async def test_ch2_single_sentinel_preserves_existing_behavior(
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=ToolRegistry(),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -333,7 +335,7 @@ async def test_ch2_dedup_same_candidate_string_from_two_sentinels(
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=ToolRegistry(),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -374,7 +376,7 @@ async def test_ch2_zero_sentinels_no_clarification_emit(
     runner = _FakeSubagentRunner(result=sub_result)
     runtime = LeadRuntime(
         router=SimpleNamespace(),
-        tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+        tool_registry=ToolRegistry(),
         parent_bus=bus,
         parent_ctx=ctx,
         subagent_runner=runner,
@@ -415,7 +417,7 @@ async def test_held_marker_tails_are_flushed_at_call_boundary_and_turn_end(monke
     runner.calls = [[first[i : i + 3] for i in range(0, len(first), 3)], [second[i : i + 4] for i in range(0, len(second), 4)]]
     runtime = LeadRuntime(
         router=SimpleNamespace(),
-        tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+        tool_registry=ToolRegistry(),
         parent_bus=bus,
         parent_ctx=_make_ctx(),
         subagent_runner=runner,
@@ -449,7 +451,7 @@ async def test_final_answer_has_no_blank_lines_left_by_stripped_markers(
     )
     runtime = LeadRuntime(
         router=SimpleNamespace(),
-        tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+        tool_registry=ToolRegistry(),
         parent_bus=bus,
         parent_ctx=_make_ctx(),
         subagent_runner=_FakeSubagentRunner(result=sub_result),
@@ -511,7 +513,7 @@ async def test_ch2_tool_context_sentinel_forwards_tool_discriminator(
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=ToolRegistry(),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,
@@ -574,7 +576,7 @@ async def test_ch2_generic_sentinel_tool_is_none(
         runner = _FakeSubagentRunner(result=sub_result)
         runtime = LeadRuntime(
             router=SimpleNamespace(),
-            tool_registry=SimpleNamespace(to_schemas=list, has=lambda *_: False),
+            tool_registry=ToolRegistry(),
             parent_bus=bus,
             parent_ctx=ctx,
             subagent_runner=runner,

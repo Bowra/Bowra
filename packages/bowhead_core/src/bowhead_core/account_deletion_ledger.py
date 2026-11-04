@@ -7,9 +7,8 @@ import hmac
 import json
 from pathlib import Path
 
-import aiosqlite
-
-from bowhead_core.account_deletion import AccountDeletion, AccountDeletionError, retire_account_conn
+from bowhead_core.account_deletion import AccountDeletion, AccountDeletionError, finish_account_retirement_execution, retire_account_conn
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.user_store import UserStore
 
 
@@ -28,7 +27,7 @@ class AccountDeletionLedger:
 
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute(
                 "CREATE TABLE IF NOT EXISTS account_retirements (subject TEXT PRIMARY KEY,requested_at TEXT NOT NULL,purge_after TEXT NOT NULL,signature TEXT NOT NULL)"
             )
@@ -37,7 +36,7 @@ class AccountDeletionLedger:
     async def record(self, deletion: AccountDeletion) -> None:
         subject = self.subject(deletion.user_id)
         signature = self._signature(subject, deletion.requested_at, deletion.purge_after)
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO account_retirements VALUES (?,?,?,?)", (subject, deletion.requested_at, deletion.purge_after, signature)
             )
@@ -52,7 +51,7 @@ class AccountDeletionLedger:
         from datetime import datetime
 
         async with (
-            aiosqlite.connect(self.path) as ledger,
+            diagnostic_connect(self.path) as ledger,
             ledger.execute("SELECT subject,requested_at,purge_after,signature FROM account_retirements") as cur,
         ):
             receipts = {row[0]: row for row in await cur.fetchall()}
@@ -60,7 +59,8 @@ class AccountDeletionLedger:
             if not hmac.compare_digest(signature, self._signature(subject, requested_at, purge_after)):
                 raise AccountDeletionError("account_deletion_ledger_signature_invalid")
         restored = 0
-        async with aiosqlite.connect(store.db_path) as db:
+        restored_deletions = []
+        async with diagnostic_connect(store.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute("SELECT user_id,requested_at,purge_after FROM account_deletions") as cur:
@@ -79,8 +79,11 @@ class AccountDeletionLedger:
                     if (result.requested_at, result.purge_after) != (receipt[1], receipt[2]):
                         raise AccountDeletionError("account_deletion_ledger_mismatch")
                     restored += 1
+                    restored_deletions.append(result)
                 await db.commit()
             except BaseException:
                 await db.rollback()
                 raise
+        for deletion in restored_deletions:
+            await finish_account_retirement_execution(store, deletion)
         return restored

@@ -15,6 +15,8 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
 
 export interface AiRewriteRanges {
+  /** Chosen prose before generation; view-only and not marked as a deletion. */
+  target?: { from: number; to: number } | null;
   /** Original text range before rewriting (to be deleted → struck through and grayed out). */
   old: { from: number; to: number } | null;
   /** New text range after rewriting (added → highlighted background). */
@@ -39,7 +41,7 @@ export function aiRewritePlugin(): Plugin<AiRewriteRanges | null> {
         if (!value) return value;
         const mapR = (r: { from: number; to: number } | null) =>
           r ? { from: tr.mapping.map(r.from, 1), to: tr.mapping.map(r.to, -1) } : null;
-        return { ...value, old: mapR(value.old), new: mapR(value.new) };
+        return { ...value, old: mapR(value.old), new: mapR(value.new), ...(value.target ? { target: mapR(value.target) } : {}) };
       },
     },
     props: {
@@ -47,6 +49,9 @@ export function aiRewritePlugin(): Plugin<AiRewriteRanges | null> {
         const ranges = AiRewriteDecoKey.getState(state);
         if (!ranges) return DecorationSet.empty;
         const decos: Decoration[] = [];
+        if (ranges.target && ranges.target.to > ranges.target.from) {
+          decos.push(Decoration.inline(ranges.target.from, ranges.target.to, { class: "ai-rewrite-target" }));
+        }
         if (ranges.old && ranges.old.to > ranges.old.from) {
           decos.push(
             Decoration.inline(ranges.old.from, ranges.old.to, { class: "ai-rewrite-old" }),

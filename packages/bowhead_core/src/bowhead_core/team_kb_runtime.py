@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 _IDLE_TIMEOUT_SEC = 3600
 _MAX_CACHE = 100
 _SUPPORTED_PROTOCOLS = frozenset(PROTOCOLS)
-_KB_CAPABILITIES = ("embed", "rerank", "vision", "row_extractor")
+_KB_CAPABILITIES = ("embed", "rerank", "vision", "row_extractor", "source_description")
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +152,8 @@ def _diagnose_kb_model_ref(
         and bool(str(spec.get("real_id") or spec.get("model")).strip())
         and spec.get("protocol", "openai_compat") in _SUPPORTED_PROTOCOLS
     )
+    if capability == "source_description" and isinstance(provider, dict) and provider.get("type") in {"azure_openai", "custom_http"}:
+        valid = False
     if valid and capability == "embed":
         try:
             valid = int(spec.get("dim")) > 0
@@ -198,6 +200,7 @@ class TeamKbRuntimeRegistry:
         active_per_row_tasks_ref: Any,
         ingestion_gate: Any = None,
         ingestion_authorizer: Any = None,
+        description_assignment_resolver: Any = None,
     ) -> None:
         self._persist_dir = persist_dir
         self._files_store = files_store
@@ -212,6 +215,7 @@ class TeamKbRuntimeRegistry:
         self._active_per_row_tasks_ref = active_per_row_tasks_ref
         self._ingestion_gate = ingestion_gate
         self._ingestion_authorizer = ingestion_authorizer
+        self._description_assignment_resolver = description_assignment_resolver
         self._cache: dict[str, TeamKbRuntime] = {}
         self._lock = asyncio.Lock()
         self._reaper_task: asyncio.Task[None] | None = None
@@ -356,6 +360,7 @@ class TeamKbRuntimeRegistry:
                 active_per_row_tasks_ref=self._active_per_row_tasks_ref,
                 ingestion_gate=self._ingestion_gate,
                 ingestion_authorizer=self._ingestion_authorizer,
+                description_assignment_resolver=self._description_assignment_resolver,
             )
             return TeamKbRuntime(
                 version=version,

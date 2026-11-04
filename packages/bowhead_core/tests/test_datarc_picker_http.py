@@ -71,7 +71,11 @@ async def test_helper_native_switch_continues_its_admitted_task_after_selection(
             if len(lead_calls) == 1:
                 return response(
                     body,
-                    call("original-delegation", "subagent_spawn", {"profile": "compute", "task": "Switch to Source, then inspect it."}),
+                    call(
+                        "original-delegation",
+                        "subagent_spawn",
+                        {"profile": "compute", "required_source_urls": [], "task": "Switch to Source, then inspect it."},
+                    ),
                     "tool_calls",
                 )
             returned = [json.loads(message["content"]) for message in body["messages"] if message.get("name") == "subagent_spawn"]
@@ -227,7 +231,11 @@ async def test_helper_workspace_picker_pauses_without_empty_result_and_resumes(h
             lead_calls.append(body)
             if len(lead_calls) > 2:
                 return response(body, {"role": "assistant", "content": "Source A selected."}, "stop")
-            return response(body, call(f"helper-{len(lead_calls)}", "subagent_spawn", {"profile": "compute", "task": "Inspect sales."}), "tool_calls")
+            return response(
+                body,
+                call(f"helper-{len(lead_calls)}", "subagent_spawn", {"profile": "compute", "required_source_urls": [], "task": "Inspect sales."}),
+                "tool_calls",
+            )
         if "bi_schema" in names:
             helper_calls.append(body)
             if len(helper_calls) <= 2:
@@ -323,7 +331,9 @@ async def test_compute_uses_saved_source_or_calls_existing_switch_tools(http_sta
         if "subagent_spawn" in names:
             lead_calls.append(body)
             if len(lead_calls) == 1:
-                return response(body, call("compute-source", "subagent_spawn", {"profile": "compute", "task": task}), "tool_calls")
+                return response(
+                    body, call("compute-source", "subagent_spawn", {"profile": "compute", "required_source_urls": [], "task": task}), "tool_calls"
+                )
             return response(body, {"role": "assistant", "content": target_name + " inspected."}, "stop")
         if "bi_schema" in names:
             helper_calls.append(body)
@@ -425,7 +435,7 @@ async def test_workspace_answer_restores_list_switch_and_helper_reads(http_start
             elif tool == "tool_switch_context":
                 arguments = {"name": "Source" if native else target_name, "remember": selection == "native-override"}
             elif tool == "subagent_spawn":
-                arguments = {"profile": "compute", "task": "Inspect " + target_name + "."}
+                arguments = {"profile": "compute", "required_source_urls": [], "task": "Inspect " + target_name + "."}
             return response(body, call(f"source-step-{len(lead_calls)}", tool, arguments), "tool_calls")
         if "bi_schema" in names:
             helper_calls.append(body)

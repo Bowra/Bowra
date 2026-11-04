@@ -26,6 +26,8 @@ export type ToolName =
   | "web_search"
   | "kb_search"
   | "subagent_spawn"
+  | "subagent_return"
+  | "review_delivery"
   | "agent_message"
   | "lead_thinking_writing_python"
   | "lead_thinking_writing_sql"

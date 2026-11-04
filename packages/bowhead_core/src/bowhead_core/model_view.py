@@ -143,6 +143,24 @@ def project_tool_result(
     """
     if not tool_name or not enabled():
         return result
+    if tool_name == "present_artifacts" and isinstance(result, dict):
+        result = dict(result)
+        for key in ("artifacts", "output_artifacts"):
+            if isinstance(result.get(key), list):
+                result[key] = [
+                    {k: v for k, v in item.items() if k not in {"title", "description"}} if isinstance(item, dict) else item for item in result[key]
+                ]
+        if result.get("ok"):
+            if result.get("output_artifacts"):
+                # Declarations contain authored labels; expose one canonical file table.
+                result.pop("artifacts", None)
+            result["evidence_guidance"] = (
+                "Presentation labels are model-authored, not independent evidence. Use native diagnostics only for their stated checks. "
+                "Not checked does not mean absent. runtime_checked=false describes this checker, not prior network activity."
+                " Copy each file's ID, name, MIME and size from the same output_artifacts entry. "
+                "A label_conflicts entry identifies a supplied title naming another file; use its canonical filename. "
+                "The native file list provides download links. Do not repeat raw artifact IDs in prose unless explicitly requested."
+            )
     if tool_name in _FIGURE_ANCHOR_TOOLS:
         result = _with_figure_anchor_hint(result, anchor_id=figure_anchor_id)
     keys = _BACKEND_ONLY_KEYS.get(tool_name)

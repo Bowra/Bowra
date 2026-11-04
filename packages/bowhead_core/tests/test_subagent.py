@@ -210,7 +210,9 @@ async def test_known_url_answer_requires_successful_page_read(backend, dc, monke
         task="核对 https://example.com 的公告内容",
         parent_turn_id="t_url",
         parent_bus=bus,
-        parent_ctx=ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t_url", datarc=dc),
+        parent_ctx=ToolExecutionContext(
+            workspace_id="w", member_uid="m", user_id="u", turn_id="t_url", datarc=dc, required_web_sources=("https://example.com",)
+        ),
     )
 
     assert result.ok is False
@@ -255,7 +257,9 @@ async def test_known_url_fetch_allows_answer_only_on_success(backend, dc, monkey
         task=task,
         parent_turn_id="t_url",
         parent_bus=bus,
-        parent_ctx=ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t_url", datarc=dc),
+        parent_ctx=ToolExecutionContext(
+            workspace_id="w", member_uid="m", user_id="u", turn_id="t_url", datarc=dc, required_web_sources=("https://example.com",)
+        ),
     )
 
     assert result.ok is fetch_ok
@@ -637,8 +641,21 @@ async def test_short_chat_payload_suppresses_peer_auto_chart(
     monkeypatch,
     latch_before_auto_chart: bool,
 ) -> None:
-    """短答不升级；已锁存持久化失败也不得执行 auto-chart 写副作用。"""
+    """Short answers never auto-chart, including after a durable-event failure."""
     chart_calls: list[dict[str, object]] = []
+
+    # Later peer rounds stream; the basic mock omits native Tool deltas.
+    from bowhead_router import LLMChunk
+
+    async def stream_tools(adapter, request):
+        response = await adapter.invoke(request)
+        if response.content:
+            yield LLMChunk(delta=response.content)
+        for call in response.tool_calls:
+            yield LLMChunk(tool_call_delta=call)
+        yield LLMChunk(finish_reason="tool_use" if response.tool_calls else "stop", usage=response.usage)
+
+    monkeypatch.setattr(MockAdapter, "stream", stream_tools)
 
     async def _persist(_event):
         return True
@@ -715,6 +732,11 @@ async def test_short_chat_payload_suppresses_peer_auto_chart(
                     name="skill_invoke",
                     arguments={"name": "python_sandbox", "script": "compute.py"},
                 ),
+            ],
+        ),
+        LLMResponse(
+            content="",
+            tool_calls=[
                 ToolCall(
                     id="return",
                     name="subagent_return",
@@ -763,8 +785,8 @@ async def test_short_chat_payload_suppresses_peer_auto_chart(
 
     assert result.ok
     returned = [inv for inv in result.tool_invocations if inv.tool_name == "subagent_return"]
-    assert len(returned) == 1
-    assert returned[0].result["ok"] is True
+    assert len(returned) == 1, [(inv.tool_name, inv.result, inv.error) for inv in result.tool_invocations]
+    assert returned[0].result["ok"] is True, returned[0].result
     assert result.payload is not None
     assert result.payload["delivery_surface"] == "chat"
     assert chart_calls == []
@@ -1507,3 +1529,115 @@ async def test_run_wires_figure_anchor_resolution_with_the_run_local_allowlist(b
     assert isinstance(seen["allowlist"], RefAllowlist), f"传下去的不是本 run 的表：{seen['allowlist']!r}"
     # No evidence (no chart created this run, none in the allowlist) ⇒ fail open, preserving anchors unchanged.
     assert "[figure:7]" in (result.final_answer or "")
+
+
+async def test_literal_html_dependency_does_not_require_network_read(backend, dc, monkeypatch):
+    profile = SubagentProfile(
+        name="literal-source-test",
+        llm_agent_type="analyst",
+        tool_whitelist=("web_fetch",),
+        system_prompt="Create the requested literal example without accessing its dependency.",
+        max_iterations=2,
+    )
+    monkeypatch.setitem(PROFILES, profile.name, profile)
+    router = _scripted_for(backend, LLMResponse(content="The literal example is prepared."))
+    result = await SubagentRunner(router=router, tool_registry=ToolRegistry(), backend=backend).run(
+        profile_name=profile.name,
+        task="Include the literal script URL https://example.invalid/offline.js; do not access it.",
+        parent_turn_id="t_literal",
+        parent_bus=TurnEventBus(),
+        parent_ctx=ToolExecutionContext(workspace_id="w", member_uid="m", user_id="u", turn_id="t_literal", datarc=dc),
+    )
+    assert result.ok
+    assert not result.tool_invocations
+
+
+async def test_failed_spawn_preserves_recovery_reference_and_failure(dc, monkeypatch):
+    from bowhead_core import artifact_presentation
+
+    class FailedRunner:
+        async def run(self, **kwargs):
+            return SubagentResult(profile="compute", subagent_id="sub_failed", ok=False, final_answer="", error="subagent_source_unverified")
+
+    async def retained(invocations, ctx):
+        assert ctx.user_id == "u"
+        return [{"artifact_id": "art_retained"}]
+
+    monkeypatch.setattr(artifact_presentation, "retained_failure_artifacts", retained)
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    ctx = ToolExecutionContext(
+        workspace_id="w",
+        member_uid="m",
+        user_id="u",
+        turn_id="t_recovery",
+        datarc=dc,
+        subagent_runner=FailedRunner(),
+        parent_bus=TurnEventBus(),
+    )
+    invocation = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Create an offline example"}, ctx)
+    assert invocation.error is None
+    assert invocation.result["ok"] is False
+    assert invocation.result["failure_stage"] == "source_verification"
+    assert invocation.result["retained_artifacts"] == [{"artifact_id": "art_retained"}]
+    assert "present_artifacts" in invocation.result["directive"]
+
+
+async def test_model_spawn_requires_declared_sources_before_execution(dc):
+    registry = ToolRegistry()
+    register_subagent_tool(registry)
+
+    class UnexpectedRunner:
+        async def run(self, **kwargs):
+            raise AssertionError("Missing source declaration must be corrected before execution")
+
+    ctx = ToolExecutionContext(
+        workspace_id="w",
+        member_uid="m",
+        user_id="u",
+        turn_id="t_source_contract",
+        datarc=dc,
+        subagent_runner=UnexpectedRunner(),
+        parent_bus=TurnEventBus(),
+        tool_view=registry,
+    )
+    result = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Create an example"}, ctx)
+    assert result.error is None
+    assert result.result["ok"] is False
+    assert "required_source_urls" in result.result["error"]
+
+
+async def test_source_declaration_is_bound_only_to_the_child_context(dc):
+    seen = []
+
+    class SourceRunner:
+        async def run(self, **kwargs):
+            seen.append(kwargs["parent_ctx"].required_web_sources)
+            return SubagentResult(profile="compute", subagent_id="sub_sources", ok=True, final_answer="Done.")
+
+    registry = ToolRegistry()
+    register_subagent_tool(registry)
+    ctx = ToolExecutionContext(
+        workspace_id="w",
+        member_uid="m",
+        user_id="u",
+        turn_id="t_sources",
+        datarc=dc,
+        subagent_runner=SourceRunner(),
+        parent_bus=TurnEventBus(),
+        tool_view=registry,
+    )
+    for sources in [["https://example.com"], []]:
+        result = await registry.execute(
+            "subagent_spawn",
+            {
+                "profile": "compute",
+                "task": "Complete the assignment",
+                "required_source_urls": sources,
+            },
+            ctx,
+        )
+        assert result.error is None
+        assert result.result["ok"], result.result
+        assert ctx.required_web_sources == ()
+    assert seen == [("https://example.com",), ()]

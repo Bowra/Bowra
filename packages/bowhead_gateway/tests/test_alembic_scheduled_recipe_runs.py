@@ -11,13 +11,13 @@ import sqlite3
 
 import anyio
 import pytest
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.scheduled_store import _RUNNING_UNIQUE_INDEX, ScheduledJobStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 _OLD_RUNNING_UNIQUE_INDEX = "CREATE UNIQUE INDEX idx_sjr_one_running ON scheduled_job_runs(job_id) WHERE status = 'running'"
 
@@ -104,7 +104,7 @@ def test_an_already_deployed_old_predicate_index_is_replaced_not_kept(tmp_path) 
         connection.commit()
         assert "awaiting_input" not in str(_index_sql(connection, "idx_sjr_one_running"))
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     with sqlite3.connect(db_path) as connection:
         assert "awaiting_input" in str(_index_sql(connection, "idx_sjr_one_running"))
@@ -134,7 +134,7 @@ def test_store_boot_ddl_and_the_revision_agree_on_the_predicate(tmp_path) -> Non
     """常量分叉守卫：store 每次 boot 都 CREATE IF NOT EXISTS，新库与迁移库语义必须一致。"""
     migrated = tmp_path / "bowhead.db"
     _create_1_0_fixture(migrated)
-    assert upgrade(f"sqlite+aiosqlite:///{migrated}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(migrated).with_name('bowhead.db')}", target="core") == ("core",)
 
     fresh = tmp_path / "fresh.db"
     anyio.run(ScheduledJobStore(str(fresh)).initialize)
@@ -157,7 +157,7 @@ def test_recipe_ref_write_path_works_on_a_migrated_db(tmp_path) -> None:
     """
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     store = ScheduledJobStore(str(db_path))
     ref = '{"form":"personal_skill","id_or_name":"weekly-report"}'
@@ -197,7 +197,7 @@ def test_create_with_binding_on_migrated_db_and_without_on_legacy(tmp_path) -> N
     legacy = legacy_dir / "bowhead.db"
     migrated = migrated_dir / "bowhead.db"
     _create_1_0_fixture(migrated)
-    assert upgrade(f"sqlite+aiosqlite:///{migrated}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(migrated).with_name('bowhead.db')}", target="core") == ("core",)
 
     ref = '{"form":"personal_skill","id_or_name":"weekly-report"}'
 

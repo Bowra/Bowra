@@ -45,6 +45,7 @@ from bowhead_core.figure_anchor_layout import (
     figure_prose_title,
     normalize_figure_anchors,
 )
+from bowhead_core.sqlite_domain_runtime import connect_sync
 
 JOB_TURN_ID = "job:figure_anchor_normalize"
 
@@ -55,7 +56,7 @@ def _out(msg: str = "") -> None:
 
 
 def _open_read_only(db_path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = connect_sync(f"file:{db_path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
 

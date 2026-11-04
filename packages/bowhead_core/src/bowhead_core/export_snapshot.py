@@ -57,6 +57,8 @@ from bowhead_core.source_access_projection import (
     StaticSafeSourceMap,
     project_section_for_static_export,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 SNAPSHOT_SCHEMA_VERSION = 1
 MAX_SNAPSHOT_SECTION_COUNT = 500
@@ -296,11 +298,16 @@ class ExportSnapshotStore:
     _path: str = field(init=False)
 
     def __post_init__(self) -> None:
+        self.db_path = domain_database_path(self.db_path, "content")
         self._path = str(self.db_path)
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._path):
+            async with diagnostic_connect(domain_database_path(self._path, "content")) as db:
+                await require_domain_schema(db, "content")
+            return
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             await db.executescript(_SNAPSHOT_SCHEMA)
             await initialize_snapshot_asset_schema(db)
             await db.commit()
@@ -427,7 +434,7 @@ class ExportSnapshotStore:
         expected_surface_token: str,
     ) -> ExportSnapshot:
         """Revalidate a candidate under a short writer lock and freeze it once."""
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -499,7 +506,7 @@ class ExportSnapshotStore:
         )
 
     async def get_snapshot(self, snapshot_id: str) -> ExportSnapshot | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM canvas_export_snapshots WHERE id=?",
@@ -509,7 +516,7 @@ class ExportSnapshotStore:
         return _row_to_snapshot(row) if row is not None else None
 
     async def _read_stable_state(self, canvas_id: str) -> tuple[Canvas, list[Section]]:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "content")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             try:

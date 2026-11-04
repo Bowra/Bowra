@@ -236,6 +236,9 @@ async def read_reference_receiver_candidates(
         include_receivers=True,
     )
     methods = reference_skill_metadata_map(metadata_groups)
+    from bowhead_core.skill_method_policy import task_method_reads_ready
+
+    allow_task_methods = await task_method_reads_ready(db_path)
     candidates = []
     for group in metadata_groups:
         for item in group.items:
@@ -249,7 +252,7 @@ async def read_reference_receiver_candidates(
                 continue
             if capability is not None and not capability_supported_by_behavior(item.receiver_metadata.behavior, capability):
                 continue
-            modes = reference_skill_modes(item.receiver_metadata, skills, methods) if skills else ()
+            modes = reference_skill_modes(item.receiver_metadata, skills, methods, allow_task_methods=allow_task_methods) if skills else ()
             if modes is not None:
                 candidates.append(ReferenceReceiverCandidate(item.resource, name, item.label, item.summary, modes))
     if len(candidates) > MAX_RECEIVER_CANDIDATES:

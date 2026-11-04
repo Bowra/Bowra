@@ -912,3 +912,15 @@ async def test_read_grant_denied_source_file_answers_like_a_missing_one(ctx, mon
     for got, expected in zip(denied, missing, strict=True):
         _assert_code_only(got, 404, "matrix_source_file_unavailable")
         assert (got.status_code, got.content) == (expected.status_code, expected.content)
+
+
+async def test_snapshot_returns_navigation_purpose_without_changing_business_prompt(ctx):
+    matrix = ctx["matrix"]
+    column = matrix.columns[0]
+    _as(ctx["app"], U_MEMBER)
+    await ctx["store"].update_column(matrix.matrix_id, column["column_id"], workspace_id=WS_A, navigation_role="description")
+    result = ctx["client"].get(f"/api/v1/kb/matrices/{matrix.matrix_id}/snapshot", headers=_h(WS_A))
+    assert result.status_code == 200, result.text
+    projected = result.json()["columns"][0]
+    assert projected["navigation_role"] == "description"
+    assert projected["prompt_version"] == column["prompt_version"]

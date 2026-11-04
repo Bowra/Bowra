@@ -41,3 +41,8 @@ def runtime_parameter_changes_admitted(old: dict[str, Any], new: dict[str, Any])
         for model in provider.get("models") or []
         if isinstance(model, dict)
     )
+
+
+def model_assignment_reconciliation_enabled() -> bool:
+    """Stage automatic assignment maintenance independently of existing runtime routing."""
+    return os.environ.get("FEATURE_MODEL_ASSIGNMENT_RECONCILIATION", "0").strip().lower() in _TRUE_VALUES

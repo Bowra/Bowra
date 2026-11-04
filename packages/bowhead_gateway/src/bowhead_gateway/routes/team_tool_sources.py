@@ -67,6 +67,7 @@ from pydantic import BaseModel, Field
 from bowhead_core import approval_gate
 from bowhead_gateway._entitlement_gate import is_feature_licensed_request, require_feature_licensed, require_not_readonly
 from bowhead_gateway.connector_presets import presets_for
+from bowhead_gateway.resource_impact_http import pause_affected_schedules as _pause_affected_schedules
 from bowhead_gateway.routes.auth import _require_team_role_dep, _store
 from bowhead_gateway.turn_service import resolve_team_model_runtime
 
@@ -548,22 +549,6 @@ async def _affected_schedule_ids(db: Any, *, team_id: str, source_id: str) -> li
         return [str(row[0]) for row in await cursor.fetchall()]
 
 
-async def _pause_affected_schedules(db: Any, schedule_ids: list[str]) -> None:
-    if not schedule_ids:
-        return
-    placeholders = ",".join("?" for _ in schedule_ids)
-    await db.execute(
-        f"UPDATE scheduled_job_agent_binding SET state='needs_reconfirm',row_version=row_version+1 "
-        f"WHERE job_id IN ({placeholders}) AND state='ready'",  # noqa: S608 -- placeholders only
-        schedule_ids,
-    )
-    await db.execute(
-        f"UPDATE scheduled_jobs SET status='paused',pause_reason='resource_dependency_changed',updated_at=? "
-        f"WHERE id IN ({placeholders}) AND status='active'",  # noqa: S608 -- placeholders only
-        (_now(), *schedule_ids),
-    )
-
-
 def _impact_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ResourceImpactKeyUnavailable):
         return HTTPException(503, detail={"error": {"code": exc.code}})
@@ -626,6 +611,7 @@ async def _protected_patch_source(
             )
             if cached is not None:
                 await db.rollback()
+                await _pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
                 return cached
             async with db.execute(
                 "SELECT * FROM team_tool_source WHERE team_id=? AND id=?",
@@ -667,7 +653,6 @@ async def _protected_patch_source(
                 resource_state=_source_state(current),
                 dependency_impact=dependency_impact,
             )
-            await _pause_affected_schedules(db, schedule_ids)
             sets: list[str] = []
             params: list[Any] = []
             for key, column in (
@@ -726,6 +711,7 @@ async def _protected_patch_source(
                 response=response,
             )
             await db.commit()
+            await _pause_affected_schedules(db, schedule_ids)
             return response
         except Exception:
             await db.rollback()
@@ -761,6 +747,7 @@ async def _protected_delete_source(
             )
             if cached is not None:
                 await db.rollback()
+                await _pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
                 return cached
             async with db.execute(
                 "SELECT * FROM team_tool_source WHERE team_id=? AND id=?",
@@ -807,7 +794,6 @@ async def _protected_delete_source(
                 resource_state=_source_state(current),
                 dependency_impact=dependency_impact,
             )
-            await _pause_affected_schedules(db, schedule_ids)
             deleted = await db.execute(
                 "DELETE FROM team_tool_source WHERE team_id=? AND id=?",
                 (user.team_id, source_id),
@@ -841,6 +827,7 @@ async def _protected_delete_source(
                 response=response,
             )
             await db.commit()
+            await _pause_affected_schedules(db, schedule_ids)
             return response
         except Exception:
             await db.rollback()
@@ -2215,6 +2202,7 @@ async def refresh_source_apply(
             )
             if cached is not None:
                 await db.rollback()
+                await _pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
                 return cached
             async with db.execute(
                 "SELECT candidate_digest,resource_state_digest,candidate_json,expires_at "
@@ -2279,8 +2267,6 @@ async def refresh_source_apply(
                 resource_state=_source_state(current),
                 dependency_impact=dependency_impact,
             )
-            if candidate.get("selected_dropped"):
-                await _pause_affected_schedules(db, schedule_ids)
             prompt_values: list[dict[str, Any]] | None = None
             if "prompts_schema" in candidate:
                 raw_prompts = candidate.get("prompts_schema")
@@ -2360,6 +2346,8 @@ async def refresh_source_apply(
                 response=result,
             )
             await db.commit()
+            if candidate.get("selected_dropped"):
+                await _pause_affected_schedules(db, schedule_ids)
     except (
         ResourceImpactKeyUnavailable,
         ResourceImpactTokenInvalid,

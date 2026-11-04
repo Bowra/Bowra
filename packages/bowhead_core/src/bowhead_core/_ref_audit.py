@@ -23,8 +23,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import aiosqlite
-
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_layout_active, require_domain_schema
 from bowhead_core.types import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -42,10 +42,15 @@ async def init_ref_audit(db_path: Path | str) -> None:
     global _DB_PATH, _INIT_DONE
     p = Path(db_path)
     _DB_PATH = p
-    async with aiosqlite.connect(p) as db:
-        await db.execute("PRAGMA journal_mode=WAL")
+    if domain_layout_active(p):
+        async with diagnostic_connect(p) as db:
+            await require_domain_schema(db, "core")
+        _INIT_DONE = True
+        return
+    async with diagnostic_connect(p) as db:
+        await db.execute("PRAGMA main.journal_mode=WAL")
         await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA main.synchronous=NORMAL")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS ref_audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +98,7 @@ async def emit_ref_audit_event(
     if _DB_PATH is None or not _INIT_DONE:
         return  # logger only — init not yet called (e.g. test path)
     try:
-        async with aiosqlite.connect(_DB_PATH) as db:
+        async with diagnostic_connect(_DB_PATH) as db:
             await db.execute(
                 "INSERT INTO ref_audit_log(turn_id, user_id, workspace_id, event_type, payload_json, created_at) VALUES (?,?,?,?,?,?)",
                 (

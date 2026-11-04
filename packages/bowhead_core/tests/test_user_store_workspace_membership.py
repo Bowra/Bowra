@@ -6,6 +6,34 @@ from bowhead_core.space_governance import SpaceGovernanceError
 from bowhead_core.user_store import UserStore
 
 
+async def test_authorization_reads_observe_external_revocation_and_space_archive(tmp_path) -> None:
+    store = UserStore(tmp_path / "authorization-freshness.db")
+    await store.initialize()
+    team = await store.create_team(name="Team", max_seats=10)
+    owner = await store.create_user(team_id=team.id, email="owner@example.com", password="Passw0rd!")
+    member = await store.create_user(team_id=team.id, email="member@example.com", password="Passw0rd!")
+    workspace = await store.create_local_workspace(team_id=team.id, name="Knowledge", creator_user_id=owner.id)
+    await store.add_member(workspace_id=workspace, user_id=member.id, role="member")
+    assert await store.get_team_role(member.id, team.id) == "member"
+    assert await store.get_member_role(workspace, member.id) == "member"
+    assert await store.get_workspace_team_id(workspace) == team.id
+    assert await store.get_user_team_id(member.id) == team.id
+    assert (await store.get_workspace(workspace))["status"] == "active"
+
+    async with aiosqlite.connect(store.db_path) as external:
+        await external.execute("UPDATE team_members SET status='removed' WHERE user_id=? AND team_id=?", (member.id, team.id))
+        await external.execute("UPDATE workspace_members SET status='removed' WHERE user_id=? AND workspace_id=?", (member.id, workspace))
+        await external.execute("UPDATE users SET status='disabled' WHERE id=?", (member.id,))
+        await external.execute("UPDATE workspaces SET status='archived',revision=revision+1 WHERE id=?", (workspace,))
+        await external.commit()
+
+    assert await store.get_team_role(member.id, team.id) is None
+    assert await store.get_member_role(workspace, member.id) is None
+    assert await store.get_user_team_id(member.id) is None
+    assert (await store.get_workspace(workspace))["status"] == "archived"
+    assert await store.get_workspace_team_id(workspace) == team.id
+
+
 async def test_add_member_rejects_cross_team_canonical_workspace(tmp_path) -> None:
     store = UserStore(tmp_path / "membership.db")
     await store.initialize()

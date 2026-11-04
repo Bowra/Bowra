@@ -100,6 +100,15 @@ function duplicateDateDimension(rows: readonly Row[], xCol: ChartColumn, seriesC
 function detectLong(spec: ChartSpec): { xCol: ChartColumn; seriesCol: ChartColumn } | null {
   const cols = spec.columns ?? [];
   const rows = spec.rows ?? [];
+  if (spec.explicit_presentation) {
+    const binding = spec.explicit_presentation;
+    if (binding.mode !== "plot" || !binding.group_by?.length) return null;
+    if (cols.filter((column) => DIM_TYPES.has(column.type)).length !== 2 || cols.filter((column) => column.type === "numeric").length !== 1) return null;
+    const xCol = cols.find((column) => column.key === binding.axes?.x);
+    const seriesCol = cols.find((column) => column.key === binding.group_by![0]);
+    if (!xCol || !seriesCol || binding.axes?.y.length !== 1) throw new Error("Invalid explicit plot binding");
+    return { xCol, seriesCol };
+  }
   // Declared axis roles first (see `stack-dims.ts`); without them, column order as before.
   const dims = roleOrderedDims(cols.filter((c) => DIM_TYPES.has(c.type)));
   const nums = cols.filter((c) => c.type === "numeric");
@@ -185,10 +194,11 @@ export function pivotLongSpec(spec: ChartSpec, trackOrigins = false, scopeSource
     const v = typeof raw === "number" ? raw : Number(raw);
     if (!Number.isFinite(v)) continue;
     const bucket = cells.get(x)!;
+    if (bucket.has(s) && spec.explicit_presentation) throw new Error("Explicit plot cells must be unique; prepare aggregation upstream");
     if (bucket.has(s)) aggregated = true; // Multiple rows per cell ⇒ source contains unexpanded dimensions
     bucket.set(s, (bucket.get(s) ?? 0) + v);
   }
-  if (sVals.length < 2) return null; // Only one series; pivot is pointless
+  if (sVals.length < 2 && !spec.explicit_presentation) return null; // Only one series; pivot is pointless
 
   // Series columns inherit numeric-column units/format/percentage mode — each expanded column remains same measure.
   const seriesColumns: ChartColumn[] = sVals.map((s) => ({
@@ -216,7 +226,7 @@ export function pivotLongSpec(spec: ChartSpec, trackOrigins = false, scopeSource
     [column.key, sources.get(String(row[xCol.key]))?.get(sVals[index]!) ?? []]))])) : undefined;
 
   return {
-    spec: { ...spec, columns: [xCol, ...seriesColumns], rows: wideRows, row_count: wideRows.length },
+    spec: { ...spec, columns: [xCol, ...seriesColumns], rows: wideRows, row_count: wideRows.length, ...(spec.explicit_presentation ? { _explicit_pivoted: true } : {}) },
     seriesCol,
     seriesCount: sVals.length,
     aggregated,

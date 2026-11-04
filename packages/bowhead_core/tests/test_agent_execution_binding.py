@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import AgentAssignmentStore
 from bowhead_core.agent_execution_binding import (
     AgentExecutionBindingError,
@@ -33,6 +32,7 @@ from bowhead_core.session_store import SessionStore
 from bowhead_core.subagent import SubagentRunner, _agent_attribution_payload, _system_profile_snapshot
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.user_store import TeamSubagent, UserStore
+from core_legacy_database import upgrade
 
 _NOW = "2026-09-04T00:00:00+00:00"
 
@@ -104,7 +104,7 @@ async def _setup(tmp_path: Path) -> _Fixture:
         source.backup(destination)
     # The deployment migrator resolves the canonical core filename from the
     # URL's directory, mirroring the real multi-database startup path (a no-op at head).
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     sessions = SessionStore(db_path)
     await users.initialize()

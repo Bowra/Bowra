@@ -192,10 +192,12 @@ skill_invoke(name="web-artifacts-builder", input={
 })
 ```
 
-产出的 React/JavaScript HTML artifact 只作为可下载的交互文件，不得用 iframe 或
-`canvas_add_html_artifact` 嵌入 Report。若用户同时需要 Report 内阅读，另产一份已物化的单文件静态
-HTML（正文、数字、表格、图形都不依赖 JavaScript/fetch/外部资源），以正确 HTML MIME 持久化后调用
-`canvas_add_html_artifact`。
+Use the current HTML viewer capability: authenticated Interactive mode supports isolated offline scripts;
+Reading and shared contexts retain static sanitization. Prefer a materialized report whose text, numbers,
+tables and figures remain readable without scripts or external resources. Persist the actual HTML with
+the correct MIME and use the existing report/file presentation path. Inspect `html_static_check` results
+and verify promised controls when an authorized browser is available; otherwise disclose runtime
+interactions as unverified. Keep section and table IDs distinct and bind filters to actual table elements.
 **当且仅当** 用户明确要 "导出 / 下载 / 离线可打开 / interactive dashboard" 才触发，日常 canvas 够用.
 
 ### Step 8 · Narrative

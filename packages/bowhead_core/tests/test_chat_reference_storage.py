@@ -18,7 +18,6 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_reference_storage import (
     ChatReferenceStore,
@@ -32,7 +31,9 @@ from bowhead_core.chat_reference_storage import (
 from bowhead_core.chat_references import InputDocument
 from bowhead_core.chat_turn_source import ChatTurnUserSource
 from bowhead_core.session_store import SessionStore, _insert_chat_turn_user_source_in_tx, _project_legacy_steer_buffer
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore
+from core_legacy_database import TARGET_FILES
 
 from bowhead_core import migrations
 
@@ -42,12 +43,12 @@ ROOT_KEY = base64.urlsafe_b64encode(b"r" * 32).decode()
 SUBMISSION_ID = "0da31a6b-2c6e-4fb3-8c80-f034b37d840f"
 
 
-def _upgrade(path: Path, revision: str = "head", target: str = "core") -> None:
+def _upgrade(path: Path, revision: str = SOURCE_REVISION, target: str = "core") -> None:
     config = Config()
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = target
-    command.upgrade(config, revision)
+    command.upgrade(config, SOURCE_REVISION if revision == "head" else revision)
 
 
 #: Tables a later revision retires on purpose. Only these may exist in a historical schema
@@ -65,6 +66,11 @@ RETIRED_TABLES = frozenset(
         "agent_version_webhook_delivery",
         "agent_version_webhook_event",
         "agent_version_webhook_subscription",
+        # Revision 0219 retires these unused legacy tables; historical copies must remain empty.
+        "artifact_stdout",
+        "business_rules",
+        "mcp_servers",
+        "pbi_connection_legacy_0022",
     }
 )
 

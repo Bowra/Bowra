@@ -39,8 +39,7 @@ def _repack(source: bytes, changes: dict[str, bytes]) -> bytes:
     return output.getvalue()
 
 
-@pytest.fixture
-def source() -> bytes:
+def _word_source_bytes() -> bytes:
     document = Document()
     section = document.sections[0]
     section.page_width, section.page_height = Inches(8.5), Inches(11)
@@ -71,6 +70,11 @@ def source() -> bytes:
     document.add_section(WD_SECTION_START.NEW_PAGE)
     document.add_paragraph("Second section remains unchanged")
     return _bytes(document)
+
+
+@pytest.fixture
+def source() -> bytes:
+    return _word_source_bytes()
 
 
 def _block(document: DocumentTemplate, text: str, *, occurrence: int = 0) -> dict:

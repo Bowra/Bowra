@@ -9,7 +9,7 @@ async def published_file_identity(path, *, artifact_id: str, user_id: str):
         db.execute(
             """SELECT f.job_id,f.name FROM document_draft_files f JOIN document_executions e ON e.job_id=f.job_id
             JOIN document_jobs j ON j.id=f.job_id
-            JOIN document_draft_files parent ON parent.job_id=f.job_id AND parent.name='candidate.pptx'
+            JOIN document_draft_files parent ON parent.job_id=f.job_id AND parent.name=CASE (SELECT profile FROM document_dispatches WHERE job_id=f.job_id) WHEN 'docx-script-worker-v1' THEN 'candidate.docx' ELSE 'candidate.pptx' END
             JOIN artifacts source ON source.id=parent.artifact_id
             WHERE f.artifact_id=? AND j.requested_by=? AND e.state='published'
             AND source.deleted_at IS NULL AND source.status='ready'

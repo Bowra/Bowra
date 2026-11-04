@@ -14,6 +14,7 @@ from bowhead_core.public_entries import PublicEntryStore
 from bowhead_gateway.conditional_headers import (
     ConditionalHeaderCanonicalizationMiddleware,
 )
+from bowhead_gateway.cookie_request_security import CookieRequestSecurityMiddleware
 from bowhead_gateway.http_request_context import RequestIdContextMiddleware
 from bowhead_gateway.installation import CommunitySetupMiddleware
 from bowhead_gateway.main import create_app
@@ -117,11 +118,12 @@ def test_create_app_has_the_reviewed_effective_user_middleware_order() -> None:
     # The Community setup gate runs inside request ids, CORS and public-entry context, so its
     # pending-installation refusals are still logged, CORS-readable and entry-scoped.
     # d89e42a77 placed the public slash redirect between entry context and the setup gate.
-    assert [item.cls for item in app.user_middleware[:7]] == [
+    assert [item.cls for item in app.user_middleware[:8]] == [
         RequestIdContextMiddleware,
         ConditionalHeaderCanonicalizationMiddleware,
         CORSMiddleware,
         PublicEntryContextMiddleware,
+        CookieRequestSecurityMiddleware,
         PublicSlashRedirectMiddleware,
         CommunitySetupMiddleware,
         MemoryMutationContextMiddleware,

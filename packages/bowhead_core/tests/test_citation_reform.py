@@ -39,6 +39,33 @@ def test_internal_artifact_label_is_removed_with_its_identity() -> None:
     assert _resolve_citations(text, type("Context", (), {})()) == "File policy.md was added."
 
 
+@pytest.mark.parametrize("delimiter", ["`", "``"])
+@pytest.mark.parametrize("identity", ["art_123456789abc", "artifact_id = art_123456789abc", "(artifact art_123456789abc)"])
+def test_receipt_removes_code_wrapping_only_an_internal_artifact(delimiter: str, identity: str) -> None:
+    text = f"Original file {delimiter}{identity}{delimiter} remains retained; status is `removed`."
+    expected = "Original file  remains retained; status is `removed`."
+    assert _strip_data_markers(text) == expected
+    assert _resolve_citations(text, None) == expected
+    assert _resolve_citations(text, _StubCtx()) == expected
+    assert _resolve_citations(expected, _StubCtx()) == expected
+
+
+def test_receipt_cleanup_preserves_regular_code_and_registered_citations() -> None:
+    ctx = _StubCtx()
+    registry = ensure_registry(ctx)
+    registry.register("art_123456789abc")
+    text = "Keep `removed`, ``kbf_123456789abc``, and `art_short`. [cite:1]\n```python\nretained = True\n```"
+    assert _resolve_citations(text, ctx) == text
+    assert _strip_data_markers(text) == text
+
+
+def test_receipt_cleanup_preserves_code_fences_around_internal_id_examples() -> None:
+    text = "Example:\n```text\n`art_123456789abc`\n```"
+    expected = "Example:\n```text\n``\n```"
+    assert _strip_data_markers(text) == expected
+    assert _resolve_citations(text, _StubCtx()) == expected
+
+
 def test_registry_register_returns_1_based_seq() -> None:
     """First register → seq=1; second different artifact → seq=2."""
     r = TurnCitationRegistry()

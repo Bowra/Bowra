@@ -652,6 +652,7 @@ class NotificationActionDTO(BaseModel):
 
 
 class NotificationItemDTO(BaseModel):
+    actionRequired: bool
     id: str
     teamId: str
     category: str

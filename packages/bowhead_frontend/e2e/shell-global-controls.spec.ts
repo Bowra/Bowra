@@ -131,3 +131,96 @@ test("desktop keeps all three controls in the topbar at 1440px", async ({ page }
   await expect(head.getByRole("button", { name: /^额度：/ })).toContainText("1,200");
   await expect(page.getByRole("button", { name: /切换空间/ })).toHaveCount(1);
 });
+
+for (const locale of ["zh-CN", "en-US"] as const) {
+  test.describe(`space self-exit ${locale}`, () => {
+    test.use({ locale });
+    for (const [width, another] of [[1280, true], [390, false]] as const) {
+      test(`space settings submenu exits safely at ${width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 844 });
+        await mockShell(page);
+        let left = false;
+        const admin = width === 1280;
+        const calls: string[] = [];
+        await page.route("**/api/v1/auth/me/workspaces*", route => route.fulfill(json({
+          items: [
+            ...(!left ? [{ workspace_id: "ws_east", name: "Sales", role: admin ? "admin" : "viewer" }] : []),
+            ...(another ? [{ workspace_id: "ws_south", name: "Finance", role: "member" }] : []),
+          ], active_id: left ? (another ? "ws_south" : null) : "ws_east",
+        })));
+        await page.route("**/api/v1/workspaces/ws_east/leave", route => {
+          if (route.request().method() === "POST") { left = true; calls.push("leave"); }
+          return route.fulfill(json(route.request().method() === "POST" ? { ok: true } : { can_leave: true }));
+        });
+        await page.goto("/", { waitUntil: "domcontentloaded" });
+        const picker = page.locator(".v2-ws-picker-button");
+        await expect(picker).toContainText("Sales", { timeout: 30_000 });
+        await picker.click();
+        const more = page.getByRole("menuitem", { name: locale === "zh-CN" ? "更多空间设置" : "More Space Settings", exact: true });
+        const leaveLabel = locale === "zh-CN" ? "退出当前空间…" : "Leave Current Space…";
+        await expect(page.getByRole("menuitem", { name: leaveLabel, exact: true })).toHaveCount(0);
+        await more.click();
+        const leave = page.getByRole("menuitem", { name: leaveLabel, exact: true });
+        await expect(leave).toBeEnabled();
+        if (admin) {
+          for (const path of ["general", "instructions", "members"]) {
+            await expect(page.locator(`[role="menuitem"][href="/space/settings/${path}/"]`)).toBeVisible();
+          }
+        } else {
+          await expect(page.locator('[role="menuitem"][href^="/space/settings/"]')).toHaveCount(0);
+          // Shared submenu drills down on phones and offers a way back to the space list.
+          const back = page.locator(".ui-menu-drill-back");
+          await expect(back).toBeVisible();
+          await back.click();
+          await expect(more).toBeVisible();
+          await more.click();
+        }
+        await page.screenshot({ path: testInfo.outputPath("space-settings.png") });
+        await leave.click();
+        const dialog = page.getByRole("dialog", { name: locale === "zh-CN" ? "退出「Sales」？" : "Leave “Sales”?" });
+        await expect(dialog).toBeVisible();
+        expect(calls).toEqual([]);
+        await dialog.getByRole("button", { name: locale === "zh-CN" ? "取消" : "Cancel", exact: true }).click();
+        expect(left).toBe(false);
+        await picker.click();
+        await more.click();
+        await leave.click();
+        await dialog.getByRole("button", { name: locale === "zh-CN" ? "退出当前空间" : "Leave Current Space", exact: true }).click();
+        await expect(dialog).toBeHidden();
+        expect(calls).toEqual(["leave"]);
+        await expect(page.getByText(locale === "zh-CN" ? "已退出「Sales」" : "Left “Sales”", { exact: true })).toBeVisible();
+        await expect(picker).not.toContainText("Sales");
+        if (another) await expect(picker).toContainText("Finance");
+        else {
+          await expect(page.getByRole("heading", { name: locale === "zh-CN" ? "创建或加入一个空间" : "Create or join a space", exact: true })).toBeVisible();
+          expect(await page.evaluate(() => localStorage.getItem("bowhead.space_id"))).toBeNull();
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      });
+    }
+  });
+}
+
+test("last space administrator reads the disabled reason without triggering exit", async ({ page }) => {
+  await mockShell(page);
+  await page.route("**/api/v1/auth/me/workspaces*", route => route.fulfill(json({
+    items: [{ workspace_id: "ws_east", name: "华东区经营分析空间", role: "admin" }], active_id: "ws_east",
+  })));
+  await page.route("**/api/v1/workspaces/ws_east/leave", route => {
+    expect(route.request().method()).toBe("GET");
+    return route.fulfill(json({ can_leave: false }));
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /切换空间，当前：华东区/ }).click();
+  const more = page.getByRole("menuitem", { name: "更多空间设置", exact: true });
+  await more.focus();
+  await page.keyboard.press("ArrowRight");
+  const leave = page.getByRole("menuitem", { name: "退出当前空间…", exact: true });
+  await expect(leave).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByText("你是该空间的最后一位有效管理员，请先指定另一位管理员，再退出。")).toBeVisible();
+  await leave.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: /退出「/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(more).toBeVisible();
+});

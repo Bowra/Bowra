@@ -24,6 +24,8 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from bowhead_core.chat_reference_admission import ReferenceStartAdmission
@@ -965,11 +967,8 @@ async def _cancel_running_plan_for_turn_in_tx(
 ) -> bool:
     """Project one durable Turn cancellation onto its exact running Plan."""
 
-    async with db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='plans'",
-    ) as table_cursor:
-        if await table_cursor.fetchone() is None:
-            return False
+    if not await readable_table_exists(db, "plans"):
+        return False
     cursor = await db.execute(
         "UPDATE plans SET status='cancelled',updated_at=? WHERE execution_turn_id=? AND status='running'",
         (updated_at, turn_id),
@@ -1387,7 +1386,8 @@ class ChatSubmissionClaim:
 
 class SessionStore:
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._core_db_path = str(domain_database_path(db_path, "core"))
+        self._db_path = str(domain_database_path(db_path, "execution"))
 
     @property
     def db_path(self) -> str:
@@ -1535,7 +1535,16 @@ class SessionStore:
                     return False
                 if head_num < 10:
                     return False
+                split = domain_layout_active(self._db_path)
+                if split:
+                    await require_domain_schema(db, "execution")
                 for table, columns in required.items():
+                    if split:
+                        async with db.execute(f"SELECT * FROM {table} LIMIT 0") as cursor:  # noqa: S608 -- fixed required-table registry
+                            actual = {column[0] for column in cursor.description or ()}
+                        if not columns.issubset(actual):
+                            return False
+                        continue
                     async with db.execute(
                         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                         (table,),
@@ -1546,6 +1555,8 @@ class SessionStore:
                         actual = {str(row[1]) for row in await cursor.fetchall()}
                     if not columns.issubset(actual):
                         return False
+                if split:
+                    return True  # Persistent guards were verified against the migration manifest above.
                 async with db.execute(
                     "SELECT tbl_name, sql FROM sqlite_master WHERE type='trigger' AND name=?",
                     ("trg_turn_delete_cancel_receipt_tombstone",),
@@ -1745,9 +1756,16 @@ class SessionStore:
         """Return only a complete pre-0008 or complete sentinel-level schema."""
 
         async with open_shared_ctx(self._db_path) as db:
+            if domain_layout_active(self._db_path):
+                await require_domain_schema(db, "execution")
+                return "migrated"
             return await _terminal_protocol_schema_mode(db)
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self._db_path) as db:
             # Fail closed before the legacy initializer can mutate a database
@@ -2737,152 +2755,169 @@ class SessionStore:
         elif previous_accept_until:
             return False
 
-        async with open_shared_ctx(self._db_path) as db:
+        async def align_core(db: aiosqlite.Connection) -> bool:
+            async with db.execute(
+                "SELECT * FROM security_key_epochs WHERE purpose='chat_submission_fingerprint' ORDER BY activated_at",
+            ) as cursor:
+                epochs = await cursor.fetchall()
+            current_rows = [row for row in epochs if row["retired_at"] is None]
+            if len(current_rows) > 1:
+                return False
+            current_row = current_rows[0] if current_rows else None
+            historical_ids = {str(row["key_id"]) for row in epochs}
+
+            if current_row is None:
+                if current_key_id in historical_ids:
+                    return False
+                activated_at = now
+                if previous_key_id is not None:
+                    if previous_key_id in historical_ids:
+                        return False
+                    await db.execute(
+                        "INSERT INTO security_key_epochs("
+                        "purpose,key_id,activated_at,retired_at,accept_until"
+                        ") VALUES ('chat_submission_fingerprint',?,?,?,?)",
+                        (
+                            previous_key_id,
+                            activated_at,
+                            activated_at,
+                            accept_dt.isoformat(),
+                        ),
+                    )
+                await db.execute(
+                    "INSERT INTO security_key_epochs("
+                    "purpose,key_id,activated_at,retired_at,accept_until"
+                    ") VALUES ('chat_submission_fingerprint',?,?,NULL,NULL)",
+                    (current_key_id, activated_at),
+                )
+            elif str(current_row["key_id"]) != current_key_id:
+                if previous_key_id != str(current_row["key_id"]) or accept_dt is None or current_key_id in historical_ids:
+                    return False
+                unexpired_previous = [
+                    row
+                    for row in epochs
+                    if row["retired_at"] is not None and datetime.fromisoformat(str(row["accept_until"])).astimezone(UTC) > now_dt
+                ]
+                if unexpired_previous:
+                    return False
+                activated_at = now
+                await db.execute(
+                    "UPDATE security_key_epochs SET retired_at=?,accept_until=? "
+                    "WHERE purpose='chat_submission_fingerprint' AND key_id=? "
+                    "AND retired_at IS NULL",
+                    (activated_at, accept_dt.isoformat(), previous_key_id),
+                )
+                await db.execute(
+                    "INSERT INTO security_key_epochs("
+                    "purpose,key_id,activated_at,retired_at,accept_until"
+                    ") VALUES ('chat_submission_fingerprint',?,?,NULL,NULL)",
+                    (current_key_id, activated_at),
+                )
+            elif previous_key_id is not None and previous_key_id not in historical_ids:
+                return False
+
+            async with db.execute(
+                "SELECT key_id,retired_at,accept_until FROM security_key_epochs WHERE purpose='chat_submission_fingerprint'",
+            ) as cursor:
+                epochs = await cursor.fetchall()
+            accepted_db_ids = {
+                str(row["key_id"])
+                for row in epochs
+                if row["retired_at"] is None or datetime.fromisoformat(str(row["accept_until"])).astimezone(UTC) > now_dt
+            }
+            if accepted_db_ids != set(configured_key_ids):
+                return False
+            if previous_key_id is not None:
+                previous_row = next(row for row in epochs if str(row["key_id"]) == previous_key_id)
+                if datetime.fromisoformat(str(previous_row["accept_until"])).astimezone(UTC) != accept_dt:
+                    return False
+
+            return True
+
+        async def expire_claims(db: aiosqlite.Connection) -> None:
+            async with db.execute(
+                "SELECT i.* FROM chat_submission_inflight i "
+                "JOIN security_key_epochs e ON e.purpose='chat_submission_fingerprint' "
+                "AND e.key_id=i.fingerprint_key_id "
+                "WHERE e.accept_until IS NOT NULL AND e.accept_until<=? "
+                "AND i.lease_expires_at<=?",
+                (now, now),
+            ) as cursor:
+                expired_inflight = await cursor.fetchall()
+            expires_at = (now_dt + timedelta(days=30)).isoformat()
+            for row in expired_inflight:
+                await db.execute(
+                    "INSERT OR IGNORE INTO chat_submission_abandon_tombstones("
+                    "team_id,user_id,client_submission_id,workspace_id,"
+                    "requested_session_id,created_at,expires_at"
+                    ") VALUES (?,?,?,?,?,?,?)",
+                    (
+                        str(row["team_id"]),
+                        str(row["user_id"]),
+                        str(row["client_submission_id"]),
+                        str(row["workspace_id"]),
+                        row["requested_session_id"],
+                        now,
+                        expires_at,
+                    ),
+                )
+                await db.execute(
+                    "DELETE FROM chat_submission_inflight WHERE team_id=? AND user_id=? AND client_submission_id=? AND lease_expires_at<=?",
+                    (
+                        str(row["team_id"]),
+                        str(row["user_id"]),
+                        str(row["client_submission_id"]),
+                        now,
+                    ),
+                )
+
+        async def required_keys_available(db: aiosqlite.Connection) -> bool:
+            retry_floor = (now_dt - timedelta(days=8)).isoformat()
+            async with db.execute(
+                "SELECT DISTINCT fingerprint_key_id FROM ("
+                "SELECT fingerprint_key_id FROM chat_submission_inflight "
+                "UNION ALL SELECT r.fingerprint_key_id "
+                "FROM chat_submission_receipts r JOIN security_key_epochs e "
+                "ON e.purpose='chat_submission_fingerprint' "
+                "AND e.key_id=r.fingerprint_key_id "
+                "WHERE r.created_at>=? AND "
+                "(e.accept_until IS NULL OR e.accept_until>?)"
+                ")",
+                (retry_floor, now),
+            ) as cursor:
+                required_rows = await cursor.fetchall()
+            required = {str(row[0]) for row in required_rows}
+            return required.issubset(set(configured_key_ids))
+
+        split = domain_layout_active(self._db_path)
+        if split:
+            # Claim cleanup is execution-local. Release its writer before the
+            # core key epoch transaction reads the remaining required keys.
+            async with open_shared_ctx(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await db.execute("BEGIN IMMEDIATE")
+                try:
+                    await expire_claims(db)
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
+        async with open_shared_ctx(self._core_db_path if split else self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
-                async with db.execute(
-                    "SELECT * FROM security_key_epochs WHERE purpose='chat_submission_fingerprint' ORDER BY activated_at",
-                ) as cursor:
-                    epochs = await cursor.fetchall()
-                current_rows = [row for row in epochs if row["retired_at"] is None]
-                if len(current_rows) > 1:
-                    await db.execute("ROLLBACK")
+                if not await align_core(db):
+                    await db.rollback()
                     return False
-                current_row = current_rows[0] if current_rows else None
-                historical_ids = {str(row["key_id"]) for row in epochs}
-
-                if current_row is None:
-                    if current_key_id in historical_ids:
-                        await db.execute("ROLLBACK")
-                        return False
-                    activated_at = now
-                    if previous_key_id is not None:
-                        if previous_key_id in historical_ids:
-                            await db.execute("ROLLBACK")
-                            return False
-                        await db.execute(
-                            "INSERT INTO security_key_epochs("
-                            "purpose,key_id,activated_at,retired_at,accept_until"
-                            ") VALUES ('chat_submission_fingerprint',?,?,?,?)",
-                            (
-                                previous_key_id,
-                                activated_at,
-                                activated_at,
-                                accept_dt.isoformat(),
-                            ),
-                        )
-                    await db.execute(
-                        "INSERT INTO security_key_epochs("
-                        "purpose,key_id,activated_at,retired_at,accept_until"
-                        ") VALUES ('chat_submission_fingerprint',?,?,NULL,NULL)",
-                        (current_key_id, activated_at),
-                    )
-                elif str(current_row["key_id"]) != current_key_id:
-                    if previous_key_id != str(current_row["key_id"]) or accept_dt is None or current_key_id in historical_ids:
-                        await db.execute("ROLLBACK")
-                        return False
-                    unexpired_previous = [
-                        row
-                        for row in epochs
-                        if row["retired_at"] is not None and datetime.fromisoformat(str(row["accept_until"])).astimezone(UTC) > now_dt
-                    ]
-                    if unexpired_previous:
-                        await db.execute("ROLLBACK")
-                        return False
-                    activated_at = now
-                    await db.execute(
-                        "UPDATE security_key_epochs SET retired_at=?,accept_until=? "
-                        "WHERE purpose='chat_submission_fingerprint' AND key_id=? "
-                        "AND retired_at IS NULL",
-                        (activated_at, accept_dt.isoformat(), previous_key_id),
-                    )
-                    await db.execute(
-                        "INSERT INTO security_key_epochs("
-                        "purpose,key_id,activated_at,retired_at,accept_until"
-                        ") VALUES ('chat_submission_fingerprint',?,?,NULL,NULL)",
-                        (current_key_id, activated_at),
-                    )
-                elif previous_key_id is not None and previous_key_id not in historical_ids:
-                    await db.execute("ROLLBACK")
-                    return False
-
-                async with db.execute(
-                    "SELECT key_id,retired_at,accept_until FROM security_key_epochs WHERE purpose='chat_submission_fingerprint'",
-                ) as cursor:
-                    epochs = await cursor.fetchall()
-                accepted_db_ids = {
-                    str(row["key_id"])
-                    for row in epochs
-                    if row["retired_at"] is None or datetime.fromisoformat(str(row["accept_until"])).astimezone(UTC) > now_dt
-                }
-                if accepted_db_ids != set(configured_key_ids):
-                    await db.execute("ROLLBACK")
-                    return False
-                if previous_key_id is not None:
-                    previous_row = next(row for row in epochs if str(row["key_id"]) == previous_key_id)
-                    if datetime.fromisoformat(str(previous_row["accept_until"])).astimezone(UTC) != accept_dt:
-                        await db.execute("ROLLBACK")
-                        return False
-
-                async with db.execute(
-                    "SELECT i.* FROM chat_submission_inflight i "
-                    "JOIN security_key_epochs e ON e.purpose='chat_submission_fingerprint' "
-                    "AND e.key_id=i.fingerprint_key_id "
-                    "WHERE e.accept_until IS NOT NULL AND e.accept_until<=? "
-                    "AND i.lease_expires_at<=?",
-                    (now, now),
-                ) as cursor:
-                    expired_inflight = await cursor.fetchall()
-                expires_at = (now_dt + timedelta(days=30)).isoformat()
-                for row in expired_inflight:
-                    await db.execute(
-                        "INSERT OR IGNORE INTO chat_submission_abandon_tombstones("
-                        "team_id,user_id,client_submission_id,workspace_id,"
-                        "requested_session_id,created_at,expires_at"
-                        ") VALUES (?,?,?,?,?,?,?)",
-                        (
-                            str(row["team_id"]),
-                            str(row["user_id"]),
-                            str(row["client_submission_id"]),
-                            str(row["workspace_id"]),
-                            row["requested_session_id"],
-                            now,
-                            expires_at,
-                        ),
-                    )
-                    await db.execute(
-                        "DELETE FROM chat_submission_inflight WHERE team_id=? AND user_id=? AND client_submission_id=? AND lease_expires_at<=?",
-                        (
-                            str(row["team_id"]),
-                            str(row["user_id"]),
-                            str(row["client_submission_id"]),
-                            now,
-                        ),
-                    )
-
-                retry_floor = (now_dt - timedelta(days=8)).isoformat()
-                async with db.execute(
-                    "SELECT DISTINCT fingerprint_key_id FROM ("
-                    "SELECT fingerprint_key_id FROM chat_submission_inflight "
-                    "UNION ALL SELECT r.fingerprint_key_id "
-                    "FROM chat_submission_receipts r JOIN security_key_epochs e "
-                    "ON e.purpose='chat_submission_fingerprint' "
-                    "AND e.key_id=r.fingerprint_key_id "
-                    "WHERE r.created_at>=? AND "
-                    "(e.accept_until IS NULL OR e.accept_until>?)"
-                    ")",
-                    (retry_floor, now),
-                ) as cursor:
-                    required_rows = await cursor.fetchall()
-                required = {str(row[0]) for row in required_rows}
-                if not required.issubset(set(configured_key_ids)):
-                    await db.execute("ROLLBACK")
+                if not split:
+                    await expire_claims(db)
+                if not await required_keys_available(db):
+                    await db.rollback()
                     return False
                 await db.commit()
                 return True
             except BaseException:
-                await db.execute("ROLLBACK")
+                await db.rollback()
                 raise
 
     async def claim_chat_submission(
@@ -2907,6 +2942,36 @@ class SessionStore:
         lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
         lease_owner = f"sub_{uuid4().hex}"
         key = (team_id, user_id, client_submission_id)
+        if domain_layout_active(self._db_path):
+            # Bootstrap the instance key epoch in core before taking the
+            # execution writer. Recheck the auth generation again below.
+            async with open_shared_ctx(self._db_path) as auth_db:
+                async with auth_db.execute(
+                    "SELECT state FROM chat_auth_session_generations WHERE user_id=? AND auth_session_generation_hash=?",
+                    (user_id, auth_session_generation_hash),
+                ) as cursor:
+                    auth = await cursor.fetchone()
+                if auth is None or auth[0] != "active":
+                    return ChatSubmissionClaim(kind="auth_generation_inactive")
+            async with open_shared_ctx(self._core_db_path) as epoch_db:
+                await epoch_db.execute("BEGIN IMMEDIATE")
+                try:
+                    async with epoch_db.execute(
+                        "SELECT key_id FROM security_key_epochs WHERE purpose='chat_submission_fingerprint' AND retired_at IS NULL"
+                    ) as cursor:
+                        epoch = await cursor.fetchone()
+                    if epoch is None:
+                        await epoch_db.execute(
+                            "INSERT INTO security_key_epochs(purpose,key_id,activated_at,retired_at,accept_until) "
+                            "VALUES ('chat_submission_fingerprint',?,?,NULL,NULL)",
+                            (fingerprint_key_id, now),
+                        )
+                    elif epoch[0] != fingerprint_key_id:
+                        raise ValueError("submission_fingerprint_epoch_misaligned")
+                    await epoch_db.commit()
+                except BaseException:
+                    await epoch_db.rollback()
+                    raise
         async with open_shared_ctx(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
@@ -2924,6 +2989,8 @@ class SessionStore:
                 ) as epoch_cursor:
                     current_epoch = await epoch_cursor.fetchone()
                 if current_epoch is None:
+                    if domain_layout_active(self._db_path):
+                        raise ValueError("submission_fingerprint_epoch_missing")
                     await db.execute(
                         "INSERT INTO security_key_epochs("
                         "purpose,key_id,activated_at,retired_at,accept_until"
@@ -7640,11 +7707,8 @@ class SessionStore:
                 turn = await turn_cursor.fetchone()
             if turn is None or str(turn["status"]) != "clarification_pending":
                 return False
-            async with db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_turn_spawn_dispatch'",
-            ) as table_cursor:
-                if await table_cursor.fetchone() is None:
-                    return False
+            if not await readable_table_exists(db, "chat_turn_spawn_dispatch"):
+                return False
             from bowhead_core.document_clarification_lifecycle import document_card_id_in_tx, require_document_pause_in_tx
 
             document_card_id = await document_card_id_in_tx(db, turn_id=turn_id)

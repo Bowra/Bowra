@@ -15,13 +15,13 @@ import functools
 import hashlib
 import json
 import os
-import sqlite3
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+import anyio
 import httpx2
 import jwt
 from bowhead_core._db import open_shared_ctx
@@ -30,6 +30,8 @@ from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.public_entries import PublicEntryStore
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_runtime import connect_sync
+from bowhead_core.sqlite_domains import TABLE_DOMAINS, domain_database_path
 from bowhead_core.turn_log_store import TurnLogStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
@@ -129,7 +131,7 @@ class _StaticTeamRouterRegistry:
 
 
 def _assert_schema(db_path: Path) -> str:
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         head_row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         head = str(head_row[0]) if head_row and head_row[0] else ""
         # The migration head known to this image is the compatibility floor; the rollback image must accept
@@ -140,15 +142,13 @@ def _assert_schema(db_path: Path) -> str:
             head_num = -1
         if head_num < int(_HEAD.split("_", 1)[0]):
             raise RuntimeError(f"unexpected migration head: {head_row!r}")
-        tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'",
-            )
-        }
-        missing = sorted(_REQUIRED_TABLES - tables)
-        if missing:
-            raise RuntimeError(f"rollback image cannot read required tables: {missing}")
+    missing = []
+    for domain in {TABLE_DOMAINS[table] for table in _REQUIRED_TABLES}:
+        with connect_sync(domain_database_path(db_path, domain)) as connection:
+            tables = {str(row[0]) for row in connection.execute("SELECT name FROM main.sqlite_master WHERE type='table'")}
+        missing.extend(table for table in _REQUIRED_TABLES if TABLE_DOMAINS[table] == domain and table not in tables)
+    if missing:
+        raise RuntimeError(f"rollback image cannot read required tables: {sorted(missing)}")
     return head
 
 
@@ -158,12 +158,12 @@ async def _prepare(db_path: Path) -> dict[str, object]:
     if db_path.name != "bowhead.db":
         raise RuntimeError("fixture must be named bowhead.db for the multi-target migration runner")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
     # Migrate **all** target databases: Gateway startup opens the KB databases (e.g. kb_files' kb_rebuild_jobs); a fixture that migrates only core
     # fails with no such table when Gateway starts. Core already has the 1.0.0 baseline schema, so upgrading it to head here is idempotent.
-    upgrade(f"sqlite+aiosqlite:///{db_path}")
+    await anyio.to_thread.run_sync(upgrade, f"sqlite+aiosqlite:///{db_path}")
 
     store = SessionStore(db_path)
     await store.initialize()
@@ -309,7 +309,7 @@ async def _prepare(db_path: Path) -> dict[str, object]:
         raise RuntimeError("clarification pending-work fixture was not resolved")
     # Model a candidate crash after the atomic pending→resolved + work insert.
     # The rollback image must claim this expired lease and finalize the same row.
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(domain_database_path(db_path, "execution")) as connection:
         connection.execute(
             "UPDATE clarification_resolution_outbox SET lease_expires_at='1970-01-01T00:00:00+00:00' WHERE request_id=? AND state='pending'",
             (pending_resolution.request_id,),
@@ -436,7 +436,7 @@ async def _verify_seeded_protocol_state(
     if pending_after.kind != "abandoned":
         raise RuntimeError("rollback image did not preserve the inflight abandonment fence")
 
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         telemetry = connection.execute(
             "SELECT occurred_at FROM composer_telemetry_dedupe WHERE user_id=? AND event_id=?",
             (_USER_ID, _TELEMETRY_EVENT_ID),
@@ -452,7 +452,7 @@ async def _verify_seeded_protocol_state(
         raise RuntimeError("rollback image duplicated the prepared telemetry event")
 
     clarification_store = ClarificationStore(db_path)
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         pending_row = connection.execute(
             "SELECT request_id FROM clarification_requests WHERE turn_id=? AND token=?",
             (_PENDING_CLARIFICATION_TURN_ID, _PENDING_CLARIFICATION_TOKEN),
@@ -569,7 +569,7 @@ async def _verify_gateway_contract(db_path: Path, phase: str) -> None:
         actor_id=user.id,
         verification_method="trusted_proxy_bootstrap",
     )
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         pending_identity = connection.execute(
             "SELECT c.request_id,c.user_id,c.workspace_id,u.team_id "
             "FROM clarification_requests c JOIN users u ON u.id=c.user_id "
@@ -622,6 +622,7 @@ async def _verify_gateway_contract(db_path: Path, phase: str) -> None:
             transport=transport,
             base_url="http://localhost:8090",
             cookies={"bowhead_jwt": token},
+            headers={"Origin": "http://localhost:8090"},
         ) as client:
             me = await client.get("/api/v1/auth/me")
             if me.status_code != 200:
@@ -665,11 +666,13 @@ async def _verify_gateway_contract(db_path: Path, phase: str) -> None:
                 mime="text/csv",
                 created_by=user.id,
             )
-            async with open_shared_ctx(db_path) as connection:
+            async with open_shared_ctx(domain_database_path(db_path, "content")) as connection:
                 await connection.executemany(
                     "INSERT INTO artifact_upload_bindings(artifact_id,workspace_id,user_id,session_id,created_at) VALUES (?,?,?,?,datetime('now'))",
                     [(artifact.id, workspace_id, user.id, None) for artifact in (bundle, child_a, child_b)],
                 )
+                await connection.commit()
+            async with open_shared_ctx(domain_database_path(db_path, "execution")) as connection:
                 await connection.executemany(
                     "INSERT INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,datetime('now'))",
                     [(bundle.id, child_a.id), (bundle.id, child_b.id)],
@@ -727,6 +730,7 @@ async def _verify_gateway_contract(db_path: Path, phase: str) -> None:
             transport=pending_transport,
             base_url="http://localhost:8090",
             cookies={"bowhead_jwt": pending_token},
+            headers={"Origin": "http://localhost:8090"},
         ) as pending_client:
             resolve_url = f"/api/v1/clarifications/{pending_request_id}/resolve"
             first_resolution = await pending_client.post(
@@ -757,7 +761,7 @@ async def _verify_gateway_contract(db_path: Path, phase: str) -> None:
                         f"rollback Gateway clarification canonical outcome drifted: {response_json!r}",
                     )
 
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         failed_rows = connection.execute(
             "SELECT (SELECT COUNT(*) FROM chat_submission_receipts "
             "WHERE client_submission_id=?),"

@@ -58,36 +58,6 @@ async def test_bad_layout_saves_all_valid_views_and_exact_values(layout: object)
     assert args == before
 
 
-async def test_missing_child_hints_keep_explicit_chart_types_and_report_defaults() -> None:
-    args = _args()
-    args.pop("hint")
-    for view in args["views"]:
-        view.pop("hint")
-    before = copy.deepcopy(args)
-    canvas = _CapturingCanvasStore()
-    result = await _add_chart(args, _StubCtx(artifact_store=_source(), canvas_store=canvas))
-    assert "error" not in result, result
-    assert result["presentation_fallbacks"] == [
-        {"code": "hint_defaulted", "path": "/views/0/hint"},
-        {"code": "hint_defaulted", "path": "/views/1/hint"},
-    ]
-    assert [view["spec"]["kind"] for view in canvas.appended_payload["spec"]["views"]] == ["line", "table"]
-    assert args == before
-
-
-async def test_missing_hint_uses_existing_raw_inference() -> None:
-    canvas = _CapturingCanvasStore()
-    args = {"data_artifact_id": "art_aaaaaaaaaaaa", "title": "Original observations", "series": ["revenue", "cost"]}
-    result = await _add_chart(
-        args,
-        _StubCtx(artifact_store=_source(), canvas_store=canvas),
-    )
-    assert "error" not in result, result
-    expected = _CapturingCanvasStore()
-    await _add_chart({**args, "hint": "raw"}, _StubCtx(artifact_store=_source(), canvas_store=expected))
-    assert canvas.appended_payload["spec"] == expected.appended_payload["spec"]
-
-
 @pytest.mark.parametrize("wrapper", ["fence", "closers"], ids=["complete-json-fence", "extra-closing-braces"])
 def test_bounded_nested_json_preserves_literal_notes_and_layout(wrapper: str) -> None:
     layout = _args()["layout"]

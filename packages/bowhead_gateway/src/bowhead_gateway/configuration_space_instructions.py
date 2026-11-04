@@ -26,7 +26,7 @@ class SpaceInstructionsDraftDTO(BaseModel):
         default=None,
         json_schema_extra={"maxLength": MAX_CONTENT_CHARS},
         description=(
-            "Complete new Space instructions text. Preserve every unrequested line exactly; empty text clears only on explicit request. "
+            "Complete new AI work instructions text. Preserve every unrequested line exactly; empty text clears only on explicit request. "
             "The length limit applies after removing byte-order marks and trimming surrounding whitespace."
         ),
     )

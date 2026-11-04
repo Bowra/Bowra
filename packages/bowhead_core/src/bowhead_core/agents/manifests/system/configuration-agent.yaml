@@ -1,5 +1,5 @@
 name: configuration-agent
-version: 11
+version: 12
 model: analyst
 trust_class: read-mostly
 max_iterations: 12
@@ -20,7 +20,7 @@ plugins:
   - builtin:settings-personal-appearance@4
   - builtin:settings-language-preferences@2
   - builtin:settings-space-preferences@6
-  - builtin:settings-space-instructions@2
+  - builtin:settings-space-instructions@3
   - builtin:settings-team-administration@1
 skill_grants: []
 callable_peers: []

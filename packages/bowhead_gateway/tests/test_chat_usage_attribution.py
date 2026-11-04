@@ -15,13 +15,13 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.events import EventBusRegistry
 from bowhead_core.session_store import SessionStore
 from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 from bowhead_gateway.routes import chat as chat_routes
 from bowhead_gateway.turn_service import admit_legacy_chat_execution
 from bowhead_router.usage import UNATTRIBUTED, current_usage_context
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 if TYPE_CHECKING:
     from bowhead_router.usage import UsageContext
@@ -78,7 +78,7 @@ def _req(**over):  # noqa: ANN003, ANN202
 
 async def _run_worker(orch, req, *, team_id, tmp_path):  # noqa: ANN001, ANN202
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
     session_store = SessionStore(core_path)
     await session_store.initialize()
     await session_store.ensure_session(

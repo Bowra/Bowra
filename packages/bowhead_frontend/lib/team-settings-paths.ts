@@ -51,3 +51,8 @@ export function teamSettingsPath(tab: TeamSettingsPathTab, fromSetup = false): s
 export function modelExternalCapabilitiesPath(section?: "image" | "search"): string {
   return `${teamSettingsPath("llm")}external/${section ? `${section}/` : ""}`;
 }
+
+/** Presentation tab within the model-settings overview, separate from editor routes. */
+export function modelSettingsOverviewPath(tab: "connections" | "assignments" = "connections"): string {
+  return `${teamSettingsPath("llm")}#${tab}`;
+}

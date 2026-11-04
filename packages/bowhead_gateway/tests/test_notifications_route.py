@@ -1,4 +1,7 @@
-from bowhead_core.notification_store import NotificationForUser
+from typing import Any
+
+import pytest
+from bowhead_core.notification_store import ACTION_REQUIRED_TYPES, NotificationForUser
 from bowhead_gateway.routes.notifications import (
     _to_dto,
 )
@@ -36,3 +39,30 @@ def test_notification_dto_normalizes_legacy_scheduled_links() -> None:
 
     assert dto.actionUrl == "/team/settings/scheduled/"
     assert dto.actions[0].url == "/team/settings/scheduled/"
+
+
+@pytest.mark.parametrize("type_", sorted(ACTION_REQUIRED_TYPES) + ["routine.delivered", "unknown.update"])
+@pytest.mark.parametrize("state", ["open", "resolved"])
+def test_notification_action_projection_uses_server_classification(type_: str, state: str) -> None:
+    from dataclasses import fields
+
+    # The stored dataclass contains heterogeneous scalar, collection and optional fields.
+    values: dict[str, Any] = {field.name: None for field in fields(NotificationForUser)}
+    values.update(
+        id="n",
+        team_id="team",
+        category="test",
+        type=type_,
+        priority="p2",
+        title="Title",
+        actions=[],
+        metadata={},
+        dedupe_key="key",
+        state=state,
+        created_at="now",
+        updated_at="now",
+        recipient_user_id="user",
+        delivered_at="now",
+    )
+    row = NotificationForUser(**values)
+    assert _to_dto(row).actionRequired is (type_ in ACTION_REQUIRED_TYPES and state == "open")

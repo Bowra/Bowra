@@ -4,8 +4,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.reference_mcp_runtime import ReferenceMcpHandlerScope, _saved_result
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_reference_mcp_preparation import _claimed_runtime
 from test_reference_model_context_migration import snapshot

@@ -25,12 +25,22 @@ from bowhead_core.documents.request import (
     DocumentProposal,
     DocumentRequestError,
     DocumentScope,
+    DocumentTaskGenerationArguments,
     UserQuote,
+    generation_proposal,
     resolve_proposal_positions,
     verify_proposal_source,
 )
 from bowhead_core.documents.revision_admission import PreparedRevision, commit_revision_in_tx, prepare_revision_in_tx
+from bowhead_core.documents.task_sources import (
+    DocumentTaskSource,
+    job_task_source_in_tx,
+    read_task_source_in_tx,
+    resolve_task_source_in_tx,
+    task_sources_enabled,
+)
 from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.document_chat_continuation import DocumentTurnOwner
@@ -95,6 +105,7 @@ class PreparedDocumentSubmission:
     proposal: DocumentProposal
     answer: _AnswerContext | None = None
     revision: PreparedRevision | None = None
+    task_source: DocumentTaskSource | None = None
 
 
 async def _question(db, scope: DocumentScope, job_id: str):
@@ -214,8 +225,9 @@ async def _validate_inputs(
     proposal: DocumentProposal,
     *,
     answer: _AnswerContext | None = None,
+    task_source: ChatTurnUserSource | None = None,
 ) -> None:
-    verify_proposal_source(proposal, source)
+    verify_proposal_source(proposal, source, task_source=task_source)
     if answer is not None:
         from bowhead_core.documents.revision_admission import authorized_revision_inputs_in_tx, has_revision_inputs_in_tx
 
@@ -241,7 +253,7 @@ async def _validate_inputs(
 
 class DocumentStore:
     def __init__(self, db_path: str | Path) -> None:
-        self._path = str(db_path)
+        self._path = str(domain_database_path(db_path, "execution"))
 
     async def close_uncommitted_admission(self, *, scope: DocumentScope, turn_id: str, cancelled: bool) -> None:
         """Close only the document-owned reservation, including a lost binding reply.
@@ -251,7 +263,7 @@ class DocumentStore:
         Cleanup needs the original owner scope, not still-active membership;
         revocation or session deletion must not strand the reservation.
         """
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
                 """UPDATE turn_agent_execution SET status=?,ended_at=?,failure_code=?
@@ -277,7 +289,13 @@ class DocumentStore:
             await db.commit()
 
     async def recover_from_turn(
-        self, *, scope: DocumentScope, turn_id: str, command_id: str, proposal: DocumentProposal | UserQuote, parent_job_id: str | None = None
+        self,
+        *,
+        scope: DocumentScope,
+        turn_id: str,
+        command_id: str,
+        proposal: DocumentProposal | DocumentTaskGenerationArguments | UserQuote,
+        parent_job_id: str | None = None,
     ) -> DocumentReceipt | None:
         """Read an exact durable admission without reopening its terminal binding.
 
@@ -286,7 +304,7 @@ class DocumentStore:
         It never dispatches or reauthorizes bytes for execution/publication.
         """
         _command_id(command_id)
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=False)
             db.row_factory = aiosqlite.Row
@@ -314,6 +332,8 @@ class DocumentStore:
                 or _digest(_json(chat_turn_user_source_projection(source))) != row["user_source_sha256"]
             ):
                 raise DocumentRequestError("document_source_unavailable")
+            proposal = generation_proposal(proposal, source, preserve_task_source=request.get("task_source") is not None)
+            material = await job_task_source_in_tx(db, job=row)
             if source.document_revision_target is not None:
                 if (
                     parent_job_id is not None
@@ -328,7 +348,9 @@ class DocumentStore:
             elif parent_job_id is None:
                 if not isinstance(proposal, DocumentProposal) or "answer" in request:
                     raise DocumentRequestError("document_command_conflict")
-                candidate = resolve_proposal_positions(DocumentProposal.model_validate_json(proposal.model_dump_json()), source)
+                candidate = resolve_proposal_positions(
+                    DocumentProposal.model_validate_json(proposal.model_dump_json()), source, task_source=material[2] if material else None
+                )
                 request["proposal"] = candidate.model_dump(mode="json")
             else:
                 if not isinstance(proposal, UserQuote) or request.get("answer", {}).get("parent_job_id") != parent_job_id:
@@ -345,13 +367,21 @@ class DocumentStore:
             return receipt
 
     async def prepare_from_turn(
-        self, *, scope: DocumentScope, turn_id: str, proposal: DocumentProposal | UserQuote, parent_job_id: str | None = None
+        self,
+        *,
+        scope: DocumentScope,
+        turn_id: str,
+        proposal: DocumentProposal | DocumentTaskGenerationArguments | UserQuote,
+        parent_job_id: str | None = None,
     ) -> PreparedDocumentSubmission:
         """Reject repairable input before allocating an Agent execution."""
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=True)
             source = await _live_source(db, scope, turn_id)
+            if isinstance(proposal, DocumentTaskGenerationArguments) and not task_sources_enabled():
+                raise DocumentRequestError("document_task_source_disabled", field="task_source")
+            proposal = generation_proposal(proposal, source)
             if source.document_revision_target is not None:
                 if parent_job_id is not None or not isinstance(proposal, UserQuote):
                     raise DocumentRequestError("document_revision_required")
@@ -381,9 +411,19 @@ class DocumentStore:
                 answer = _AnswerContext(parent_job_id, digest, instruction)
             if not isinstance(proposal, DocumentProposal):
                 raise DocumentRequestError("document_request_invalid")
-            proposal = resolve_proposal_positions(DocumentProposal.model_validate_json(proposal.model_dump_json()), source)
-            await _validate_inputs(db, scope, source, proposal, answer=answer)
-            return PreparedDocumentSubmission(proposal, answer)
+            snapshot = original = None
+            if proposal.task_source is not None:
+                if answer is not None:
+                    material = await job_task_source_in_tx(db, job=parent)
+                    if material is None:
+                        raise DocumentRequestError("document_task_source_unavailable", field="task_source")
+                    snapshot = material[0]
+                    original = await read_task_source_in_tx(db, current=source, snapshot=snapshot, quote=proposal.task_source)
+                else:
+                    snapshot, original = await resolve_task_source_in_tx(db, current=source, quote=proposal.task_source)
+            proposal = resolve_proposal_positions(DocumentProposal.model_validate_json(proposal.model_dump_json()), source, task_source=original)
+            await _validate_inputs(db, scope, source, proposal, answer=answer, task_source=original)
+            return PreparedDocumentSubmission(proposal, answer, task_source=snapshot)
 
     async def submit_from_turn(
         self,
@@ -396,6 +436,7 @@ class DocumentStore:
         _answer: _AnswerContext | None = None,
         _revision: PreparedRevision | None = None,
         _canvas: CanvasInputAdmission | None = None,
+        _task_source: DocumentTaskSource | None = None,
     ) -> DocumentReceipt:
         """Commit proposal + exact source hash + receipt/link/event atomically.
 
@@ -408,6 +449,11 @@ class DocumentStore:
         # validation APIs). Only the typed bounded proposal enters the hash.
         proposal = DocumentProposal.model_validate_json(proposal.model_dump_json())
         request_data = {"command_kind": "submit", "turn_id": turn_id, "proposal": proposal.model_dump(mode="json")}
+        if (proposal.task_source is None) != (_task_source is None):
+            raise DocumentRequestError("document_task_source_unavailable", field="task_source")
+        if _task_source is not None:
+            _task_source = DocumentTaskSource.model_validate_json(_task_source.model_dump_json())
+            request_data["task_source"] = _task_source.model_dump(mode="json")
         if _answer is not None:
             request_data["answer"] = _answer.as_json()
         if _revision is not None:
@@ -419,7 +465,7 @@ class DocumentStore:
         if runtime is not None:
             request_data["runtime"] = {
                 "profile": runtime.turn_snapshot.planner_profile
-                if runtime.turn_snapshot is not None and runtime.turn_snapshot.schema_version == 2
+                if runtime.turn_snapshot is not None and runtime.turn_snapshot.schema_version in {2, 3}
                 else "ordinary-pptx-worker-v1",
                 "image_id": runtime.image_id,
                 "model_config_version": runtime.model_config_version,
@@ -428,9 +474,21 @@ class DocumentStore:
                 request_data["runtime"]["model_selection"] = runtime.model_selection.model_dump(mode="json")
         request_json = _json(request_data)
         request_hash = _digest(request_json)
-        async with open_shared_ctx(self._path) as db:
+        if _canvas is not None:
+            from bowhead_core.documents.canvas_inputs import prepare_canvas_input_artifact
+
+            _canvas = await prepare_canvas_input_artifact(self._path, scope=scope, admission=_canvas, now=datetime.now(UTC).isoformat())
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             await _authorize(db, scope, write=False)
+            original = None
+            if _task_source is not None:
+                current = await _read_chat_turn_user_source_in_tx(
+                    db, turn_id=turn_id, expected_user_id=scope.user_id, expected_workspace_id=scope.workspace_id
+                )
+                if current is None:
+                    raise DocumentRequestError("document_source_unavailable")
+                original = await read_task_source_in_tx(db, current=current, snapshot=_task_source, quote=proposal.task_source)
             previous = await _receipt(db, scope, command_id, request_hash)
             if previous is not None:
                 if runtime is not None:
@@ -441,6 +499,8 @@ class DocumentStore:
                         raise DocumentRequestError("document_command_conflict")
                 return previous  # Remains recoverable after the Turn ends.
             await _authorize(db, scope, write=True)
+            if _task_source is not None and _answer is None and not task_sources_enabled():
+                raise DocumentRequestError("document_task_source_disabled", field="task_source")
             source = await _live_source(db, scope, turn_id)
             if source.document_revision_target is not None:
                 if _revision is None or _answer is not None:
@@ -451,7 +511,7 @@ class DocumentStore:
             elif _revision is not None:
                 raise DocumentRequestError("document_revision_conflict")
             else:
-                await _validate_inputs(db, scope, source, proposal, answer=_answer)
+                await _validate_inputs(db, scope, source, proposal, answer=_answer, task_source=original)
             if _canvas is not None:
                 from bowhead_core.documents.canvas_inputs import inherit_canvas_input_in_tx, validate_current_canvas_in_tx
 
@@ -603,11 +663,12 @@ class DocumentStore:
             proposal=prepared.proposal,
             runtime=runtime,
             _answer=prepared.answer,
+            _task_source=prepared.task_source,
         )
 
     async def questions_from_turn(self, *, scope: DocumentScope, turn_id: str) -> list[dict]:
         """Only current-owner questions in the canonical Turn's exact session."""
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=True)
             source = await _read_chat_turn_user_source_in_tx(
@@ -626,7 +687,7 @@ class DocumentStore:
                 return [{"job_id": row[0], "question": row[1]} for row in await cursor.fetchall()]
 
     async def get(self, *, scope: DocumentScope, job_id: str) -> DocumentJob | None:
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=False)
             db.row_factory = aiosqlite.Row
@@ -637,6 +698,8 @@ class DocumentStore:
                 (job_id, *scope.sql_params()),
             ) as cur:
                 row = await cur.fetchone()
+            if row is not None:
+                await job_task_source_in_tx(db, job=row)
             return _job(row) if row is not None else None
 
     async def list_for_session(self, *, scope: DocumentScope, session_id: str, after_id: str = "", limit: int = 50) -> list[DocumentJob]:
@@ -646,7 +709,7 @@ class DocumentStore:
         """
         if not 1 <= limit <= 100:
             raise DocumentRequestError("document_page_invalid")
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=False)
             db.row_factory = aiosqlite.Row
@@ -658,7 +721,10 @@ class DocumentStore:
                 ORDER BY l.job_id LIMIT ?""",
                 (*scope.sql_params(), session_id, after_id, limit),
             ) as cur:
-                return [_job(row) for row in await cur.fetchall()]
+                rows = await cur.fetchall()
+            for row in rows:
+                await job_task_source_in_tx(db, job=row)
+            return [_job(row) for row in rows]
 
     async def cancel(self, *, scope: DocumentScope, job_id: str, command_id: str, expected_proposal_revision: int) -> DocumentReceipt:
         """Explicit trusted user cancellation; works with feature off.
@@ -668,7 +734,7 @@ class DocumentStore:
         """
         _command_id(command_id)
         request_hash = _digest(_json({"command_kind": "cancel", "job_id": job_id, "expected_proposal_revision": expected_proposal_revision}))
-        async with open_shared_ctx(self._path) as db:
+        async with open_shared_ctx(domain_database_path(self._path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             await _authorize(db, scope, write=False)
             previous = await _receipt(db, scope, command_id, request_hash)

@@ -18,6 +18,7 @@ from bowhead_core.chat_reference_storage import _row
 from bowhead_core.reference_mcp_prompt_model import ReferenceMcpPromptModelAccess
 from bowhead_core.skill_read_access import ReferenceSkillReadAccess
 from bowhead_core.skill_read_model_input import RequiredSkillModelInput
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.tool_registry import ToolExecutionContext
 
 
@@ -76,7 +77,7 @@ async def record_model_context(
         access.require_model_receiver(ctx)
 
     require_receiver()
-    async with open_shared_ctx(access.source_db_path) as db:
+    async with open_shared_ctx(domain_database_path(access.source_db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             if type(access) is ReferenceMcpPromptModelAccess:

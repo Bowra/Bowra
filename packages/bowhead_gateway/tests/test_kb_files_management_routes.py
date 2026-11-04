@@ -524,3 +524,50 @@ async def test_exact_file_filter_has_a_bounded_request(ctx) -> None:
     client, _store = ctx
     response = client.get("/api/v1/kb/files", params=[("file_ids", f"kbf_{i}") for i in range(101)])
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid", [None, "existing_upload", "artifact_owner", "foreign_owner", "foreign_space", "retired"])
+async def test_prepare_kb_chat_attachment_uses_current_source_and_original_upload_authority(production_ctx, tmp_path: Path, invalid: str | None):
+    from bowhead_gateway.chat_attachment_access import validate_chat_attachment_access
+
+    client, files = production_ctx
+    artifacts = ArtifactStore(str(tmp_path / "chat-artifacts.db"), LocalBackend(tmp_path / "chat-blobs"))
+    await artifacts.initialize()
+    client.app.state.artifact_store = artifacts
+    artifact = await artifacts.put_bytes(
+        content=b"Synthetic knowledge",
+        filename="source.md",
+        mime="text/markdown",
+        source="upload" if invalid == "existing_upload" else "kb_upload",
+        kind="user_upload",
+        created_by="other" if invalid == "artifact_owner" else UID,
+        workspace_id=WS,
+        bind_chat_upload=invalid == "existing_upload",
+    )
+    [file_id] = await _seed(
+        files,
+        1,
+        artifact_id=artifact.id,
+        filename=artifact.filename,
+        mime_type=artifact.mime,
+        size_bytes=artifact.size,
+        uploaded_by="other" if invalid == "foreign_owner" else UID,
+        workspace_id="other-space" if invalid == "foreign_space" else WS,
+        initial_parse_status="done",
+    )
+    if invalid == "retired":
+        await files.soft_delete(file_id)
+    response = client.post(f"/api/v1/kb/files/{file_id}/chat-attachment", headers={"X-Space-Id": WS})
+    if invalid not in {None, "existing_upload"}:
+        assert response.status_code in {403, 404, 409}
+        assert await artifacts.get_ready_uploads_for_chat([artifact.id], user_id=UID, workspace_id=WS) == {}
+        return
+    assert response.status_code == 200, response.text
+    reference = response.json()
+    assert reference == {"fileId": artifact.id, "filename": artifact.filename, "mime": artifact.mime, "size": artifact.size}
+    await validate_chat_attachment_access(
+        artifact_store=artifacts, refs=[reference], runtime_ids=[artifact.id], user_id=UID, workspace_id=WS, session_id=None
+    )
+    again = client.post(f"/api/v1/kb/files/{file_id}/chat-attachment", headers={"X-Space-Id": WS})
+    assert again.json() == reference

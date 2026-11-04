@@ -965,6 +965,7 @@ async def _protected_disable_team_skill(
             )
             if cached is not None:
                 await db.rollback()
+                await pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
                 return cached
             async with db.execute(
                 "SELECT * FROM team_skill WHERE team_id=? AND id=?",
@@ -1002,7 +1003,6 @@ async def _protected_disable_team_skill(
                 resource_state=_team_skill_state(current),
                 dependency_impact=dependency_impact,
             )
-            await pause_affected_schedules(db, schedule_ids)
             await db.execute(
                 "UPDATE team_skill SET status='disabled',updated_at=? WHERE team_id=? AND id=?",
                 (_now(), user.team_id, skill_id),
@@ -1050,6 +1050,7 @@ async def _protected_disable_team_skill(
                 response=response,
             )
             await db.commit()
+            await pause_affected_schedules(db, schedule_ids)
             return response
     except (
         ResourceChangeIdempotencyConflict,
@@ -1643,6 +1644,7 @@ async def _protected_delete_team_skill(
             if cached is not None:
                 replayed = True
                 await db.rollback()
+                await pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
             else:
                 async with db.execute(
                     "SELECT * FROM team_skill WHERE team_id=? AND id=?",
@@ -1704,7 +1706,6 @@ async def _protected_delete_team_skill(
                     root=root,
                     command_identity=f"{user.team_id}:{user.id}:{idempotency_key}",
                 )
-                await pause_affected_schedules(db, schedule_ids)
                 access = getattr(request.app.state, "access_control_store", None)
                 if access is not None:
                     revoked = await access._revoke_grants_for_resource_conn(
@@ -1764,6 +1765,7 @@ async def _protected_delete_team_skill(
                     audit_id=audit_id,
                 )
                 await db.commit()
+                await pause_affected_schedules(db, schedule_ids)
                 committed = True
     except (
         ResourceChangeIdempotencyConflict,

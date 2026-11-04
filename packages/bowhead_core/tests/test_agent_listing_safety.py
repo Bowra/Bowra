@@ -4,13 +4,13 @@ import json
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_listing_safety import (
     BLOCKED_LISTING_DISPLAY_NAME,
     BLOCKED_LISTING_SUMMARY,
     AgentListingSafetyStore,
     scan_agent_listing,
 )
+from core_legacy_database import upgrade
 
 
 def test_listing_scanner_returns_taxonomy_without_matched_secret_or_pii() -> None:
@@ -118,7 +118,7 @@ def _seed(db_path, *, count: int = 3) -> None:  # noqa: ANN001
 @pytest.mark.asyncio
 async def test_inventory_scan_is_dry_run_by_default_resumable_and_idempotent(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     _seed(db_path)
     private_listing = "owner@example.com"
     with sqlite3.connect(db_path) as connection:

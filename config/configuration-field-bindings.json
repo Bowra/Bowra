@@ -72,12 +72,12 @@
   "team_model_config.kb": {
     "kind": "container",
     "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
-    "schema_revision": "edc24b851f9ade9eee27"
+    "schema_revision": "f94563ca535ee4ff6325"
   },
   "team_model_config.kb.active": {
     "kind": "container",
     "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
-    "schema_revision": "e02b9b67d4b00c29003b"
+    "schema_revision": "fd600b4c5e7d037ba6ba"
   },
   "team_model_config.kb.active.embed": {
     "kind": "control",
@@ -100,6 +100,13 @@
     "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
     "schema_revision": "00404e686415370f1711"
   },
+  "team_model_config.kb.active.source_description": {
+    "kind": "control",
+    "file": "components/settings/models.tsx",
+    "marker": "team_model_config.kb.active.source_description",
+    "reason": "The optional source-description selector uses the existing model editor, explicit disable semantics and Review/Apply boundary.",
+    "schema_revision": "00404e686415370f1711"
+  },
   "team_model_config.kb.active.vision": {
     "kind": "control",
     "file": "components/settings/models.tsx",
@@ -107,15 +114,20 @@
     "reason": "The original control reads value-free metadata; saves and permissions remain in the original editor.",
     "schema_revision": "00404e686415370f1711"
   },
+  "team_model_config.kb.auto_assign_disabled": {
+    "kind": "derived",
+    "reason": "The original optional-model selectors store an explicit-off marker when cleared and remove it when selected. Connection reconciliation preserves these choices; no separate preference control or writer exists.",
+    "schema_revision": "384f51c01ec746e3095a"
+  },
   "team_model_config.kb.models": {
     "kind": "container",
     "reason": "Structural group; original child controls and their individual bindings carry the explanations.",
-    "schema_revision": "52f964a3917df87226b2"
+    "schema_revision": "2a19e5bd5e64b6fd6fbe"
   },
   "team_model_config.kb.models.*.capability": {
     "kind": "derived",
     "reason": "Knowledge declarations are derived from original connection/model capability controls; the dimension has its own reindex control.",
-    "schema_revision": "8bbe6fe76aef81992be4"
+    "schema_revision": "8557022d69c1ae5d288a"
   },
   "team_model_config.kb.models.*.dim": {
     "kind": "control",

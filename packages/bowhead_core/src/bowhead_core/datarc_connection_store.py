@@ -21,6 +21,8 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core.llm_config_crypto import decrypt_llm_config, encrypt_llm_config
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS datarc_connection (
@@ -122,12 +124,15 @@ class DatarcConnectionStore:
     """Team-scoped datarc connection registry. Reuses the bowhead.db sqlite file."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
-            await db.executescript(_SCHEMA)
+        async with diagnostic_connect(self._db_path) as db:
+            if domain_layout_active(self._db_path):
+                await require_domain_schema(db, "core")
+            else:
+                await db.executescript(_SCHEMA)
             now = _now()
             await db.execute(
                 "UPDATE datarc_connection AS dc SET status='archived', updated_at=? "
@@ -139,7 +144,8 @@ class DatarcConnectionStore:
                 ")",
                 (now,),
             )
-            await db.execute(_ACTIVE_UNIQUE_INDEX)
+            if not domain_layout_active(self._db_path):
+                await db.execute(_ACTIVE_UNIQUE_INDEX)
             await db.commit()
 
     async def create_connection(
@@ -157,7 +163,7 @@ class DatarcConnectionStore:
         auth_ref = _encrypt_auth_or_raise(auth_key) if auth_key else None
         dc_id = _dc_id()
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             if status == "active":
                 await db.execute(
                     "UPDATE datarc_connection SET status='archived', updated_at=? WHERE team_id=? AND status='active'",
@@ -198,7 +204,7 @@ class DatarcConnectionStore:
         if not include_archived:
             sql += " AND status='active'"
         sql += " ORDER BY created_at"
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, (team_id,)) as cur:
                 rows = await cur.fetchall()
@@ -206,7 +212,7 @@ class DatarcConnectionStore:
 
     async def get_connection(self, dc_id: str, team_id: str) -> DatarcConnection | None:
         """team-bound read (fail-closed cross-team: wrong team_id → None)."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM datarc_connection WHERE id=? AND team_id=?", (dc_id, team_id)) as cur:
                 row = await cur.fetchone()
@@ -214,7 +220,7 @@ class DatarcConnectionStore:
 
     async def get_connection_auth(self, dc_id: str, team_id: str) -> str | None:
         """Decrypt the auth_key — use-time + team-bound only. None if no connection / no auth."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT auth_ref FROM datarc_connection WHERE id=? AND team_id=?", (dc_id, team_id)) as cur:
                 row = await cur.fetchone()
@@ -229,7 +235,7 @@ class DatarcConnectionStore:
         when the registry timestamp has not advanced within the same second.
         Its digest identifies a revision; it is not an authorization token.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM datarc_connection WHERE team_id=? AND status='active'", (team_id,)) as cursor:
                 row = await cursor.fetchone()
@@ -242,7 +248,7 @@ class DatarcConnectionStore:
 
     async def update_connection_auth(self, dc_id: str, team_id: str, *, auth_key: str) -> bool:
         auth_ref = _encrypt_auth_or_raise(auth_key) if auth_key else None
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE datarc_connection SET auth_ref=?, key_hint=?, updated_at=? WHERE id=? AND team_id=?",
                 (auth_ref, _key_hint(auth_key), _now(), dc_id, team_id),
@@ -254,7 +260,7 @@ class DatarcConnectionStore:
         if status not in ("active", "archived"):
             raise ValueError(f"invalid status: {status!r}")
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             if status == "active":
                 await db.execute(
                     "UPDATE datarc_connection SET status='archived', updated_at=? WHERE team_id=? AND id<>? AND status='active'",

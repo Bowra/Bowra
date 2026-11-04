@@ -1,6 +1,4 @@
-requested_metrics: "   - Alle angefragten Felder und Kennzahlen in der Antwort nennen. Wenn ein Ergebnisartefakt erforderlich ist, seine Spalten
-  in `add_chart.series` aufnehmen; ausgelassene Spalten werden nicht angezeigt. Eingabedateien nur zusammenführen, wenn das angeforderte Artefakt
-  dies benötigt. Bei einer einfachen Abfrage genügt eine Zusammenfassung mit Quellen."
+requested_metrics: "   - Alle angefragten Felder und Kennzahlen beantworten. Tabellen zeigen mit columns=all standardmäßig alle Quellspalten; nur eine angefragte Teilmenge mit exakten Schlüsseln in Reihenfolge wählen. Diagramme deklarieren Typ, Achsen, Skala und group_by ([] ohne Gruppierung). Aggregation und Top N vorgelagert vorbereiten. Eingaben nur für das angefragte Artefakt zusammenführen. Einfache Kennzahlen dürfen belegte Zusammenfassungen nutzen."
 requested_artifacts: "   - Bei ausdrücklich angeforderten Tabellen, Diagrammen, Detaildaten oder Berichten reicht Fließtext nicht als Lieferung
   ihrer Kennzahlen. Bei einer einfachen Abfrage ohne angefordertes Artefakt genügt `exec_summary` mit allen geprüften Werten und Quellen. Fehlende
   Elemente und deren Gründe in `caveats[]` nennen."

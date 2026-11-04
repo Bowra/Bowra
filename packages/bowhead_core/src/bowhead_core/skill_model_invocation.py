@@ -25,6 +25,7 @@ from bowhead_core.reference_mcp_prompt_model import ReferenceMcpPromptModelAcces
 from bowhead_core.skill_model_context import ModelContextReceipt
 from bowhead_core.skill_read_access import ReferenceSkillReadAccess
 from bowhead_core.skill_read_model_input import RequiredSkillModelInput
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.tool_registry import ToolExecutionContext
 
 
@@ -55,7 +56,7 @@ class ReferenceModelInvocationHook:
                 if type(self.access) is ReferenceSkillReadAccess:
                     await self.ctx.ensure_reference_skill_context()
                 self._require_receiver()
-                async with open_shared_ctx(self.access.source_db_path) as db:
+                async with open_shared_ctx(domain_database_path(self.access.source_db_path, "execution")) as db:
                     await db.execute("BEGIN IMMEDIATE")
                     try:
                         prepared = None
@@ -168,7 +169,7 @@ class ReferenceModelInvocationHook:
                     or any(type(v) is not int or v < 0 for v in (usage.input_tokens, usage.output_tokens, usage.cached_tokens))
                 ):
                     raise ValueError()
-                async with open_shared_ctx(self.access.source_db_path) as db:
+                async with open_shared_ctx(domain_database_path(self.access.source_db_path, "execution")) as db:
                     await db.execute("BEGIN IMMEDIATE")
                     try:
                         row = await _row(db, "SELECT * FROM chat_reference_model_invocations WHERE invocation_id=?", (identity["invocation_id"],))
@@ -204,7 +205,7 @@ class ReferenceModelInvocationHook:
             # retrying HTTP or replaying an unrelated successful invocation.
             if isinstance(exc, Exception) and committing:
                 with suppress(Exception):
-                    async with open_shared_ctx(self.access.source_db_path) as db:
+                    async with open_shared_ctx(domain_database_path(self.access.source_db_path, "execution")) as db:
                         await db.execute("BEGIN")
                         try:
                             row = await _row(db, "SELECT * FROM chat_reference_model_invocations WHERE invocation_id=?", (identity["invocation_id"],))

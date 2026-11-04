@@ -289,3 +289,17 @@ it("collapses long unchanged runs and finds a similar existing line", () => {
   expect(findSimilarLine("Intro\n- 新品指上市未满 24 个月的产品。", ["- 新品指上市未满 24 个月的产品；同一个回答里如果用了别的界定，要先写明。"])).toBe(2);
   expect(findSimilarLine("Intro", ["Totally new line here"])).toBeNull();
 });
+
+
+it.each([
+  ["zh-CN", "AI 工作说明", "所有成员", "描述", "下一条消息"],
+  ["en-US", "AI work instructions", "every member", "description", "next message"],
+  ["de-DE", "KI-Arbeitsanweisungen", "alle Mitglieder", "Beschreibung", "nächsten Nachricht"],
+  ["fr-FR", "Consignes de travail de l’IA", "tous les membres", "description", "prochain message"],
+] as const)("explains the AI instructions purpose and scope in %s", async (locale, title, members, description, nextMessage) => {
+  const { container } = renderIntl(<SpaceInstructions />, { locale });
+  expect(await screen.findByRole("heading", { name: title })).toBeTruthy();
+  const text = container.querySelector(".ui-page-desc")!.textContent!;
+  for (const phrase of [members, description, nextMessage]) expect(text).toContain(phrase);
+  expect((await screen.findByRole("textbox")).textContent).toBe(current.content);
+});

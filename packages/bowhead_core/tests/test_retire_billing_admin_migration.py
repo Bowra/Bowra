@@ -11,6 +11,7 @@ from alembic import command
 from alembic.config import Config
 from bowhead_core.credit_activation import credit_capabilities_for_role
 from bowhead_core.migrations.baseline_schema import INITIAL_SCHEMA_B85
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore
 
 from bowhead_core import migrations
@@ -59,8 +60,8 @@ async def test_upgrade_preserves_memberships_and_removes_old_authority(tmp_path:
             "INSERT INTO admin_audit_log(id,actor_user_id,team_id,action,scope,payload_json,ts) VALUES ('audit','old','team_a','role_change','team','{\"new_role\":\"billing_admin\"}','2026-09-01')"
         )
         before_indexes = db.execute("SELECT name,sql FROM sqlite_master WHERE type='index' AND tbl_name='team_members' ORDER BY name").fetchall()
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     command.stamp(config, MIGRATION.down_revision)
     # Replay only this revision, then restore the ledger to head; later revisions (e.g. 0063 tables/MCP Prompt structural prechecks) may not rerun on upgraded databases.
     command.upgrade(config, MIGRATION.revision)
@@ -103,5 +104,5 @@ async def test_upgrade_preserves_memberships_and_removes_old_authority(tmp_path:
 @pytest.mark.parametrize("target", list(INITIAL_SCHEMA_B85))
 def test_upgrade_empty_targets(tmp_path: Path, target: str) -> None:
     config = _config(tmp_path / f"{target}.db", target)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)

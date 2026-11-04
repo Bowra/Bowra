@@ -18,39 +18,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from bowhead_core.canvas_composer import (
-    _hint_from_caption,
     _try_auto_build_chart_section,
 )
 
 # ─── hint heuristic ──────────────────────────────────────────────────
-
-
-def test_hint_trend_keywords() -> None:
-    assert _hint_from_caption("GMV 月度趋势") == "trend"
-    assert _hint_from_caption("Q1 同比走势") == "trend"
-    assert _hint_from_caption("各月营收") == "trend"
-
-
-def test_hint_rank_keywords() -> None:
-    assert _hint_from_caption("品牌销售排名") == "rank"
-    assert _hint_from_caption("top 10 客户") == "rank"
-    assert _hint_from_caption("各品类大到小") == "rank"
-
-
-def test_hint_share_keywords() -> None:
-    assert _hint_from_caption("品类构成占比") == "share"
-    assert _hint_from_caption("share 分布") == "share"
-
-
-def test_hint_compare_keywords() -> None:
-    assert _hint_from_caption("Q1 vs Q2 对比") == "compare"
-    # "compare" keyword direct hit
-    assert _hint_from_caption("compare A and B") == "compare"
-
-
-def test_hint_none_when_no_keyword() -> None:
-    assert _hint_from_caption("一些数据") is None
-    assert _hint_from_caption("") is None
 
 
 # ─── _try_auto_build_chart_section ───────────────────────────────────
@@ -102,9 +73,9 @@ class _StubBus:
 
 
 @pytest.mark.asyncio
-async def test_auto_build_succeeds_with_real_csv() -> None:
+@pytest.mark.parametrize("csv_data", [b"category,sales\nA,100\nB,200\nC,150\n", b"region,status\nSouth,Active\n", b"value\n42\n"])
+async def test_auto_build_succeeds_with_real_csv(csv_data: bytes) -> None:
     """Valid CSV → composer builds chart section successfully."""
-    csv_data = b"category,sales\nA,100\nB,200\nC,150\n"
     backend = _StubBackend(csv_data)
     artifact = _StubArtifact(path="/tmp/x.csv", backend=backend)
 
@@ -131,6 +102,10 @@ async def test_auto_build_succeeds_with_real_csv() -> None:
     assert kwargs["kind"] == "chart"
     assert kwargs["canvas_id"] == "canvas_1"
     assert kwargs["by_turn_id"] == "t_test"
+    spec = kwargs["payload"]["spec"]
+    assert spec["kind"] == "table"
+    assert [column["key"] for column in spec["columns"]] == csv_data.decode().splitlines()[0].split(",")
+    assert spec["explicit_presentation"]["mode"] == "table"
 
 
 @pytest.mark.asyncio
@@ -181,35 +156,6 @@ async def test_auto_build_returns_none_on_empty_csv() -> None:
         bus=bus,
     )
     assert new_sid is None
-
-
-@pytest.mark.asyncio
-async def test_auto_build_skips_scalar_when_chart_shape_required() -> None:
-    """Computation scalar artifacts should stay callouts, not become one-point charts."""
-    csv_data = "利润 / 元\n217778083.62\n".encode()
-    backend = _StubBackend(csv_data)
-    artifact = _StubArtifact(path="/tmp/scalar.csv", backend=backend)
-
-    artifact_store = MagicMock()
-    artifact_store.get = AsyncMock(return_value=artifact)
-    artifact_store.backend = backend
-
-    canvas_store = _StubCanvasStore()
-    bus = _StubBus()
-
-    new_sid = await _try_auto_build_chart_section(
-        canvas_id="canvas_1",
-        artifact_store=artifact_store,
-        canvas_store=canvas_store,
-        data_artifact_id="art_scalar",
-        caption="利润",
-        user_id="u_x",
-        turn_id="t_test",
-        bus=bus,
-        require_chart_shape=True,
-    )
-    assert new_sid is None
-    canvas_store.append_section.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -327,7 +273,6 @@ async def test_computation_artifact_evidence_auto_builds_chart(monkeypatch: Any)
     async def _stub_auto_build(**kwargs: Any) -> str | None:
         auto_build_calls["n"] += 1
         assert kwargs["data_artifact_id"] == "art_comp"
-        assert kwargs["require_chart_shape"] is True
         return "sec_auto_comp"
 
     monkeypatch.setattr(
@@ -389,11 +334,11 @@ async def test_chart_and_computation_auto_build_cache_is_namespaced(monkeypatch:
     canvas_store.append_section = AsyncMock(side_effect=_append_section)
     artifact_store = MagicMock()
     bus = _StubBus()
-    calls: list[bool] = []
+    calls: list[str] = []
 
     async def _stub_auto_build(**kwargs: Any) -> str | None:
-        calls.append(bool(kwargs.get("require_chart_shape")))
-        return "sec_auto_comp" if kwargs.get("require_chart_shape") else "sec_auto_chart"
+        calls.append(kwargs["caption"])
+        return "sec_auto_comp" if len(calls) == 2 else "sec_auto_chart"
 
     monkeypatch.setattr(
         "bowhead_core.canvas_composer._try_auto_build_chart_section",
@@ -437,14 +382,14 @@ async def test_chart_and_computation_auto_build_cache_is_namespaced(monkeypatch:
         artifact_store=artifact_store,
     )
 
-    assert calls == [False, True]
+    assert calls == ["营业额走势", "利润走势"]
     markdown = "\n".join(payload.get("markdown", "") for kind, payload in appended if kind == "narrative")
     assert "[figure:sec_auto_chart]" in markdown and "[figure:sec_auto_comp]" in markdown
 
 
 @pytest.mark.asyncio
-async def test_scalar_computation_evidence_stays_computation(monkeypatch: Any) -> None:
-    """If computation auto-chart declines, the evidence remains a computation entry."""
+async def test_unavailable_computation_source_retains_original_evidence(monkeypatch: Any) -> None:
+    """If the authorized source cannot be materialized, retain the computation evidence."""
     appended: list[tuple[str, dict[str, Any]]] = []
     canvas_store = MagicMock()
     canvas_store.ensure_canvas = AsyncMock(return_value=MagicMock(id="canvas_1", title="t"))
@@ -460,7 +405,6 @@ async def test_scalar_computation_evidence_stays_computation(monkeypatch: Any) -
 
     async def _stub_auto_build(**kwargs: Any) -> str | None:
         assert kwargs["data_artifact_id"] == "art_scalar"
-        assert kwargs["require_chart_shape"] is True
         return None
 
     monkeypatch.setattr(

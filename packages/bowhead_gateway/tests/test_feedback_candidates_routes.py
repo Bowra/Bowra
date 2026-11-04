@@ -21,6 +21,7 @@ from bowhead_core.coach_drafting import CoachDraft
 from bowhead_core.feedback_candidate_store import FeedbackCandidateStore
 from bowhead_core.notification_service import NotificationService
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import User
 from bowhead_gateway.routes import feedback_candidates as fc
 from fastapi import FastAPI, HTTPException
@@ -42,7 +43,7 @@ def _migrated_db(tmp_path: Path) -> str:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return str(path)
 
 

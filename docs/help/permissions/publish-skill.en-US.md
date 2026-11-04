@@ -1,12 +1,14 @@
 # Publish a team Skill
 
+In Chat, `/` can add an accessible standalone Skill method to the current task without configuring the Agent. This provides read-only method content; script and Tool execution retain their existing permissions.
+
 A Skill is a reusable method. Personal editing, team submission, approval, and each member's enablement are different actions.
 
 ## Use a personal Skill or configure it for an Agent
 
 Open **Skills and workflows → My Skills** to manage your personal version. Once enabled with no pending import issues, it can be read as needed by built-in execution Agents in your ordinary conversations; you can also ask for it by name. Saving or enabling it does not mean it will be selected on every task, and reading its instructions does not enable script execution.
 
-Custom Agents need a separate Skill configuration, directly, through a selected Plugin, or as an allowed read-only method the user selects for a task. A personal Skill requires the Agent to be set to **Only me**. To configure it for an Agent shared with colleagues, submit it to the team using the steps below. Once approved, enabled and available to the entire team, choose the team version in the Agent's configuration, then save and apply or publish the Agent version. Team approval does not add the Skill to Agents automatically.
+To make a Skill a persistent Agent dependency, configure it directly or through a selected Plugin. A personal Skill requires the Agent to be set to **Only me**. To configure it for an Agent shared with colleagues, submit it to the team using the steps below. Once approved, enabled and available to the entire team, choose the team version in the Agent's configuration, then save and apply or publish the Agent version. Team approval does not add the Skill to Agents automatically.
 
 ## First submission
 

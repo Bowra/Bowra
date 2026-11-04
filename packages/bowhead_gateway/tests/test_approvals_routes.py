@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 import aiosqlite
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.events import EventBusRegistry, OrchestratorEvent
 from bowhead_core.notification_service import NotificationService
 from bowhead_core.notification_store import NotificationStore
@@ -20,6 +19,7 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from bowhead_router.types import ToolSchema
+from gateway_legacy_database import upgrade
 
 from bowhead_core import ApprovalStore
 
@@ -47,14 +47,15 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "1")
     db = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core") == ("core",)
     store = ApprovalStore(db_path=str(tmp_path / "approvals.db"))
     await store.initialize()
     users = UserStore(db)
     await users.initialize()
+    await complete_community_http_installation(users)
     team = await users.create_team(name="Acme", max_seats=10)
     admin = await users.create_user(team_id=team.id, email="admin@example.com", password="Passw0rd!")
     owner = await users.create_user(team_id=team.id, email="owner@example.com", password="Passw0rd!")
@@ -87,6 +88,7 @@ async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.state.settings = Settings()
     app.state.approval_store = store
     app.state.user_store = users
+    await complete_community_http_installation(users, app=app)
     notification_store = NotificationStore(str(db))
     await notification_store.initialize()
     app.state.notification_store = notification_store

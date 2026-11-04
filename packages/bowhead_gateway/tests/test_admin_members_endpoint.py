@@ -28,10 +28,10 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="session")
 def member_schema(tmp_path_factory):
-    from bowhead_cli.migrate import upgrade
+    from gateway_legacy_database import upgrade
 
     path = tmp_path_factory.mktemp("member-account-schema") / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     return path
 
 

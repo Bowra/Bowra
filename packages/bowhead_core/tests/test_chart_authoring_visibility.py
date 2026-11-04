@@ -15,7 +15,13 @@ async def setup_chart(tmp_path: Path):
     artifact = _FakeArtifact(id="art_aaaaaaaaaaaa", filename="regions.csv", path="regions.csv")
     artifacts = _RichArtifactStore([artifact], {artifact.path: b"region,revenue\nA,12\nB,21\n"})
     context = _StubCtx(artifact_store=artifacts, canvas_store=store)
-    args = {"data_artifact_id": artifact.id, "title": "Regions", "hint": "rank", "force_kind": "bar"}
+    args = {
+        "data_artifact_id": artifact.id,
+        "title": "Regions",
+        "force_kind": "bar",
+        "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+        "group_by": [],
+    }
     return store, context, args
 
 
@@ -45,11 +51,17 @@ async def test_composed_views_inherit_and_override_visibility(setup_chart) -> No
     store, context, args = setup_chart
     result = await _add_chart(
         {
-            **args,
+            **{key: value for key, value in args.items() if key not in {"force_kind", "axes", "group_by", "columns"}},
             "show_data_labels": True,
             "views": [
-                {"id": "trend", "title": "Trend", "series": ["revenue"], "force_kind": "bar"},
-                {"id": "table", "title": "Table", "series": ["revenue"], "force_kind": "table", "show_data_labels": False},
+                {
+                    "id": "trend",
+                    "title": "Trend",
+                    "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+                    "group_by": [],
+                    "force_kind": "bar",
+                },
+                {"id": "table", "title": "Table", "force_kind": "table", "show_data_labels": False},
             ],
         },
         context,
@@ -72,11 +84,19 @@ async def test_invalid_visibility_is_rejected_before_writes(setup_chart, value) 
 async def test_composed_chart_with_different_view_visibility_remains_distinct(setup_chart) -> None:
     _, context, args = setup_chart
     views = [
-        {"id": "bars", "title": "Bars", "series": ["revenue"], "force_kind": "bar"},
-        {"id": "details", "title": "Details", "series": ["revenue"], "force_kind": "table"},
+        {"id": "bars", "title": "Bars", "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"}, "group_by": [], "force_kind": "bar"},
+        {"id": "details", "title": "Details", "force_kind": "table"},
     ]
-    first = await _add_chart({**args, "views": views}, context)
-    changed = await _add_chart({**args, "views": [{**views[0], "show_legend": False}, views[1]]}, context)
+    first = await _add_chart(
+        {**{key: value for key, value in args.items() if key not in {"force_kind", "axes", "group_by", "columns"}}, "views": views}, context
+    )
+    changed = await _add_chart(
+        {
+            **{key: value for key, value in args.items() if key not in {"force_kind", "axes", "group_by", "columns"}},
+            "views": [{**views[0], "show_legend": False}, views[1]],
+        },
+        context,
+    )
     assert "error" not in first and "error" not in changed
     assert first["section_id"] != changed["section_id"]
 
@@ -84,10 +104,12 @@ async def test_composed_chart_with_different_view_visibility_remains_distinct(se
 async def test_invalid_child_visibility_rejects_composition_without_writing(setup_chart) -> None:
     store, context, args = setup_chart
     views = [
-        {"id": "bars", "title": "Bars", "series": ["revenue"], "force_kind": "bar"},
-        {"id": "details", "title": "Details", "series": ["revenue"], "force_kind": "table", "show_legend": "false"},
+        {"id": "bars", "title": "Bars", "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"}, "group_by": [], "force_kind": "bar"},
+        {"id": "details", "title": "Details", "force_kind": "table", "show_legend": "false"},
     ]
-    result = await _add_chart({**args, "views": views}, context)
+    result = await _add_chart(
+        {**{key: value for key, value in args.items() if key not in {"force_kind", "axes", "group_by", "columns"}}, "views": views}, context
+    )
     assert result["error_kind"] == "invalid_chart_expression"
     assert "show_legend" in result["error"]
     assert await store.get_canvas_by_session(context.session_id) is None

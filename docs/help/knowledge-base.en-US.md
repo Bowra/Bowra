@@ -4,6 +4,20 @@ After you add material to the knowledge base, the assistant can search it for re
 
 When answering from your knowledge, the assistant can use accessible source names, available section headings and short opening excerpts to find relevant material. It searches when your task needs supporting evidence; a source preview does not mean the entire document has been reviewed.
 
+When you reopen a chat, document references are checked against your current access. Revoked or removed sources no longer provide an accessible reference or file name.
+
+## Source discovery descriptions and categories
+
+Open a ready file's details to see its source discovery description and categories. These help the assistant decide where to search; they are not evidence that the whole file has been reviewed. A permitted file maintainer can write a manual description, assign up to eight categories, or maintain categories and aliases in the file's original scope. Categories have at most two levels. Use category search when the initial list does not include the category you need.
+
+A manual description takes priority. Clearing it and saving restores any still-valid automatic description. When the source changes, review and re-enter an outdated manual description; previous text is not republished automatically. Unsaved drafts remain intact while generation status updates.
+
+Automatic descriptions are optional and disabled by default. A Team owner or administrator can select **Source descriptions** on **Team settings → Models → Assignments**. New searchable source publications can then generate a short description from bounded excerpts. Saving this setting does not process older files. A file maintainer can explicitly choose **Generate description** for a current published file; this consumes the selected model's credits. Failed generation leaves the file searchable. Refresh the file before an explicit retry, especially if the previous model request's outcome is unknown.
+
+In a document matrix, edit a column and set its **Source discovery purpose** to **Description** or **Topics** to reuse eligible existing results. This setting does not run extraction. Reuse remains limited to the current Matrix's permissions and source versions; edited or outdated cells do not qualify. It does not publish the Matrix text as the file's shared manual description.
+
+The assistant receives a small directory limited to the current user, Space and Agent's allowed sources. It can search a paginated source directory when coverage is unclear and read original evidence when the task needs it. Missing matches do not establish that a document or topic is absent. Unrelated tasks have no mandatory knowledge-base step.
+
 ## Page layout
 
 The knowledge base page has four kinds of content; click one to switch. They are shown as tabs above the content; in a narrow window, they become a row of buttons you can scroll sideways.
@@ -158,6 +172,8 @@ Extraction is queued within a daily quota, so it can take a while when there are
 
 ## See sources in answers and reports
 
+For a ready file you uploaded in the current Space, open its details and choose **Use in chat**. Bowra checks the original file and prepares its attachment before opening the new chat. If the file is no longer available, restore the original and try again.
+
 When an answer or report uses documents from the knowledge base, the related sentence carries a citation number. Open it to check the source text.
 
 ### In a chat
@@ -201,3 +217,9 @@ You can click **Cancel upload** to stop an upload in progress.
 If an upload cannot confirm your sign-in information, the dialog shows a failure instead of loading indefinitely. Choose **Reload sign-in information** to read it again. Upload stays unavailable until your identity is confirmed; this message alone does not mean you lack Space access.
 
 If no relevant evidence is found after a bounded search, the answer explains what remains unverified. This does not mean the knowledge base is empty. You can provide a document name or a more specific question to narrow the search.
+
+In larger collections, recent sources with maintained descriptions or categories receive priority in the assistant’s initial source hints. The assistant can use the source directory to find additional files by category name; a missing hint does not mean a file is unavailable.
+
+## When sources change during a paused task
+
+If a task waiting for your answer reports **Knowledge sources changed**, start a new conversation and ask again using the currently available sources. Changes to a source, its description or your access can make the earlier context unusable. The assistant checks current sources before continuing with them. The same source-change status is shown after refreshing or replaying the chat.

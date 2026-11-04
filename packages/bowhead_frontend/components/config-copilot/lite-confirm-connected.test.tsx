@@ -276,7 +276,7 @@ describe("LiteConfirmConnected", () => {
     });
     renderIntl(<LiteConfirmConnected proposalId="ccd_si" />);
     const card = await screen.findByTestId("lite-propose");
-    expect(card.textContent).toContain("更新「医药」的空间说明？");
+    expect(card.textContent).toContain("更新「医药」的 AI 工作说明？");
     expect(card.textContent).toContain("新品指上市未满 24 个月的产品。");
     expect(card.querySelectorAll('[data-kind="add"]')).toHaveLength(1);
     expect(card.querySelector('[data-kind="del"]')).toBeNull();
@@ -286,7 +286,7 @@ describe("LiteConfirmConnected", () => {
     fireEvent.click(screen.getByRole("button", { name: "应用" }));
     const applied = await screen.findByTestId("lite-applied");
     window.removeEventListener(WORKSPACE_INSTRUCTIONS_SAVED_EVENT, saved);
-    expect(applied.textContent).toContain("「医药」的空间说明已更新为新版本。要撤回，可以在空间说明的版本历史里恢复上一版。");
+    expect(applied.textContent).toContain("「医药」的 AI 工作说明已更新为新版本。要撤回，可以在 AI 工作说明的版本历史里恢复上一版。");
     expect(applied.textContent).not.toContain("24 个月");
     expect(screen.queryByRole("button", { name: "撤销" })).toBeNull();
     // An open instructions page learns that a new version exists.
@@ -310,7 +310,7 @@ describe("LiteConfirmConnected", () => {
     apiMock.mockRejectedValueOnce(new ApiError(403, "forbidden"));
     fireEvent.click(screen.getByRole("button", { name: "应用" }));
     const failed = await screen.findByTestId("lite-fail");
-    expect(failed.textContent).toContain("只有空间管理员和团队管理员可以修改空间说明");
+    expect(failed.textContent).toContain("只有空间管理员和团队管理员可以修改 AI 工作说明");
     expect([...failed.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["忽略"]);
   });
 

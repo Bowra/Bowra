@@ -33,7 +33,7 @@ import {
   readDocumentDraft,
   type DocumentDraftCanvasContext,
 } from "@/lib/document-draft-client";
-import { documentCanvasTitle, documentCanvasStateKey, documentSourceExtension, type DocumentJob, type DocumentPreviewAccess } from "@/lib/document-drafts";
+import { documentCanvasTitle, documentCanvasStateKey, documentSourceExtension, documentDraftSourceName, type DocumentJob, type DocumentPreviewAccess } from "@/lib/document-drafts";
 import { randomUuid } from "@/lib/random-id";
 import type { DocumentRevisionDisplay, DocumentRevisionTarget, DocumentRevisionStageResult } from "@/lib/composer-document-revision";
 import { spaceHeader } from "@/lib/space-storage";
@@ -62,7 +62,7 @@ export interface DocumentDraftCanvasPublication {
   originTurnId: string;
   draftDigest: string;
   source: { artifactId: string; sha256: string };
-  pdf: { artifactId: string; sha256: string };
+  pdf?: { artifactId: string; sha256: string };
 }
 export interface DocumentDraftCanvasRevisionRequest {
   context: Readonly<DocumentDraftCanvasContext>;
@@ -274,16 +274,17 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
       publishedDigest.current === job.draft_digest
     )
       return;
-    const source = job.draft.files["candidate.pptx"];
-    const pdf = job.draft.files["candidate.pdf"];
-    if (!source || !pdf || !inScope() || !callbacks.current.onPublished) return;
+    const source = job.draft.files[documentDraftSourceName(job)];
+    const publishPdf = !job.draft.descriptor || job.draft.descriptor.published_outputs.includes("pdf");
+    const pdf = publishPdf ? job.draft.files["candidate.pdf"] : undefined;
+    if (!source || (publishPdf && !pdf) || !inScope() || !callbacks.current.onPublished) return;
     publishedDigest.current = job.draft_digest;
     callbacks.current.onPublished?.({
       context,
       originTurnId: job.origin_turn_id,
       draftDigest: job.draft_digest,
       source: { artifactId: source.artifact_id, sha256: source.sha256 },
-      pdf: { artifactId: pdf.artifact_id, sha256: pdf.sha256 },
+      ...(pdf ? { pdf: { artifactId: pdf.artifact_id, sha256: pdf.sha256 } } : {}),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, status, context, t]);
@@ -471,7 +472,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
   const changeCount = job?.draft?.manifest.changes.length ?? 0;
   const draftSummary = job?.draft ? job.draft.manifest.comparison === "unavailable"
     ? t("canvas_subtitle_uncompared", { pages })
-    : t("canvas_subtitle", { pages, changes: changeCount }) : undefined;
+    : t(job.draft.descriptor?.format === "docx" ? "canvas_document_subtitle" : "canvas_subtitle", { pages, changes: changeCount }) : undefined;
   const stepIndex = job ? ACTIVE_STEPS.indexOf(job.state) : -1;
   const returnToChat = props.onReturnToChat ? () => {
     if (inScope() && !revoked.current) callbacks.current.onReturnToChat?.(context);
@@ -579,7 +580,7 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
       <CanvasObjectHeader
         titleId={titleId}
         icon={<FileText size={14} aria-hidden />}
-        eyebrow={t("canvas_eyebrow", { format: (job ? documentSourceExtension(job) : null)?.toUpperCase() ?? "PPTX" })}
+        eyebrow={job && documentSourceExtension(job) ? t("canvas_eyebrow", { format: documentSourceExtension(job)!.toUpperCase() }) : t("canvas_eyebrow_unknown")}
         title={title}
         subtitle={draftSummary}
       />
@@ -593,10 +594,10 @@ function DocumentDraftCanvasInstance(props: DocumentDraftCanvasObjectProps) {
           intent="success"
           eyebrow={t("state_published")}
           data-testid="document-published-card"
-          secondary={props.onOpenPublished ? (["pptx", "pdf"] as const).flatMap((format) => {
+          secondary={props.onOpenPublished ? (job.draft?.descriptor ? ["docx", ...(job.draft.descriptor.published_outputs.includes("pdf") ? ["pdf"] : [])] : ["pptx", "pdf"]).flatMap((format) => {
             const artifactId = job.draft?.files[`candidate.${format}`]?.artifact_id;
             return artifactId ? [{
-              label: t(format === "pptx" ? "canvas_open_pptx" : "canvas_open_pdf"),
+              label: t(format === "docx" ? "canvas_open_docx" : format === "pptx" ? "canvas_open_pptx" : "canvas_open_pdf"),
               variant: "secondary" as const,
               disabled: busy || view.phase !== "ready",
               onSelect: () => {

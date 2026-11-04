@@ -8,7 +8,7 @@ from typing import Any
 from bowhead_core.agent_knowledge_policy import KnowledgeAccessError, KnowledgeScope
 from bowhead_core.kb.permission import KbPermission, ScopeContext
 
-KNOWLEDGE_TOOLS = frozenset({"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record"})
+KNOWLEDGE_TOOLS = frozenset({"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record", "kb_list_sources"})
 
 
 async def readable_source(ctx, file_id: str, *, generation: Any = ..., enforce: bool = False) -> bool:
@@ -42,6 +42,9 @@ async def prepare_source_read(ctx, tool_name: str):
     result.knowledge_pending_citations = []
     result.knowledge_source_generations = {}
     ids = ctx.knowledge_scope.file_ids
+    if tool_name == "kb_list_sources":
+        result.knowledge_navigation_pending = {}
+        return result
     if ids is None and tool_name != "kb_search":
         if ctx.kb_files_store is None:
             raise KnowledgeAccessError("knowledge_source_authorization_unavailable")
@@ -74,14 +77,24 @@ def retained_knowledge_scope(ctx) -> KnowledgeScope | None:
 
 
 async def finish_source_read(ctx, tool_name: str, result):
-    if tool_name == "subagent_spawn" and isinstance(result, dict) and ctx.knowledge_source_uses:
+    if tool_name == "subagent_spawn" and isinstance(result, dict) and (ctx.knowledge_source_uses or ctx.knowledge_navigation_uses):
         sources = dict(ctx.knowledge_source_uses)
         await validate_retained_sources(ctx, sources)
         return {
             **result,
-            "knowledge_provenance": {"schema_version": 1, "policy_fingerprint": retained_knowledge_scope(ctx).fingerprint, "sources": sources},
+            "knowledge_provenance": {
+                "schema_version": 1,
+                "policy_fingerprint": (
+                    retained_knowledge_scope(ctx)
+                    or KnowledgeScope(
+                        schema_version=1, user_id=ctx.user_id, team_id=ctx.team_id, workspace_id=ctx.workspace_id, file_ids=None, bindings=()
+                    )
+                ).fingerprint,
+                "sources": sources,
+            },
+            **({"knowledge_navigation_provenance": dict(ctx.knowledge_navigation_uses)} if ctx.knowledge_navigation_uses else {}),
         }
-    if ctx.knowledge_scope is None or tool_name not in KNOWLEDGE_TOOLS or not isinstance(result, dict):
+    if (ctx.knowledge_scope is None and tool_name != "kb_list_sources") or tool_name not in KNOWLEDGE_TOOLS or not isinstance(result, dict):
         return result
     sources: dict[str, Any] = {}
     if tool_name == "kb_search":
@@ -96,6 +109,13 @@ async def finish_source_read(ctx, tool_name: str, result):
         result = {**result, "chunks": permitted}
         if len(permitted) != len(chunks):
             result.update(partial=True, hint="Some sources became unavailable before delivery. Use only the returned evidence.")
+    elif tool_name == "kb_list_sources":
+        from bowhead_core.kb.source_navigation import record_navigation_uses, validate_navigation_dependencies
+
+        await validate_navigation_dependencies(ctx, ctx.knowledge_navigation_pending)
+        record_navigation_uses(ctx, ctx.knowledge_navigation_pending)
+        sources = dict(ctx.knowledge_source_generations)
+        result = {**result, "knowledge_navigation_provenance": ctx.knowledge_navigation_pending}
     else:
         # Recheck the complete input set, including aggregate/metadata contributors.
         for file_id in ctx.knowledge_readable_file_ids or ():
@@ -104,7 +124,11 @@ async def finish_source_read(ctx, tool_name: str, result):
             sources[file_id] = ctx.knowledge_source_generations[file_id]
     if result.get("error") or result.get("ok") is False:
         return result
-    evidence = {"schema_version": 1, "policy_fingerprint": ctx.knowledge_scope.fingerprint, "sources": sources}
+    scope = retained_knowledge_scope(ctx)
+    if scope is None and sources:
+        record_source_uses(ctx, sources)
+        scope = retained_knowledge_scope(ctx)
+    evidence = {"schema_version": 1, "policy_fingerprint": scope.fingerprint if scope else "", "sources": sources}
     record_source_uses(ctx, sources)
     for registry, row_id, label in ctx.knowledge_pending_citations:
         registry.register(row_id, label=label, kind="kb_row")
@@ -163,7 +187,37 @@ async def filter_inherited_knowledge(ctx, invocations: list) -> list:
 
 
 async def validate_retained_sources(ctx, sources: dict) -> None:
-    await require_evidence(ctx, {"schema_version": 1, "sources": sources})
+    if (
+        sources
+        and callable(getattr(getattr(ctx, "kb_file_authorizer", None), "batch", None))
+        and callable(getattr(ctx.kb_files_store, "get_many", None))
+    ):
+        scope = ctx.knowledge_scope
+        if scope is not None:
+            scope.require_context(ctx)
+        for offset in range(0, len(sources), 256):
+            ids = list(sources)[offset : offset + 256]
+            files = await ctx.kb_files_store.get_many(ids)
+            decisions = await ctx.kb_file_authorizer.batch(files, ctx.user_id, ctx.team_id, ctx.workspace_id)
+            if (
+                decisions is None
+                or len(files) != len(ids)
+                or any(
+                    not decisions.get(file.file_id)
+                    or file.soft_deleted_at
+                    or file.team_id != ctx.team_id
+                    or file.active_generation_id != sources[file.file_id]
+                    or (scope is not None and not scope.permits(file.file_id))
+                    for file in files
+                )
+            ):
+                raise KnowledgeAccessError("knowledge_source_changed")
+    else:
+        await require_evidence(ctx, {"schema_version": 1, "sources": sources})
+    if getattr(ctx, "knowledge_navigation_uses", None):
+        from bowhead_core.kb.source_navigation import validate_navigation_dependencies
+
+        await validate_navigation_dependencies(ctx, ctx.knowledge_navigation_uses)
 
 
 async def inherited_execution_scope(ctx, binding):
@@ -236,6 +290,14 @@ async def validate_source_messages(ctx, messages) -> None:
             continue
         if not isinstance(result, dict):
             continue
+        navigation = result.get("knowledge_navigation_provenance")
+        if navigation is not None:
+            from bowhead_core.kb.source_navigation import record_navigation_uses, validate_navigation_dependencies
+
+            if not isinstance(navigation, dict):
+                raise KnowledgeAccessError("knowledge_source_provenance_unavailable")
+            await validate_navigation_dependencies(ctx, navigation)
+            record_navigation_uses(ctx, navigation)
         evidence = result.get("knowledge_provenance")
         if evidence is not None:
             await require_evidence(ctx, evidence)

@@ -91,7 +91,8 @@ class _FakeCtx:
         self.document_turn_state = None
         self.collaboration_runtime = None
         self.knowledge_scope = None
-        self.knowledge_source_uses = []
+        self.knowledge_source_uses = {}
+        self.knowledge_navigation_uses = {}
 
 
 @pytest.fixture(autouse=True)

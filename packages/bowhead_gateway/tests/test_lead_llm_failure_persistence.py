@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 import respx
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from cryptography.fernet import Fernet
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +35,7 @@ async def r4_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """真 gateway lifespan（prod 同款 wiring）+ tmp SQLite + mock LLM。"""
     monkeypatch.chdir(tmp_path)
     db_file = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_file}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    assert upgrade(f"sqlite+aiosqlite:///{(db_file).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
     monkeypatch.setenv("BOWHEAD_DB_URL", f"sqlite+aiosqlite:///{db_file}")
     monkeypatch.setenv("BOWHEAD_LLM_PROVIDER", "mock")
     monkeypatch.setenv("BOWHEAD_PRIVACY_LEDGER_DB", str(tmp_path / "privacy" / "deletions.db"))

@@ -14,6 +14,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_plan_store import _workspace_scope
 from bowhead_core.agent_eval_policy_store import AgentEvalPolicyError, AgentEvalPolicyStore, _current_row
 from bowhead_core.agent_version_automation import AgentVersionAutomationError, AgentVersionAutomationStore
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 def canonical(value: object) -> str:
@@ -331,7 +332,7 @@ async def preparation_conn(
 
 class AgentAutomationContextStore:
     def __init__(self, db_path: str):
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def read_comparison_operation(
         self, *, team_id: str, agent_id: str, candidate_id: str, authority: AutomationAuthority, operation_key_hash: str

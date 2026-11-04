@@ -164,6 +164,7 @@ from bowhead_core.coach_drafting import DEFAULT_TIMEOUT_SEC, FAIL_INVOKE, FAIL_T
 from bowhead_core.language_context import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, _normalize_accept_language
 from bowhead_core.secret_redaction import extract_secrets
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.subagent_authoring_catalog import (
     SubagentAuthoringCatalogService,
 )
@@ -6537,7 +6538,7 @@ async def _system_consumer_resources(store: UserStore, user: User, name: str) ->
     definition = system_agent_definition(name)
     if definition is None:
         return None
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         return await agent_resources(db, team_id=user.team_id, user_id=user.id, definition=definition)
 
 
@@ -6548,7 +6549,7 @@ async def _consumer_resources(store: UserStore, user: User, team_source: Any) ->
     live_revision_id = getattr(team_source, "live_revision_id", None)
     if team_source is None or not live_revision_id:
         return None
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         async with db.execute(
             "SELECT definition_json FROM team_subagent_revision WHERE team_id=? AND id=?", (user.team_id, live_revision_id)
         ) as cursor:

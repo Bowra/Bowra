@@ -13,7 +13,6 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.openapi_tool_source import op_tool_name
 from bowhead_core.resource_usage_projection import ResourceUsageSummary, ResourceUsageView
 from bowhead_core.tool_auth_registry import ToolAuthRegistry
@@ -22,6 +21,7 @@ from bowhead_gateway.routes import team_tool_sources as ots
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 from bowhead_core import approval_gate
 
@@ -117,7 +117,7 @@ def test_impact_guard_requires_preview_and_replays_delete_receipt(tmp_path, monk
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "guard.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -195,7 +195,7 @@ def test_impact_guard_rejects_stale_patch_preview(tmp_path, monkeypatch):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "stale.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -240,7 +240,7 @@ def test_impact_guard_treats_legacy_empty_selection_as_all_operations(
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "legacy-selection.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -275,7 +275,7 @@ def test_delete_preview_blocks_when_current_agents_still_depend_on_source(
 ):
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "blocking-delete.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     store = UserStore(str(tmp_path / "bowhead.db"))
     _run(store.initialize())
     source = TeamToolSource(
@@ -324,7 +324,7 @@ def test_mcp_refresh_preview_apply_uses_server_candidate_and_replays_receipt(
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "refresh-guard.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -954,7 +954,7 @@ def test_mcp_preview_only_marks_explicit_destructive_tools_as_approval_gated(tmp
 def test_mcp_prompt_preview_and_create_persist_metadata_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_MCP_PROMPT", "1")
     requested = tmp_path / "prompt-cache.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     store = UserStore(str(tmp_path / "bowhead.db"))
     _run(store.initialize())
     team = _run(store.create_team(name="Prompts", max_seats=2))
@@ -1681,7 +1681,7 @@ def test_usage_projection_lists_source_and_operation_dependencies(
     monkeypatch,
 ):
     requested = tmp_path / "requested.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     store = UserStore(str(tmp_path / "bowhead.db"))
     team = _run(store.create_team(name="Usage", max_seats=2))
     user = _run(store.create_user(team_id=team.id, email="usage@example.com"))
@@ -1723,7 +1723,7 @@ def test_impact_guard_replays_disable_after_source_is_already_disabled(
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "disable-retry.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -1772,7 +1772,7 @@ def test_impact_guard_replays_disable_after_source_is_already_disabled(
 def _guarded_mcp_store(tmp_path, monkeypatch, *, requested_name: str, tools, selected):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     requested = tmp_path / requested_name
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())

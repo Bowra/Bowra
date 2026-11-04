@@ -6,7 +6,6 @@ import sqlite3
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_candidate_name_store import (
     AgentCandidateNameConflictError,
     AgentCandidateNameStateError,
@@ -18,6 +17,7 @@ from bowhead_core.agent_release_baseline import (
     AgentReleaseBaselineStore,
 )
 from bowhead_core.team_subagent_store import effective_agent_name_key
+from core_legacy_database import upgrade
 
 _TIMESTAMP = "2026-09-03T01:00:00Z"
 
@@ -28,7 +28,7 @@ def _run(coro):
 
 def _migrated_db(tmp_path):
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     return db_path
 
 

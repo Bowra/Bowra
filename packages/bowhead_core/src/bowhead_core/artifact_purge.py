@@ -16,6 +16,7 @@ import structlog
 
 from bowhead_core.artifact_store import _open_db
 from bowhead_core.documents.retention import active_ref_sql
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -70,6 +71,7 @@ async def claim_artifact_purge(
     A missing migration fails before storage I/O. Already claimed identities may
     be resumed, including after a crash; a completed tombstone is a no-op.
     """
+    db_path = domain_database_path(db_path, "content")
     async with _open_db(db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
@@ -100,6 +102,23 @@ async def claim_artifact_purge(
 
 
 async def _complete_purge(db_path: str, claim: PurgeClaim) -> int:
+    db_path = domain_database_path(db_path, "content")
+    split = domain_layout_active(db_path)
+    if split:
+        async with _open_db(db_path) as content:
+            async with content.execute("SELECT path,completed_at FROM artifact_purge_claims WHERE artifact_id=?", (claim.artifact_id,)) as cursor:
+                existing = await cursor.fetchone()
+            if existing is None or existing[0] != claim.path:
+                raise RuntimeError("artifact purge identity mismatch")
+            if existing[1] is not None:
+                return 0
+        # The durable content purge claim already fences new attachment refs.
+        # Release the execution writer before recording content completion.
+        async with _open_db(domain_database_path(db_path, "execution")) as execution:
+            await execution.execute("BEGIN IMMEDIATE")
+            await execution.execute("DELETE FROM session_attachments WHERE artifact_id=?", (claim.artifact_id,))
+            await execution.execute("DELETE FROM turn_attachments WHERE artifact_id=?", (claim.artifact_id,))
+            await execution.commit()
     async with _open_db(db_path) as db:
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT path,completed_at FROM artifact_purge_claims WHERE artifact_id=?", (claim.artifact_id,)) as cur:
@@ -110,8 +129,9 @@ async def _complete_purge(db_path: str, claim: PurgeClaim) -> int:
             return 0
         # Triggers prevent restoration/new references after claim. These legacy
         # attachment FKs predate CASCADE; all removals and completion commit once.
-        await db.execute("DELETE FROM session_attachments WHERE artifact_id=?", (claim.artifact_id,))
-        await db.execute("DELETE FROM turn_attachments WHERE artifact_id=?", (claim.artifact_id,))
+        if not split:
+            await db.execute("DELETE FROM session_attachments WHERE artifact_id=?", (claim.artifact_id,))
+            await db.execute("DELETE FROM turn_attachments WHERE artifact_id=?", (claim.artifact_id,))
         cur = await db.execute("DELETE FROM artifacts WHERE id=? AND path=?", (claim.artifact_id, claim.path))
         removed = cur.rowcount
         await db.execute(

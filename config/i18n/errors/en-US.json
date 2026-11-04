@@ -1,4 +1,5 @@
 {
+  "content_sharing_disabled": "Sharing is disabled for this deployment. You can inspect or revoke existing shares. Contact your deployment administrator to enable sharing.",
   "coach_canvas_target_unavailable": "The original resource or its saved version is no longer available. Review the editor and send again; your message is kept.",
   "reference_input_invalid": "The reference input is invalid. Keep the draft and check its references.",
   "reference_request_too_large": "The reference input is too large. Shorten it before sending.",
@@ -304,8 +305,10 @@
   "last_team_admin_cannot_self_demote": "You are the last Administrator. Promote another Administrator before demoting yourself.",
   "last_workspace_admin": "This member is the space's only Administrator. Grant another member Administrator access first.",
   "lead_internal_error": "A system error interrupted this turn. Please try again later.",
+  "tool_call_not_executed": "The required operation was not executed, so this task is unfinished. Send a follow-up asking to continue the unfinished work.",
   "lead_empty_answer": "The model returned no answer or action within this task’s limits. No operation was executed. Retry this task; if it happens again, copy the diagnostics for your administrator.",
   "lead_output_exhausted": "The model reached its response limit without producing an answer or action. No operation was executed. Retry this task; if it happens again, copy the diagnostics for your administrator.",
+  "knowledge_source_changed": "Knowledge sources changed before this task continued. Start a new conversation and ask again using the current sources.",
   "reference_policy_changed": "Team permissions changed before this reference ran. Select the Agent and Skill again before sending.",
   "llm_config_encryption_required": "Model-key encryption is not configured for this deployment, so the model configuration cannot be saved. Contact your system administrator.",
   "llm_provider_auth_failed": "Model service authentication failed. Ask your team administrator to check the model connection's API key and access rights. Include the diagnostics, then send again after the issue is fixed.",
@@ -717,5 +720,12 @@
   "shopify_outbound_blocked": "This deployment's outbound address policy blocks this store address. Use the store's myshopify.com domain.",
   "shopify_api_version_unverified": "The store does not support the Shopify API version required here. Contact your administrator.",
   "shopify_request_rejected": "Shopify rejected the request. Check the app's permissions on this store and try again.",
-  "shopify_response_invalid": "Shopify returned an unexpected response. Try again later; if it persists, contact your administrator."
+  "shopify_response_invalid": "Shopify returned an unexpected response. Try again later; if it persists, contact your administrator.",
+  "tool_arguments_invalid": "This step was rejected because its inputs do not match the required format or data fields. The agent must correct the inputs before trying again.",
+  "tool_resource_unavailable": "The selected source is unavailable. Check access or select an available source before continuing.",
+  "tool_code_failed": "The script failed. Check the recorded exception, declared inputs and actual column names before running corrected code.",
+  "tool_execution_timeout": "This operation timed out and its result is not confirmed. Check the recorded outcome before repeating an operation that changes data.",
+  "tool_execution_unknown": "The operation has no confirmed outcome. Verify whether it took effect before attempting it again.",
+  "tool_execution_failed": "The tool could not complete this step. Review its recorded result and copy the diagnostics for your administrator if the cause is unavailable.",
+  "tool_delivery_review_required": "Delivery could not yet be verified. The agent must account for the failed steps and identify any unmet requirements before finishing."
 }

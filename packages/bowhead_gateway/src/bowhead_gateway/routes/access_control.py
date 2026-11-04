@@ -628,6 +628,9 @@ async def upsert_resource_grant(
         principal_type=body.principal_type,
         principal_id=body.principal_id,
     )
+    from bowhead_gateway.sharing_policy import require_sharing_expansion
+
+    require_sharing_expansion(resource_kind)
     # content-permissions write-through convergence (tech-design §2.3): an admin
     # creating the team-principal ALLOW grant of a shareable kind == publishing it
     # team_wide — route through set_audience so visibility stays in sync (single
@@ -765,6 +768,7 @@ async def revoke_resource_grant(
         existing is not None
         and existing.revoked_at is None
         and existing.resource_kind in SHAREABLE_KINDS
+        and existing.resource_kind != "report"
         and existing.principal_type == "team"
         and existing.effect == "allow"
     ):

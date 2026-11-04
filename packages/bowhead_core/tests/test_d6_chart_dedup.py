@@ -84,13 +84,13 @@ class _Ctx:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
-_SMALL = "销售额,利润\n100,20"  # 1 data row, numeric-only → kpi
+_SMALL = "季度,销售额\nQ1,100"  # 1 data row, numeric-only → kpi
 _BIG = "季度,销售额\nQ1,100\nQ2,120\nQ3,90\nQ4,110"  # 4 data rows → series
 
 
 async def _call(store: _FakeCanvasStore, csv_text: str, title: str) -> dict:
     ctx = _Ctx(canvas_store=store, artifact_store=_FakeArtStore(csv_text))
-    return await _add_chart({"data_artifact_id": _AID, "hint": "raw", "title": title}, ctx)
+    return await _add_chart({"data_artifact_id": _AID, "title": title}, ctx)
 
 
 @pytest.mark.asyncio
@@ -180,28 +180,38 @@ async def test_same_title_still_goes_through_the_old_dedup() -> None:
 async def test_same_title_and_rows_from_a_different_artifact_are_reported_without_losing_source() -> None:
     store = _FakeCanvasStore()
     ctx = _Ctx(canvas_store=store, artifact_store=_FakeArtStore(_BIG))
-    first = await _add_chart({"data_artifact_id": _AID, "hint": "raw", "title": "Trend"}, ctx)
-    second = await _add_chart({"data_artifact_id": "art_bbbbbbbbbbbb", "hint": "raw", "title": "Trend"}, ctx)
+    first = await _add_chart({"data_artifact_id": _AID, "title": "Trend"}, ctx)
+    second = await _add_chart({"data_artifact_id": "art_bbbbbbbbbbbb", "title": "Trend"}, ctx)
     assert second["section_id"] != first["section_id"]
     assert len(store.sections) == 2
     assert second["same_data_as"] == "Trend"
     assert "provenance" in second["note"]
 
 
-@pytest.mark.parametrize("change", ["series", "kind", "unit", "subtitle", "sort"])
+@pytest.mark.parametrize("change", ["axes", "kind", "unit", "subtitle", "labels"])
 async def test_same_title_does_not_discard_a_different_chart_request(change: str) -> None:
     store = _FakeCanvasStore()
     ctx = _Ctx(canvas_store=store, artifact_store=_FakeArtStore("region,revenue,cost\nA,100,70\nB,50,40\nC,80,30"))
-    args = {"data_artifact_id": _AID, "hint": "raw", "title": "Regional results", "force_kind": "bar", "series": ["revenue"]}
+    args = {
+        "data_artifact_id": _AID,
+        "title": "Regional results",
+        "force_kind": "bar",
+        "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+        "group_by": [],
+    }
     first = await _add_chart(args, ctx)
     changes = {
-        "series": {"series": ["cost"]},
+        "axes": {"axes": {"x": "region", "y": ["cost"], "x_scale": "category"}},
         "kind": {"force_kind": "table"},
         "unit": {"column_units": {"revenue": "EUR"}},
         "subtitle": {"subtitle": "Prepared regional observations"},
-        "sort": {"sort_by": "revenue", "limit": 2},
+        "labels": {"show_data_labels": False},
     }
-    second = await _add_chart({**args, **changes[change]}, ctx)
+    second_args = {**args, **changes[change]}
+    if change == "kind":
+        second_args.pop("axes")
+        second_args.pop("group_by")
+    second = await _add_chart(second_args, ctx)
     assert "error" not in first and "error" not in second
     assert second["section_id"] != first["section_id"], "A shared title must not substitute the first chart for a different requested view"
     assert len(store.sections) == 2
@@ -221,7 +231,7 @@ async def test_chart_upgrade_publishes_stored_revision_without_revealing_chat_on
 
     bus = Bus()
     ctx = _Ctx(canvas_store=store, artifact_store=_FakeArtStore(_SMALL), parent_bus=bus)
-    args = {"data_artifact_id": _AID, "hint": "raw", "title": "Regional results", **({"target": "chat"} if chat_only else {})}
+    args = {"data_artifact_id": _AID, "title": "Regional results", **({"target": "chat"} if chat_only else {})}
     await _add_chart(args, ctx)
     bus.events.clear()
     ctx.artifact_store = _FakeArtStore(_BIG)

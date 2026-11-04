@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from bowhead_core.sqlite_domains import domain_database_path
+
 if TYPE_CHECKING:
     import aiosqlite
 
@@ -138,6 +140,8 @@ async def finalize_cleanup(db_path: str, entries: list[QuarantinedPath]) -> None
         return
     from bowhead_core._db import open_shared_ctx
 
+    db_path = domain_database_path(db_path, "core")
+
     for entry in entries:
         error_code: str | None = None
         try:
@@ -161,6 +165,8 @@ async def retry_pending_cleanup(db_path: str, *, limit: int = 20) -> None:
     """Retry abandoned post-commit cleanup and prune completed receipts after 30 days."""
 
     from bowhead_core._db import open_shared_ctx
+
+    db_path = domain_database_path(db_path, "core")
 
     async with open_shared_ctx(db_path) as db:
         async with db.execute(

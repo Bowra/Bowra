@@ -5,6 +5,7 @@ import hashlib
 from bowhead_core.agent_behavior_contract import canonical_fingerprint
 from bowhead_core.agent_capability_catalog import default_catalog
 from bowhead_core.agent_capability_execution import CapabilityExecutionSelection, apply_capability_execution_conn
+from bowhead_core.documents.authoring_formats import WORD_PROFILE
 from bowhead_core.documents.request import DocumentRequestError
 
 
@@ -16,13 +17,19 @@ async def admit_capability(db, *, path, runtime, scope, turn_id, inputs, now):
     if catalog is None:
         raise DocumentRequestError("document_capability_unavailable")
     catalog.validate_reviewed_evidence()
-    definition = catalog.get_definition("cap_template_document", 1)
-    implementation = catalog.get_implementation("capi_template_document_native", 1)
+    word = runtime.turn_snapshot is not None and runtime.turn_snapshot.planner_profile == WORD_PROFILE
+    version = 2 if word else 1
+    definition = catalog.get_definition("cap_template_document", version)
+    implementation = catalog.get_implementation("capi_template_document_native", version)
     if definition.lifecycle != "active" or implementation.lifecycle != "active" or implementation.review_state != "reviewed":
         raise DocumentRequestError("document_capability_unavailable")
     tools = binding.definition.get("tool_refs" if binding.agent_source_kind == "team" else "tool_whitelist", [])
     if "template_document_submit" not in tools:
         raise DocumentRequestError("document_capability_unavailable")
+    if word:
+        from bowhead_core.documents.agent_caller import require_word_method_in_tx
+
+        await require_word_method_in_tx(db, path=path, scope=scope, binding=binding)
     if binding.runtime_profile_name != "lead":
         from bowhead_core.documents.agent_caller import read_document_caller_in_tx
 
@@ -44,7 +51,7 @@ async def admit_capability(db, *, path, runtime, scope, turn_id, inputs, now):
         prompt_module_fingerprint="sha256:" + hashlib.sha256(b"").hexdigest(),
         dependency_fingerprint=canonical_fingerprint(implementation.model_dump(mode="json")),
         input_artifact_refs=tuple(item.artifact_id for item in inputs),
-        output_contract="document.admission.v1",
+        output_contract=f"document.admission.v{version}",
     )
     exact = await apply_capability_execution_conn(
         db,

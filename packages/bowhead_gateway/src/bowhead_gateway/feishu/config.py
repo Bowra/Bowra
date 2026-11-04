@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
 from bowhead_core.llm_config_crypto import decrypt_llm_config
+from bowhead_core.sqlite_domain_runtime import connect_sync
 
 FeishuAppType = Literal["internal", "store"]
 FeishuEventIngress = Literal["webhook", "long_connection", "disabled"]
@@ -137,7 +138,7 @@ class DbBackedFeishuAppConfigResolver:
 
     def _lookup_row(self, tenant_key: str) -> dict[str, Any] | None:
         try:
-            conn = sqlite3.connect(self._db_path)
+            conn = connect_sync(self._db_path)
             conn.row_factory = sqlite3.Row
             try:
                 row = conn.execute(

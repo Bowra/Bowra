@@ -1,0 +1,540 @@
+{
+  "synthetic": true,
+  "delivery": {
+    "exec_summary": "Revenue chart is retained; store profitability remains unfulfilled.",
+    "delivery_review": {
+      "requirements": [
+        {
+          "requirement": "Store profitability metrics",
+          "status": "unfulfilled",
+          "evidence_call_ids": []
+        }
+      ],
+      "issues": [
+        {
+          "call_id": "synthetic_script",
+          "resolution": "unfulfilled",
+          "evidence_call_ids": [],
+          "explanation": "The required calculation failed."
+        }
+      ]
+    },
+    "completion": "partial",
+    "caveats": [
+      "Some requested work remains unfulfilled or unverified. Review the failed steps before relying on a complete result. Store profitability metrics"
+    ]
+  },
+  "chart": {
+    "section_id": "sec_test",
+    "canvas_id": "cv_test",
+    "kind": "hbar",
+    "row_count": 40,
+    "title": "2025年门店营业额排名（全部40家）",
+    "_infer_reason": "force_kind=hbar",
+    "display_receipt": {
+      "dimensions": [
+        {
+          "key": "门店",
+          "type": "categorical"
+        }
+      ],
+      "value_display": {
+        "prepared_rows": "not_modified_by_axis_formatting",
+        "axis_magnitude": "renderer_selected_may_change",
+        "actual_axis_unit": "not_available_in_tool_receipt"
+      }
+    }
+  },
+  "section": {
+    "id": "sec_synthetic_stores",
+    "kind": "chart",
+    "rev": 1,
+    "spec": {
+      "kind": "hbar",
+      "title": "2025年门店营业额排名（全部40家）",
+      "rows": [
+        {
+          "门店": "Store 0",
+          "营业额(亿元)": 1
+        },
+        {
+          "门店": "Store 1",
+          "营业额(亿元)": 2
+        },
+        {
+          "门店": "Store 2",
+          "营业额(亿元)": 3
+        },
+        {
+          "门店": "Store 3",
+          "营业额(亿元)": 4
+        },
+        {
+          "门店": "Store 4",
+          "营业额(亿元)": 5
+        },
+        {
+          "门店": "Store 5",
+          "营业额(亿元)": 6
+        },
+        {
+          "门店": "Store 6",
+          "营业额(亿元)": 7
+        },
+        {
+          "门店": "Store 7",
+          "营业额(亿元)": 8
+        },
+        {
+          "门店": "Store 8",
+          "营业额(亿元)": 9
+        },
+        {
+          "门店": "Store 9",
+          "营业额(亿元)": 10
+        },
+        {
+          "门店": "Store 10",
+          "营业额(亿元)": 11
+        },
+        {
+          "门店": "Store 11",
+          "营业额(亿元)": 12
+        },
+        {
+          "门店": "Store 12",
+          "营业额(亿元)": 13
+        },
+        {
+          "门店": "Store 13",
+          "营业额(亿元)": 14
+        },
+        {
+          "门店": "Store 14",
+          "营业额(亿元)": 15
+        },
+        {
+          "门店": "Store 15",
+          "营业额(亿元)": 16
+        },
+        {
+          "门店": "Store 16",
+          "营业额(亿元)": 17
+        },
+        {
+          "门店": "Store 17",
+          "营业额(亿元)": 18
+        },
+        {
+          "门店": "Store 18",
+          "营业额(亿元)": 19
+        },
+        {
+          "门店": "Store 19",
+          "营业额(亿元)": 20
+        },
+        {
+          "门店": "Store 20",
+          "营业额(亿元)": 21
+        },
+        {
+          "门店": "Store 21",
+          "营业额(亿元)": 22
+        },
+        {
+          "门店": "Store 22",
+          "营业额(亿元)": 23
+        },
+        {
+          "门店": "Store 23",
+          "营业额(亿元)": 24
+        },
+        {
+          "门店": "Store 24",
+          "营业额(亿元)": 25
+        },
+        {
+          "门店": "Store 25",
+          "营业额(亿元)": 26
+        },
+        {
+          "门店": "Store 26",
+          "营业额(亿元)": 27
+        },
+        {
+          "门店": "Store 27",
+          "营业额(亿元)": 28
+        },
+        {
+          "门店": "Store 28",
+          "营业额(亿元)": 29
+        },
+        {
+          "门店": "Store 29",
+          "营业额(亿元)": 30
+        },
+        {
+          "门店": "Store 30",
+          "营业额(亿元)": 31
+        },
+        {
+          "门店": "Store 31",
+          "营业额(亿元)": 32
+        },
+        {
+          "门店": "Store 32",
+          "营业额(亿元)": 33
+        },
+        {
+          "门店": "Store 33",
+          "营业额(亿元)": 34
+        },
+        {
+          "门店": "Store 34",
+          "营业额(亿元)": 35
+        },
+        {
+          "门店": "Store 35",
+          "营业额(亿元)": 36
+        },
+        {
+          "门店": "Store 36",
+          "营业额(亿元)": 37
+        },
+        {
+          "门店": "Store 37",
+          "营业额(亿元)": 38
+        },
+        {
+          "门店": "Store 38",
+          "营业额(亿元)": 39
+        },
+        {
+          "门店": "Store 39",
+          "营业额(亿元)": 40
+        }
+      ],
+      "data_artifact_id": "art_111111111111",
+      "row_count": 40,
+      "columns": [
+        {
+          "key": "门店",
+          "header": "门店",
+          "type": "categorical",
+          "y_axis_id": 0
+        },
+        {
+          "key": "营业额(亿元)",
+          "header": "营业额(亿元)",
+          "type": "numeric",
+          "unit": "亿元",
+          "percent_shape_unknown": true,
+          "y_axis_id": 0
+        }
+      ],
+      "limit_rows": 30,
+      "secondary_axis": false,
+      "show_legend": true,
+      "percent_stack": false,
+      "fallback_kind": "table",
+      "source_meta": {
+        "id": "art_111111111111",
+        "tool": "add_chart",
+        "query": "2025年门店营业额排名（全部40家）",
+        "artifact_id": "art_111111111111",
+        "turn_id": "t_test"
+      },
+      "_infer_reason": "force_kind=hbar",
+      "auto_charted": false
+    }
+  },
+  "read_paths": [
+    "stores.csv"
+  ],
+  "live": [
+    {
+      "event_type": "step_started",
+      "payload": {
+        "card_id": "t_test",
+        "step_id": "step_synthetic_script",
+        "step_type": "tool_run",
+        "header_zh": "compute_fixture",
+        "started_at": "2026-11-01T04:39:33.409030+00:00#1",
+        "parent_step_id": null,
+        "concurrency_group_id": null,
+        "input_preview": "{}",
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "subagent_id": "analyst",
+        "arguments_preview": "{}",
+        "kind": "compute",
+        "display_category": "full",
+        "open_world": false,
+        "seq": 1,
+        "evt_seq": 1
+      }
+    },
+    {
+      "event_type": "tool_result",
+      "payload": {
+        "subagent_id": "analyst",
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "ok": false,
+        "duration_ms": 0,
+        "error": "tool_code_failed",
+        "diagnostics": {
+          "schema_version": 1,
+          "disclosure": "authenticated",
+          "diagnostic_code": "tool_failure",
+          "occurrence_id": "7358d7a8095449c6a4568987c8110089",
+          "turn_id": "t_test",
+          "safe_detail": "exception=KeyError; missing_key=bm; exit_code=1",
+          "retryable": false
+        },
+        "failure_code": "tool_code_failed",
+        "result_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic proce…",
+        "result_token_count": 10052,
+        "result_meta": null,
+        "result_inline": null,
+        "preview_payload": null,
+        "seq": 2,
+        "evt_seq": 2
+      }
+    },
+    {
+      "event_type": "step_done",
+      "payload": {
+        "card_id": "t_test",
+        "step_id": "step_synthetic_script",
+        "step_type": "tool_run",
+        "state": "failure",
+        "output_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic …",
+        "duration_ms": 0,
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "ok": false,
+        "result_inline": null,
+        "result_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic proce…",
+        "result_meta": null,
+        "result_token_count": 10052,
+        "error": {
+          "type": "tool_returned_error",
+          "code": "tool_code_failed",
+          "message_zh": "tool_code_failed",
+          "is_transient": false,
+          "diagnostics": {
+            "schema_version": 1,
+            "disclosure": "authenticated",
+            "diagnostic_code": "tool_failure",
+            "occurrence_id": "7358d7a8095449c6a4568987c8110089",
+            "turn_id": "t_test",
+            "safe_detail": "exception=KeyError; missing_key=bm; exit_code=1",
+            "retryable": false
+          }
+        },
+        "seq": 3,
+        "evt_seq": 3
+      }
+    },
+    {
+      "event_type": "step_list_card_finalized",
+      "payload": {
+        "card_id": "t_test",
+        "state": "completed",
+        "step_count": 1,
+        "seq": 4,
+        "evt_seq": 4
+      }
+    },
+    {
+      "event_type": "canvas.done",
+      "payload": {
+        "canvas_id": null,
+        "turn_id": "t_test",
+        "section_count": 0,
+        "errors": [],
+        "source": "turn_done_chokepoint_fallback",
+        "seq": 5,
+        "evt_seq": 5
+      }
+    },
+    {
+      "event_type": "final_answer",
+      "payload": {
+        "text": "Nothing displayable was produced this turn. Please describe the data you want to see, or ask a more specific question (e.g. time range / dimension).",
+        "reason_code": "silent_done_fallback",
+        "card_id": "t_test",
+        "seq": 6,
+        "evt_seq": 6
+      }
+    },
+    {
+      "event_type": "done",
+      "payload": {
+        "turn_id": "t_test",
+        "status": "completed",
+        "response_kind": "chat",
+        "step_outcome": {
+          "schema_version": 1,
+          "issue_steps": 1,
+          "recovered_steps": 0,
+          "unresolved_steps": 1,
+          "answer_affected": true
+        },
+        "seq": 7,
+        "evt_seq": 7
+      }
+    }
+  ],
+  "replay": [
+    {
+      "seq": 1,
+      "event_type": "step_started",
+      "occurred_at": "",
+      "payload": {
+        "card_id": "t_test",
+        "step_id": "step_synthetic_script",
+        "step_type": "tool_run",
+        "header_zh": "compute_fixture",
+        "started_at": "2026-11-01T04:39:33.409030+00:00#1",
+        "parent_step_id": null,
+        "concurrency_group_id": null,
+        "input_preview": "{}",
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "subagent_id": "analyst",
+        "arguments_preview": "{}",
+        "kind": "compute",
+        "display_category": "full",
+        "open_world": false,
+        "seq": 1,
+        "evt_seq": 1
+      }
+    },
+    {
+      "seq": 2,
+      "event_type": "tool_result",
+      "occurred_at": "",
+      "payload": {
+        "subagent_id": "analyst",
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "ok": false,
+        "duration_ms": 0,
+        "error": "tool_code_failed",
+        "diagnostics": {
+          "schema_version": 1,
+          "disclosure": "authenticated",
+          "diagnostic_code": "tool_failure",
+          "occurrence_id": "7358d7a8095449c6a4568987c8110089",
+          "turn_id": "t_test",
+          "safe_detail": "exception=KeyError; missing_key=bm; exit_code=1",
+          "retryable": false
+        },
+        "failure_code": "tool_code_failed",
+        "result_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic proce…",
+        "result_token_count": 10052,
+        "result_meta": null,
+        "result_inline": null,
+        "preview_payload": null,
+        "seq": 2,
+        "evt_seq": 2
+      }
+    },
+    {
+      "seq": 3,
+      "event_type": "step_done",
+      "occurred_at": "",
+      "payload": {
+        "card_id": "t_test",
+        "step_id": "step_synthetic_script",
+        "step_type": "tool_run",
+        "state": "failure",
+        "output_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic …",
+        "duration_ms": 0,
+        "tool_name": "compute_fixture",
+        "call_id": "synthetic_script",
+        "ok": false,
+        "result_inline": null,
+        "result_preview": "{\"ok\": true, \"result_json\": {\"ok\": false, \"exit_code\": 1, \"stdout\": \"Synthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic process output\\nSynthetic proce…",
+        "result_meta": null,
+        "result_token_count": 10052,
+        "error": {
+          "type": "tool_returned_error",
+          "code": "tool_code_failed",
+          "message_zh": "tool_code_failed",
+          "is_transient": false,
+          "diagnostics": {
+            "schema_version": 1,
+            "disclosure": "authenticated",
+            "diagnostic_code": "tool_failure",
+            "occurrence_id": "7358d7a8095449c6a4568987c8110089",
+            "turn_id": "t_test",
+            "safe_detail": "exception=KeyError; missing_key=bm; exit_code=1",
+            "retryable": false
+          }
+        },
+        "seq": 3,
+        "evt_seq": 3
+      }
+    },
+    {
+      "seq": 4,
+      "event_type": "step_list_card_finalized",
+      "occurred_at": "",
+      "payload": {
+        "card_id": "t_test",
+        "state": "completed",
+        "step_count": 1,
+        "seq": 4,
+        "evt_seq": 4
+      }
+    },
+    {
+      "seq": 5,
+      "event_type": "canvas.done",
+      "occurred_at": "",
+      "payload": {
+        "canvas_id": null,
+        "turn_id": "t_test",
+        "section_count": 0,
+        "errors": [],
+        "source": "turn_done_chokepoint_fallback",
+        "seq": 5,
+        "evt_seq": 5
+      }
+    },
+    {
+      "seq": 6,
+      "event_type": "final_answer",
+      "occurred_at": "",
+      "payload": {
+        "text": "Nothing displayable was produced this turn. Please describe the data you want to see, or ask a more specific question (e.g. time range / dimension).",
+        "reason_code": "silent_done_fallback",
+        "card_id": "t_test",
+        "seq": 6,
+        "evt_seq": 6
+      }
+    },
+    {
+      "seq": 7,
+      "event_type": "done",
+      "occurred_at": "",
+      "payload": {
+        "turn_id": "t_test",
+        "status": "completed",
+        "response_kind": "chat",
+        "step_outcome": {
+          "schema_version": 1,
+          "issue_steps": 1,
+          "recovered_steps": 0,
+          "unresolved_steps": 1,
+          "answer_affected": true
+        },
+        "seq": 7,
+        "evt_seq": 7
+      }
+    }
+  ]
+}

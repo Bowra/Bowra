@@ -26,8 +26,8 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import upgrade
 from bowhead_core.user_memory import ProjectMemoryStore, UserMemoryStore
+from core_legacy_database import upgrade
 
 from bowhead_core import migrations
 
@@ -52,16 +52,10 @@ _SCOPED_IDENTITY_INDEX = "idx_memory_entries_identity_scoped"
 
 
 def _chain_head() -> str:
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
+    """The admitted legacy revision for single-file historical fixtures."""
+    from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
-    from bowhead_core import migrations
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    heads = ScriptDirectory.from_config(config).get_heads()
-    assert len(heads) == 1, f"revision 链分叉了，heads={heads}"
-    return heads[0]
+    return SOURCE_REVISION
 
 
 def _columns(db_path: Path) -> list[str]:
@@ -135,7 +129,7 @@ async def test_upgrade_adds_columns_and_scopes_the_identity_key(tmp_path) -> Non
     with sqlite3.connect(db_path) as conn:
         before_ids = [r[0] for r in conn.execute("SELECT id FROM memory_entries ORDER BY id")]
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     columns = _columns(db_path)
     assert set(_NEW_COLUMNS).issubset(columns), f"新列没长出来: {columns}"
@@ -168,7 +162,7 @@ async def test_scoped_identity_lets_two_spaces_hold_the_same_key(tmp_path) -> No
     """
     db_path = tmp_path / "bowhead.db"
     _seed_pre_0024(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -197,7 +191,7 @@ async def test_project_memory_upsert_still_writes_after_the_identity_change(tmp_
     """
     db_path = tmp_path / "bowhead.db"
     _seed_pre_0024(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     store = ProjectMemoryStore(db_path)
     await store.initialize()
@@ -213,8 +207,8 @@ async def test_migration_and_store_initialize_are_both_idempotent(tmp_path) -> N
     db_path = tmp_path / "bowhead.db"
     _seed_pre_0024(db_path)
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     store = UserMemoryStore(db_path)
     await store.initialize()
@@ -286,7 +280,7 @@ async def test_store_first_then_migration_converges_to_the_same_shape(tmp_path) 
     await store.initialize()
     assert not _has_legacy_identity_unique(db_path)
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     assert not _has_legacy_identity_unique(db_path)
     assert _SCOPED_IDENTITY_INDEX in _index_names(db_path)

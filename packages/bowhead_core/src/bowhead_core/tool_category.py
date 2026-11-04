@@ -145,6 +145,7 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "configuration_result": "fetch",
     # Delivers the specialist's final message, like subagent_return.
     "configuration_submit": "spawn",
+    "clarification_dismiss": "write",
 }
 
 #: Kinds that produce a numeric/factual result worth LLM-summarizing.

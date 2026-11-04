@@ -162,7 +162,9 @@ class DocumentExecutor:
         return_failed: bool = False,
     ) -> tuple[Path, dict]:
         """Stage exact bytes and reconcile the original durable execution only."""
-        if re.fullmatch(r"[a-f0-9]{64}", run_id) is None or not 1 <= len(inputs) <= (9 if profile == "pptx-script-worker-v1" else 8):
+        from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES
+
+        if re.fullmatch(r"[a-f0-9]{64}", run_id) is None or not 1 <= len(inputs) <= (9 if profile in AUTHORING_PROFILES else 8):
             raise OfficePackageError("document_worker_control_invalid")
         if len(encoded) > 256_000 or sum(len(item.content) for item in inputs) > 128 * 1024 * 1024:
             raise OfficePackageError("document_inputs_too_large")

@@ -24,12 +24,22 @@ import {
   evidenceItems,
 } from "@/lib/readiness-items";
 
+export interface AssignmentSummaryRow {
+  role: string;
+  target: string;
+  providerKey?: string;
+  modelId?: string;
+  mode: "specified" | "follow" | "automatic" | "off" | "missing";
+}
+
 export interface ModelSettingsOverviewProvider {
+  providerId?: string;
   runtimeKey: string;
   displayName: string;
   type: string;
   endpoint: string;
   modelCount: number;
+  models?: Array<{ id: string; capabilities: Array<{ capability: string; state: string }> }>;
   fingerprint?: string | null;
   authType?: "bearer" | "api_key" | "secret_header" | "none";
 }
@@ -78,7 +88,7 @@ function providerTypeLabelKey(providerType: string): string {
   return PROVIDER_TYPE_KEYS.has(providerType) ? providerType : "other";
 }
 
-function roleTranslationKey(role: string): string {
+export function roleTranslationKey(role: string): string {
   if (role === "tier.primary") return "role_primary";
   if (role.startsWith("tier.primary_fallback")) return "role_fallback";
   if (role === "tier.fast") return "role_fast";
@@ -86,6 +96,7 @@ function roleTranslationKey(role: string): string {
   if (role === "kb.embed") return "role_embed";
   if (role === "kb.rerank") return "role_rerank";
   if (role === "kb.vision") return "role_vision";
+  if (role === "kb.source_description") return "role_source_description";
   if (role === "kb.row_extractor") return "role_row_extractor";
   return "role_other";
 }
@@ -204,7 +215,7 @@ function EvidenceRow({
             {t("evidence_actual_model", { model: row.actual_model_id })}
           </small>
         ) : null}
-        {observedAt ? <small>{observedAt}</small> : null}
+        {observedAt ? <small>{t("evidence_checked_at", { time: observedAt })}</small> : null}
       </div>
       <div className="overview-ledger-attempt">
         <AttemptState row={row} />
@@ -258,6 +269,7 @@ function EvidenceRow({
 export function ModelSettingsOverview({
   version,
   section,
+  assignments,
   imageConfigured = false,
   searchConfigured = false,
   onConfigureImage,
@@ -273,6 +285,7 @@ export function ModelSettingsOverview({
   onAddProvider,
   onConnectBowra,
   onEditProvider,
+  onVerifyProvider,
   onRetryReadiness,
   onVerify,
   onVerifyItem,
@@ -281,6 +294,7 @@ export function ModelSettingsOverview({
   verificationAvailable,
   configurationActionsDisabled,
 }: {
+  assignments?: AssignmentSummaryRow[];
   section?: "connections" | "assignments" | "external" | "index";
   imageConfigured?: boolean;
   searchConfigured?: boolean;
@@ -298,6 +312,7 @@ export function ModelSettingsOverview({
   onAddProvider: () => void;
   onConnectBowra?: () => void;
   onEditProvider: (runtimeKey: string) => void;
+  onVerifyProvider?: (runtimeKey: string) => void;
   onRetryReadiness: () => void;
   onVerify: () => void;
   /** Verify one item only (absent = batch verification only). */
@@ -309,8 +324,10 @@ export function ModelSettingsOverview({
   configurationActionsDisabled: boolean;
 }) {
   const t = useTranslations("settings.models.overview");
+  const tTier = useTranslations("settings.models.tier");
   const tConnect = useTranslations("settings.models.connect");
   const tProviderType = useTranslations("settings.llm.provider_types");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const items = evidenceItems(readiness);
   const orderedRows = [...(readiness?.rows ?? [])].sort((left, right) =>
@@ -363,7 +380,7 @@ export function ModelSettingsOverview({
           <span>
             {attentionSummary(t, attentionBreakdown(items))}
             {" — "}
-            <a className="rd-link" href="#mset-overview-evidence">{t("evidence_jump")}</a>
+            <a className="rd-link" href="#mset-overview-evidence" onClick={() => setDetailsOpen(true)}>{t("evidence_jump")}</a>
           </span>
         </p>
       ) : null}
@@ -410,6 +427,12 @@ export function ModelSettingsOverview({
                     <small>{t("model_count", { count: provider.modelCount })}</small>
                   </div>
                   <code translate="no">{safeOverviewEndpoint(provider.endpoint)}</code>
+                  {provider.models?.map((model) => <div className="overview-model-capabilities" key={model.id}>
+                    <span>{model.id}</span>
+                    {model.capabilities.map(({ capability, state }) => <span className={`overview-state fact-${state}`} key={capability}>
+                      {t(`capability_${capability}`)} · {t(`fact_${FACT_STATES.has(state) ? state : "unknown"}`)}
+                    </span>)}
+                  </div>)}
                 </div>
                 <div className="overview-provider-secret">
                   <span>{provider.authType === "none" ? tConnect("auth_type") : t("secret")}</span>
@@ -417,15 +440,18 @@ export function ModelSettingsOverview({
                     ? <span>{tConnect("no_auth")}</span>
                     : <code translate="no">{provider.fingerprint || t("secret_saved")}</code>}
                 </div>
+                <div className="overview-connection-actions">
+                {onVerifyProvider && provider.models?.some((model) => model.capabilities.length > 0) ? <button type="button" className="btn sec sm" disabled={configurationActionsDisabled} onClick={() => onVerifyProvider(provider.runtimeKey)}>{t("verify_one")}</button> : null}
                 <button
                   type="button"
-                  className="iconbtn"
+                  className="btn sec sm"
                   disabled={configurationActionsDisabled}
                   aria-label={t("edit_connection", { name: provider.displayName })}
                   onClick={() => onEditProvider(provider.runtimeKey)}
                 >
-                  <Edit size={14} />
+                  <Edit size={14} /> {t("edit")}
                 </button>
+                </div>
               </div>
             ))}
           </div>
@@ -436,8 +462,8 @@ export function ModelSettingsOverview({
         <div className="overview-section-head">
           <div>
             {!section ? <span className="overview-section-index">02</span> : null}
-            <h2 id="mset-overview-evidence">{t("evidence_title")}</h2>
-            <p>{t("evidence_body")}</p>
+            <h2 id="mset-overview-evidence">{t(assignments ? "assignments_title" : "evidence_title")}</h2>
+            <p>{t(assignments ? "assignments_body" : "evidence_body")}</p>
           </div>
           <div className="overview-section-actions">
             <button
@@ -456,7 +482,7 @@ export function ModelSettingsOverview({
             </button>
             {onEdit && (!section || section === "assignments") ? <button
               type="button"
-              className="btn ghost sm"
+              className="btn pri sm"
               disabled={configurationActionsDisabled}
               onClick={onEdit}
             >
@@ -464,6 +490,28 @@ export function ModelSettingsOverview({
             </button> : null}
           </div>
         </div>
+        {assignments ? <>
+          {["tier.", "kb."].map((prefix) => <section key={prefix} className="assignment-group" aria-label={t(prefix === "tier." ? "chat_assignments" : "kb_assignments")}>
+            <h3>{t(prefix === "tier." ? "chat_assignments" : "kb_assignments")}</h3>
+            {assignments.filter((assignment) => assignment.role.startsWith(prefix)).map((assignment) => {
+              const evidence = readiness?.rows.filter((row) =>
+                row.role_key === (assignment.role.startsWith("tier.primary_fallback.") ? "tier.primary_fallback" : assignment.role)
+                && row.model_id === assignment.modelId
+                && row.provider_id === providers.find((provider) => provider.runtimeKey === assignment.providerKey)?.providerId) ?? [];
+              return <div className="assignment-summary-row" key={assignment.role}>
+                <b>{t(roleTranslationKey(assignment.role))}</b>
+                <div className="assignment-summary-target"><span translate="no">{assignment.target || "—"}</span><small>{t(assignment.role.startsWith("kb.") && assignment.mode === "automatic" ? "automatic_pending" : `selection_${assignment.mode}`)}</small>
+                  {assignment.role === "tier.judge" && assignment.mode === "automatic" && assignment.modelId && assignments.some((row) => row.role === "tier.primary" && row.modelId === assignment.modelId && row.providerKey === assignment.providerKey) ? <small>{tTier("judge_auto_none", { model: assignment.modelId })}<button type="button" className="btn ghost sm" disabled={configurationActionsDisabled} onClick={onAddProvider}>{t("add_connection")}</button></small> : null}</div>
+                <div className="assignment-summary-evidence">{!assignment.modelId ? "—" : readinessLoading ? t("readiness_loading") : readinessError ? t("evidence_unavailable_title") : evidence.length ? evidence.map((row) => <span key={row.capability}>
+                  <span>{CAPABILITY_KEYS.has(row.capability) ? t(`capability_${row.capability}`) : row.capability}: </span><FactState row={row} />{row.attempt_state ? <AttemptState row={row} /> : null}
+                </span>) : assignment.mode === "off" ? "—" : t("fact_unknown")}</div>
+              </div>;
+            })}
+          </section>)}
+          <p className="overview-quiet">{t("verification_boundary")}</p>
+          <button type="button" className="btn ghost sm" aria-expanded={detailsOpen} aria-controls="assignment-verification-details" onClick={() => setDetailsOpen((open) => !open)}>{t(detailsOpen ? "hide_details" : "show_details")}</button>
+        </> : null}
+        <div id={assignments ? "assignment-verification-details" : undefined} hidden={Boolean(assignments) && !detailsOpen}>
         {readinessLoading ? (
           <div className="overview-ledger-loading" aria-live="polite">
             <Spinner size={15} /> {t("readiness_loading")}
@@ -509,11 +557,12 @@ export function ModelSettingsOverview({
           <div className="overview-ledger-empty">
             <Info size={17} />
             <div>
-              <b>{providers.length ? t("no_assignments_title") : t("no_evidence_title")}</b>
-              <span>{providers.length ? t("no_assignments_body") : t("no_evidence_body")}</span>
+              <b>{assignments?.some((row) => row.modelId) ? t("no_records_title") : providers.length ? t("no_assignments_title") : t("no_evidence_title")}</b>
+              <span>{assignments?.some((row) => row.modelId) ? t("no_records_body") : providers.length ? t("no_assignments_body") : t("no_evidence_body")}</span>
             </div>
           </div>
         )}
+        </div>
       </section> : null}
 
       {section === "external" ? <section className="overview-section overview-external" aria-labelledby="mset-overview-external">

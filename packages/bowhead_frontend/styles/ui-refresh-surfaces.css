@@ -603,9 +603,33 @@
   font-size: 0.75rem;
 }
 :root:root .rc-inspect-foot {
+  flex-wrap: wrap;
+  flex: none;
   font-family: var(--font-control);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+}
+:root:root .rc-inspect-foot > span:first-child {
+  flex: 1 1 160px;
+  overflow-wrap: anywhere;
+}
+:root:root .rc-inspect-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  :root:root .rc-inspect-foot > span:first-child,
+  :root:root .rc-inspect-actions {
+    flex: 1 1 100%;
+  }
+}
+:root:root .rc-inspect-panel .rc-inspect-actions .v2-chart-action-btn {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-block: 6px;
 }
 
 /* Model discovery / verification: filled search box (batch 1 search spec), hairline list border/separators, hover/selection matching batch 4 tables */

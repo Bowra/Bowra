@@ -75,6 +75,8 @@ Si l’enregistrement échoue à cause d’une version modifiée, réessayez sur
 
 Responsabilités et Skills aident à sélectionner l’Agent. Ils n’accordent pas d’autorisation sur les données et ne garantissent pas la configuration d’un outil externe. Les outils, formats de sortie et appels entre Agents définis par le produit ne peuvent pas être remplacés librement ici.
 
+Dans les détails de l’exécution, **Créer une nouvelle présentation** crée un nouveau PPTX modifiable à partir du contenu fourni. **Modifier un document modèle** prépare un brouillon privé à partir d’un modèle PPTX ou DOCX importé pris en charge ; Word nécessite l’activation de la fonction. Relisez le brouillon dans le Canvas, puis confirmez la publication. Le choix Word seul publie uniquement le fichier Word ; un PDF facultatif provient du même fichier source relu. L’export d’un rapport existant du Canvas reste une action distincte.
+
 ## Trouver le responsable d’une activation
 
 | Besoin                                               | Responsable                                                                                                                     |

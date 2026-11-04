@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Literal, NoReturn
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field
 
-from bowhead_core.agent_behavior_contract import AgentBehaviorDescriptor, canonical_fingerprint
+from bowhead_core.agent_behavior_contract import AgentBehaviorDescriptor, canonical_fingerprint, supports_skill_method_input
 from bowhead_core.agent_dependency_compiler import ExactSkillGrant, parse_exact_skill_grants
 from bowhead_core.chat_reference_execution import ReferencePrimaryInput
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_reference_storage import ContentHash
-from bowhead_core.chat_references import Identity, SkillResourceRef, _bounded_json
+from bowhead_core.chat_references import CapabilityResourceRef, Identity, ReferenceNode, SkillResourceRef, _bounded_json
 from bowhead_core.skill_read_closure import MAX_SELECTED_SKILLS, PreparedSkillReadClosure, SkillReadClosureError, prepare_skill_read_closure
 from bowhead_core.skill_read_material import SkillReadMaterialError
 from bowhead_core.skill_read_resolution import ResolvedSkillRead, SkillReadResolutionError, SkillReadSourceProof, SkillReadSourceResolver
@@ -57,10 +57,14 @@ class SkillReadReceiverBaseline(BaseModel):
     policy_fingerprint: ContentHash
     baseline: AgentBehaviorDescriptor = Field(repr=False)
     grants: tuple[ExactSkillGrant, ...] = Field(repr=False)
+    ordinary_system_scope: Literal[True] | None = None
 
     @property
     def digest(self) -> str:
-        return canonical_fingerprint(self.model_dump(mode="json"))
+        value = self.model_dump(mode="json")
+        if self.ordinary_system_scope is None:
+            value.pop("ordinary_system_scope")
+        return canonical_fingerprint(value)
 
     def require_skill_read(self, resource: SkillResourceRef, *, scope: ReferenceRequestScope) -> ExactSkillGrant:
         """Match this exact baseline only; current source use is checked separately."""
@@ -155,12 +159,20 @@ def primary_skill_read_receiver(primary: ReferencePrimaryInput, scope: Reference
     # The descriptor hashes the authored definition. A team Agent with Plugins runs the
     # Plugin-expanded definition, which its binding carries beside the authored one.
     authored = binding.authored_definition if binding.authored_definition is not None else definition
-    if baseline.source_definition_hash != canonical_fingerprint(authored) or baseline.verification_state == "blocked":
+    selections = [node.resource for node in primary.source.input_document.nodes if isinstance(node, ReferenceNode)]
+    if baseline.source_definition_hash != canonical_fingerprint(authored) or not supports_skill_method_input(
+        baseline,
+        allow_unproven_primary=any(isinstance(resource, SkillResourceRef) for resource in selections)
+        and not any(isinstance(resource, CapabilityResourceRef) for resource in selections),
+        declared_primary=definition.get("primary_capability_ref"),
+    ):
         _fail()
-    # A descriptor can be shadow solely because no Capability implementation is
-    # selected. Release/Safety authorization belongs to the canonical reader;
-    # descriptor state alone neither grants nor removes exact Skill permissions.
-    grants = exact_reference_skill_grants(definition)
+    # Method eligibility does not promote an Outcome or change exact grants.
+    # Release/Safety authorization still belongs to the canonical reader.
+    from bowhead_core.system_skill_snapshot import has_ordinary_system_skill_scope
+
+    ordinary_system = binding.agent_source_kind == "system" and has_ordinary_system_skill_scope(definition)
+    grants = () if ordinary_system else exact_reference_skill_grants(definition)
     if binding.agent_source_kind == "team" and not binding.release_id:
         _fail()
     return SkillReadReceiverBaseline(
@@ -177,6 +189,7 @@ def primary_skill_read_receiver(primary: ReferencePrimaryInput, scope: Reference
         policy_fingerprint=binding.policy_fingerprint,
         baseline=baseline,
         grants=grants,
+        ordinary_system_scope=True if ordinary_system else None,
     )
 
 
@@ -262,7 +275,12 @@ async def prepare_primary_baseline_skill_reads(
 
 
 async def require_prepared_primary_skill_baseline(
-    db: aiosqlite.Connection, primary: ReferencePrimaryInput, closure: PreparedSkillReadClosure, *, sources: SkillReadSourceResolver
+    db: aiosqlite.Connection,
+    primary: ReferencePrimaryInput,
+    closure: PreparedSkillReadClosure,
+    *,
+    sources: SkillReadSourceResolver,
+    task_method_reference: bool = False,
 ) -> None:
     """Check a freshly admitted primary against server-prepared source facts.
 
@@ -290,7 +308,7 @@ async def require_prepared_primary_skill_baseline(
             skill_read_provenance,
         )
 
-        extension = await primary_extension_policy(db, primary, receiver)
+        extension = await primary_extension_policy(db, primary, receiver, prefer_task_method=task_method_reference)
         policy = extension.policy if extension is not None else None
         require_extension_roots(receiver.grants, closure.roots, policy)
         has_extensions = False
@@ -300,6 +318,12 @@ async def require_prepared_primary_skill_baseline(
             if item.proof.scope != closure.scope:
                 _fail("reference_skill_baseline_required")
         if has_extensions:
+            from bowhead_core.skill_method_policy import TaskMethodReadPolicy
+
+            if isinstance(policy, TaskMethodReadPolicy):
+                async with db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_method_composition'") as cursor:
+                    if await cursor.fetchone() is None:
+                        _fail("reference_skill_extension_migration_required")
             async with db.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
                 "AND name IN ('trg_reference_skill_extension_composition','trg_reference_extension_epoch_check')"

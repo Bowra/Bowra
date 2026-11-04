@@ -19,6 +19,7 @@ import aiosqlite
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_dependency_compiler import AgentDependencyCompilation
 from bowhead_core.openapi_tool_source import mcp_entry, openapi_entry, parse_openapi_ops
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -502,7 +503,7 @@ class ResourceDependencyBackfillService:
     """Paged preview/stage/verify service; never runs inside a migration."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def run_page(
         self,

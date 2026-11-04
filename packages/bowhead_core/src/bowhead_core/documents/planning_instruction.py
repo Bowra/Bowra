@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from bowhead_core.documents.authoring_protocol import PROFILE as AUTHORING_PROFILE
+from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES
 from bowhead_core.documents.executor import WorkerInput
 from bowhead_core.documents.pptx_plan import CURRENT_PROFILE
 from bowhead_core.documents.request import DocumentRequestError
@@ -38,11 +38,11 @@ def _retained_history_sources(context: dict, *, instruction: str, history: Worke
 
     _validated_context(context, instruction, profile=profile)
     payload = json.loads(context["payload"])
-    sources = payload.get("inputs" if profile == AUTHORING_PROFILE else "sources")
+    sources = payload.get("inputs" if profile in AUTHORING_PROFILES else "sources")
     if not isinstance(sources, list) or not sources:
         raise DocumentRequestError("document_checkpoint_unavailable")
     expected = {"name": history.name, "sha256": hashlib.sha256(history.content).hexdigest()}
-    if profile == AUTHORING_PROFILE:
+    if profile in AUTHORING_PROFILES:
         if sources[-1] != {**expected, "alias": f"data-{len(sources) - 2}", "role": "data"}:
             raise DocumentRequestError("document_checkpoint_unavailable")
         sources = [{"name": item.get("name"), "sha256": item.get("sha256")} if isinstance(item, dict) else None for item in sources]
@@ -135,6 +135,8 @@ async def document_instruction_in_tx(db: Connection, *, worker: DocumentTurnOwne
     from bowhead_core.documents.continuation import _dispatch_material
 
     _, runtime = await _dispatch_material(db, job_id=job_id, creation_worker=worker)
+    async with db.execute("SELECT * FROM document_jobs WHERE id=?", (job_id,)) as cursor:
+        job = await cursor.fetchone()
 
     source = await _read_chat_turn_user_source_in_tx(
         db, turn_id=worker.turn_id, expected_user_id=worker.user_id, expected_workspace_id=worker.workspace_id
@@ -146,7 +148,13 @@ async def document_instruction_in_tx(db: Connection, *, worker: DocumentTurnOwne
         (job_id, job_id),
     ) as cursor:
         prior = await cursor.fetchone()
-    text = prior[0] if prior else source.user_text
+    from bowhead_core.documents.task_sources import job_task_source_in_tx, task_instruction_in_tx
+
+    if prior:
+        await job_task_source_in_tx(db, job=job)
+        text = prior[0]
+    else:
+        text = await task_instruction_in_tx(db, job=job, fallback=source.user_text)
     legacy_text = text
     try:
         answers = await prior_document_answers_in_tx(db, worker=worker, job_id=job_id)

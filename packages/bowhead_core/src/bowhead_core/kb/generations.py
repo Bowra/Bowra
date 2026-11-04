@@ -11,7 +11,9 @@ from typing import Any
 
 import aiosqlite
 
+from bowhead_core.kb.ingestion import KnowledgeAction
 from bowhead_core.kb.schemas import KbFileDTO
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 
 def generation_writes_enabled() -> bool:
@@ -34,7 +36,7 @@ class KbGenerationStore:
     async def get(self, generation_id: str | None) -> dict[str, Any] | None:
         if not generation_id:
             return None
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             db.row_factory = aiosqlite.Row
             row = await (await db.execute("SELECT * FROM kb_file_generations WHERE generation_id=?", (generation_id,))).fetchone()
@@ -42,7 +44,7 @@ class KbGenerationStore:
 
     async def begin(self, file: KbFileDTO, sha256: str, count: int, index_version: str) -> str:
         generation_id = "kbg_" + uuid.uuid4().hex
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute(
                 "INSERT INTO kb_file_generations VALUES (?,?,?,?,?,?,'writing',?,NULL)",
@@ -51,9 +53,19 @@ class KbGenerationStore:
             await db.commit()
         return generation_id
 
-    async def publish(self, file: KbFileDTO, generation_id: str, *, layer: str, duration_ms: int, summary_json: str | None) -> bool:
+    async def publish(
+        self,
+        file: KbFileDTO,
+        generation_id: str,
+        *,
+        layer: str,
+        duration_ms: int,
+        summary_json: str | None,
+        description_fingerprint: str | None = None,
+        description_action: KnowledgeAction | None = None,
+    ) -> bool:
         """CAS the generation and file together; losers cannot replace newer work."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("BEGIN IMMEDIATE")
             generation = await (
@@ -92,11 +104,38 @@ class KbGenerationStore:
                 await db.rollback()
                 return False
             await db.execute("UPDATE kb_file_generations SET state='published',published_at=? WHERE generation_id=?", (stamp, generation_id))
+            from bowhead_core.kb.source_navigation_store import SourceNavigationStore
+
+            await SourceNavigationStore.ensure_base(db, file, generation_id)
+            admission = None
+            if description_fingerprint and description_action is not None:
+                description_action.require(user_id=description_action.actor_user_id, team_id=file.team_id)
+                admission = (description_action.actor_user_id, description_action.workspace_id)
+            elif description_fingerprint and file.ingestion_action_id:
+                admission = await (
+                    await db.execute(
+                        "SELECT actor_user_id,workspace_id FROM kb_membership_operations WHERE id=? AND file_id=? AND team_id=? AND membership_revision=? AND state='applied'",
+                        (file.ingestion_action_id, file.file_id, file.team_id, file.membership_revision),
+                    )
+                ).fetchone()
+            if admission:
+                navigation = await (await db.execute("SELECT revision FROM kb_source_navigation WHERE file_id=?", (file.file_id,))).fetchone()
+                await SourceNavigationStore.enqueue_in(
+                    db,
+                    file,
+                    generation_id=generation_id,
+                    fingerprint=description_fingerprint,
+                    admission_key=f"publication:{file.file_id}:{file.membership_revision}:{generation_id}",
+                    actor_user_id=admission[0],
+                    workspace_id=admission[1],
+                    manual_revision=navigation[0],
+                    source_version=file.version + 1,
+                )
             await db.commit()
             return True
 
     async def mark_absent(self, file: KbFileDTO) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute(
                 "UPDATE kb_files SET source_absent=1, source_binding_json=NULL WHERE file_id=? AND artifact_id=? AND active_generation_id IS ?",
@@ -106,7 +145,7 @@ class KbGenerationStore:
 
     async def bind_source(self, file: KbFileDTO, identity: str, sha256: str) -> bool:
         binding = json.dumps({"artifact_id": file.artifact_id, "identity": identity, "sha256": sha256}, sort_keys=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             result = await db.execute(
                 "UPDATE kb_files SET source_binding_json=?, source_absent=0 WHERE file_id=? AND artifact_id=? "
@@ -118,7 +157,7 @@ class KbGenerationStore:
 
     async def restore_source(self, file: KbFileDTO, artifact_id: str) -> bool:
         """Called only after matching the complete upload against the published SHA."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             result = await db.execute(
                 "UPDATE kb_files SET artifact_id=?, source_binding_json=NULL WHERE file_id=? AND artifact_id=? "
@@ -140,7 +179,7 @@ class KbGenerationStore:
 
     async def claim_orphans(self, file: KbFileDTO, *, index_version: str, before: str) -> list[str]:
         """Only unpublished writes older than the maximum parse lifetime; bounded and retryable."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             rows = await (
                 await db.execute(
@@ -155,7 +194,7 @@ class KbGenerationStore:
             return [row[0] for row in rows]
 
     async def forget_orphan(self, generation_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("DELETE FROM kb_file_generations WHERE generation_id=? AND state='abandoned'", (generation_id,))
             await db.commit()

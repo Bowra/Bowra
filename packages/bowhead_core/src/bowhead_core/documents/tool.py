@@ -1,14 +1,27 @@
 """Exact Agent request admission. The receipt is not a completed document."""
 
-import json
 import os
 
 from bowhead_router.types import ToolSchema
 from pydantic import ValidationError
 
 from bowhead_core.documents.continuation import DocumentPlanningFailure, DocumentPlanningPause, DocumentPlanningReview
-from bowhead_core.documents.request import DOCUMENT_TOOL_ARGUMENTS, DocumentProposal, DocumentRequestError, document_tool_schema
-from bowhead_core.documents.turn_policy import ORIGINAL_REQUEST_QUOTE_GUIDANCE, DocumentTurnState, pending_source_action_message, terminal_message
+from bowhead_core.documents.request import (
+    DocumentProposal,
+    DocumentRequestError,
+    DocumentTaskGenerationArguments,
+    document_tool_schema,
+    parse_document_tool_arguments,
+)
+from bowhead_core.documents.task_sources import task_source_guidance, task_sources_enabled
+from bowhead_core.documents.turn_policy import (
+    ORIGINAL_REQUEST_QUOTE_GUIDANCE,
+    TEMPLATE_REQUEST_WORKFLOW_GUIDANCE,
+    DocumentTurnState,
+    pending_source_action_message,
+    task_source_failure_message,
+    terminal_message,
+)
 from bowhead_core.tool_registry import ToolSpec
 
 
@@ -49,7 +62,7 @@ def register_document_tool(registry, *, service):
             }
         receipt = None
         try:
-            parsed = DOCUMENT_TOOL_ARGUMENTS.validate_json(json.dumps(arguments))
+            parsed = parse_document_tool_arguments(arguments)
             if state.revision_required and parsed.action != "revise":
                 raise DocumentRequestError("document_revision_required")
             if parsed.action == "list_questions":
@@ -59,7 +72,10 @@ def register_document_tool(registry, *, service):
             elif parsed.action == "revise":
                 receipt = await service().submit(ctx, parsed.evidence)
             else:
-                receipt = await service().submit(ctx, DocumentProposal.model_validate_json(parsed.model_dump_json()))
+                proposal = (
+                    parsed if isinstance(parsed, DocumentTaskGenerationArguments) else DocumentProposal.model_validate_json(parsed.model_dump_json())
+                )
+                receipt = await service().submit(ctx, proposal)
             outcome = await service().run_turn(ctx, receipt)
             if outcome is not None:
                 return planning_receipt(state, outcome, receipt.job_id)
@@ -80,6 +96,8 @@ def register_document_tool(registry, *, service):
                 "canvas",
                 "section_ids",
                 "job_id",
+                "task_source",
+                "original_request_quote",
             }
             errors = []
             constraints = {
@@ -101,7 +119,12 @@ def register_document_tool(registry, *, service):
                 "retryable": False,
                 "field_errors": errors,
                 "hint": ORIGINAL_REQUEST_QUOTE_GUIDANCE
-                + "For generate, include top-level evidence.text copied exactly from the current user's request, inputs with their own exact role quotations and artifact IDs, and source or source+pdf outputs. Use each artifact only once with one role and exactly one template. A separate data file is optional when the user supplies the values; never repeat the template as data. The server resolves file positions; omit them. list_questions takes only action; answer takes action, job_id and evidence. An explicitly bound revision requires revise with only evidence. Correct the request once; do not switch to scripts or another Agent.",
+                + (
+                    task_source_guidance()
+                    if task_sources_enabled() or "original_request_quote" in arguments
+                    else "For generate, include top-level evidence.text copied exactly from the current user's request, inputs with their own exact role quotations and artifact IDs, and source or source+pdf outputs. "
+                )
+                + "Use each artifact only once with one role and exactly one template. A separate data file is optional when the user supplies the values; never repeat the template as data. The server resolves file positions; omit them. list_questions takes only action; answer takes action, job_id and evidence. An explicitly bound revision requires revise with only evidence. Correct the request once; do not switch to scripts or another Agent.",
             }
             if state.attempts >= 2:
                 result.update(document_terminal=True, message=terminal_message(ctx, accepted=False))
@@ -116,6 +139,8 @@ def register_document_tool(registry, *, service):
                 "document_reference_ambiguous",
                 "document_revision_required",
                 "document_canvas_selection_invalid",
+                "document_task_source_unavailable",
+                "document_task_source_ambiguous",
             }
             conflict = exc.code in {"document_command_conflict", "document_revision_conflict"}
             result = {
@@ -124,7 +149,19 @@ def register_document_tool(registry, *, service):
                 "error_kind": "validation",
                 "retryable": False,
                 "hint": (
-                    "Use action=revise with only current-request evidence; the canonical request already binds the exact draft."
+                    "Quote a longer unique exact passage from the earlier user's task in this same Chat, or ask the user to restate the complete request. Do not use assistant prose, another Chat or a later message. This attempt admitted no new job."
+                    if exc.code in {"document_task_source_unavailable", "document_task_source_ambiguous"}
+                    else "Earlier-task references are not enabled. Ask the administrator to enable the qualified capability, or provide the full task in the current request. No job was admitted."
+                    if exc.code == "document_task_source_disabled"
+                    else "The original request plus current supplement exceeds the 8,000-character document instruction limit. Ask the user for a shorter complete request; no job was admitted."
+                    if exc.code == "document_task_source_limit"
+                    else "The saved original task source changed or is no longer readable. Start a new request with the complete requirements; do not publish this draft."
+                    if exc.code == "document_task_source_changed"
+                    else "Word template drafting is not enabled for this deployment. Ask the administrator to enable its qualified Word runtime before a new request; no draft or files were created."
+                    if exc.code == "document_word_unavailable"
+                    else "This Agent has no exact Word method resource. Select the document template Plugin or add its read-only Word method through the original Agent configuration before a new request."
+                    if exc.code == "document_word_method_unavailable"
+                    else "Use action=revise with only current-request evidence; the canonical request already binds the exact draft."
                     if exc.code == "document_revision_required"
                     else "An explicitly selected connector operation has no durable completed result. Complete that original operation before requesting a document draft. No document job was admitted."
                     if exc.code == "document_source_action_pending"
@@ -139,15 +176,19 @@ def register_document_tool(registry, *, service):
                     else "The existing request was not replaced. Do not retry with changed arguments or infer publication from this conflict."
                     if conflict
                     else ORIGINAL_REQUEST_QUOTE_GUIDANCE
-                    + "Copy exact, unique quotations from the current user message, not history or file contents. Use exact available artifact IDs; the server resolves current files and existing session pins. Do not invent file positions."
+                    + task_source_guidance()
+                    + "Copy exact, unique quotations from the current user message or the explicitly selected task source, not assistant prose or file contents. Use exact available artifact IDs; the server resolves current files and existing session pins. Do not invent file positions."
                 ),
                 "document_terminal": not repairable or state.attempts >= 2,
                 "message": pending_source_action_message(ctx)
                 if exc.code == "document_source_action_pending"
-                else terminal_message(ctx, accepted=False, conflict=conflict),
+                else task_source_failure_message(ctx, exc.code) or terminal_message(ctx, accepted=False, conflict=conflict),
             }
             if exc.field is not None:
-                result["field_errors"] = [{"field": exc.field, "issue": "exact_current_quote_required"}]
+                field = "original_request_quote" if exc.field == "task_source" and isinstance(parsed, DocumentTaskGenerationArguments) else exc.field
+                result["field_errors"] = [
+                    {"field": field, "issue": "exact_task_source_required" if exc.field == "task_source" else "exact_current_quote_required"}
+                ]
             if result["document_terminal"]:
                 state.receipt = result
             return result
@@ -181,9 +222,19 @@ def register_document_tool(registry, *, service):
                 name="template_document_submit",
                 description=(
                     ORIGINAL_REQUEST_QUOTE_GUIDANCE
-                    + "Request a private draft from an ordinary uploaded PPTX explicitly identified as a template by the user. "
-                    "For action=generate, evidence is REQUIRED at the top level: {text: an exact quotation from the current user request}. "
-                    "Also copy exact current user quotations for each input role and exact artifact IDs. The server resolves file positions; do not supply them. "
+                    + (
+                        "Start a private task to inspect, clarify and draft from an ordinary uploaded PPTX or DOCX explicitly identified as a template by the user. Word supports text and fixed ordinary table cells, preserves source formatting and allows natural reflow; structural edits and new images are not supported in that profile. "
+                        if os.environ.get("FEATURE_TEMPLATE_DOCX_AUTHORING", "0") == "1"
+                        else "Start a private task to inspect, clarify and draft from an ordinary uploaded PPTX explicitly identified as a template by the user. "
+                    )
+                    + TEMPLATE_REQUEST_WORKFLOW_GUIDANCE
+                    + task_source_guidance()
+                    + (
+                        "The server reads the active canonical user message directly; input roles are model choices, not proof of user intent. "
+                        if task_sources_enabled()
+                        else "For action=generate, evidence is REQUIRED at the top level: {text: an exact quotation from the current user request}. Also copy exact current user quotations for each input role. "
+                    )
+                    + "Use exact artifact IDs. The server resolves file positions; do not supply them. "
                     "Use each artifact only once with one role and exactly one template. Values supplied by the user need no separate data file; never repeat the template as data. "
                     "Data may be JSON, CSV, XLSX values, or UTF-8 text. "
                     "For content from this Chat's Canvas, add canvas={} for its current visible content, or use section_ids only when exact IDs are already available; "
@@ -191,7 +242,8 @@ def register_document_tool(registry, *, service):
                     "For a requested draft, submit the original request and admitted files directly. The private worker reads the template and data itself; "
                     "a preparatory inspection or edit plan from another Agent is unnecessary. "
                     + (
-                        "The private authoring worker supports local text, ordinary tables, qualified native charts and raster-image changes, and selecting/reordering existing source pages. Use this same draft path for an analytical report based on selected existing template pages; pass the original request and sources, not an edit plan. Arbitrary vendor-object editing, cross-deck composition and blank creation are not yet supported. "
+                        ("For PPTX, the" if os.environ.get("FEATURE_TEMPLATE_DOCX_AUTHORING", "0") == "1" else "The")
+                        + " private authoring worker supports local text, ordinary tables, qualified native charts and raster-image changes, and selecting/reordering existing source pages. Use this same draft path for an analytical report based on selected existing template pages; pass the original request and sources, not an edit plan. Arbitrary vendor-object editing, cross-deck composition and blank creation are not yet supported. "
                         if os.environ.get("FEATURE_DOCUMENT_SCRIPT_AUTHORING", "0") == "1"
                         else "Complex charts and embedded objects are not supported. "
                     )

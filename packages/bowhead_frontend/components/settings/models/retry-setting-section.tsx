@@ -82,6 +82,7 @@ export function RetrySettingSection({
           <h2 id={`${id}-title`}>{t("title")}</h2>
         </div>
       </div>
+      <p className="overview-quiet">{t("save_boundary")}</p>
       <Field
         id={inputId}
         help={<ConfigurationFieldHelp field="team_model_retry.max_retries" label={t("label")} />}

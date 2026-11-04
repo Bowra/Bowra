@@ -37,6 +37,7 @@ from bowhead_core.reference_mcp_prompt_execution import (
 from bowhead_core.skill_baseline_read import read_baseline_package, snapshot_skill_read_arguments
 from bowhead_core.skill_read_model_input import RequiredSkillModelInput
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.tool_registry import ToolExecutionContext
 
 if TYPE_CHECKING:
@@ -113,9 +114,12 @@ class ReferenceMcpPromptModelAccess:
         # its ContextVar. Every model validation and physical send supplies it.
         if ctx is not None:
             self.require_receiver(ctx)
-        if Path(self.index.db_path).resolve() != Path(self.access.db_path).resolve():
+        if Path(domain_database_path(self.index.db_path, "core")).resolve() != Path(domain_database_path(self.access.db_path, "core")).resolve():
             raise ValueError("reference_mcp_prompt_scope_changed")
-        if self.sources is not None and Path(self.sources.db_path).resolve() != Path(self.index.db_path).resolve():
+        if (
+            self.sources is not None
+            and Path(domain_database_path(self.sources.db_path, "core")).resolve() != Path(domain_database_path(self.index.db_path, "core")).resolve()
+        ):
             raise ValueError("reference_mcp_prompt_scope_changed")
         primary, composition = await _require_prompt_runtime_in_connection(
             db,

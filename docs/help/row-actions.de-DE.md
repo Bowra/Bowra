@@ -13,7 +13,7 @@ Statusschalter und Hauptaktionen wie das Öffnen eines Berichts können direkt i
 ## Häufige Beispiele
 
 - Teameinstellungen: Mitglieder, Einladungen, Bereiche, Modell- und Datenverbindungen, Tools, integrierte Agents, Workflows und geplante Aufgaben.
-- Bereichseinstellungen: Mitglieder und Bereichsanweisungen.
+- Bereichseinstellungen: Mitglieder und KI-Arbeitsanweisungen.
 - Persönliche Einstellungen: angemeldete Geräte, Erinnerungen und kürzlich geleerte Elemente.
 - Bibliothek und Berichte: Dateien, Extraktionstabellen, Berichtslinks und Löschen.
 - Agents und Skills: unterstützte Freigaben, Verwaltung und persönliche Aktivierung.

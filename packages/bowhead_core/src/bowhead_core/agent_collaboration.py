@@ -24,6 +24,8 @@ from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_ref
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, require_live_worker_in_tx
+from bowhead_core.sqlite_domains import domain_database_path
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 Identity = Annotated[str, Field(min_length=1, max_length=128)]
 # Adapters retain original caller/resource access and explicit result-sharing
@@ -162,7 +164,7 @@ async def recover_collaboration_publications_in_connection(db: aiosqlite.Connect
 
     if not db.in_transaction:
         raise CollaborationUnavailable("collaboration_recovery_transaction_required")
-    if await _row(db, "SELECT 1 FROM sqlite_master WHERE name='agent_collaboration_operation'") is None:
+    if not await readable_table_exists(db, "agent_collaboration_operation"):
         return 0
     async with db.execute("SELECT * FROM agent_collaboration_operation WHERE turn_id=? AND published=0 ORDER BY seq", (turn_id,)) as cursor:
         cursor.row_factory = aiosqlite.Row
@@ -200,14 +202,14 @@ class CollaborationStore:
     """Use the existing core database, scope-bound cipher, and dispatch fence."""
 
     def __init__(self, db_path: str | Path, *, cipher: ReferenceCipher, clock: Callable[[], float] = time.time) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "execution"))
         self.cipher = cipher
         self.clock = clock
 
     @asynccontextmanager
     async def _transaction(self, worker: DocumentTurnOwner, *, write: bool = True, history: bool = False) -> AsyncIterator[aiosqlite.Connection]:
         worker = DocumentTurnOwner.model_validate(worker.model_dump())
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
                 if write:
@@ -1027,7 +1029,7 @@ class CollaborationStore:
     async def acknowledge_publication(self, worker: DocumentTurnOwner, *, operation_id: str) -> None:
         # Projection recovery can finish after execution is terminal. It cannot
         # mutate questions or start another Agent/model execution.
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await self._require_read_scope(db, worker)

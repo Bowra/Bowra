@@ -5,13 +5,13 @@ from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.team_llm_verification_store import (
     CapabilityEvidence,
     ProviderIdentityConflict,
     TeamLlmVerificationStore,
 )
+from gateway_legacy_database import upgrade
 
 ROOT_KEY = base64.urlsafe_b64encode(bytes(range(32))).decode()
 NOW = datetime(2026, 7, 30, 8, tzinfo=UTC)
@@ -24,7 +24,7 @@ def migrated_db(tmp_path):
 
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     return db_path
 
 

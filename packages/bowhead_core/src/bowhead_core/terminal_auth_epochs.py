@@ -9,10 +9,24 @@ leaving an already-open stream authorized against stale state.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import aiosqlite
 
+from bowhead_core.sqlite_domains import domain_layout_active
 from bowhead_core.terminal_protocol import AuthFenceScopeKind
+
+
+async def terminal_auth_epoch_table(connection: aiosqlite.Connection, scope_kind: AuthFenceScopeKind) -> str:
+    """Resolve the fixed epoch authority without opening another connection."""
+    if scope_kind is AuthFenceScopeKind.SESSION_VISIBILITY:
+        return "terminal_auth_scope_epochs"
+    async with connection.execute("PRAGMA database_list") as cursor:
+        databases = await cursor.fetchall()
+    path = next((Path(row[2]) for row in databases if row[1] == "main" and row[2]), None)
+    if path is not None and domain_layout_active(path):
+        return "terminal_authority_scope_epochs"
+    return "terminal_auth_scope_epochs"
 
 
 async def bump_terminal_auth_epoch(
@@ -35,16 +49,17 @@ async def bump_terminal_auth_epoch(
     elif team_id == "__global__":
         raise ValueError("team auth epoch cannot use global team scope")
     updated_at = now or datetime.now(UTC).isoformat()
+    table = await terminal_auth_epoch_table(connection, scope_kind)
     await connection.execute(
-        """
-        INSERT INTO terminal_auth_scope_epochs(
+        f"""
+        INSERT INTO {table}(
           scope_kind,team_id,scope_ref,epoch,row_version,updated_at
         ) VALUES (?,?,?,1,1,?)
         ON CONFLICT(scope_kind,team_id,scope_ref) DO UPDATE SET
-          epoch=terminal_auth_scope_epochs.epoch+1,
-          row_version=terminal_auth_scope_epochs.row_version+1,
+          epoch={table}.epoch+1,
+          row_version={table}.row_version+1,
           updated_at=excluded.updated_at
-        """,
+        """,  # noqa: S608 -- fixed epoch authority table selected above
         (scope_kind.value, team_id, scope_ref, updated_at),
     )
 

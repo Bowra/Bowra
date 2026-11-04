@@ -13,7 +13,7 @@ State controls, such as enable switches, and primary actions, such as opening a 
 ## Common examples
 
 - Team settings: members and invitations, spaces, model and data connections, tools, built-in Agents, workflows and scheduled tasks.
-- Space settings: members and Space Instructions.
+- Space settings: members and AI Work Instructions.
 - Personal settings: signed-in devices, memories and recently cleared items.
 - Library and reports: files, extraction tables, report links and deletion.
 - Agents and Skills: supported sharing, management and personal enablement actions.

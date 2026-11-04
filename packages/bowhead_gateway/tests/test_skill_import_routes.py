@@ -19,6 +19,7 @@ from alembic import command
 from alembic.config import Config
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.skill_upload import SkillUploadError
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import User, UserStore, _now
 from bowhead_gateway.error_handler import _skill_upload_error_handler
 from bowhead_gateway.routes import skills as skr
@@ -60,7 +61,7 @@ def _app(tmp_path, monkeypatch, *, migrated: bool = False) -> FastAPI:
         config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
         config.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_path / 'u.db'}")
         config.attributes["bowhead_target"] = "core"
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)
     store = UserStore(str(tmp_path / "u.db"))
     _run(store.initialize())
     _run(_seed_team(str(tmp_path / "u.db")))

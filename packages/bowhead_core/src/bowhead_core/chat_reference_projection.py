@@ -42,6 +42,7 @@ from bowhead_core.chat_references import (
 )
 from bowhead_core.reference_mcp_prompt_execution import ReferenceMcpPromptResultResolution
 from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from bowhead_core.skill_reference_execution import SkillCompositionMember
@@ -814,9 +815,7 @@ async def read_reference_projection(
                     "SELECT * FROM turn_capability_execution WHERE turn_id=? ORDER BY created_at,id LIMIT 101",
                     (turn_id,),
                 )
-                async with db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_mcp_calls'") as cursor:
-                    mcp_call_table = await cursor.fetchone()
-                if mcp_call_table is None:
+                if not await readable_table_exists(db, "chat_reference_mcp_calls"):
                     mcp_calls, mcp_calls_truncated = [], False
                 else:
                     mcp_calls, mcp_calls_truncated = await _rows(

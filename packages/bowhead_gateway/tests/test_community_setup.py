@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import gc
+import json
+import shutil
 import sqlite3
+import subprocess
+import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.entitlements import CommunityResolver
 from bowhead_core.installation import community_setup_token, initialize_installation, read_installation
 from bowhead_core.public_entries import PublicEntryStore
@@ -16,12 +21,13 @@ from bowhead_gateway.public_entry_context import PublicEntryContextMiddleware
 from bowhead_gateway.routes import auth, bootstrap
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 
 @pytest.fixture(scope="module")
 def template(tmp_path_factory):
     path = tmp_path_factory.mktemp("community-gateway") / "bowhead.db"
-    upgrade(f"sqlite:///{path}", target="core")
+    upgrade(f"sqlite:///{(path).with_name('bowhead.db')}", target="core")
     return path
 
 
@@ -150,6 +156,113 @@ def test_preparation_rejects_unknown_data_before_creating_admission_lock(tmp_pat
         installation.prepare_installation(db_url=f"sqlite:///{path}", migration_command="must-never-run")
     assert path.read_bytes() == before
     assert not (tmp_path / ".installation-prepare.lock").exists()
+
+
+def test_prepare_recovers_killed_core_transaction_before_provenance_and_migrates_normally(tmp_path, monkeypatch):
+    from bowhead_core.sqlite_domain_upgrade import SPLIT_REVISION
+    from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
+    from bowhead_core.sqlite_upgrade import SQLiteUpgradeError, database_head, runtime_shared_lease
+
+    from bowhead_gateway import installation
+
+    monkeypatch.setattr(installation, "read_build_edition", lambda: "business")
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    path = tmp_path / "sqlite" / "bowhead.db"
+    url = f"sqlite:///{path}"
+    upgrade(url)
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO _phase0_probe(k,ts) VALUES('retained-before-crash',1.0)")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); "
+            "db.execute('PRAGMA cache_size=1'); db.execute('BEGIN IMMEDIATE'); "
+            "db.execute('CREATE TABLE interrupted_startup(value BLOB)'); "
+            "db.execute('INSERT INTO interrupted_startup VALUES(zeroblob(100000))'); os._exit(0)",
+            str(path),
+        ],
+        check=True,
+    )
+    journal = path.with_name(path.name + "-journal")
+    assert journal.is_file()
+    command = str(Path(sys.executable).with_name("bowhead"))
+    with runtime_shared_lease(path.parent), pytest.raises(SQLiteUpgradeError, match="already owns this data directory"):
+        installation.prepare_installation(db_url=url, migration_command=command)
+    assert journal.is_file()
+    installation.prepare_installation(db_url=url, migration_command=command)
+    assert read_installation(str(path)).current_edition == "business"
+    assert all(database_head(path.parent / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT ts FROM _phase0_probe WHERE k='retained-before-crash'").fetchone() == (1.0,)
+        assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='interrupted_startup'").fetchone() is None
+
+
+@pytest.fixture(scope="module")
+def stopped_wal_upgrade_source(tmp_path_factory, template):
+    directory = tmp_path_factory.mktemp("stopped-wal-upgrade") / "sqlite"
+    directory.mkdir()
+    shutil.copy2(template, directory / "bowhead.db")
+    upgrade(f"sqlite:///{directory / 'bowhead.db'}")
+    return directory
+
+
+@pytest.mark.parametrize("stage", ["initial", "vacuum_resume"])
+def test_prepare_subprocess_finishes_existing_wal_migration_without_garbage_collection(tmp_path, monkeypatch, stopped_wal_upgrade_source, stage):
+    from bowhead_core.sqlite_domain_upgrade import SPLIT_REVISION
+    from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
+    from bowhead_core.sqlite_upgrade import LAYOUT_FILE, database_head
+
+    from bowhead_cli import migrate
+    from bowhead_gateway import installation
+
+    monkeypatch.setattr(installation, "read_build_edition", lambda: "business")
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    directory = tmp_path / "sqlite"
+    shutil.copytree(stopped_wal_upgrade_source, directory)
+    path = directory / "bowhead.db"
+    url = f"sqlite:///{path}"
+    checkpoint = None
+    if stage == "vacuum_resume":
+        original = migrate.run_domain_upgrade
+
+        def stop_after_vacuum(*args, **kwargs):
+            def fail(phase):
+                if phase == "after_vacuum":
+                    raise RuntimeError("stopped before vacuum checkpoint")
+
+            return original(*args, **kwargs, fault=fail)
+
+        with pytest.MonkeyPatch.context() as interruption:
+            interruption.setattr(migrate, "run_domain_upgrade", stop_after_vacuum)
+            with pytest.raises(RuntimeError, match="before vacuum checkpoint"):
+                migrate.upgrade(url)
+        checkpoint = json.loads((directory / LAYOUT_FILE).read_text())
+        assert checkpoint["phase"] == "vacuum"
+        assert all(database_head(directory / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        db.execute("INSERT INTO _phase0_probe(k,ts) VALUES('retained-wal-source',1.0)")
+        db.commit()
+    gc.collect()
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        installation.prepare_installation(db_url=url, migration_command=str(Path(sys.executable).with_name("bowhead")))
+        assert read_installation(str(path)).current_edition == "business"
+    finally:
+        if enabled:
+            gc.enable()
+        gc.collect()
+    complete = json.loads((directory / LAYOUT_FILE).read_text())
+    assert complete["status"] == "ready" and complete["phase"] == "complete"
+    assert all(database_head(directory / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    if checkpoint is not None:
+        assert complete["backup"] == checkpoint["backup"]
+        for domain in ("execution", "content", "notifications", "observability"):
+            assert complete["targets"][domain]["evidence"] == checkpoint["targets"][domain]["evidence"]
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT ts FROM _phase0_probe WHERE k='retained-wal-source'").fetchone() == (1.0,)
 
 
 @pytest.mark.parametrize("prefix", ["", "/bowhead"])

@@ -13,7 +13,14 @@ from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_ref
 from bowhead_core.chat_reference_storage import ReferenceScope
 from bowhead_core.chat_references import ReferenceNode, SkillResourceRef
 from bowhead_core.skill_baseline_material import prepare_baseline_selected_reads, prepare_primary_skill_baseline
-from bowhead_core.skill_read_extensions import prepare_extended_skill_reads, primary_extension_policy, require_current_extension_policy
+from bowhead_core.skill_method_policy import TaskMethodReadPolicy, task_method_policy
+from bowhead_core.skill_read_extensions import (
+    SkillReadExtensionPolicy,
+    prepare_extended_skill_reads,
+    primary_extension_policy,
+    require_current_extension_policy,
+)
+from bowhead_core.skill_read_material import SkillReadMaterialError
 from bowhead_core.skill_read_receiver import PreparedReceiverSkillReads, SkillReadReceiverError, primary_skill_read_receiver
 from bowhead_core.skill_read_render import RenderedSkillReads, render_prepared_skill_reads
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
@@ -38,6 +45,7 @@ async def prepare_reference_primary_skill_reads(
     bindings = AgentExecutionBindingStore(sources.db_path)
     original: ReferencePrimaryInput | None = None
     extension = None
+    prefer_task_method = False
 
     async def read() -> ReferencePrimaryInput:
         nonlocal extension
@@ -50,7 +58,9 @@ async def prepare_reference_primary_skill_reads(
                     primary = await read_reference_skill_primary_in_connection(
                         db, scope=ReferenceScope(**scope.model_dump(), policy_epoch=epoch), turn_id=turn_id, bindings=bindings
                     )
-                    current = await primary_extension_policy(db, primary, primary_skill_read_receiver(primary, scope, turn_id))
+                    current = await primary_extension_policy(
+                        db, primary, primary_skill_read_receiver(primary, scope, turn_id), prefer_task_method=prefer_task_method
+                    )
                     if original is not None and current != extension:
                         raise SkillReadReceiverError("reference_skill_receiver_changed")
                     extension = current
@@ -71,11 +81,21 @@ async def prepare_reference_primary_skill_reads(
     assert document is not None  # required by the canonical reader
     selections = [node for node in document.nodes if isinstance(node, ReferenceNode) and isinstance(node.resource, SkillResourceRef)]
     baseline = await prepare_primary_skill_baseline(sources, scope=scope, turn_id=turn_id, primary_factory=read)
-    prepared = (
-        await prepare_extended_skill_reads(sources, baseline, [node.resource for node in selections], extension)
-        if extension is not None and selections
-        else await prepare_baseline_selected_reads(baseline, [node.resource for node in selections])
-    )
+    try:
+        prepared = (
+            await prepare_extended_skill_reads(sources, baseline, [node.resource for node in selections], extension)
+            if extension is not None and selections
+            else await prepare_baseline_selected_reads(baseline, [node.resource for node in selections])
+        )
+    except SkillReadMaterialError:
+        if extension is None or isinstance(extension.policy, TaskMethodReadPolicy):
+            raise
+        prefer_task_method = True
+        extension = SkillReadExtensionPolicy(
+            schema_version=2, receiver_digest=baseline.receiver.digest, policy=task_method_policy(document), source_hash=baseline.receiver.source_hash
+        )
+        await read()
+        prepared = await prepare_extended_skill_reads(sources, baseline, [node.resource for node in selections], extension)
     if prepared.extension is not None:
         async with open_shared_ctx(sources.db_path) as db:
             await db.execute("PRAGMA query_only=ON")

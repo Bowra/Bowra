@@ -1,4 +1,5 @@
 {
+  "content_sharing_disabled": "Le partage est désactivé pour ce déploiement. Vous pouvez consulter ou révoquer les partages existants. Contactez votre administrateur pour activer le partage.",
   "coach_canvas_target_unavailable": "La ressource d’origine ou sa version enregistrée n’est plus disponible. Vérifiez l’éditeur puis renvoyez le message ; son contenu est conservé.",
   "reference_input_invalid": "Les références saisies ne sont pas valides. Conservez le brouillon et vérifiez ses références.",
   "reference_request_too_large": "Le contenu avec références est trop volumineux. Raccourcissez-le avant de l’envoyer.",
@@ -304,8 +305,10 @@
   "last_team_admin_cannot_self_demote": "Vous êtes le dernier administrateur. Nommez un autre administrateur avant de réduire vos propres autorisations.",
   "last_workspace_admin": "Ce membre est le seul administrateur de l’espace. Accordez d’abord l’accès administrateur à un autre membre.",
   "lead_internal_error": "Une erreur système a interrompu cette réponse. Réessayez plus tard.",
+  "tool_call_not_executed": "L’opération requise n’a pas été exécutée. Cette tâche reste donc inachevée. Envoyez un nouveau message pour demander de poursuivre le travail restant.",
   "lead_empty_answer": "Le modèle n’a fourni aucune réponse ni action. Aucune opération n’a été exécutée. Réessayez cette tâche ; si le problème persiste, copiez le diagnostic pour votre administrateur.",
   "lead_output_exhausted": "Le modèle a atteint sa limite de réponse sans fournir de réponse ni d’action. Aucune opération n’a été exécutée. Réessayez ; si le problème persiste, copiez le diagnostic pour votre administrateur.",
+  "knowledge_source_changed": "Les sources de connaissances ont changé avant la reprise. Ouvrez une nouvelle conversation avec les sources actuellement disponibles.",
   "reference_policy_changed": "Les autorisations de l’équipe ont changé avant l’utilisation de cette référence. Sélectionnez de nouveau l’Agent et le Skill avant l’envoi.",
   "llm_config_encryption_required": "Le chiffrement des clés de modèles n’est pas configuré pour ce déploiement ; la configuration des modèles ne peut donc pas être enregistrée. Contactez votre administrateur système.",
   "llm_provider_auth_failed": "L’authentification auprès du service de modèle a échoué. Demandez à votre administrateur d’équipe de vérifier la clé API de la connexion au modèle et les droits d’accès. Joignez le diagnostic, puis renvoyez la demande après correction.",
@@ -717,5 +720,12 @@
   "shopify_outbound_blocked": "La politique d’adresses sortantes de ce déploiement bloque cette adresse de boutique. Utilisez le domaine myshopify.com de la boutique.",
   "shopify_api_version_unverified": "La boutique ne prend pas en charge la version de l’API Shopify requise ici. Contactez votre administrateur.",
   "shopify_request_rejected": "Shopify a refusé la requête. Vérifiez les autorisations de l’application sur cette boutique et réessayez.",
-  "shopify_response_invalid": "Shopify a renvoyé une réponse inattendue. Réessayez plus tard ; si le problème persiste, contactez votre administrateur."
+  "shopify_response_invalid": "Shopify a renvoyé une réponse inattendue. Réessayez plus tard ; si le problème persiste, contactez votre administrateur.",
+  "tool_arguments_invalid": "Le format des entrées ou les champs de données ne conviennent pas à cette étape. L’agent doit corriger les entrées avant de réessayer.",
+  "tool_resource_unavailable": "La source sélectionnée est indisponible. Vérifiez l’accès ou choisissez une source disponible.",
+  "tool_code_failed": "Le script a échoué. Vérifiez l’exception, les entrées déclarées et les noms réels des colonnes avant d’exécuter le code corrigé.",
+  "tool_execution_timeout": "Le délai de l’opération a expiré et son résultat n’est pas confirmé. Vérifiez les effets avant de répéter une opération qui modifie des données.",
+  "tool_execution_unknown": "Le résultat de l’opération n’est pas confirmé. Vérifiez si elle a pris effet avant de la répéter.",
+  "tool_execution_failed": "L’outil n’a pas terminé cette étape. Consultez le résultat ou copiez le diagnostic pour votre administrateur.",
+  "tool_delivery_review_required": "La livraison reste à vérifier. L’agent doit examiner les étapes en échec et les demandes non satisfaites avant de terminer."
 }

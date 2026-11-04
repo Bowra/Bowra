@@ -10,16 +10,16 @@ import re
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from bowhead_core.terminal_protocol import (
     TERMINAL_PROTOCOL_TABLES,
     load_terminal_protocol_enum_registry,
 )
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 REQUIRED_TABLES = {
     "turn_generations",
@@ -113,8 +113,8 @@ def test_terminal_protocol_revision_upgrades_all_eight_targets(tmp_path) -> None
     core_path = tmp_path / TARGET_FILES["core"]
     _create_1_0_fixture(core_path)
 
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     for target, filename in TARGET_FILES.items():
         with sqlite3.connect(tmp_path / filename) as connection:
@@ -156,7 +156,7 @@ def test_expand_migration_and_old_binary_leave_protocol_columns_null(tmp_path) -
         )
         connection.commit()
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as connection:
         before = connection.execute(
@@ -215,7 +215,7 @@ def test_expand_migration_and_old_binary_leave_protocol_columns_null(tmp_path) -
 def test_terminal_protocol_shape_and_immutability_guards(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         _insert_workspace(connection)
@@ -327,7 +327,7 @@ def test_terminal_protocol_shape_and_immutability_guards(tmp_path) -> None:
 def test_terminal_protocol_schema_checks_match_canonical_enum_registry(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     registry = load_terminal_protocol_enum_registry()
     cases = (
         ("sessions", "steer_buffer_state", "steer_buffer_state"),
@@ -387,7 +387,7 @@ def test_terminal_protocol_schema_checks_match_canonical_enum_registry(tmp_path)
 def test_sqlite_effect_bundle_uses_deferred_no_action_fk(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
@@ -468,7 +468,7 @@ def test_sqlite_effect_bundle_uses_deferred_no_action_fk(tmp_path) -> None:
 def test_ac_b1b_026_uncertified_surfaces_remain_legacy(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         _insert_workspace(connection)
         for surface in ("feishu", "scheduler"):
@@ -490,7 +490,7 @@ def test_terminal_control_outcome_shape_and_immutability_are_db_enforced(
 ) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         _insert_workspace(connection)
         _insert_session(connection, session_id="s_v1")
@@ -571,7 +571,7 @@ def test_terminal_decision_effect_skipped_resolution_shape_is_db_enforced(
 ) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         _insert_workspace(connection)
         _insert_session(connection, session_id="s_v1")

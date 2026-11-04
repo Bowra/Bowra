@@ -28,6 +28,8 @@ from bowhead_core.memory_privacy import (
     ensure_memory_write_allowed,
     is_memory_read_hidden,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +79,16 @@ class MemoryPackSnapshotsStore:
     """Append-only audit log of memory injected into Lead prompts (per turn)."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
         """Create table + indexes. PRD-B/C 3-step pattern (TABLE → ALTER → INDEX).
         Rename the pre-team schema column before creating the team-scoped index.
         """
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self._db_path) as db:
             await db.executescript(_TABLE_SCHEMA)
@@ -163,7 +169,7 @@ class MemoryPackSnapshotsStore:
 
         Cross-user attempts (user A queries user B's turn) → returns None (opaque 404).
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             if await is_memory_read_hidden(db, user_id=user_id):
                 return None
@@ -188,7 +194,7 @@ class MemoryPackSnapshotsStore:
         if not admin_team_id:
             # Admin without team_id can't scope; return None to be safe.
             return None
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM memory_pack_snapshots WHERE turn_id = ? AND team_id IS NOT NULL AND team_id = ?",

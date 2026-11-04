@@ -5,7 +5,6 @@ Tests for the auto-chart fallback:
 - ``collect_auto_chart_candidates`` two-pass walk + cap
 - ``peer_supports_auto_chart`` I-ι1 / I-ι3 invariant whitelist
 - Feature flag (BOWHEAD_IOTA_AUTO_CHART_FALLBACK=0 disables module)
-- ``_looks_numeric_col`` detector
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import os
 import pytest
 from bowhead_core.canvas_composers.auto_chart import (
     DEFAULT_PER_TURN_CAP,
-    _looks_numeric_col,
     collect_auto_chart_candidates,
     peer_supports_auto_chart,
     should_auto_chart,
@@ -72,10 +70,6 @@ def test_passes_5_and_gate_canonical() -> None:
     [
         ("mime", "image/png"),  # cond 1 fail
         ("mime", "application/json"),
-        ("numeric_col_count", 0),  # cond 2 fail (too few)
-        ("numeric_col_count", 3),  # cond 2 fail (too many)
-        ("row_count", 2),  # cond 3 fail (too few)
-        ("row_count", 201),  # cond 3 fail (too many)
         ("artifact_id", None),  # missing aid
         ("artifact_id", ""),
     ],
@@ -105,24 +99,6 @@ def test_cond5_already_charted_blocked() -> None:
     )
 
 
-def test_boundary_lower_bounds_pass() -> None:
-    """row_count=3 + numeric_col_count=1 (lower edges) should pass."""
-    assert should_auto_chart(
-        _meta(row_count=3, numeric_col_count=1),
-        consumed_artifact_ids=set(),
-        chart_referenced_artifact_ids=set(),
-    )
-
-
-def test_boundary_upper_bounds_pass() -> None:
-    """row_count=200 + numeric_col_count=2 (upper edges) should pass."""
-    assert should_auto_chart(
-        _meta(row_count=200, numeric_col_count=2),
-        consumed_artifact_ids=set(),
-        chart_referenced_artifact_ids=set(),
-    )
-
-
 # ───────────────────────────────────────────────────────────────
 # Feature flag
 # ───────────────────────────────────────────────────────────────
@@ -149,32 +125,8 @@ def test_flag_on_default_allows() -> None:
 
 
 # ───────────────────────────────────────────────────────────────
-# _looks_numeric_col detector
+# Full-column fallback delivery
 # ───────────────────────────────────────────────────────────────
-
-
-def test_looks_numeric_col_pure_numeric() -> None:
-    rows = [["1.0", "a"], ["2.0", "b"], ["3", "c"]]
-    assert _looks_numeric_col(rows, 0)
-    assert not _looks_numeric_col(rows, 1)
-
-
-def test_looks_numeric_col_threshold_80_percent() -> None:
-    # 4/5 numeric (80%) → pass; 3/5 (60%) → fail.
-    pass_rows = [["1"], ["2"], ["3"], ["4"], ["x"]]
-    fail_rows = [["1"], ["2"], ["3"], ["x"], ["y"]]
-    assert _looks_numeric_col(pass_rows, 0)
-    assert not _looks_numeric_col(fail_rows, 0)
-
-
-def test_looks_numeric_col_thousand_separator() -> None:
-    rows = [["1,234"], ["5,678"], ["9,000"]]
-    assert _looks_numeric_col(rows, 0)
-
-
-def test_looks_numeric_col_empty_or_short() -> None:
-    assert not _looks_numeric_col([], 0)
-    assert not _looks_numeric_col([[""], [""]], 0)
 
 
 # ───────────────────────────────────────────────────────────────
@@ -228,7 +180,7 @@ def test_collect_emits_for_unconsumed_uncharted_csv() -> None:
     assert len(candidates) == 1
     assert candidates[0]["data_artifact_id"] == "art_y"
     assert candidates[0]["auto_charted"] is True
-    assert candidates[0]["hint"] == "auto"
+    assert candidates[0]["columns"] == "all"
 
 
 @pytest.mark.parametrize("skill_name", ["python_sandbox", "table_export", None])

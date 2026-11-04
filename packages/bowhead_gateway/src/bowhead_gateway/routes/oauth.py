@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx2
 from bowhead_core.entitlements import EntitlementDenied
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from starlette.responses import RedirectResponse
 
@@ -192,11 +193,9 @@ async def _store_state(
     """P4.5.15: persist OAuth state in sqlite (multi-worker safe)."""
     from datetime import datetime, timedelta
 
-    import aiosqlite
-
     now = datetime.now(UTC).isoformat()
     expires = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         await db.execute(
             "INSERT OR REPLACE INTO oauth_state("
             "state,provider,next_path,public_entry_id,expires_at,created_at,"
@@ -235,10 +234,8 @@ async def _consume_state_snapshot(
     """P4.5.15: verify + delete state (one-shot use)."""
     from datetime import datetime
 
-    import aiosqlite
-
     now = datetime.now(UTC).isoformat()
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         async with db.execute(
             "DELETE FROM oauth_state WHERE state = ? RETURNING provider,expires_at,next_path,public_entry_id,flow_kind,invite_intent_hash,redirect_uri",
             (state,),

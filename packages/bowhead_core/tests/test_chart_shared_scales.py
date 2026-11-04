@@ -22,7 +22,7 @@ from test_export_visual_identity_projection_invariance import _THEME
 
 def scale_args(value):
     args = window_args(value)
-    args["views"][1].update(force_kind="line", hint="trend", series=["revenue"])
+    args["views"][1].update(force_kind="line", axes={"x": "month", "y": ["revenue"], "x_scale": "category"}, group_by=[])
     args["presentation_plan"] = {"version": 1, "scale_groups": [{"view_ids": ["trend", "detail"], "axis": "y"}]}
     return args
 
@@ -126,11 +126,11 @@ async def test_invalid_scale_plans_reject_before_any_write(prepared, damage):
     elif damage == "wrong_axis":
         group["axis"] = "x"
     elif damage == "different_key":
-        args["views"][1]["series"] = ["cost"]
+        args["views"][1]["axes"]["y"] = ["cost"]
     elif damage == "ranked":
         args["views"][1]["top_n"] = 2
     elif damage == "kind":
-        args["views"][1].update(force_kind="bar", hint="compare")
+        args["views"][1].update(force_kind="bar")
     else:
         args["presentation_plan"]["scale_groups"] = []
     before = set(artifacts.backend.root_dir.rglob("*"))

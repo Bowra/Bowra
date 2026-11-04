@@ -6,8 +6,8 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.skill_reference_execution import claim_reference_skill_primary_for_worker
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade, assert_rows_survive_upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema

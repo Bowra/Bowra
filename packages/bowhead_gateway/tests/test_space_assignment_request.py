@@ -30,6 +30,7 @@ def client(stores, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "prod")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
     from bowhead_gateway.routes import admin_members, auth
+    from bowhead_gateway.routes import notifications as notification_routes
 
     app = FastAPI()
     app.state.user_store = users
@@ -46,6 +47,7 @@ def client(stores, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app.state.settings = Settings()
     app.include_router(auth.router, prefix="/api/v1/auth")
     app.include_router(admin_members.router)
+    app.include_router(notification_routes.router, prefix="/api/v1/notifications")
     return TestClient(app)
 
 
@@ -105,6 +107,7 @@ async def test_request_space_assignment_notifies_only_governors(
     assert len(owner_items) == 1
     assert owner_items[0].metadata == {
         "requesterUserId": requester_id,
+        "requesterName": "requester",
     }
     assert requester_items == []
 
@@ -173,3 +176,36 @@ async def test_admin_grant_resolves_request_and_notifies_requester(
     )
     assert owner_actions == []
     assert [item.type for item in requester_updates] == ["space_assignment_ready"]
+
+
+async def test_legacy_request_lists_current_requester_name_and_member_link(client: TestClient, stores) -> None:
+    team_id, owner_id, requester_id = await _seed(stores)
+    users, notifications = stores
+    legacy = await notifications.upsert_item_with_recipients(
+        team_id=team_id,
+        category="space_assignment",
+        type="space_assignment_requested",
+        priority="p1",
+        body=None,
+        actor_user_id=requester_id,
+        title="A member needs a space",
+        subject_type="team_space_assignment",
+        subject_id=team_id,
+        action_url="/team/settings/workspaces",
+        actions=[{"id": "review", "label": "Review", "kind": "link", "url": "/team/settings/workspaces"}],
+        metadata={"requesterUserId": requester_id},
+        dedupe_key=f"space.assignment.requested:{requester_id}",
+        recipients=[(owner_id, "space_assignment_admin")],
+    )
+    response = client.get("/api/v1/notifications?tab=action", cookies={"bowhead_jwt": _token(owner_id)})
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["id"] == legacy.id
+    assert item["metadata"]["requesterName"] == "requester"
+    assert item["actionUrl"] == f"/team/settings/people/?member={requester_id}&team={team_id}"
+    assert item["actions"][0]["url"] == item["actionUrl"]
+    grants = client.get(f"/api/v1/admin/members/{requester_id}/workspace-grants", cookies={"bowhead_jwt": _token(owner_id)})
+    assert grants.status_code == 200, grants.text
+    assert grants.json()["email"] == "requester@example.com"
+    denied = client.get(f"/api/v1/admin/members/{owner_id}/workspace-grants", cookies={"bowhead_jwt": _token(requester_id)})
+    assert denied.status_code == 403

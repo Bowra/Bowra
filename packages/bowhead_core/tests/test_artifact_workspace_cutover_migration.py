@@ -25,6 +25,7 @@ from bowhead_core.artifact_store import (
     artifact_created_after_cutover,
     read_artifact_workspace_cutover_at,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -66,7 +67,7 @@ def test_upgrade_declares_the_marker_but_never_stamps_it(tmp_path: Path) -> None
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
     assert TABLE not in tables, "前置不成立：升级前就有本表，这条测试证明不了任何事"
 
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     assert _rows(path) == [(1, None)], "迁移不得打戳（activated_at 必须为 NULL）"
 
     # Column must be nullable: NOT NULL would force the migration to invent a timestamp immediately.
@@ -93,7 +94,7 @@ def test_upgrade_does_not_clobber_an_existing_stamp(tmp_path: Path) -> None:
     """
     path = tmp_path / "core.db"
     config = _config(path)
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         db.execute(f"UPDATE {TABLE} SET activated_at=? WHERE singleton=1", ("2026-09-17T00:00:00.000Z",))  # noqa: S608
 
@@ -113,7 +114,7 @@ def test_upgrade_does_not_clobber_an_existing_stamp(tmp_path: Path) -> None:
 )
 def test_non_core_target_untouched(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
     assert TABLE not in tables, f"{target} 目标不该有 {TABLE}"
@@ -143,7 +144,7 @@ def test_reader_returns_none_until_someone_stamps(tmp_path: Path) -> None:
 
     # ② Migrated but not stamped
     migrated = tmp_path / "core.db"
-    command.upgrade(_config(migrated), "head")
+    command.upgrade(_config(migrated), SOURCE_REVISION)
     assert asyncio.run(read_artifact_workspace_cutover_at(str(migrated))) is None
 
     # ③ Positive control: manually stamped value **is readable**, proving the reader works.

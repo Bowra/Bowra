@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core._db import close_pooled_readers
 from bowhead_core.entitlements import CommunityResolver
 from bowhead_core.events import EventBusRegistry
@@ -22,6 +21,7 @@ from bowhead_gateway._scheduled_runner import (
     admit_scheduled_execution,
     run_scheduled_turn,
 )
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -180,7 +180,7 @@ async def store(tmp_path):
 @pytest.fixture
 async def billing_stores(tmp_path):
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(str(core_path))
     sessions = SessionStore(core_path)
     try:

@@ -473,6 +473,24 @@ class KbStore:
         ]
         return sorted(rows, key=lambda row: int(row[2]["chunk_index"]))
 
+    async def sample_current_chunks(self, file: KbFileDTO) -> list[tuple[str, str, dict[str, Any]]]:
+        """Read at most twelve distributed published chunks without scanning a file."""
+        if not file.active_generation_id or file.chunks_count < 1:
+            return []
+        coll = await self._file_collection(file)
+        if coll is None:
+            return []
+        count = min(12, file.chunks_count)
+        positions = sorted({1 + round(index * (file.chunks_count - 1) / max(1, count - 1)) for index in range(count)})
+        where = {"$and": [self._current_chunks_where(file), {"chunk_index": {"$in": positions}}]}
+        got = await asyncio.to_thread(coll.get, where=where, include=["documents", "metadatas"], limit=12)
+        rows = [
+            (identity, text, metadata)
+            for identity, text, metadata in zip(got.get("ids") or [], got.get("documents") or [], got.get("metadatas") or [], strict=True)
+            if isinstance(text, str) and isinstance(metadata, dict) and metadata.get("generation_id") == file.active_generation_id
+        ]
+        return sorted(rows, key=lambda row: row[2].get("chunk_index", 0))
+
     async def get_ordered_chunks_for_file(self, file: KbFileDTO) -> list[tuple[str, str, int]]:
         rows = await self.list_active_chunks(file)
         ordered = []

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from bowhead_cli.main import app
-from bowhead_cli.migrate import upgrade
+from cli_legacy_database import upgrade
 from typer.testing import CliRunner
 
 

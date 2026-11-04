@@ -29,13 +29,13 @@ from bowhead_core.clarification_store import (
 from bowhead_core.events import OrchestratorEvent, get_event_registry
 from bowhead_core.language_context import RESUME_LANGUAGE_KEY, resume_language_context, resume_viewer_time_zone
 from bowhead_core.space_governance import SpaceOperation
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from bowhead_core import LanguageContext, Orchestrator, TurnRequest
 
 logger = logging.getLogger(__name__)
-from bowhead_gateway._entitlement_gate import require_not_readonly
+from bowhead_gateway._entitlement_gate import assert_not_readonly, require_not_readonly
 from bowhead_gateway.access_context import (
     AccessContextError,
     access_context_to_dict,
@@ -1905,6 +1905,136 @@ class DismissResultDTO(BaseModel):
     original_user_text: str | None = None  # FE composer prefill source
 
 
+@router.get("/session/{session_id}/pending")
+async def pending_session_questions(
+    session_id: str,
+    request: Request,
+    clarify: ClarificationStore = Depends(_clarify_store),
+) -> list[dict[str, Any]]:
+    """Keep older ordinary questions visible without replacing the active Turn."""
+    user_id = _current_user_id(request)
+    sessions = getattr(request.app.state, "session_store", None)
+    if sessions is None:
+        raise rule_clarification_http_error(503, "clarification_store_unavailable")
+    session = await sessions.get_session(session_id)
+    if session is None or session.user_id != user_id or getattr(session, "deleted_at", None):
+        raise rule_clarification_http_error(404, "clarification_not_found")
+    await _require_clarification_lifecycle(session, request, operation=SpaceOperation.READ_HISTORY)
+    can_dismiss = True
+    try:
+        await _require_clarification_lifecycle(session, request, operation=SpaceOperation.WRITE)
+        await assert_not_readonly(request)
+    except HTTPException:
+        can_dismiss = False
+    pending = await clarify.get_pending_for_session(session_id=session_id, user_id=user_id, workspace_id=session.workspace_id)
+    result = []
+    for item in pending:
+        context = item.resume_context if isinstance(item.resume_context, dict) else {}
+        continuation = context.get("continuation")
+        if context.get("__schema_version") != 4 or not isinstance(continuation, dict) or continuation.get("kind") != "ordinary_lead":
+            continue
+        questions = context.get("questions")
+        texts = (
+            [q["question"] for q in questions if isinstance(q, dict) and isinstance(q.get("question"), str)] if isinstance(questions, list) else []
+        )
+        result.append(
+            {"request_id": item.request_id, "turn_id": item.turn_id, "question": " / ".join(texts) or item.rationale, "can_dismiss": can_dismiss}
+        )
+    return result
+
+
+async def dismiss_legacy_clarification(app: Any, clarify: ClarificationStore, pre: Any) -> Any:
+    """Share the original settled-pause dismissal and durable event delivery."""
+    request_id = pre.request_id
+    requires_settlement = clarification_requires_legacy_resume_fence(pre)
+    context = pre.resume_context if isinstance(pre.resume_context, dict) else {}
+    ordinary_pause = context.get("__schema_version") == 4
+    if pre.status == "pending" and requires_settlement:
+        try:
+            scheduled_origin = await scheduled_run_for_turn(
+                app,
+                pre.turn_id,
+            )
+        except RuntimeError as exc:
+            raise rule_clarification_http_error(
+                503,
+                "clarification_store_unavailable",
+                nested_error=True,
+            ) from exc
+        if scheduled_origin is not None:
+            if scheduled_origin.status != "awaiting_input":
+                raise rule_clarification_http_error(
+                    409,
+                    (
+                        "clarification_not_resolvable"
+                        if scheduled_origin.status in {"success", "failed", "skipped", "expired"}
+                        else "clarification_resume_not_ready"
+                    ),
+                )
+        orchestrator = getattr(app.state, "orchestrator", None)
+        session_store = getattr(orchestrator, "session_store", None)
+        if session_store is None:
+            raise rule_clarification_http_error(
+                503,
+                "clarification_orchestrator_unavailable",
+            )
+        if not ordinary_pause and not await wait_for_legacy_turn_resume_ready(
+            session_store,
+            pre.turn_id,
+        ):
+            raise rule_clarification_http_error(
+                409,
+                "clarification_resume_not_ready",
+            )
+    try:
+        invalidation = await clarify.invalidate_one(
+            request_id,
+            target_status="dismissed",
+            reason="user_rephrase",
+            actor="user",
+        )
+    except ValueError as exc:
+        from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+        if not isinstance(exc, OrdinaryContinuationUnavailable):
+            raise
+        raise rule_clarification_http_error(409, "clarification_resume_not_ready") from exc
+    req = invalidation.request
+    if (
+        req is not None
+        and req.status == "dismissed"
+        and isinstance(req.resume_context, dict)
+        and ("reference_continuation" in req.resume_context or "continuation" in req.resume_context)
+    ):
+        # The durable dismissal is the cancellation intent. Common dispatch
+        # recovery closes the paused execution and preserves accepted steer;
+        # its periodic sweep also repairs a crash before this eager attempt.
+        try:
+            await app.state.orchestrator.session_store.recover_expired_chat_spawn_dispatches()
+        except Exception:
+            logger.exception("clarify.reference_dismiss_settlement_deferred request=%s turn=%s", request_id, pre.turn_id)
+    if invalidation.invalidation is not None:
+        from bowhead_gateway.clarification_invalidation import (
+            publish_pending_clarification_invalidations,
+        )
+
+        try:
+            await publish_pending_clarification_invalidations(
+                app,
+                request_ids=[request_id],
+            )
+        except Exception:
+            # The state + intent transaction already committed.  Periodic
+            # recovery owns delivery; returning an error would invite the
+            # user to repeat an action that already won.
+            logger.exception(
+                "clarify.dismiss_publish_deferred request=%s turn=%s",
+                request_id,
+                pre.turn_id,
+            )
+    return req
+
+
 @router.post("/{request_id}/dismiss", response_model=DismissResultDTO, dependencies=[Depends(require_not_readonly)])
 async def dismiss_clarification(
     request_id: str,
@@ -1934,83 +2064,7 @@ async def dismiss_clarification(
         user_id=cur_uid,
     )
     if terminal_factory is None:
-        requires_settlement = clarification_requires_legacy_resume_fence(pre)
-        if pre.status == "pending" and requires_settlement:
-            try:
-                scheduled_origin = await scheduled_run_for_turn(
-                    request.app,
-                    pre.turn_id,
-                )
-            except RuntimeError as exc:
-                raise rule_clarification_http_error(
-                    503,
-                    "clarification_store_unavailable",
-                    nested_error=True,
-                ) from exc
-            if scheduled_origin is not None:
-                if scheduled_origin.status != "awaiting_input":
-                    raise rule_clarification_http_error(
-                        409,
-                        (
-                            "clarification_not_resolvable"
-                            if scheduled_origin.status in {"success", "failed", "skipped", "expired"}
-                            else "clarification_resume_not_ready"
-                        ),
-                    )
-            orchestrator = getattr(request.app.state, "orchestrator", None)
-            session_store = getattr(orchestrator, "session_store", None)
-            if session_store is None:
-                raise rule_clarification_http_error(
-                    503,
-                    "clarification_orchestrator_unavailable",
-                )
-            if not await wait_for_legacy_turn_resume_ready(
-                session_store,
-                pre.turn_id,
-            ):
-                raise rule_clarification_http_error(
-                    409,
-                    "clarification_resume_not_ready",
-                )
-        invalidation = await clarify.invalidate_one(
-            request_id,
-            target_status="dismissed",
-            reason="user_rephrase",
-            actor="user",
-        )
-        req = invalidation.request
-        if (
-            req is not None
-            and req.status == "dismissed"
-            and isinstance(req.resume_context, dict)
-            and ("reference_continuation" in req.resume_context or "continuation" in req.resume_context)
-        ):
-            # The durable dismissal is the cancellation intent. Common dispatch
-            # recovery closes the paused execution and preserves accepted steer;
-            # its periodic sweep also repairs a crash before this eager attempt.
-            try:
-                await request.app.state.orchestrator.session_store.recover_expired_chat_spawn_dispatches()
-            except Exception:
-                logger.exception("clarify.reference_dismiss_settlement_deferred request=%s turn=%s", request_id, pre.turn_id)
-        if invalidation.invalidation is not None:
-            from bowhead_gateway.clarification_invalidation import (
-                publish_pending_clarification_invalidations,
-            )
-
-            try:
-                await publish_pending_clarification_invalidations(
-                    request.app,
-                    request_ids=[request_id],
-                )
-            except Exception:
-                # The state + intent transaction already committed.  Periodic
-                # recovery owns delivery; returning an error would invite the
-                # user to repeat an action that already won.
-                logger.exception(
-                    "clarify.dismiss_publish_deferred request=%s turn=%s",
-                    request_id,
-                    pre.turn_id,
-                )
+        req = await dismiss_legacy_clarification(request.app, clarify, pre)
     else:
         from bowhead_core.terminal_protocol import (
             DecisionAction,

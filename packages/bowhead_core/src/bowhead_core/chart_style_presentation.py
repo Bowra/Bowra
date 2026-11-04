@@ -118,24 +118,29 @@ def _pivot_long_spec(spec: dict[str, Any]) -> dict[str, Any] | None:
         return None
     columns = spec.get("columns") or []
     rows = spec.get("rows") or []
+    explicit = spec.get("explicit_presentation")
+    if explicit and (explicit.get("mode") != "plot" or not explicit.get("group_by")):
+        return None
     dimensions = _role_ordered_dimensions([column for column in columns if column.get("type") in {"date", "categorical", "geo"}])
     numeric = [column for column in columns if column.get("type") == "numeric"]
-    if len(numeric) != 1 or len(dimensions) != 2 or len(rows) < 2:
+    if len(numeric) != 1 or len(dimensions) != 2 or (not explicit and len(rows) < 2):
         return None
     x_column = (
-        dimensions[0]
+        next(column for column in dimensions if column["key"] == explicit["axes"]["x"])
+        if explicit
+        else dimensions[0]
         if spec.get("kind") in {"bar", "hbar", "stacked_bar"}
         else next((column for column in dimensions if column.get("type") == "date"), dimensions[0])
     )
     group_column = next(column for column in dimensions if column.get("key") != x_column.get("key"))
-    if spec.get("kind") in {"line", "area_stacked"} and _duplicate_date_dimension(rows, x_column, group_column):
+    if not explicit and spec.get("kind") in {"line", "area_stacked"} and _duplicate_date_dimension(rows, x_column, group_column):
         return None
     x_values = list(dict.fromkeys(_string_cell(row.get(x_column["key"])) for row in rows))
     group_values = list(dict.fromkeys(_string_cell(row.get(group_column["key"])) for row in rows))
-    if len(x_values) < 2:
+    if not explicit and len(x_values) < 2:
         return None
     fill = len(rows) / (len(x_values) * max(1, len(group_values)))
-    if fill < policy["minimumLongTableFillRatio"]:
+    if not explicit and fill < policy["minimumLongTableFillRatio"]:
         return None
 
     metric = numeric[0]
@@ -147,8 +152,10 @@ def _pivot_long_spec(spec: dict[str, Any]) -> dict[str, Any] | None:
         if value is None:
             continue
         bucket = cells.setdefault(x_value, {})
-        bucket[group_value] = bucket.get(group_value, 0) + value
-    if len(group_values) < 2:
+        if explicit and group_value in bucket:
+            raise ValueError("Explicit plot cells must be unique; prepare aggregation upstream")
+        bucket[group_value] = value if explicit else bucket.get(group_value, 0) + value
+    if not explicit and len(group_values) < 2:
         return None
     series_columns = []
     for group_value in group_values:
@@ -172,6 +179,8 @@ def _pivot_long_spec(spec: dict[str, Any]) -> dict[str, Any] | None:
     result["columns"] = [copy.deepcopy(x_column), *series_columns]
     result["rows"] = wide_rows
     result["row_count"] = len(wide_rows)
+    if explicit:
+        result["_explicit_pivoted"] = True
     return result
 
 
@@ -282,7 +291,12 @@ def _derive_series(spec: dict[str, Any]) -> tuple[int, list[dict[str, Any]], lis
         if len(numeric) < 2:
             return len(rows), [], []
         x_column, y_column = numeric[:2]
-        group_column = next((column for column in dimensions if column.get("type") == "categorical"), None)
+        explicit = spec.get("explicit_presentation")
+        group_column = (
+            next((column for column in dimensions if column["key"] in explicit.get("group_by", [])), None)
+            if explicit
+            else next((column for column in dimensions if column.get("type") == "categorical"), None)
+        )
         valid_rows = [
             row for row in rows if _finite_number(row.get(x_column["key"])) is not None and _finite_number(row.get(y_column["key"])) is not None
         ]
@@ -434,16 +448,29 @@ def derive_normalized_chart_render_shape_v1(normalized_spec: Mapping[str, Any] |
     return shape
 
 
+def explicit_plot_columns(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Project declared marks while retaining prepared observation row context."""
+    binding = spec.get("explicit_presentation")
+    if binding and binding.get("mode") == "plot" and spec.get("kind") != "table" and not spec.get("_explicit_pivoted"):
+        axes = binding["axes"]
+        keys = [*([axes["x"]] if "x" in axes else []), *binding["group_by"], *axes["y"]]
+        columns = {column["key"]: column for column in spec["columns"]}
+        return {**spec, "columns": [columns[key] for key in keys]}
+    return dict(spec)
+
+
 def normalize_chart_for_rendering_v1(raw_spec: Mapping[str, Any] | object) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the sole infer -> pivot -> transpose recipe without mutating ChartSpec."""
+    """Render declared bindings; retain historical saved-spec normalization."""
 
     spec = _spec_dict(raw_spec)
-    if not spec.get("columns"):
+    spec = explicit_plot_columns(spec)
+    if not spec.get("columns") and not spec.get("explicit_presentation"):
         spec["columns"] = _infer_columns(spec.get("rows") or [])
     if spec.get("_export_analytical"):
         return spec, derive_normalized_chart_render_shape_v1(spec)
     spec = _pivot_long_spec(spec) or spec
-    spec = _transpose_time_wide_spec(spec) or spec
+    if not spec.get("explicit_presentation"):
+        spec = _transpose_time_wide_spec(spec) or spec
     return spec, derive_normalized_chart_render_shape_v1(spec)
 
 

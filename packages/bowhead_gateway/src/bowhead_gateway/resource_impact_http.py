@@ -11,6 +11,9 @@ from bowhead_core.resource_impact import (
     ResourceImpactTokenInvalid,
     ResourceImpactTokenStale,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domain_runtime import release_domain_snapshots
+from bowhead_core.sqlite_domains import domain_database_path
 from fastapi import HTTPException, Request
 
 
@@ -72,17 +75,25 @@ async def affected_skill_schedule_ids(
 async def pause_affected_schedules(db: Any, schedule_ids: list[str]) -> None:
     if not schedule_ids:
         return
-    placeholders = ",".join("?" for _ in schedule_ids)
-    await db.execute(
-        f"UPDATE scheduled_job_agent_binding SET state='needs_reconfirm',row_version=row_version+1 "
-        f"WHERE job_id IN ({placeholders}) AND state='ready'",  # noqa: S608 -- placeholders only
-        schedule_ids,
-    )
-    await db.execute(
-        f"UPDATE scheduled_jobs SET status='paused',pause_reason='resource_dependency_changed',updated_at=? "
-        f"WHERE id IN ({placeholders}) AND status='active'",  # noqa: S608 -- placeholders only
-        (datetime.now(UTC).isoformat(), *schedule_ids),
-    )
+    if db.in_transaction:
+        raise RuntimeError("Schedule follow-up requires a committed resource change")
+    await db._execute(release_domain_snapshots, db._conn)  # noqa: SLF001 -- Release completed read cursors on their owning worker.
+    async with db.execute("PRAGMA database_list") as cursor:
+        paths = await cursor.fetchall()
+    path = next(row[2] for row in paths if row[1] == "main")
+    async with diagnostic_connect(domain_database_path(path, "execution")) as execution_db:
+        placeholders = ",".join("?" for _ in schedule_ids)
+        await execution_db.execute(
+            f"UPDATE scheduled_job_agent_binding SET state='needs_reconfirm',row_version=row_version+1 "
+            f"WHERE job_id IN ({placeholders}) AND state='ready'",  # noqa: S608 -- placeholders only
+            schedule_ids,
+        )
+        await execution_db.execute(
+            f"UPDATE scheduled_jobs SET status='paused',pause_reason='resource_dependency_changed',updated_at=? "
+            f"WHERE id IN ({placeholders}) AND status='active'",  # noqa: S608 -- placeholders only
+            (datetime.now(UTC).isoformat(), *schedule_ids),
+        )
+        await execution_db.commit()
 
 
 __all__ = [

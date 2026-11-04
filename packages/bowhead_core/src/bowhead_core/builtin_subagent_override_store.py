@@ -29,6 +29,7 @@ from typing import Any
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 BUILTIN_SUBAGENT_OVERRIDE_RESOURCE_KIND = "builtin_subagent_override"
 
@@ -153,7 +154,7 @@ class BuiltinSubagentOverrideStore:
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def _now(self) -> str:

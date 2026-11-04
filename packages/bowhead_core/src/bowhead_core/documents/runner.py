@@ -49,8 +49,9 @@ async def run_document(
         async with open_shared_ctx(delivery.path) as db:
             await db.execute("BEGIN")
             await _fence(db, scope, job_id, owner)
-            async with db.execute("SELECT origin_turn_id FROM document_jobs WHERE id=?", (job_id,)) as cursor:
-                turn_id = (await cursor.fetchone())[0]
+            async with db.execute("SELECT * FROM document_jobs WHERE id=?", (job_id,)) as cursor:
+                job = await cursor.fetchone()
+                turn_id = job["origin_turn_id"]
             source = await _read_chat_turn_user_source_in_tx(
                 db, turn_id=turn_id, expected_user_id=scope.user_id, expected_workspace_id=scope.workspace_id
             )
@@ -59,11 +60,14 @@ async def run_document(
                 (job_id, job_id),
             ) as cursor:
                 continuation = await cursor.fetchone()
+            from bowhead_core.documents.task_sources import task_instruction_in_tx
+
+            instruction = await task_instruction_in_tx(db, job=job, fallback=source.user_text) if source is not None else None
             async with db.execute("SELECT artifact_id,filename FROM document_input_copies WHERE job_id=?", (job_id,)) as cursor:
                 names = dict(await cursor.fetchall())
         if source is None:
             raise DocumentRequestError("document_source_unavailable")
-        instruction = continuation[0] if continuation else source.user_text
+        instruction = continuation[0] if continuation else instruction
         inputs = tuple(
             [
                 WorkerInput(names[item.artifact_id], item.role, await inputs_store.read(scope=scope, job_id=job_id, artifact_id=item.artifact_id))

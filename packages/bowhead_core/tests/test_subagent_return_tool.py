@@ -89,6 +89,50 @@ async def test_consume_clears_attr() -> None:
 
 
 @pytest.mark.unit
+async def test_native_schema_correction_does_not_create_a_delivery_review_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.agents._lead_context import set_current_subagent_invocations
+    from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal, failed_calls
+    from bowhead_core.types import ToolInvocation
+
+    monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
+    reg = ToolRegistry()
+    register_subagent_return_tool(reg)
+    ctx = _stub_ctx()
+    calls = [
+        ToolInvocation("chart", {}, call_id="bad_chart", result={"ok": False, "error_kind": "invalid_chart_expression"}),
+        ToolInvocation("table", {}, call_id="ranking_table", result={"ok": True, "rows": [["Store 1", 1]]}),
+    ]
+    review = {
+        "requirements": [{"requirement": "Store ranking", "status": "fulfilled", "evidence_call_ids": ["ranking_table"]}],
+        "issues": [
+            {
+                "call_id": "bad_chart",
+                "resolution": "covered",
+                "evidence_call_ids": ["ranking_table"],
+                "explanation": "The native table delivers the ranking.",
+            }
+        ],
+    }
+    token = set_current_subagent_invocations(calls)
+    try:
+        malformed = {**_good_payload(), "delivery_review": review}
+        malformed.pop("title")
+        refused = await reg.execute("subagent_return", {"payload": malformed}, ctx)
+        assert isinstance(refused.result, TerminalCorrectionRefusal)
+        assert refused.result["validation_errors"]
+        assert consume_returned_payload(ctx) is None
+        refused.call_id = "bad_return"
+        calls.append(refused)
+        assert set(failed_calls(calls)) == {"bad_chart"}
+        corrected = {**_good_payload(), "delivery_review": review}
+        accepted = await reg.execute("subagent_return", {"payload": corrected}, ctx)
+        assert accepted.result["ok"] is True
+        assert consume_returned_payload(ctx)["completion"] == "complete"
+    finally:
+        token.var.reset(token)
+
+
+@pytest.mark.unit
 async def test_handler_rejects_non_dict_payload() -> None:
     reg = ToolRegistry()
     register_subagent_return_tool(reg)
@@ -221,14 +265,24 @@ async def test_handler_unwraps_double_encoded_payload() -> None:
 
 
 @pytest.mark.unit
-async def test_handler_args_parse_error_clear_message() -> None:
-    """ToolRegistry 报 _args_parse_error 时 handler 给清晰错而不是误诊."""
+@pytest.mark.parametrize("review_enabled", [True, False])
+async def test_terminal_argument_parse_failure_uses_admission_or_legacy_handler(monkeypatch: pytest.MonkeyPatch, review_enabled: bool) -> None:
+    """Native admission rejects malformed arguments; disabling it retains legacy repair."""
+    from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1" if review_enabled else "0")
     reg = ToolRegistry()
     register_subagent_return_tool(reg)
     ctx = _stub_ctx()
     inv = await reg.execute("subagent_return", {"_args_parse_error": "bad json"}, ctx)
     assert inv.result["ok"] is False
-    assert "args 解析失败" in inv.result["error"]
+    if review_enabled:
+        assert isinstance(inv.result, TerminalCorrectionRefusal)
+        assert inv.result["error_kind"] == "tool_arguments_invalid"
+        assert "could not be parsed as a JSON object" in inv.result["error"]
+    else:
+        assert "args 解析失败" in inv.result["error"]
+    assert consume_returned_payload(ctx) is None
 
 
 # ─────────────────────────────────────────────────────────────

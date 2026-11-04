@@ -63,6 +63,7 @@ async def retained_review_inputs_in_tx(
     exclude_turn_id: str | None = None,
 ) -> tuple[DocumentProposal, tuple[RevisionInput, ...]]:
     """Shared authorized read for revision availability and exact admission."""
+    from bowhead_core.documents.authoring_formats import draft_source_name
     from bowhead_core.documents.delivery import _execution, _scope
     from bowhead_core.documents.store import _digest, _job
 
@@ -79,18 +80,19 @@ async def retained_review_inputs_in_tx(
         or _digest(execution["draft_json"]) != draft_digest
     ):
         raise DocumentRequestError("document_revision_conflict")
+    candidate_name = draft_source_name(json.loads(execution["draft_json"]))
     async with connection.execute(
         """SELECT f.*,a.mime FROM document_draft_files f JOIN artifacts a ON a.id=f.artifact_id
-        WHERE f.job_id=? AND f.name='candidate.pptx' AND f.verified_at IS NOT NULL
+        WHERE f.job_id=? AND f.name=? AND f.verified_at IS NOT NULL
           AND a.created_by=? AND a.workspace_id=? AND a.status='ready' AND a.deleted_at IS NULL
           AND a.producer_kind='template_document_internal_v1' AND a.path=f.path AND a.size=f.size_bytes
           AND NOT EXISTS(SELECT 1 FROM artifact_purge_claims p WHERE p.artifact_id=a.id)""",
-        (job_id, scope.user_id, scope.workspace_id),
+        (job_id, candidate_name, scope.user_id, scope.workspace_id),
     ) as cursor:
         candidate = await cursor.fetchone()
     if candidate is None:
         raise DocumentRequestError("document_draft_unavailable")
-    declared = json.loads(execution["draft_json"]).get("files", {}).get("candidate.pptx")
+    declared = json.loads(execution["draft_json"]).get("files", {}).get(candidate_name)
     if declared != {"artifact_id": candidate["artifact_id"], "sha256": candidate["sha256"]}:
         raise DocumentRequestError("document_draft_unavailable")
     async with connection.execute(

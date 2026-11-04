@@ -24,7 +24,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-import aiosqlite
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,7 +51,7 @@ async def try_acquire_gc_lock(
     Uses `datetime()` to normalize ISO 'T' vs sqlite ' ' format (spike #19).
     """
     interval_arg = f"-{int(interval_seconds)} seconds"
-    async with aiosqlite.connect(str(db_path)) as db:
+    async with diagnostic_connect(str(db_path)) as db:
         # Step 1: try insert (first run only). OR IGNORE: silent fail if row exists.
         await db.execute(
             "INSERT OR IGNORE INTO memory_gc_state (cron_name, last_run_at) VALUES (?, datetime('now', '-100 years'))",

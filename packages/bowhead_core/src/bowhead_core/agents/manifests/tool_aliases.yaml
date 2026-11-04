@@ -74,6 +74,19 @@
 version: 1
 
 tools:
+  - canonical: clarification_dismiss
+    display_en: "Cancel Question"
+    display_zh: "取消问题"
+    display_de: "Frage abbrechen"
+    display_fr: "Annuler la question"
+    blurb_en: "Cancel your unanswered question without continuing its task."
+    blurb_zh: "取消本人尚未回答的问题，且不继续该任务。"
+    blurb_de: "Eine eigene unbeantwortete Frage abbrechen, ohne die Aufgabe fortzusetzen."
+    blurb_fr: "Annuler votre question en attente sans poursuivre sa tâche."
+    sigil: "✕"
+    category: orchestrate
+    kind: part
+    allowed_roles: [lead]
   - canonical: agent_change_validate
     display_en: "Validate Agent Change"
     display_zh: "校验智能体修改"
@@ -1302,6 +1315,21 @@ tools:
     risk: read
     allowed_roles: [analyst, lead]
 
+  - canonical: kb_list_sources
+    display_en: List knowledge sources
+    display_zh: 查看知识来源
+    display_de: Wissensquellen anzeigen
+    display_fr: Lister les sources de connaissances
+    blurb_en: Discover authorized documents and their descriptions without generating content.
+    blurb_zh: 查看有权访问的文档及说明，不触发内容生成。
+    blurb_de: Berechtigte Dokumente und Beschreibungen ohne Inhaltserzeugung entdecken.
+    blurb_fr: Découvrir les documents autorisés et leurs descriptions sans générer de contenu.
+    sigil: "📚"
+    category: kb
+    kind: tool
+    risk: read
+    allowed_roles: [analyst, lead]
+
   - canonical: kb_list_tables
     display_zh: 查看知识库表
     display_en: List Knowledge Tables
@@ -1621,14 +1649,14 @@ tools:
     allowed_roles: [analyst]
 
   - canonical: template_document_submit
-    display_zh: 编辑已有 PPT
-    display_en: Edit Existing Presentation
-    blurb_zh: "修改支持的上传 PPT 模板并生成私有草稿；审阅确认后才发布文件。"
-    blurb_en: "Prepare a private edited draft of a supported uploaded PPTX template. Files are published only after review and confirmation."
-    display_de: "Vorhandene Präsentation bearbeiten"
-    blurb_de: "Einen privaten bearbeiteten Entwurf einer unterstützten hochgeladenen PPTX-Vorlage vorbereiten. Dateien werden erst nach Prüfung und Bestätigung veröffentlicht."
-    display_fr: "Modifier une présentation existante"
-    blurb_fr: "Préparer un brouillon privé à partir d’un modèle PPTX importé pris en charge. Les fichiers ne sont publiés qu’après relecture et confirmation."
+    display_zh: 编辑模板文档
+    display_en: Edit Template Document
+    blurb_zh: "根据支持的上传 PPTX 或 DOCX 模板生成私有修改草稿；Word 需要启用相应能力，文件只在审阅确认后发布。"
+    blurb_en: "Prepare a private edited draft from a supported uploaded PPTX or DOCX template. Word requires its enabled capability; files are published only after review and confirmation."
+    display_de: "Vorlagendokument bearbeiten"
+    blurb_de: "Einen privaten bearbeiteten Entwurf aus einer unterstützten hochgeladenen PPTX- oder DOCX-Vorlage vorbereiten. Word erfordert die aktivierte Funktion; Dateien werden erst nach Prüfung und Bestätigung veröffentlicht."
+    display_fr: "Modifier un document modèle"
+    blurb_fr: "Préparer un brouillon privé à partir d’un modèle PPTX ou DOCX importé pris en charge. Word nécessite l’activation de la fonction ; les fichiers ne sont publiés qu’après relecture et confirmation."
     sigil: "📝"
     category: compute
     kind: tool

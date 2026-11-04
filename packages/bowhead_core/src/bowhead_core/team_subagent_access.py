@@ -27,6 +27,7 @@ from typing import Literal
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 SubagentRequestSurface = Literal[
     "catalog",
@@ -131,7 +132,7 @@ class TeamSubagentAccessResolver:
     """Resolve canonical access facts from the shared SQLite database."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
 
     async def resolve(
         self,

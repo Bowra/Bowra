@@ -6,8 +6,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
+from core_legacy_database import TARGET_FILES
 from test_agent_admission_transaction import _team_admission_case
 from test_chat_reference_storage import _historical_fixture, _upgrade
 

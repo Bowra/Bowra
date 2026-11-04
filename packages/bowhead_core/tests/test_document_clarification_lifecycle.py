@@ -38,7 +38,7 @@ async def prepare(ctx, case):
     return store, card
 
 
-async def pause(ctx, case):
+async def pause(ctx, case, *, question=QUESTION):
     store = ClarificationStore(ctx.path)
     logs = TurnLogStore(str(ctx.path))
 
@@ -57,7 +57,7 @@ async def pause(ctx, case):
         language_context=case.snapshot.language.language_context(),
     )
     result = await finish_document_planning(
-        tool_ctx, DocumentPlanningPause(case.job_id, case.ref, QUESTION), bus=bus, tokens_input=17, tokens_output=9
+        tool_ctx, DocumentPlanningPause(case.job_id, case.ref, question), bus=bus, tokens_input=17, tokens_output=9
     )
     card = (await store.get_pending_for_turn(case.worker.turn_id))[0]
     assert result.status.value == "clarification_pending"

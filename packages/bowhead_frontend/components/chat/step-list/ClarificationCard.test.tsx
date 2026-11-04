@@ -30,6 +30,16 @@ const MIXED_QUESTIONS = [
 const continueButton = () => screen.getByRole("button", { name: /^继续/ });
 
 describe("ClarificationCard · one question (D2)", () => {
+  it("cancels without answering or skipping", () => {
+    const cancel = vi.fn();
+    const skip = vi.fn();
+    const single = vi.fn();
+    renderIntl(<ClarificationCard questions={QUESTIONS} onSubmitSingle={single} onSubmitMulti={vi.fn()} onSkip={skip} onCancel={cancel} />);
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(skip).not.toHaveBeenCalled();
+    expect(single).not.toHaveBeenCalled();
+  });
   it("is a needs-your-input card named by its status word and question", () => {
     renderIntl(<ClarificationCard questions={QUESTIONS} onSubmitSingle={vi.fn()} onSubmitMulti={vi.fn()} />);
     const card = screen.getByRole("group", { name: `需要你回答 ${QUESTIONS[0].question}` });
@@ -353,4 +363,13 @@ describe("ClarificationAnsweredSummary", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
+});
+
+it("submits the sixth analysis scope option with its canonical value", () => {
+  const onMulti = vi.fn();
+  const options = ["Revenue", "Profit", "Brands", "Stores", "Members", "Traffic"];
+  renderIntl(<ClarificationCard questions={[{ question: "Analysis scope", options, type: "multi_select" }]} onSubmitSingle={vi.fn()} onSubmitMulti={onMulti} />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Traffic" }));
+  fireEvent.click(continueButton());
+  expect(onMulti).toHaveBeenCalledWith(expect.objectContaining({ values: ["Traffic"] }));
 });

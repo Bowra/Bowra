@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class SpaceInstructionsStore:
     _COLUMNS = "workspace_id, version, content, created_by, created_at, restored_from, source_candidate_id"
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def current(self, workspace_id: str) -> SpaceInstructionsVersion | None:
         async with open_shared_ctx(self._db_path) as db:
@@ -244,7 +245,7 @@ class SpaceInstructionsStore:
         if current is None or not current.content.strip():
             return None
         try:
-            async with open_shared_ctx(self._db_path) as db:
+            async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
                 await db.execute(
                     "INSERT OR IGNORE INTO turn_space_instructions (turn_id, workspace_id, version, created_at) VALUES (?, ?, ?, ?)",
                     (turn_id, workspace_id, current.version, _now()),
@@ -266,7 +267,7 @@ class SpaceInstructionsStore:
         return SpaceInstructionsSnapshot(workspace_id=version.workspace_id, version=version.version, block=render_block(version.content))
 
     async def version_for_turn(self, turn_id: str) -> tuple[str, int] | None:
-        async with open_shared_ctx(self._db_path) as db:
+        async with open_shared_ctx(domain_database_path(self._db_path, "execution")) as db:
             cur = await db.execute(
                 "SELECT workspace_id, version FROM turn_space_instructions WHERE turn_id=?",
                 (turn_id,),

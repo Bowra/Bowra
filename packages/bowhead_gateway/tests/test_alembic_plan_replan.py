@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from bowhead_cli.migrate import TARGET_FILES, upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 
 def _create_1_0_fixture(db_path) -> None:
@@ -31,9 +31,9 @@ def test_plan_replan_fixture_upgrades_and_is_idempotent(tmp_path) -> None:
     core_path = tmp_path / TARGET_FILES["core"]
     _create_1_0_fixture(core_path)
 
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     # Repeated execution is idempotent.
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     with sqlite3.connect(core_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD_REVISION,)
@@ -45,7 +45,7 @@ def test_plan_replan_fixture_upgrades_and_is_idempotent(tmp_path) -> None:
 def test_plan_replan_empty_database_upgrades_to_head(tmp_path) -> None:
     core_path = tmp_path / TARGET_FILES["core"]
 
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     with sqlite3.connect(core_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD_REVISION,)
@@ -65,7 +65,7 @@ def test_plan_replan_store_created_columns_not_duplicated(tmp_path) -> None:
         connection.commit()
 
     # Duplicate columns make upgrade raise OperationalError; guards must prevent this.
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     with sqlite3.connect(core_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD_REVISION,)

@@ -32,10 +32,10 @@ MARKETPLACE_SEARCH_TEXT: dict[str, dict[str, str]] = {
         "fr-FR": "Agent de configuration",
     },
     "system_configuration_agent_summary": {
-        "en-US": "Explain and adjust supported personal and current Space settings with your permissions.",
-        "zh-CN": "按你的权限解释和调整受支持的个人与当前空间设置。",
-        "de-DE": "Unterstützte persönliche und aktuelle Raumeinstellungen mit Ihren Berechtigungen erklären und anpassen.",
-        "fr-FR": "Expliquer et modifier les réglages personnels et de l’espace actuel pris en charge selon vos permissions.",
+        "en-US": "Explain and adjust available personal, Space and Team settings with your permissions.",
+        "zh-CN": "按你的权限解释和调整可用的个人、空间及团队设置。",
+        "de-DE": "Verfügbare persönliche, Bereichs- und Team-Einstellungen mit deinen Berechtigungen erklären und anpassen.",
+        "fr-FR": "Expliquer et ajuster les paramètres personnels, d’espace et d’équipe disponibles selon vos autorisations.",
     },
     "system_agent_coach_name": {
         "en-US": "Coach",

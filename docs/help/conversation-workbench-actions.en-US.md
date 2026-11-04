@@ -2,6 +2,14 @@
 
 This article covers drag and drop, shortcuts, and hints on the conversation page. For the layout of the page itself, see [Conversation page layout](conversation-workbench.en-US.md).
 
+## Reuse earlier generated files
+
+Ask Bowhead to present files it generated earlier in the conversation when you need them again. The original file names and download controls identify each file. Reusing a retained file does not generate another copy.
+
+## Cancel an unanswered question
+
+Select **Cancel** on an unanswered question to close it without continuing that task. **Skip** asks the Agent to continue using its own judgment. An older unanswered question remains visible when you send another message or reload the conversation. You can also explicitly ask the Agent to cancel it; if several questions are pending, identify which one. Cancellation succeeds only after the service confirms it. If it fails, the question remains available with an error. You can cancel only your own questions in an accessible, writable Space.
+
 ## Compact a long conversation
 
 Open the conversation title’s **⋯** menu and choose **Compact context** when the conversation is idle. Bowhead summarizes eligible older material for the next message and keeps the original conversation visible. A quiet activity line shows progress and the result; the existing Stop control cancels this operation. Your unsent draft stays in the composer.
@@ -127,6 +135,10 @@ The failure card explains the recorded reason, such as a model timeout, too many
 
 If the card says a system error interrupted the turn, try its **Retry** action. If it happens again, expand **Technical details**, copy the diagnostic information, and send it to your team administrator so they can locate the failed turn.
 
+If the assistant writes a Tool request as ordinary text, Bowhead may ask it to correct the response within the task's existing limits. Text alone does not run that operation. If correction fails, follow the failure card and check completed steps before retrying.
+
 A completed step does not mean the entire request finished. Review the work already visible before sending again. If the task cannot continue and you choose **Edit and send**, sending starts a new request; it does not resume the original task. If the failure stage was not recorded, the card says so.
 
 If a step has no safe, specific error to display, it says that the step failed. Review the step information shown; if Technical details are available, you can copy the recorded diagnostics. The failure card distinguishes a service interruption from a result that could not be saved completely. A model stage appears only when it was recorded. Share the copied diagnostics with your administrator if the problem recurs.
+
+Corrections the assistant makes to its own result format do not add separate error rows. If a required result is still missing, the task remains partial even when its queries or calculations ran successfully. The answer should identify the missing result and any information needed to finish it. A rejected non-query input says that no data query ran; it does not by itself require administrator action.

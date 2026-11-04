@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_dependency_compiler import ExactSkillGrant
 from bowhead_core.resource_dependency_projection import (
@@ -24,11 +23,12 @@ from bowhead_core.resource_usage_projection import (
     ResourceUsageSelector,
 )
 from bowhead_core.user_store import TeamSubagent, UserStore
+from core_legacy_database import upgrade
 
 
 def _migrated_db(tmp_path: Path) -> Path:
     requested_path = tmp_path / "requested.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested_path).with_name('bowhead.db')}", target="core") == ("core",)
     return tmp_path / "bowhead.db"
 
 

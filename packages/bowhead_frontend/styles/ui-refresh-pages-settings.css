@@ -138,7 +138,7 @@
   max-width: none;
 }
 /* Field in card: label in left column first row, hint below, control spans two rows at right, error beneath control */
-:root:root .ui-group-card > .settings-field > .settings-field__label {
+:root:root .ui-group-card > .settings-field > :is(.settings-field__label, .settings-field__label-row) {
   grid-column: 1;
   grid-row: 1;
   margin: 0;
@@ -150,8 +150,16 @@
   line-height: 1.4;
   text-transform: none;
 }
+/* Help and suggestion buttons stay beside the label, outside the control column. */
+:root:root .ui-group-card > .settings-field > .settings-field__label-row > .settings-field__label {
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
 /* Hint-free labels span the same two grid rows as their controls on every grouped form. */
-:root:root .ui-group-card > .settings-field > .settings-field__label:not(:has(~ .settings-field__hint)) {
+:root:root .ui-group-card > .settings-field > :is(.settings-field__label, .settings-field__label-row):not(:has(~ .settings-field__hint)) {
   grid-row: 1 / span 2;
 }
 :root:root .ui-group-card > .settings-field > .settings-field__hint {
@@ -162,7 +170,7 @@
   font-size: var(--fs-sm);
   line-height: 1.45;
 }
-:root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__hint, .settings-field__error) {
+:root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__label-row, .settings-field__hint, .settings-field__error) {
   grid-column: 2;
   grid-row: 1 / span 2;
   width: 100%;
@@ -181,19 +189,19 @@
     row-gap: 8px;
     align-items: stretch;
   }
-  :root:root .ui-group-card > .settings-field > .settings-field__label:not(:has(~ .settings-field__hint)) {
+  :root:root .ui-group-card > .settings-field > :is(.settings-field__label, .settings-field__label-row):not(:has(~ .settings-field__hint)) {
     grid-row: auto;
   }
   :root:root .ui-group-control {
     max-width: none;
   }
-  :root:root .ui-group-card > .settings-field > .settings-field__label,
+  :root:root .ui-group-card > .settings-field > :is(.settings-field__label, .settings-field__label-row),
   :root:root .ui-group-card > .settings-field > .settings-field__hint,
   :root:root .ui-group-card > .settings-field > .settings-field__error {
     grid-column: 1;
     grid-row: auto;
   }
-  :root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__hint, .settings-field__error) {
+  :root:root .ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__label-row, .settings-field__hint, .settings-field__error) {
     grid-column: 1;
     grid-row: auto;
     max-width: none;

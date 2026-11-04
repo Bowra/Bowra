@@ -18,6 +18,7 @@ from bowhead_core.account_deletion_service import AccountDeletionService
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.terminal_protocol_store import TerminalProtocolStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.account_deletion_cleanup import AccountExternalCleanup
@@ -38,18 +39,19 @@ def account_gateway_schema(tmp_path_factory):
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return path
 
 
 @pytest.fixture
-async def context(tmp_path, account_gateway_schema, monkeypatch):
+async def context(tmp_path, account_gateway_schema, monkeypatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", SECRET)
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
     path = tmp_path / "bowhead.db"
     with sqlite3.connect(account_gateway_schema) as source, sqlite3.connect(path) as target:
         source.backup(target)
     users = UserStore(path)
+    await complete_community_http_installation(users)
     team = await users.create_team(name="Team", domain=None)
     user = await users.create_user(team_id=team.id, email="member@example.com", password="Current-password-123!", email_verified=True)
     artifacts = ArtifactStore(db_path=path, backend=LocalBackend(tmp_path / "blobs"))
@@ -157,11 +159,11 @@ async def test_unregistered_backup_format_blocks_completion(context, tmp_path):
 
 
 async def test_personal_kb_bytes_extractions_and_all_index_versions_are_erased(context, tmp_path, monkeypatch):
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.kb.store import KbStore
+    from gateway_legacy_database import upgrade
 
     monkeypatch.chdir(tmp_path)
-    upgrade(f"sqlite+aiosqlite:///{context.users.db_path}")
+    upgrade(f"sqlite+aiosqlite:///{Path(context.users.db_path).with_name('bowhead.db')}")
     context.app.state.memory_destructive_operation_store = SimpleNamespace(
         permanent_delete_all=AsyncMock(return_value={"status": "completed"}),
         readiness=AsyncMock(return_value=(True, None)),

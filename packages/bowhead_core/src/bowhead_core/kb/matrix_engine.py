@@ -25,7 +25,6 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
-import aiosqlite
 import anyio
 
 from bowhead_core import metrics
@@ -38,6 +37,7 @@ from bowhead_core.kb.permission import ScopeContext
 from bowhead_core.kb.structured_extractor import backfill_chunk_ids
 from bowhead_core.kb.telemetry import emit_audit
 from bowhead_core.rate_card import credits_for_tokens
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -855,7 +855,7 @@ class KbMatrixEngine:
             emit_audit("kb.matrix_cell_failed_summary", {"run_id": run_id, "matrix_id": run.matrix_id, "by_reason": by_reason})
 
     async def _ledger_totals(self, run_id: str) -> tuple[int, int, int]:
-        async with aiosqlite.connect(self._user_store.db_path) as db:  # noqa: SIM117
+        async with diagnostic_connect(self._user_store.db_path) as db:  # noqa: SIM117
             async with db.execute(
                 "SELECT COALESCE(SUM(-delta), 0), COALESCE(SUM(tokens_input), 0), COALESCE(SUM(tokens_output), 0)"
                 " FROM credit_ledger WHERE turn_id = ? AND reason = 'kb_matrix_run' AND delta < 0",

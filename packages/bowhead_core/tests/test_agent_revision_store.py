@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_dependency_compiler import (
     AGENT_DEPENDENCY_COMPILER_VERSION,
     AgentDependencyCompilation,
@@ -51,6 +50,7 @@ from bowhead_core.team_subagent_store import (
     effective_agent_name_key,
 )
 from bowhead_core.user_store import TeamSubagent
+from core_legacy_database import upgrade
 from legacy_agent_release_fixture import seed_legacy_publication
 
 _TIME = "2026-09-03T08:00:00+00:00"
@@ -375,7 +375,7 @@ def _canonical(value) -> str:
 
 def _db(tmp_path):
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     return db_path
 
 

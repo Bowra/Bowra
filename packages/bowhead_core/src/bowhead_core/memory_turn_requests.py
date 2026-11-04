@@ -22,6 +22,7 @@ from typing import Any, Final, Literal
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.memory_privacy import is_memory_read_hidden
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class MemoryTurnRequestStore:
     """Writer and reader of ``memory_turn_requests`` (core database, created by migration 0153)."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def record(self, *, user_id: str, turn_id: str, request: MemoryTurnRequest) -> None:
         """Upsert one row per source.

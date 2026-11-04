@@ -158,6 +158,10 @@ export function stepIssueSummary(
   if (outcome.turnCompleted && outcome.answerAffected && outcome.unresolvedSteps > 0) {
     return { key: "step_issues_affecting_n", count: outcome.unresolvedSteps, tone: "warning" };
   }
+  if (outcome.turnCompleted && outcome.answerAffected && outcome.issueSteps > 0) {
+    // Keep recorded counts truthful when the remaining gap concerns delivery.
+    return { key: "step_issues_n", count: outcome.issueSteps, tone: "warning" };
+  }
   // Later successful calls prove execution recovery, not fulfillment of the
   // original request. Mixed unresolved issues retain the neutral issue count.
   if (outcome.turnCompleted && !outcome.answerAffected && outcome.issueSteps > 0 && outcome.recoveredSteps > 0 && outcome.unresolvedSteps === 0) {

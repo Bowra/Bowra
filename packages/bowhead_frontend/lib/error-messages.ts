@@ -14,6 +14,9 @@
 
 /** Canonical error reason codes emitted by backend; each has copy in `error_messages.reasons`. */
 export const REASON_CODE_LIST = [
+  "tool_arguments_invalid", "tool_resource_unavailable", "tool_code_failed",
+  "tool_execution_timeout", "tool_execution_unknown", "tool_execution_failed",
+  "tool_delivery_review_required",
   "agent_step_limit",
   "agent_tool_call_limit",
   "agent_stalled",
@@ -35,6 +38,7 @@ export const REASON_CODE_LIST = [
   "plan_blocked",
   "plan_execution_failed",
   "lead_internal_error",
+  "tool_call_not_executed",
   "lead_empty_answer",
   "lead_output_exhausted",
   "document_information_incomplete",
@@ -47,6 +51,7 @@ export const REASON_CODE_LIST = [
   "document_routing_uncertain",
   "document_routing_source_unavailable",
   "service_interrupted",
+  "knowledge_source_changed",
   "reference_policy_changed",
   "reference_continuation_unavailable",
   "reference_primary_incomplete",

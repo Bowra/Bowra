@@ -2180,6 +2180,7 @@ async def test_shared_bounded_questions_resume_through_native_http(http_start, m
                 "profile": case.fixture.case.args["reference_start"].profile_name,
                 "task": "Analyze profit for 2026 in CNY",
                 "delegation_role": "primary",
+                "required_source_urls": [],
             }
         message = {"role": "assistant", "content": "Profit for 2026 in CNY has been analyzed."}
         if number == 0:
@@ -2460,6 +2461,7 @@ async def test_lead_delegation_writer_runs_explicit_team_agent_with_optional_ski
                                 {
                                     "profile": case.fixture.case.args["reference_start"].profile_name,
                                     "task": "检查实际利润变化",
+                                    "required_source_urls": [],
                                 }
                             ),
                         },
@@ -2589,6 +2591,7 @@ async def test_lead_writer_sends_selected_text_and_image_to_the_primary(http_sta
                                     "profile": case.fixture.case.args["reference_start"].profile_name,
                                     "task": "检查附图和利润变化",
                                     "delegation_role": "primary",
+                                    "required_source_urls": [],
                                 }
                             ),
                         },
@@ -2785,6 +2788,7 @@ async def test_skill_only_lead_writer_delegates_to_the_selected_receiver_without
                                     "profile": case.fixture.case.args["reference_start"].profile_name,
                                     "task": "使用所选方法分析利润",
                                     "delegation_role": "primary",
+                                    "required_source_urls": [],
                                 }
                             ),
                         },
@@ -2885,16 +2889,18 @@ async def test_skill_only_lead_writer_delegates_to_the_selected_receiver_without
     [(decision, skills, "team") for decision in ("answered", "revoked", "dismissed", "expired") for skills in (False, True)]
     + [("answered", False, "system")],
 )
-async def test_lead_delegation_http_question_resumes_the_original_execution(http_start, monkeypatch, decision, skills, source_kind):
+async def test_lead_delegation_http_question_resumes_the_original_execution(
+    http_start, monkeypatch, decision, skills, source_kind, *, selected_payload=None, selected_profile=None
+):
     from bowhead_gateway.routes import clarifications
 
     from bowhead_core import events
 
     case = http_start
     enable_lead_writer(case, monkeypatch)
-    submitted = payload(case, skills=skills)
-    profile_name = case.fixture.case.args["reference_start"].profile_name
-    if source_kind == "system":
+    submitted = selected_payload if selected_payload is not None else payload(case, skills=skills)
+    profile_name = selected_profile or case.fixture.case.args["reference_start"].profile_name
+    if source_kind == "system" and selected_payload is None:
         from bowhead_core.subagent import PROFILES
         from test_system_reference_baseline import configure
 
@@ -2919,6 +2925,7 @@ async def test_lead_delegation_http_question_resumes_the_original_execution(http
                 "profile": profile_name,
                 "task": "检查实际利润变化",
                 "delegation_role": "primary",
+                "required_source_urls": [],
             }
         elif len(calls) == 2:
             name = "subagent_return"

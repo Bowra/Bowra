@@ -75,10 +75,6 @@ def _safe_assignments(
 ) -> tuple[RequiredAssignment, ...]:
     if not config.get("providers"):
         return ()
-    tiers = config.get("tiers")
-    if isinstance(tiers, dict) and not tiers.get("primary"):
-        # Saved connection setup is visible to administrators but not runnable.
-        return ()
     return build_required_assignments(
         config,
         provider_ids=provider_ids,

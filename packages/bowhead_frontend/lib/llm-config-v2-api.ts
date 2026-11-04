@@ -119,6 +119,18 @@ export type VerificationItemState =
   | "cancelled"
   | "interrupted";
 
+export interface VerificationDiagnostics {
+  request: Record<string, unknown>;
+  response_summary: {
+    model: string | null;
+    stop_reason: string | null;
+    usage: Record<string, unknown> | null;
+    content_types: string[];
+  };
+  response_body: string;
+  response_truncated: boolean;
+}
+
 export interface VerificationBatchItem {
   item_id: string;
   ordinal: number;
@@ -130,6 +142,7 @@ export interface VerificationBatchItem {
   safe_code?: string | null;
   safe_http_status?: number | null;
   safe_summary_code?: string | null;
+  diagnostics?: VerificationDiagnostics | null;
   duration_ms?: number | null;
 }
 

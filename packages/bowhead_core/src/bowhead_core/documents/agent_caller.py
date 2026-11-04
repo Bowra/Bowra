@@ -133,7 +133,7 @@ async def document_job_caller_in_tx(db, *, scope: DocumentScope, turn_id: str, j
         JOIN turn_agent_execution a ON a.id=c.agent_execution_id
         WHERE j.id=? AND j.team_id=? AND j.workspace_id=? AND j.requested_by=? AND j.origin_turn_id=?
           AND a.turn_id=j.origin_turn_id AND a.team_id=j.team_id AND c.status='completed'
-          AND c.output_contract='document.admission.v1'""",
+          AND c.output_contract=CASE WHEN d.profile='docx-script-worker-v1' THEN 'document.admission.v2' ELSE 'document.admission.v1' END""",
         (job_id, scope.team_id, scope.workspace_id, scope.user_id, turn_id),
     ) as cursor:
         row = await cursor.fetchone()
@@ -148,7 +148,39 @@ async def authorize_document_job_caller(path: str | Path, *, scope: DocumentScop
         caller = await document_job_caller_in_tx(db, scope=scope, turn_id=turn_id, job_id=job_id)
         if execution_id is not None and caller != execution_id:
             raise DocumentRequestError("document_command_conflict")
-        return await read_document_caller_in_tx(db, path=path, scope=scope, turn_id=turn_id, execution_id=caller, retained=True)
+        binding = await read_document_caller_in_tx(db, path=path, scope=scope, turn_id=turn_id, execution_id=caller, retained=True)
+        async with db.execute("SELECT profile FROM document_dispatches WHERE job_id=?", (job_id,)) as cursor:
+            profile = (await cursor.fetchone())[0]
+        if profile == "docx-script-worker-v1":
+            await require_word_method_in_tx(db, path=path, scope=scope, binding=binding)
+        return binding
+
+
+async def require_word_method_in_tx(db, *, path, scope, binding):
+    """Admit exact method resources, never classify the user's intent."""
+    from bowhead_core.documents.authoring_formats import WORD_METHOD_REVISION
+
+    # This explicitly extends the platform Lead's native service admission.
+    # Released PPTX-only custom Agents retain their original resource scope.
+    if binding.agent_source_kind == "system" and binding.runtime_profile_name == "lead":
+        return
+    grants = binding.definition.get("skill_grants", [])
+    if not any(
+        isinstance(grant, dict)
+        and grant.get("skill_ref") == {"kind": "builtin", "id": "builtin:docx-authoring", "name": "docx-authoring"}
+        and grant.get("permissions") == ["read"]
+        and grant.get("revision") == WORD_METHOD_REVISION
+        and grant.get("distribution") == "reference"
+        for grant in grants
+    ):
+        raise DocumentRequestError("document_word_method_unavailable")
+    provenance = await team_plugin_provenance(str(path), binding.authored_definition or binding.definition, binding.definition)
+    if (
+        provenance is None
+        or "builtin:docx-authoring"
+        not in compute_turn_resources(provenance, await load_disable_state(str(path), scope.team_id, scope.user_id)).skills
+    ):
+        raise DocumentRequestError("document_word_method_unavailable")
 
 
 async def document_reference_pause_in_tx(db, *, turn_id: str, execution_id: str) -> bool:

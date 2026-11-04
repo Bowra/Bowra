@@ -17,6 +17,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 DRAFT_SCHEMA_VERSION = 1
 # Must exceed the generator's total timeout (MODEL_HARD_TIMEOUT_SECONDS); otherwise the lease expires mid-generation and same-key replay generates twice.
@@ -242,7 +243,7 @@ class SubagentDraftStore:
     ) -> None:
         if hmac_key is not None and len(hmac_key) < 32:
             raise ValueError("subagent draft HMAC key must be at least 32 bytes")
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._hmac_key = bytes(hmac_key) if hmac_key is not None else None
         self._clock = clock or SystemClock()
 

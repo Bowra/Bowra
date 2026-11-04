@@ -27,6 +27,30 @@ MALFORMED_CALL = (
 ARGUMENT_TEXT = 'questions=[{"question":"Which title?","options":[],"type":"free_text"}]\nfallback_text="Enter a title"'
 SELF_CLOSING_CALL = '\n<clarification_ask questions="[{"question":"Which audience?","options":["Operations","Finance"],"type":"single_select"}]"/>'
 TRUNCATED_CALL = '<clarification_ask questions="[{"question":"Which audience?"}'
+NAMED_TOOL_CALL = '<tool_list_workspaces>\n<parameter name="tool">datarc</｜｜DSML｜｜ parameter>\n</tool_list_workspaces>'
+
+
+@pytest.mark.parametrize("text", [NAMED_TOOL_CALL, '<tool_list_workspaces tool="datarc"/>', '<tool_list_workspaces tool="datarc"'])
+def test_registered_tool_name_tags_are_uninvoked_protocol(text: str) -> None:
+    assert has_uninvoked_clarification(text, tool_names=["tool_list_workspaces"])
+    assert not has_uninvoked_clarification(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "tool_list_workspaces lists data sources.",
+        "<tool_list_workspaces_example />",
+        '<unregistered_tool><parameter name="tool">datarc</parameter></unregistered_tool>',
+        "```xml\n" + NAMED_TOOL_CALL + "\n```",
+        "~~~xml\n" + NAMED_TOOL_CALL,
+        "`" + NAMED_TOOL_CALL.replace("\n", "") + "`",
+        "\n".join("> " + line for line in NAMED_TOOL_CALL.splitlines()),
+        "\n".join("    " + line for line in NAMED_TOOL_CALL.splitlines()),
+    ],
+)
+def test_registered_tool_detection_preserves_prose_and_quoted_examples(text: str) -> None:
+    assert not has_uninvoked_clarification(text, tool_names=["tool_list_workspaces"])
 
 
 @pytest.mark.parametrize("text", [MALFORMED_CALL, SELF_CLOSING_CALL, TRUNCATED_CALL, ARGUMENT_TEXT, "Please supply a title.\n" + ARGUMENT_TEXT])

@@ -1,6 +1,7 @@
 #!/bin/sh
 # Candidate-owned, fail-closed startup. Compose stops the previous app writer
-# before this process starts; uvicorn is exec'd only after migration, dry-run,
+# before this process starts. The migration runner locks the data directory,
+# snapshots pending upgrades and verifies every target; uvicorn is exec'd only after migration, dry-run,
 # idempotent cutover, and a final marker/schema/compatibility verification.
 set -eu
 

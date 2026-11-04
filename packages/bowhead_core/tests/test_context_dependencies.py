@@ -74,6 +74,54 @@ async def test_malformed_dependency_data_is_not_accepted_as_source_evidence():
         await validate_context_dependencies(None, [Message(role="user", name="context_source_dependencies_v1", content='{"knowledge_sources":true}')])
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("dependency", ["source", "navigation"])
+async def test_final_preparation_cannot_replace_retained_source_evidence(monkeypatch, dependency):
+    from bowhead_core.context_dependencies import ContextSourceValidator, PreparedContextSourceValidator
+
+    from bowhead_core import knowledge_source_runtime
+
+    monkeypatch.setattr(knowledge_source_runtime, "validate_retained_sources", AsyncMock())
+    ctx = SimpleNamespace(knowledge_scope=None, knowledge_source_uses={}, knowledge_navigation_uses={}, ordinary_lead_state=None)
+    values = ctx.knowledge_source_uses if dependency == "source" else ctx.knowledge_navigation_uses
+    values["file_original"] = "generation_original" if dependency == "source" else {"view_token": "original"}
+    prepared = PreparedContextSourceValidator(ContextSourceValidator(ctx))
+    await prepared.collect([])
+    values["file_original"] = "generation_new" if dependency == "source" else {"view_token": "new"}
+    with pytest.raises(KnowledgeAccessError, match="knowledge_source_changed"):
+        await prepared.collect([])
+
+
+@pytest.mark.unit
+async def test_prepared_adoption_rechecks_all_current_and_retained_sources_together(monkeypatch):
+    from bowhead_core.context_dependencies import ContextSourceValidator, PreparedContextSourceValidator
+
+    from bowhead_core import knowledge_source_runtime
+
+    validate = AsyncMock()
+    monkeypatch.setattr(knowledge_source_runtime, "validate_retained_sources", validate)
+    ctx = SimpleNamespace(
+        knowledge_scope=None,
+        knowledge_source_uses={"file_retained": "generation_retained"},
+        knowledge_source_ancestors=({},),
+        ordinary_lead_state=SimpleNamespace(knowledge_sources={}),
+    )
+    prepared = PreparedContextSourceValidator(ContextSourceValidator(ctx))
+    await prepared.collect([])
+    ctx.knowledge_source_uses = {"file_current": "generation_current"}
+    ctx.ordinary_lead_state.knowledge_sources = {"file_lead": "generation_lead"}
+    validate.reset_mock()
+    await prepared.for_adoption()([])
+    validate.assert_awaited_once()
+    assert validate.await_args.args[1] == {
+        "file_retained": "generation_retained",
+        "file_current": "generation_current",
+        "file_lead": "generation_lead",
+    }
+    assert ctx.knowledge_source_uses["file_retained"] == "generation_retained"
+    assert ctx.knowledge_source_ancestors == ({"file_retained": "generation_retained"},)
+
+
 @pytest.mark.parametrize("continuation_engaged", [True, False])
 async def test_material_dependencies_repeat_original_readers_after_restoring_summary(collab, context_case, monkeypatch, continuation_engaged):
     from bowhead_core.context_dependencies import ContextSourceObservations

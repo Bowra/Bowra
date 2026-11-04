@@ -12,7 +12,6 @@ import contextlib
 import json
 import logging
 import shutil
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -64,6 +63,7 @@ from bowhead_core.skill_upload import (
     validate_and_extract,
     validate_and_save_generated,
 )
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from bowhead_skill.builtin_display import listing_description_fields
 from bowhead_skill.effective import effective_description
 from bowhead_skill.loader import load_skill
@@ -1076,6 +1076,7 @@ async def _protected_patch_skill(
             )
             if cached is not None:
                 await db.rollback()
+                await pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
             else:
                 current = await _reload_skill_impact_target_in_connection(
                     db,
@@ -1110,7 +1111,6 @@ async def _protected_patch_skill(
                     resource_state=_impact_target_state(current),
                     dependency_impact=dependency_impact,
                 )
-                await pause_affected_schedules(db, schedule_ids)
                 await _write_skill_preference_in_connection(
                     db,
                     target=current,
@@ -1136,6 +1136,7 @@ async def _protected_patch_skill(
                     response=receipt_response,
                 )
                 await db.commit()
+                await pause_affected_schedules(db, schedule_ids)
     except (
         ResourceChangeIdempotencyConflict,
         ResourceImpactKeyUnavailable,
@@ -1516,7 +1517,7 @@ async def _personal_quota_check(store: SkillInstanceStore, user: User, instance:
 
     def check(validated: Any) -> None:
         # This callback runs inside the original package lock, before publishing bytes.
-        with contextlib.closing(sqlite3.connect(Path(store.db_path).resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        with contextlib.closing(connect_sync(Path(store.db_path).resolve().as_uri() + "?mode=ro", uri=True)) as db:
             row = db.execute("SELECT id,source_path,source_type FROM skill_instances WHERE user_id=? AND name=?", (user.id, instance.name)).fetchone()
         if row != (instance.id, instance.source_path, instance.source_type) or expected_instance_id is not None and row[0] != expected_instance_id:
             raise skill_workflow_http_error(409, "skill_write_conflict")
@@ -2346,6 +2347,7 @@ async def _protected_delete_skill(
             if cached is not None:
                 replayed = True
                 await db.rollback()
+                await pause_affected_schedules(db, list(cached.get("paused_schedule_ids", [])))
             else:
                 async with db.execute(
                     "SELECT * FROM skill_instances WHERE user_id=? AND id=?",
@@ -2412,7 +2414,6 @@ async def _protected_delete_skill(
                     root=_user_dir_for(user.id),
                     command_identity=f"{user.team_id}:{user.id}:{idempotency_key}",
                 )
-                await pause_affected_schedules(db, schedule_ids)
                 await db.execute(
                     "DELETE FROM skill_instances WHERE user_id=? AND id=?",
                     (user.id, skill_id),
@@ -2444,6 +2445,7 @@ async def _protected_delete_skill(
                     resource_id=skill_id,
                 )
                 await db.commit()
+                await pause_affected_schedules(db, schedule_ids)
                 committed = True
     except (
         ResourceChangeIdempotencyConflict,

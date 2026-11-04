@@ -173,8 +173,10 @@ export interface ReportViewProps {
   showEditControls?: boolean;
   /** Optional Results toolbar host. Undefined keeps the legacy inline placement. */
   editControlsHost?: HTMLElement | null;
-  /** The existing toolbar owns History in compact reading mode. */
+  /** The existing toolbar owns History when its document menu is available. */
   hideHistoryControl?: boolean;
+  /** Reuse the source summary in the document toolbar; undefined retains inline placement. */
+  sourceLinkageHost?: HTMLElement | null;
   /**
    * Visual refresh batch 4b: output toolbar status group. With this prop supplied (including not-yet-mounted null), streaming-banner and report-header
    * status badges move here (writing progress while writing, status badge otherwise). Without the prop, keep the banner/header positions.
@@ -357,6 +359,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
   showEditControls = false,
   editControlsHost,
   hideHistoryControl = false,
+  sourceLinkageHost,
   statusHost,
   turnTerminalStatus = null,
   turnTerminalTurnId = null,
@@ -1461,7 +1464,11 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
           facts reflect the CURRENT report, not the folded prior reports. Still
           includes insight_card-absorbed charts of the current turn (they're not
           superseded), so the original "count absorbed-chart markers" intent holds. */}
-      <SourceLinkageStrip sections={currentSections} isStreaming={isStreaming} />
+      {sourceLinkageHost === undefined
+        ? <SourceLinkageStrip sections={currentSections} isStreaming={isStreaming} />
+        : sourceLinkageHost
+          ? createPortal(<SourceLinkageStrip sections={currentSections} isStreaming={isStreaming} />, sourceLinkageHost)
+          : null}
       {filtered.length === 0 && !isStreaming ? (
         // Feishu 07.06 #22: caller (e.g. Code panel) can override report empty state
         emptyState !== undefined ? <>{emptyState}</> : <EmptyReportState />
@@ -1501,7 +1508,7 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
         sectionId={editorOverlays.blockAISectionId}
         onClose={() => editorOverlays.close("block-ai")}
         floatingRef={editorOverlays.registerFloating("block-ai")}
-        onSubmit={(instruction, range) => aiRewrite.start("custom", instruction, range)}
+        onSubmit={(instruction, range) => aiRewrite.tryStart("custom", instruction, range)}
         draftScope={canvasId ?? sessionId}
       />
       {/* WP3 (design D2TextEdit): single selection toolbar — formatting + AI shortcuts (rewrite/shorten/formal) */}

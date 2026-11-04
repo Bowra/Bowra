@@ -42,6 +42,8 @@ from bowhead_core.source_linkage_copy import (
     generic_source_type_copy,
     source_list_copy,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import Artifact, ArtifactStore
@@ -180,9 +182,8 @@ async def init_export_jobs(db_path: str) -> None:
     完成, 诚实标 failed (带人话原因), 而不是让前端轮询到天荒地老.
     """
     global _db_path  # noqa: PLW0603
-    import aiosqlite
 
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(domain_database_path(db_path, "content")) as db:
         await db.execute(_EXPORT_JOBS_SCHEMA)
         for column, declaration in _EXPORT_JOBS_MIGRATIONS:
             await _ensure_export_job_column(db, column, declaration)
@@ -248,10 +249,9 @@ def _row_to_job(row: Sequence[Any]) -> ExportJob:
 async def _persist(job: ExportJob) -> None:
     if _db_path is None:
         return
-    import aiosqlite
 
     try:
-        async with aiosqlite.connect(_db_path) as db:
+        async with diagnostic_connect(domain_database_path(_db_path, "content")) as db:
             await db.execute(
                 f"INSERT INTO canvas_export_jobs ({_JOB_COLS_SQL}) VALUES ({_JOB_PLACEHOLDERS_SQL}) ON CONFLICT(id) DO UPDATE SET {_JOB_UPDATES_SQL}",
                 tuple(getattr(job, column) for column in _JOB_COLS),
@@ -350,9 +350,8 @@ async def get_job(job_id: str) -> ExportJob | None:
     job = _jobs.get(job_id)
     if job is not None or _db_path is None:
         return job
-    import aiosqlite
 
-    async with aiosqlite.connect(_db_path) as db:
+    async with diagnostic_connect(domain_database_path(_db_path, "content")) as db:
         cur = await db.execute(
             f"SELECT {_JOB_COLS_SQL} FROM canvas_export_jobs WHERE id=?",
             (job_id,),
@@ -367,9 +366,8 @@ async def list_jobs_for_canvas(canvas_id: str, limit: int = 20) -> list[ExportJo
         items = [j for j in _jobs.values() if j.canvas_id == canvas_id]
         items.sort(key=lambda j: j.created_at, reverse=True)
         return items[:limit]
-    import aiosqlite
 
-    async with aiosqlite.connect(_db_path) as db:
+    async with diagnostic_connect(domain_database_path(_db_path, "content")) as db:
         cur = await db.execute(
             f"SELECT {_JOB_COLS_SQL} FROM canvas_export_jobs WHERE canvas_id=? ORDER BY created_at DESC, id DESC LIMIT ?",
             (canvas_id, limit),
@@ -633,9 +631,9 @@ async def _persist_legacy_export_pair(
         if _db_path is None:
             await artifact_store.commit_staged_artifacts((manifest, output))
         else:
-            if Path(_db_path).resolve() != Path(artifact_store.db_path).resolve():
+            if Path(domain_database_path(_db_path, "content")).resolve() != Path(artifact_store.db_path).resolve():
                 raise RuntimeError("legacy export and artifact store must share SQLite")
-            async with open_shared_ctx(_db_path) as db:
+            async with open_shared_ctx(domain_database_path(_db_path, "content")) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 try:
                     await artifact_store.insert_staged_artifacts_in_transaction(db, (manifest, output))
@@ -668,6 +666,7 @@ async def _persist_legacy_export_pair(
                     await db.rollback()
                     raise
         committed = True
+        await artifact_store.complete_staged_artifact_publication((manifest, output))
         job.status = "done"
         job.phase = "terminal"
         job.quality_status = "warnings"

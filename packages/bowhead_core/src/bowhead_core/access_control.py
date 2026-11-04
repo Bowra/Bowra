@@ -19,7 +19,9 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.subagent_write_boundary import (
     TEAM_SUBAGENT_RESOURCE_KIND,
     SubagentTransactionToken,
@@ -376,7 +378,7 @@ class AccessControlStore:
         *,
         terminal_auth_fence_enabled: bool = False,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._terminal_auth_fence_enabled = terminal_auth_fence_enabled
 
     @asynccontextmanager
@@ -403,8 +405,12 @@ class AccessControlStore:
         self._terminal_auth_fence_enabled = bool(enabled)
 
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(self.db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -421,7 +427,7 @@ class AccessControlStore:
         return int(row[0]) if row else 0
 
     async def bump_policy_epoch(self, team_id: str) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await self._bump_policy_epoch_conn(db, team_id)
             await db.commit()
         return await self.get_policy_epoch(team_id)
@@ -488,7 +494,7 @@ class AccessControlStore:
         )
         if not group.name:
             raise ValueError("group name required")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             if group.workspace_id:
                 await self._assert_workspace_in_team_conn(db, group.workspace_id, team_id)
@@ -529,14 +535,14 @@ class AccessControlStore:
             "GROUP BY g.id "
             "ORDER BY g.workspace_id ASC, g.name ASC"
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
         return [_row_to_group(r) for r in rows]
 
     async def get_group(self, team_id: str, group_id: str) -> GroupRecord | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT g.*, COUNT(CASE WHEN gm.status='active' THEN 1 END) AS member_count "
@@ -557,7 +563,7 @@ class AccessControlStore:
         created_by: str | None = None,
     ) -> GroupMemberRecord:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             group = await self._get_group_conn(db, team_id, group_id)
@@ -584,7 +590,7 @@ class AccessControlStore:
 
     async def remove_group_member(self, team_id: str, group_id: str, user_id: str) -> bool:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             cur = await db.execute(
                 "UPDATE group_memberships SET status='removed', removed_at=? "
@@ -600,7 +606,7 @@ class AccessControlStore:
         return changed
 
     async def list_group_members(self, team_id: str, group_id: str) -> list[GroupMemberRecord]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT gm.*, u.email, u.display_name "
@@ -619,7 +625,7 @@ class AccessControlStore:
         group_id: str,
         user_id: str,
     ) -> GroupMemberRecord | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT gm.*, u.email, u.display_name "
@@ -707,7 +713,7 @@ class AccessControlStore:
         )
 
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -763,7 +769,7 @@ class AccessControlStore:
         team_id: str,
         grant_id: str,
     ) -> ResourceGrantRecord | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM resource_grants WHERE team_id=? AND id=?",
@@ -791,7 +797,7 @@ class AccessControlStore:
         if not include_revoked:
             where.append("revoked_at IS NULL")
         sql = f"SELECT * FROM resource_grants WHERE {' AND '.join(where)} ORDER BY updated_at DESC, created_at DESC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
@@ -804,7 +810,7 @@ class AccessControlStore:
         *,
         subagent_transaction_token: SubagentTransactionToken | None = None,
     ) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -901,7 +907,7 @@ class AccessControlStore:
             resource_kind,
             subagent_transaction_token,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             ids = await self._revoke_grants_for_resource_conn(
@@ -1108,7 +1114,7 @@ class AccessControlStore:
             resource_kind,
             subagent_transaction_token,
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             result = await self._set_audience_conn(
@@ -1431,7 +1437,7 @@ class AccessControlStore:
             if len(payload_json) > 5000:
                 payload_dict["_truncated"] = True
                 payload_json = json.dumps(payload_dict, ensure_ascii=False)[:5000]
-            async with aiosqlite.connect(self.db_path) as db:
+            async with diagnostic_connect(self.db_path) as db:
                 await db.execute(
                     "INSERT INTO admin_audit_log "
                     "(id, actor_user_id, team_id, action, target_kind, target_id, target_team_id, "
@@ -1496,7 +1502,7 @@ class AccessControlStore:
             "mode": "enforce" if resource_grants_enforce_enabled() else "shadow",
             **(payload or {}),
         }
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO admin_audit_log "
                 "(id, actor_user_id, team_id, action, target_kind, target_id, target_team_id, "

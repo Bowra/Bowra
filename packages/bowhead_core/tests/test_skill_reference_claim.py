@@ -32,13 +32,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.parametr
 @pytest.fixture
 async def claimed_case(receiver_case, request):
     fixture = receiver_case
-    if getattr(request, "param", None) in {"canonical_input", "agent_baseline", "extension"}:
+    if getattr(request, "param", None) in {"canonical_input", "agent_baseline", "extension", "temporary"}:
         from bowhead_core.chat_reference_preparation import prepare_reference_team_start_admission
         from test_reference_start_preparation import activate, raw_document
 
         activate(fixture)
-        document = raw_document(fixture, skills=request.param not in {"agent_baseline", "extension"})
-        if request.param == "extension":
+        document = raw_document(fixture, skills=request.param not in {"agent_baseline", "extension", "temporary"})
+        if request.param in {"extension", "temporary"}:
             from uuid import uuid4
 
             from bowhead_core.chat_references import ReferenceNode

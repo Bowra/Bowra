@@ -18,7 +18,6 @@ import zipfile
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from bowhead_cli.migrate import upgrade
 from bowhead_core.artifact_store import LocalBackend
 from bowhead_core.kb.files_store import KbFilesStore
 from bowhead_core.kb.permission import ScopeContext
@@ -26,6 +25,7 @@ from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.user_store import User
 from bowhead_gateway.routes.kb import _process_zip_bundle
 from fastapi import BackgroundTasks
+from gateway_legacy_database import upgrade
 
 from bowhead_core import ArtifactStore
 
@@ -63,7 +63,7 @@ async def test_direct_bundle_enqueues_single_parse_and_index_many(initialize_mig
     with sqlite3.connect(artifact_db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{artifact_db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(artifact_db_path).with_name('bowhead.db')}", target="core")
     artifact_store = ArtifactStore(
         db_path=str(artifact_db_path),
         backend=LocalBackend(root_dir=tmp_path / "blobs"),

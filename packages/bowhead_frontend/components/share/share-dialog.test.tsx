@@ -1,10 +1,24 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
-import { getShares, putAudience, type ShareState } from "@/lib/content-share-api";
+import { getShares, putAudience, revokeShareGrant, fetchTeamDirectory, type ShareState } from "@/lib/content-share-api";
 
 import { ShareDialog } from "./share-dialog";
+import { ApiError } from "@/lib/api-client";
+import { useResultsCapabilities } from "@/lib/use-results-capabilities";
+
+vi.mock("@/lib/use-results-capabilities", () => ({
+  useResultsCapabilities: vi.fn(),
+  retryResultsCapabilities: vi.fn(async () => {}),
+}));
+
+beforeEach(() => {
+  vi.mocked(useResultsCapabilities).mockReturnValue({
+    workspace: true, completeList: true, scaleNav: true, resolved: true, error: null,
+    contentSharing: true, sharingDisabled: false,
+  });
+});
 
 vi.mock("@/lib/use-media-query", () => ({ useMediaQuery: () => false }));
 vi.mock("@/lib/content-share-api", async (importOriginal) => {
@@ -15,8 +29,8 @@ vi.mock("@/lib/content-share-api", async (importOriginal) => {
     putAudience: vi.fn(),
     addShareGrant: vi.fn(),
     revokeShareGrant: vi.fn(),
-    fetchTeamDirectory: vi.fn(async () => ({ users: [], next_cursor: null })),
-    fetchTeamGroups: vi.fn(async () => []),
+    fetchTeamDirectory: vi.fn(async () => ({ items: [], next_cursor: null })),
+    fetchTeamGroups: vi.fn(async () => ({ items: [] })),
   };
 });
 
@@ -110,6 +124,35 @@ describe("ShareDialog", () => {
     expect(custom.getAttribute("aria-checked")).toBe("true");
     expect(document.activeElement?.getAttribute("role")).toBe("radio");
     expect(document.activeElement).not.toBe(custom);
+  });
+
+  it.each([true, false])("retains revocation while sharing is disabled or unverified: %s", async (explicitlyDisabled) => {
+    vi.mocked(useResultsCapabilities).mockReturnValue({
+      workspace: true, completeList: true, scaleNav: true, resolved: true, error: null,
+      contentSharing: false, sharingDisabled: explicitlyDisabled,
+    });
+    vi.mocked(getShares).mockResolvedValue(SHARED);
+    vi.mocked(revokeShareGrant).mockResolvedValue(undefined);
+    renderIntl(<ShareDialog kind="report" resourceId="rpt_1" onClose={vi.fn()} />, { locale: "en-US" });
+    await screen.findByText("Avery");
+    expect(screen.getByRole("status").textContent).toMatch(explicitlyDisabled ? /disabled for this deployment/ : /could not be verified/);
+    expect(fetchTeamDirectory).not.toHaveBeenCalled();
+    const team = screen.getByRole("radio", { name: /Whole company/ });
+    expect(team.hasAttribute("disabled") || team.getAttribute("aria-disabled") === "true").toBe(true);
+    fireEvent.click(team);
+    expect(putAudience).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Remove/ }));
+    await waitFor(() => expect(revokeShareGrant).toHaveBeenCalledWith("report", "rpt_1", "grt_1"));
+  });
+
+  it("handles a stale positive capability without hiding the management controls", async () => {
+    vi.mocked(getShares).mockResolvedValue(SHARED);
+    vi.mocked(putAudience).mockRejectedValueOnce(new ApiError(403, "disabled", { code: "content_sharing_disabled" }));
+    renderIntl(<ShareDialog kind="report" resourceId="rpt_1" onClose={vi.fn()} />, { locale: "en-US" });
+    fireEvent.click(await screen.findByRole("radio", { name: /Whole company/ }));
+    expect((await screen.findByRole("status")).textContent).toMatch(/disabled for this deployment/);
+    expect(screen.getByText("Avery")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Remove/ })).toBeTruthy();
   });
 
   it("a non-admin author cannot narrow an approved team-wide Skill", async () => {

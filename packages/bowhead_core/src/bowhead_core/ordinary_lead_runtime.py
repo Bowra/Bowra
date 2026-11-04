@@ -17,7 +17,8 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_run_limits import AgentLoopBudget
-from bowhead_core.kb_search_budget import KNOWLEDGE_READ_TOOLS, KnowledgeReadState
+from bowhead_core.kb_search_budget import CURRENT_KNOWLEDGE_READ_TOOLS as KNOWLEDGE_READ_TOOLS
+from bowhead_core.kb_search_budget import KnowledgeReadState
 from bowhead_core.ordinary_lead_checkpoint import (
     OrdinaryHelperOutcome,
     OrdinaryLeadCheckpoint,
@@ -185,7 +186,9 @@ def note_ordinary_return_rejection(ctx: ToolExecutionContext, result: dict) -> d
     identity = getattr(ctx, "ordinary_call_identity", None)
     if state is not None and state.checkpoint is None and identity is not None:
         state.rejected_returns[identity] = content_hash(result)
-    return result
+    from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal
+
+    return TerminalCorrectionRefusal(result) if result.get("ok") is False else result
 
 
 def _require_settled_returns(helper: ToolInvocation, state: OrdinaryLeadRunState) -> None:
@@ -231,10 +234,17 @@ async def capture_ordinary_lead_loop(
     loop_budget: AgentLoopBudget | None = None,
 ) -> OrdinaryLeadCheckpoint | None:
     state = getattr(ctx, "ordinary_lead_state", None)
-    retained_knowledge = knowledge_read is not None or bool(state and state.knowledge_sources)
+    navigation_used = bool(getattr(ctx, "knowledge_navigation_uses", {})) or any(inv.tool_name == "kb_list_sources" for inv in invocations)
+    if navigation_used and knowledge_read is None and getattr(ctx, "knowledge_direct_use", False):
+        from bowhead_core.kb_search_budget import KnowledgeReadState
+
+        knowledge_read = KnowledgeReadState()
+    retained_knowledge = knowledge_read is not None or bool(state and state.knowledge_sources) or navigation_used
     # Effect-free questions still use the existing bounded contract. An
     # unsupported post-helper pause must not pretend it can restart safely.
-    if not any(inv.tool_name == "subagent_spawn" or (retained_knowledge and inv.tool_name in KNOWLEDGE_READ_TOOLS) for inv in invocations):
+    if not navigation_used and not any(
+        inv.tool_name == "subagent_spawn" or (retained_knowledge and inv.tool_name in KNOWLEDGE_READ_TOOLS) for inv in invocations
+    ):
         return None
     if state is None or state.checkpoint is not None:
         raise OrdinaryContinuationUnavailable()
@@ -290,7 +300,7 @@ async def capture_ordinary_lead_loop(
             "Continue with the existing results, or ask the user in your answer which input is still needed."
         )
     if (
-        (not helpers and knowledge_read is None)
+        (not helpers and knowledge_read is None and not navigation_used)
         or len(state.helper_bindings) != len(helpers)
         or question.tool_name != "clarification_ask"
         or question.error
@@ -442,8 +452,11 @@ async def capture_ordinary_lead_loop(
         context_base_generation=getattr(getattr(ctx, "_model_context_history", None), "generation_id", None),
         collaboration=await collaboration.runtime.checkpoint(collaboration) if collaboration is not None else None,
         knowledge_read=knowledge_read,
-        knowledge_sources=dict(state.knowledge_sources) if state.knowledge_sources else None,
-        contract="ordinary-lead-loop.v13"
+        knowledge_sources=dict(state.knowledge_sources) if state.knowledge_sources or navigation_used else None,
+        knowledge_navigation=dict(ctx.knowledge_navigation_uses) if navigation_used else None,
+        contract="ordinary-lead-loop.v14"
+        if navigation_used
+        else "ordinary-lead-loop.v13"
         if state.knowledge_sources
         else "ordinary-lead-loop.v12"
         if retained_knowledge
@@ -531,7 +544,10 @@ async def _validate_input_context(
 
     material = json.loads(checkpoint.material_json)
     context = json.loads(checkpoint.context_json)
-    if checkpoint.contract in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"} and material["input_context"] is None:
+    if (
+        checkpoint.contract in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+        and material["input_context"] is None
+    ):
         if retained_ids(source, context):
             raise OrdinaryContinuationUnavailable()
     else:
@@ -555,7 +571,13 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
             row = await cursor.fetchone()
             if row is None or row[0] != checkpoint.model_config_version:
                 raise OrdinaryContinuationUnavailable()
-    if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}:
+    if checkpoint.contract in {
+        "ordinary-lead-loop.v10",
+        "ordinary-lead-loop.v11",
+        "ordinary-lead-loop.v12",
+        "ordinary-lead-loop.v13",
+        "ordinary-lead-loop.v14",
+    }:
         async with open_shared_ctx(ctx.session_store.db_path) as db:
             await db.execute("BEGIN")
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=True)
@@ -598,6 +620,11 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
         await require_live_worker_in_tx(db, worker=worker_identity(ctx))
     from bowhead_core.knowledge_source_runtime import validate_retained_sources
 
+    if checkpoint.knowledge_navigation is not None:
+        from bowhead_core.kb.source_navigation import record_navigation_uses, validate_navigation_dependencies
+
+        await validate_navigation_dependencies(ctx, checkpoint.knowledge_navigation)
+        record_navigation_uses(ctx, checkpoint.knowledge_navigation)
     if checkpoint.knowledge_sources is not None:
         await validate_retained_sources(ctx, checkpoint.knowledge_sources)
         state.knowledge_sources = dict(checkpoint.knowledge_sources)
@@ -619,7 +646,13 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             await revalidate_material_authority_in_connection(ctx, db, entry, contract=checkpoint.contract)
         source = await _source(ctx, db)
         await _uploads(ctx, source)
-        if checkpoint.contract in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13"}:
+        if checkpoint.contract in {
+            "ordinary-lead-loop.v10",
+            "ordinary-lead-loop.v11",
+            "ordinary-lead-loop.v12",
+            "ordinary-lead-loop.v13",
+            "ordinary-lead-loop.v14",
+        }:
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=False)
         if checkpoint.contract in {
             "ordinary-lead-loop.v5",
@@ -631,6 +664,7 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             "ordinary-lead-loop.v11",
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
+            "ordinary-lead-loop.v14",
         }:
             await revalidate_material_authority_in_connection(ctx, db, material, contract=checkpoint.contract)
         record = await consume_ordinary_resume_in_tx(db, worker=worker_identity(ctx), card_id=state.card_id)

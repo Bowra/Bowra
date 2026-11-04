@@ -28,7 +28,7 @@ def test_owned_prompt_loads_the_selected_language_template(locale: str) -> None:
         if not name.startswith("lead_"):
             assert text in rendered
     assert rules["lead_scope"].strip() in build_lead_system_prompt("ws_lookup", facts=[], output_language=locale)
-    for token in ("subagent_return", "exec_summary", "caveats[]", "add_chart.series", "{data}"):
+    for token in ("subagent_return", "exec_summary", "caveats[]", "columns", "{data}"):
         assert token in "\n".join(rules.values())
     if locale == "en-US":
         assert "上月营业额和客流量情况" not in rules["lookup_workflow"]

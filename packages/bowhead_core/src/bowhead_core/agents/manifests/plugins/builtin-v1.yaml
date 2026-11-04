@@ -173,6 +173,38 @@ plugins:
       - kb_get_record
       - kb_list_tables
       - attachment_read
+  - name: knowledge-base
+    version: 2
+    family: general
+    selectable: true
+    listing:
+      zh-CN:
+        name: 知识库
+        description: 搜索和查询团队知识库，读取附件正文。
+        use_when: 要按团队知识库里的资料回答时
+        example: 「报销制度里差旅住宿的标准是多少」
+      en-US:
+        name: Knowledge base
+        description: Search and query the team knowledge base and read attachment text.
+        use_when: answers should come from the team knowledge base
+        example: '"What is the hotel limit in our travel policy?"'
+      de-DE:
+        name: Wissensdatenbank
+        description: Die Team-Wissensdatenbank durchsuchen, abfragen und Anhangtext lesen.
+        use_when: Antworten aus der Team-Wissensdatenbank kommen sollen
+        example: „Wie hoch ist das Hotellimit in unserer Reiserichtlinie?“
+      fr-FR:
+        name: Base de connaissances
+        description: Rechercher et interroger la base de connaissances et lire le texte des pièces jointes.
+        use_when: les réponses doivent venir de la base de connaissances de l’équipe
+        example: « Quel est le plafond d’hôtel dans notre politique de voyage ? »
+    tools:
+      - kb_list_sources
+      - kb_search
+      - kb_query_records
+      - kb_get_record
+      - kb_list_tables
+      - attachment_read
   - name: knowledge-management
     version: 1
     family: general
@@ -496,3 +528,17 @@ plugins:
     tools: []
     parts: *id001
     skill_revision: sha256:ff7fa6f5e7ae1105ab29e203cd17cfd22183d0583ba11fc716954e0fbe6ef547
+  - name: settings-space-instructions
+    version: 3
+    family: settings
+    selectable: false
+    tools: []
+    parts:
+      - configuration_read
+      - configuration_open
+      - configuration_propose
+      - configuration_apply
+      - configuration_result
+      - configuration_submit
+      - skill_read
+    skill_revision: sha256:de8985434931565edca66839d7c448e19cde3c92b939357352f34f9683609c3d

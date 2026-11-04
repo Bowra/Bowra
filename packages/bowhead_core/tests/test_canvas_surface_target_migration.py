@@ -15,24 +15,18 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.migrations.baseline_schema import initial_schema
+from core_legacy_database import upgrade
 
 pytestmark = pytest.mark.unit
 
 
 def _chain_head() -> str:
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
+    """The admitted legacy revision for single-file historical fixtures."""
+    from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
-    from bowhead_core import migrations
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    heads = ScriptDirectory.from_config(config).get_heads()
-    assert len(heads) == 1, f"revision 链分叉了，heads={heads}"
-    return heads[0]
+    return SOURCE_REVISION
 
 
 def _columns(db_path: Path, table: str) -> set[str]:
@@ -61,7 +55,7 @@ async def test_upgrade_adds_surface_target_and_leaves_existing_rows_null(tmp_pat
         conn.commit()
 
     assert "surface_target" not in _columns(db_path, "canvas_sections")
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     assert "surface_target" in _columns(db_path, "canvas_sections")
     with sqlite3.connect(db_path) as conn:
@@ -82,8 +76,8 @@ async def test_migration_and_store_ensure_column_are_both_idempotent(tmp_path) -
     await store.initialize()
     assert "surface_target" in _columns(db_path, "canvas_sections")
 
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     assert "surface_target" in _columns(db_path, "canvas_sections")
 
 

@@ -81,6 +81,7 @@ from bowhead_router.types import (
     LLMChunk,
     LLMRequest,
     LLMResponse,
+    LLMResponseDiagnostics,
     Message,
     TokenUsage,
     ToolCall,
@@ -404,6 +405,7 @@ class AnthropicCompatibleAdapter:
         # Per-content-block accumulators (keyed by index).
         # Each entry: {"id": str, "name": str, "json_buf": str}
         tool_blocks: dict[int, dict[str, Any]] = {}
+        upstream_tool_indices: set[int] = set()
         tool_names = self._tool_name_map(req)
         try:
             async with self._http.stream(
@@ -431,6 +433,7 @@ class AnthropicCompatibleAdapter:
                         **upstream_error_fields(resp),
                     )
                 finish_reason: FinishReason | None = None
+                upstream_finish_reason: str | None = None
                 usage: TokenUsage | None = None
                 usage_input_seen = False
                 usage_output_seen = False
@@ -497,6 +500,7 @@ class AnthropicCompatibleAdapter:
                         idx = int(obj.get("index", 0))
                         block = obj.get("content_block") or {}
                         if block.get("type") == "tool_use":
+                            upstream_tool_indices.add(idx)
                             tool_blocks[idx] = {
                                 "id": str(block.get("id") or f"toolu_{idx}"),
                                 "name": str(block.get("name") or ""),
@@ -592,7 +596,8 @@ class AnthropicCompatibleAdapter:
                         d = obj.get("delta") or {}
                         sr = d.get("stop_reason")
                         if sr:
-                            finish_reason = self._map_finish_reason(sr) if hasattr(self, "_map_finish_reason") else sr
+                            upstream_finish_reason = sr if isinstance(sr, str) else "unknown"
+                            finish_reason = _STOP_REASON_MAP.get(upstream_finish_reason, upstream_finish_reason)
                         u = obj.get("usage")
                         if u:
                             usage_input_seen = usage_input_seen or "input_tokens" in u
@@ -655,7 +660,15 @@ class AnthropicCompatibleAdapter:
                 )
                 attempt_settled = True
                 output_started = True
-                yield LLMChunk(finish_reason=finish_reason, usage=usage)
+                yield LLMChunk(
+                    finish_reason=finish_reason,
+                    usage=usage,
+                    diagnostics=LLMResponseDiagnostics(
+                        transport_mode="stream",
+                        upstream_tool_call_count=len(upstream_tool_indices),
+                        upstream_finish_reason=upstream_finish_reason,
+                    ),
+                )
         except GeneratorExit:
             if not attempt_settled:
                 await abandon_physical_invocation(
@@ -1018,6 +1031,11 @@ class AnthropicCompatibleAdapter:
             provider=self.provider_name,
             model=str(data.get("model") or req.model),
             thinking="\n".join(thinking_parts),
+            diagnostics=LLMResponseDiagnostics(
+                transport_mode="invoke",
+                upstream_tool_call_count=sum(isinstance(block, dict) and block.get("type") == "tool_use" for block in blocks),
+                upstream_finish_reason=data.get("stop_reason"),
+            ),
         )
 
     # ─────────────────────────────────────────────────────────

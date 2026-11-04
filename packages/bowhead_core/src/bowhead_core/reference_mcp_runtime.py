@@ -41,6 +41,8 @@ from bowhead_core.reference_mcp_preparation import (
     PreparedReferenceMcpSelection,
     revalidate_reference_mcp_selection_in_connection,
 )
+from bowhead_core.sqlite_domains import domain_database_path
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 from bowhead_core.tool_registry import ToolRegistry, ToolSpec
 
 _MAX_RESULT_BYTES = 1024 * 1024
@@ -167,11 +169,11 @@ class ReferenceMcpHandlerScope:
             not owner_id
             or type(generation) is not int
             or generation < 1
-            or Path(index.db_path).resolve() != Path(access.db_path).resolve()
-            or Path(index.db_path).resolve() != Path(bindings.db_path).resolve()
+            or Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(access.db_path, "core")).resolve()
+            or Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(bindings.db_path, "core")).resolve()
         ):
             raise ValueError("reference_mcp_handler_scope_changed")
-        async with open_shared_ctx(str(bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")
@@ -215,7 +217,7 @@ class ReferenceMcpHandlerScope:
         return primary
 
     async def require_current(self, *, view: ToolRegistry) -> ReferencePrimaryInput:
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA query_only=ON")
             await db.execute("BEGIN")
@@ -297,7 +299,7 @@ class ReferenceMcpHandlerScope:
         except (TypeError, ValueError, json.JSONDecodeError, SchemaError, ValidationError):
             return ReferenceMcpCall.denied(_denial("reference_mcp_parameters_invalid"))
         parameter_digest = canonical_fingerprint(arguments)
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -383,7 +385,7 @@ class ReferenceMcpHandlerScope:
                 content=content,
             )
             ok = result.get("ok") is True
-            async with open_shared_ctx(str(self.bindings.db_path)) as db:
+            async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 cursor = await db.execute(
                     "UPDATE chat_reference_mcp_calls SET status=?,result_ok=?,result_hash=?,result_ciphertext=?,failure_code=?,completed_at=? "
@@ -413,7 +415,7 @@ class ReferenceMcpHandlerScope:
         if not call.call_id:
             return
         try:
-            async with open_shared_ctx(str(self.bindings.db_path)) as db:
+            async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                 await db.execute("BEGIN IMMEDIATE")
                 cursor = await db.execute(
                     "UPDATE chat_reference_mcp_calls SET status='interrupted',failure_code=?,completed_at=? "
@@ -440,7 +442,7 @@ class ReferenceMcpHandlerScope:
         required = {item.node_id for item in self.composition.mcp_admissions if isinstance(item.resource, McpToolResourceRef)}
         if not required:
             return
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             await db.execute("PRAGMA query_only=ON")
             async with db.execute(
                 "SELECT node_id,call_id,created_generation FROM chat_reference_mcp_calls WHERE turn_id=? AND execution_id=? "
@@ -575,7 +577,7 @@ async def require_reference_mcp_runtime_in_connection(
     bindings: AgentExecutionBindingStore,
     read_output: bool = False,
 ) -> tuple[ReferencePrimaryInput, ReferenceMcpPrimaryComposition]:
-    if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_mcp_calls'", ()) is None:
+    if not await readable_table_exists(db, "chat_reference_mcp_calls"):
         raise ValueError("reference_mcp_call_migration_required")
     primary = await read_reference_mcp_primary_in_connection(db, scope=scope, turn_id=turn_id, bindings=bindings, read_output=read_output)
     lead = primary.plan.orchestration_contract == "lead-delegation.v1"

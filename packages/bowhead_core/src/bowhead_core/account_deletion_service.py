@@ -24,6 +24,8 @@ from bowhead_core.account_deletion import (
 from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 from bowhead_core.account_erasure import erase_rows, freeze_rows, key_sql, protocol_receipts, reviewed_schema
 from bowhead_core.session_lifecycle import SessionLifecycleError
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import ArtifactStore
@@ -64,7 +66,7 @@ class AccountDeletionService:
         self._wake.set()
 
     async def request(self, user_id: str, *, expected_pwd_version: int | None = None) -> AccountDeletion:
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             await reviewed_schema(db)
         if getattr(self.artifacts.backend, "erase", None) is None:
             raise AccountDeletionError("account_erasure_backend_unavailable")
@@ -91,7 +93,7 @@ class AccountDeletionService:
         await adopt_deleted_accounts(self.users, now=self.clock())
         now = self.clock().isoformat()
         async with (
-            aiosqlite.connect(self.users.db_path) as db,
+            diagnostic_connect(self.users.db_path) as db,
             db.execute(
                 "SELECT user_id,operation_id,requested_at,purge_after FROM account_deletions "
                 "WHERE state!='completed' AND (next_attempt_at IS NULL OR julianday(next_attempt_at)<=julianday(?)) "
@@ -152,7 +154,7 @@ class AccountDeletionService:
 
     async def _claim(self, deletion: AccountDeletion) -> int | None:
         now = self.clock()
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             cur = await db.execute(
                 "UPDATE account_deletions SET lease_owner=?,lease_epoch=lease_epoch+1,lease_expires_at=?,attempt_count=attempt_count+1 "
                 "WHERE operation_id=? AND state!='completed' AND (lease_expires_at IS NULL OR julianday(lease_expires_at)<=julianday(?)) RETURNING lease_epoch",
@@ -165,7 +167,7 @@ class AccountDeletionService:
 
     async def _release(self, deletion: AccountDeletion, epoch: int, code: str | None) -> None:
         retry_at = (self.clock() + timedelta(minutes=5)).isoformat() if code else None
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             await db.execute(
                 "UPDATE account_deletions SET lease_owner=NULL,lease_expires_at=NULL,next_attempt_at=?,last_code=? "
                 "WHERE operation_id=? AND lease_owner=? AND lease_epoch=?",
@@ -181,10 +183,19 @@ class AccountDeletionService:
         if cur.rowcount != 1:
             raise AccountDeletionError("account_deletion_lease_lost")
 
+    async def _check_lease(self, db: aiosqlite.Connection, deletion: AccountDeletion, epoch: int) -> None:
+        """Read the authoritative lease without taking another database writer."""
+        async with db.execute(
+            "SELECT 1 FROM account_deletions WHERE operation_id=? AND lease_owner=? AND lease_epoch=? AND julianday(lease_expires_at)>julianday(?)",
+            (deletion.operation_id, self.owner, epoch, self.clock().isoformat()),
+        ) as cursor:
+            if await cursor.fetchone() is None:
+                raise AccountDeletionError("account_deletion_lease_lost")
+
     async def _heartbeat(self, deletion: AccountDeletion, epoch: int) -> None:
         while True:
             await anyio.sleep(30)
-            async with aiosqlite.connect(self.users.db_path) as db:
+            async with diagnostic_connect(self.users.db_path) as db:
                 try:
                     await self._assert_lease(db, deletion, epoch)
                     await db.commit()
@@ -196,7 +207,7 @@ class AccountDeletionService:
         if self.external_quarantine is not None:
             await self.external_quarantine(deletion.user_id, deletion.operation_id)
         async with (
-            aiosqlite.connect(self.users.db_path) as db,
+            diagnostic_connect(self.users.db_path) as db,
             db.execute("SELECT id FROM sessions WHERE user_id=? ORDER BY id", (deletion.user_id,)) as cur,
         ):
             sessions = [row[0] for row in await cur.fetchall()]
@@ -207,7 +218,7 @@ class AccountDeletionService:
                 request_id=f"account-retirement:{deletion.operation_id}:{session_id}",
                 expected_user_id=deletion.user_id,
             )
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             await db.execute(
                 "UPDATE account_deletions SET quarantined_at=COALESCE(quarantined_at,?),state=CASE WHEN state='retained' THEN 'quarantined' ELSE state END WHERE operation_id=?",
                 (self.clock().isoformat(), deletion.operation_id),
@@ -223,14 +234,14 @@ class AccountDeletionService:
 
     async def _erase_guarded(self, deletion: AccountDeletion, epoch: int) -> None:
         async with (
-            aiosqlite.connect(self.users.db_path) as db,
+            diagnostic_connect(self.users.db_path) as db,
             db.execute("SELECT state FROM account_deletions WHERE operation_id=?", (deletion.operation_id,)) as cur,
         ):
             operation = await cur.fetchone()
         if operation and operation[0] == "verifying":
             await self._finish_verification(deletion, epoch)
             return
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -285,6 +296,8 @@ class AccountDeletionService:
                         "(SELECT row_key FROM account_deletion_rows WHERE operation_id=? AND table_name='artifacts'))",
                         (deletion.operation_id, deletion.operation_id, table, deletion.operation_id),
                     )
+                # Preserve protocol evidence before any independently committed domain erasure.
+                await protocol_receipts(db, deletion.user_id, secret=self.secret, erased_at=self.clock().isoformat())
                 await db.execute("UPDATE account_deletions SET state='purging' WHERE operation_id=?", (deletion.operation_id,))
                 await db.commit()
             except BaseException:
@@ -294,7 +307,7 @@ class AccountDeletionService:
         # here retains the source graph and exact object inventory for retry.
         await self.external_cleanup(deletion.user_id, deletion.operation_id)
         async with (
-            aiosqlite.connect(self.users.db_path) as db,
+            diagnostic_connect(self.users.db_path) as db,
             db.execute(
                 "SELECT storage_kind,object_key FROM account_deletion_objects WHERE operation_id=? AND completed_at IS NULL", (deletion.operation_id,)
             ) as cur,
@@ -307,25 +320,42 @@ class AccountDeletionService:
             if erase is None:
                 raise AccountDeletionError("account_erasure_backend_unavailable")
             await erase(key)
-            async with aiosqlite.connect(self.users.db_path) as db:
+            async with diagnostic_connect(self.users.db_path) as db:
                 await self._assert_lease(db, deletion, epoch)
                 await db.execute(
                     "UPDATE account_deletion_objects SET completed_at=? WHERE operation_id=? AND storage_kind=? AND object_key=?",
                     (self.clock().isoformat(), deletion.operation_id, storage_kind, key),
                 )
                 await db.commit()
+        split = domain_layout_active(self.users.db_path)
+        if split:
+            for domain in ("observability", "notifications", "content", "execution"):
+                async with diagnostic_connect(domain_database_path(self.users.db_path, domain)) as domain_db:
+                    await domain_db.execute("PRAGMA foreign_keys=ON")
+                    await domain_db.execute("PRAGMA main.secure_delete=ON")
+                    await domain_db.execute("BEGIN IMMEDIATE")
+                    try:
+                        await self._check_lease(domain_db, deletion, epoch)
+                        await erase_rows(domain_db, deletion.operation_id, primary, domain=domain)
+                        if domain == "content":
+                            await domain_db.execute("INSERT INTO canvas_fts(canvas_fts) VALUES ('rebuild')")
+                        await domain_db.commit()
+                    except BaseException:
+                        await domain_db.rollback()
+                        raise
         # Preserve only the opaque retired principal needed by shared-resource
         # creator FKs. All personal attributes, credentials and settings vanish.
-        async with aiosqlite.connect(self.users.db_path) as db:
+        async with diagnostic_connect(self.users.db_path) as db:
             await db.execute("PRAGMA foreign_keys=ON")
-            await db.execute("PRAGMA secure_delete=ON")
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await self._assert_lease(db, deletion, epoch)
                 await reviewed_schema(db)
                 await protocol_receipts(db, deletion.user_id, secret=self.secret, erased_at=self.clock().isoformat())
-                await erase_rows(db, deletion.operation_id, primary)
-                await db.execute("INSERT INTO canvas_fts(canvas_fts) VALUES ('rebuild')")
+                await erase_rows(db, deletion.operation_id, primary, domain="core" if split else None)
+                if not split:
+                    await db.execute("INSERT INTO canvas_fts(canvas_fts) VALUES ('rebuild')")
                 await db.execute(
                     "UPDATE users SET display_name=NULL,avatar_url=NULL,password_hash=NULL,oauth_providers_json='[]',preferences_json='{}',"
                     "email_verified=0,credit_balance=0,credit_quota=0,verify_token_jti=NULL,datarc_member_uid=NULL,active_team_id=NULL,"
@@ -351,11 +381,21 @@ class AccountDeletionService:
         await self._finish_verification(deletion, epoch)
 
     async def _finish_verification(self, deletion: AccountDeletion, epoch: int) -> None:
-        async with aiosqlite.connect(self.users.db_path) as db:
+        if domain_layout_active(self.users.db_path):
+            for domain in ("observability", "notifications", "content", "execution"):
+                async with diagnostic_connect(domain_database_path(self.users.db_path, domain)) as domain_db:
+                    await self._check_lease(domain_db, deletion, epoch)
+                    await domain_db.commit()
+                    await domain_db.execute("VACUUM")
+                    async with domain_db.execute("PRAGMA main.wal_checkpoint(TRUNCATE)") as cursor:
+                        checkpoint = await cursor.fetchone()
+                    if checkpoint is None or checkpoint[0] != 0:
+                        raise AccountDeletionError("account_storage_checkpoint_pending")
+        async with diagnostic_connect(self.users.db_path) as db:
             await self._assert_lease(db, deletion, epoch)
             await db.commit()
             await db.execute("VACUUM")
-            async with db.execute("PRAGMA wal_checkpoint(TRUNCATE)") as cur:
+            async with db.execute("PRAGMA main.wal_checkpoint(TRUNCATE)") as cur:
                 checkpoint = await cur.fetchone()
             if checkpoint is None or checkpoint[0] != 0:
                 raise AccountDeletionError("account_storage_checkpoint_pending")

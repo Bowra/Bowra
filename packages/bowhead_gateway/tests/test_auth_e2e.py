@@ -14,11 +14,11 @@ from types import SimpleNamespace
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
+from gateway_legacy_database import upgrade
 
 from bowhead_core import SessionStore
 
@@ -50,7 +50,7 @@ async def app_ctx_auth(tmp_path, monkeypatch):
     with sqlite3.connect(db) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
     sess = SessionStore(str(db))
     await sess.initialize()
     user = UserStore(str(db))
@@ -198,7 +198,7 @@ async def test_register_login_me_logout_flow(
         base64.urlsafe_b64encode(b"k" * 32).decode().rstrip("="),
     )
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         # 1. register
         r = await c.post(
             "/api/v1/auth/register",
@@ -301,7 +301,7 @@ async def test_refresh_only_logout_fences_generation_before_first_chat_claim(
 ) -> None:
     """A refresh-only logout must fence the chain even before /me or chat claim."""
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         registered = await c.post(
             "/api/v1/auth/register",
             json={"email": "refresh-only@test.com", "password": "Passw0rd!"},
@@ -333,7 +333,7 @@ async def test_refresh_only_logout_fences_generation_before_first_chat_claim(
 
 async def _register_for_refresh(app, email: str) -> tuple[str, str, str]:
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as bootstrap:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as bootstrap:
         registered = await bootstrap.post(
             "/api/v1/auth/register",
             json={"email": email, "password": "Passw0rd!"},
@@ -350,7 +350,7 @@ async def _register_for_refresh(app, email: str) -> tuple[str, str, str]:
 
 async def _refresh_with(app, refresh: str) -> httpx2.Response:
     transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as client:
         client.cookies.set("bowhead_refresh", refresh)
         return await client.post("/api/v1/auth/refresh")
 
@@ -486,7 +486,7 @@ async def test_predecessor_replayed_after_grace_is_rejected(app_ctx_auth) -> Non
 async def test_logged_out_refresh_token_is_not_treated_as_superseded(app_ctx_auth) -> None:
     _user_id, refresh, _generation_hash = await _register_for_refresh(app_ctx_auth, "refresh-logout@test.com")
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as client:
         client.cookies.set("bowhead_refresh", refresh)
         assert (await client.post("/api/v1/auth/logout")).status_code == 200
     replay = await _refresh_with(app_ctx_auth, refresh)
@@ -501,7 +501,7 @@ async def test_bearer_only_logout_fences_current_and_legacy_access_generations(
     legacy: bool,
 ) -> None:
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         registered = await c.post(
             "/api/v1/auth/register",
             json={
@@ -564,7 +564,7 @@ async def test_logout_everywhere_fences_unseen_legacy_access_token(
 ) -> None:
     """A pre-upgrade token must not register itself after the user-wide fence."""
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as owner:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as owner:
         registered = await owner.post(
             "/api/v1/auth/register",
             json={"email": "legacy-fence@test.com", "password": "Passw0rd!"},
@@ -599,7 +599,7 @@ async def test_logout_everywhere_fences_unseen_legacy_access_token(
 async def test_login_with_existing_user(app_ctx_auth) -> None:
     """login 已注册用户."""
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         # Register first.
         r = await c.post(
             "/api/v1/auth/register",
@@ -626,7 +626,7 @@ async def test_login_with_existing_user(app_ctx_auth) -> None:
 async def test_login_wrong_password(app_ctx_auth) -> None:
     """错密码 401."""
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         await c.post(
             "/api/v1/auth/register",
             json={"email": "carol@test.com", "password": "Passw0rd!", "name": "Carol"},
@@ -643,7 +643,7 @@ async def test_login_wrong_password(app_ctx_auth) -> None:
 async def test_register_duplicate_email_rejected(app_ctx_auth) -> None:
     """同 email 二次注册 → 拒绝 (409 conflict OR 429 rate-limit OR 400 bad request)."""
     transport = httpx2.ASGITransport(app=app_ctx_auth)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as c:
+    async with httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"}) as c:
         await c.post(
             "/api/v1/auth/register",
             json={"email": "dup@test.com", "password": "Passw0rd!"},
@@ -662,7 +662,7 @@ async def test_external_session_requires_its_adapter_on_access_and_refresh(app_c
     from bowhead_gateway.edition_extensions import GatewayExtensions
 
     app_ctx_auth.state.gateway_extensions = GatewayExtensions()
-    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app_ctx_auth), base_url="http://gw") as client:
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app_ctx_auth), base_url="http://gw", headers={"Origin": "http://gw"}) as client:
         registered = await client.post("/api/v1/auth/register", json={"email": "external-session@test.com", "password": "Passw0rd!"})
         assert registered.status_code == 200, registered.text
         assert (await client.get("/api/v1/auth/me")).status_code == 200

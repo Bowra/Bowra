@@ -54,6 +54,7 @@ from bowhead_core.kb.schemas import (
 )
 from bowhead_core.kb.telemetry import emit_audit
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.sqlite_domains import domain_database_path
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -1250,14 +1251,17 @@ async def _process_zip_bundle(
                         datetime.now(tz=UTC).isoformat(timespec="seconds"),
                     ),
                 )
-                await db.execute(
-                    "INSERT OR IGNORE INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,?)",
-                    (
-                        bundle_artifact.id,
-                        artifact.id,
-                        datetime.now(tz=UTC).isoformat(timespec="seconds"),
-                    ),
-                )
+                await db.commit()
+                async with _open_db(domain_database_path(artifact_store.db_path, "execution")) as association_db:
+                    await association_db.execute(
+                        "INSERT OR IGNORE INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,?)",
+                        (
+                            bundle_artifact.id,
+                            artifact.id,
+                            datetime.now(tz=UTC).isoformat(timespec="seconds"),
+                        ),
+                    )
+                    await association_db.commit()
                 await db.commit()
             from bowhead_core.kb.ingestion import KnowledgeAction
 
@@ -2659,6 +2663,25 @@ async def verify_file_source(file_id: str, request: Request, response: Response,
     )
 
 
+@router.post("/files/{file_id}/chat-attachment", dependencies=[Depends(require_not_readonly), Depends(require_feature_licensed("kb"))])
+async def prepare_file_chat_attachment(file_id: str, request: Request, user: User = Depends(_current_user)) -> dict[str, Any]:
+    """Prepare the original owner's KB upload through current KB and Space authority."""
+    ctx = await _make_scope_context_checked(user, request, operation=SpaceOperation.EXECUTE)
+    file = await _kb_scope_check(file_id, ctx, _get_files_store(request), request)
+    await _require_kb_scope_grant(request, ctx, scope=file.scope, scope_id=file.scope_id, permission="read")
+    await _require_kb_file_grant(request, ctx, file, permission="read")
+    if file.uploaded_by != user.id or not ctx.workspace_id or file.workspace_id != ctx.workspace_id or file.parse_status != "done":
+        raise _kb_error(403, "kb_file_access_denied")
+    artifacts = _get_artifact_store(request)
+    existing = await artifacts.get_ready_uploads_for_chat([file.artifact_id], user_id=user.id, workspace_id=ctx.workspace_id)
+    artifact = existing.get(file.artifact_id)
+    if artifact is None:
+        artifact = await artifacts.bind_owned_kb_upload_for_chat(file.artifact_id, user_id=user.id, workspace_id=ctx.workspace_id)
+    if artifact is None:
+        raise _kb_error(409, "kb_source_missing")
+    return {"fileId": artifact.id, "filename": artifact.filename, "mime": artifact.mime, "size": artifact.size}
+
+
 async def _require_source_write(file_id: str, request: Request, user: User) -> tuple[ScopeContext, KbFileDTO]:
     ctx = await _make_scope_context_checked(user, request, operation=SpaceOperation.EXECUTE)
     file = await _kb_scope_check(file_id, ctx, _get_files_store(request), request)
@@ -3007,3 +3030,9 @@ async def resume_rebuild_batch(job_id: str, request: Request, user: User = Depen
         raise _kb_error(409, "kb_rebuild_busy")
     start_rebuild_job(request.app, job_id)
     return {"state": "running"}
+
+
+# The additive navigation API uses this original router and its authorization helpers.
+from bowhead_gateway.routes.kb_navigation import router as navigation_router  # noqa: E402
+
+router.include_router(navigation_router)

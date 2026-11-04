@@ -22,6 +22,7 @@ tools:
     - present_artifacts
     - bi_schema
     - bi_query
+    - kb_list_sources
     - kb_search
     - kb_list_tables
     - kb_query_records
@@ -41,6 +42,7 @@ tools:
     - config_read
     - config_propose
     - clarification_ask
+    - clarification_dismiss
     - feedback_escalate
     - send_email
     - get_current_user

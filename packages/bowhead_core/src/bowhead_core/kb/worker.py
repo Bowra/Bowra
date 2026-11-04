@@ -26,6 +26,7 @@ from bowhead_core.kb.document import ChunkMetadata, KbChunk, KbDocument, is_pars
 from bowhead_core.kb.errors import UnsupportedMimeError
 from bowhead_core.kb.files_store import summary_json_with_truncation
 from bowhead_core.kb.generations import KbGenerationStore, generation_writes_enabled
+from bowhead_core.kb.ingestion import KnowledgeAction
 from bowhead_core.kb.loader.dispatch import get_loader
 from bowhead_core.kb.parse_recovery import PARSE_ERROR_SOURCE_MISSING, PARSE_ERROR_TIMEOUT, PARSE_TIMEOUT_S
 from bowhead_core.kb.splitter.markdown_section import make_markdown_splitter
@@ -120,6 +121,7 @@ def _is_transient_load_failure(load_result) -> bool:
 
 
 _PARSE_AUTHORIZER: ContextVar[Callable | None] = ContextVar("kb_parse_authorizer", default=None)
+_PARSE_DESCRIPTION_ACTION: ContextVar[KnowledgeAction | None] = ContextVar("kb_parse_description_action", default=None)
 _PARSE_OWNER: ContextVar[tuple[str, int, int] | None] = ContextVar("kb_parse_owner", default=None)
 
 
@@ -146,8 +148,10 @@ class KbWorker:
         active_per_row_tasks_ref: dict | None = None,  # app.state dict for strong-ref task tracking
         ingestion_gate: object | None = None,
         ingestion_authorizer: Callable | None = None,
+        description_assignment_resolver: Callable | None = None,
     ) -> None:
         self._files = files_store
+        self._description_assignment_resolver = description_assignment_resolver
         self._store = store
         self._embedder = embedder
         self._inferrer = framework_inferrer
@@ -178,14 +182,23 @@ class KbWorker:
         self._ingestion_gate = ingestion_gate
         self._ingestion_authorizer = ingestion_authorizer
 
-    async def parse_and_index(self, file_id: str, *, allow_terminal: bool = False, authorize: Callable[..., Awaitable[bool]] | None = None) -> None:
+    async def parse_and_index(
+        self,
+        file_id: str,
+        *,
+        allow_terminal: bool = False,
+        authorize: Callable[..., Awaitable[bool]] | None = None,
+        description_action: KnowledgeAction | None = None,
+    ) -> None:
         auth_token = _PARSE_AUTHORIZER.set(authorize)
+        description_token = _PARSE_DESCRIPTION_ACTION.set(description_action)
         token = _PARSE_OWNER.set(None)
         try:
             await self._parse_and_index_scoped(file_id, allow_terminal=allow_terminal)
         finally:
             _PARSE_OWNER.reset(token)
             _PARSE_AUTHORIZER.reset(auth_token)
+            _PARSE_DESCRIPTION_ACTION.reset(description_token)
 
     async def _parse_and_index_scoped(self, file_id: str, *, allow_terminal: bool = False) -> None:
         """[P1-S2] semaphore-wrapped entry point. 限并发 5 个.
@@ -463,12 +476,25 @@ class KbWorker:
         if authorize is not None and not await authorize(await self._files.get(file.file_id)):
             await self._store.delete_generation(current, generation_id)
             raise PermissionError("rebuild authorization changed")
+        description_assignment = None
+        # Native uploads attach their persisted membership authorizer after entry.
+        # Explicit rebuild callbacks still require their own description action.
+        original_ingestion = bool(current.ingestion_action_id and authorize is self._ingestion_authorizer)
+        if self._description_assignment_resolver is not None and (
+            authorize is None or original_ingestion or _PARSE_DESCRIPTION_ACTION.get() is not None
+        ):
+            try:
+                description_assignment = await self._description_assignment_resolver(current.team_id)
+            except Exception:
+                logger.warning("kb.description_assignment_unavailable team=%s", current.team_id)
         published = await generations.publish(
             current,
             generation_id,
             layer=load_result.layer_used,
             duration_ms=duration_ms,
             summary_json=summary_json_with_truncation(current.summary_json, load_result.metadata.get("truncated_rows")),
+            description_fingerprint=description_assignment.fingerprint if description_assignment else None,
+            description_action=_PARSE_DESCRIPTION_ACTION.get(),
         )
         if not published:
             await self._store.delete_generation(current, generation_id)

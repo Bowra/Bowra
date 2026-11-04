@@ -23,6 +23,7 @@ from bowhead_core.feedback_casework_store import (
     STATUS_RUNNING,
     FeedbackCaseworkStore,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -40,14 +41,14 @@ def _config(path: Path, target: str = "core") -> Config:
 @pytest.fixture()
 def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     return str(path)
 
 
 def test_0062_creates_sidecar_only_on_core_and_is_repeatable(tmp_path: Path) -> None:
     core = tmp_path / "core.db"
-    command.upgrade(_config(core), "head")
-    command.upgrade(_config(core), "head")  # Idempotent rerun (matching column sets cause no drift error)
+    command.upgrade(_config(core), SOURCE_REVISION)
+    command.upgrade(_config(core), SOURCE_REVISION)  # Idempotent rerun (matching column sets cause no drift error)
     with sqlite3.connect(core) as db:
         cols = {r[1] for r in db.execute("PRAGMA table_info(feedback_casework)")}
         assert {"candidate_id", "status", "reason_code", "prefill_json", "receipt_at", "redraft_day"} <= cols
@@ -56,7 +57,7 @@ def test_0062_creates_sidecar_only_on_core_and_is_repeatable(tmp_path: Path) -> 
         # Candidate columns stay untouched (0059 checks exact equality; migration history is immutable).
         assert "receipt_at" not in {r[1] for r in db.execute("PRAGMA table_info(feedback_candidates)")}
     kb = tmp_path / "kb.db"
-    command.upgrade(_config(kb, target="files"), "head")
+    command.upgrade(_config(kb, target="files"), SOURCE_REVISION)
     with sqlite3.connect(kb) as db:
         assert "feedback_casework" not in {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 

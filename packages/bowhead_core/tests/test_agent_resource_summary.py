@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import aiosqlite
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_resource_summary import agent_resources, plugin_change_items, tool_and_skill_changes
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 
 def _grant(name: str) -> dict:
@@ -25,7 +25,7 @@ def test_tool_and_skill_changes_list_added_and_removed_items():
 
 async def _team(tmp_path):
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="Team", max_seats=2)

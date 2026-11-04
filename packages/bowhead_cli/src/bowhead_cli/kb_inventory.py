@@ -12,6 +12,7 @@ import anyio
 from bowhead_core.kb.files_store import _row_to_dto
 from bowhead_core.kb.health import SourceRecord, check_storage_health, inspect_file_health
 from bowhead_core.kb.schemas import KbFileDTO
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import ArtifactBackend
@@ -31,7 +32,7 @@ async def inventory_page(
     start = monotonic()
     files_path = db_path.parent / "kb_files.db"
     # mode=ro fails on missing databases; no initialize(), WAL pragma or migrations.
-    async with aiosqlite.connect(f"{files_path.resolve().as_uri()}?mode=ro", uri=True) as db:
+    async with diagnostic_connect(f"{files_path.resolve().as_uri()}?mode=ro", uri=True) as db:
         db.row_factory = aiosqlite.Row
         params: list[Any] = [after]
         where = "soft_deleted_at IS NULL AND file_id > ?"
@@ -42,7 +43,7 @@ async def inventory_page(
             rows = await cursor.fetchall()
         files = [_row_to_dto(row) for row in rows[:limit]]
     sources: dict[str, SourceRecord] = {}
-    async with aiosqlite.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as db:
+    async with diagnostic_connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as db:
         ids = list(dict.fromkeys(file.artifact_id for file in files))
         for offset in range(0, len(ids), 200):
             batch = ids[offset : offset + 200]

@@ -23,6 +23,7 @@ from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.documents import package_io as office
 from bowhead_core.documents import upload_confirmation as confirmation
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_gateway.routes import files, files_presign
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -68,7 +69,7 @@ async def ctx(tmp_path, monkeypatch):
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{store.db_path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     await store.initialize()
     sessions = SessionStore(store.db_path)
     await sessions.initialize()

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_artifact_capability import (
     ArtifactCapabilityRegistry,
     ArtifactGenerationAttempt,
@@ -38,13 +37,14 @@ from bowhead_core.agent_execution_binding import (
 )
 from bowhead_core.session_store import SessionStore
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 _HASH = "sha256:" + "1" * 64
 
 
 async def _admitted_system_execution(tmp_path: Path):
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     users = UserStore(db_path)
     sessions = SessionStore(db_path)
     await users.initialize()

@@ -5,9 +5,9 @@ from importlib import import_module
 
 import pytest
 from alembic import command
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.session_store import SessionStore
+from core_legacy_database import TARGET_FILES
 from test_agent_collaboration import collab as collab
 from test_agent_collaboration_migration import config
 from test_chat_reference_storage import _historical_fixture

@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslations } from "next-intl";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { appPath } from "@/lib/base-path";
+import { ApiError } from "@/lib/api-client";
+import { retryResultsCapabilities, useResultsCapabilities } from "@/lib/use-results-capabilities";
 import { DialogShell } from "@/components/ui/dialog";
 import {
   KIND_META,
@@ -75,6 +77,14 @@ export function ShareDialog(props: ShareDialogProps) {
   const t = useTranslations("share");
   const isMobile = useMediaQuery("(max-width: 760px)");
   const meta = localizedMeta(props.kind, t);
+  const capabilities = useResultsCapabilities();
+  const [serverDisabled, setServerDisabled] = useState(false);
+  const sharingAllowed = props.kind !== "report" || (capabilities.contentSharing === true && !serverDisabled);
+  const sharingNotice = sharingAllowed ? undefined : t(serverDisabled || capabilities.sharingDisabled ? "deployment_disabled" : "capability_unavailable");
+  useEffect(() => {
+    setServerDisabled(false);
+    if (props.kind === "report") void retryResultsCapabilities();
+  }, [props.kind, props.resourceId]);
 
   const [state, setState] = useState<ShareState | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -99,7 +109,12 @@ export function ShareDialog(props: ShareDialogProps) {
   const mutate = useCallback(async (fn: () => Promise<unknown>) => {
     setBusy(true);
     try { await fn(); await load(); fireChanged?.(); }
-    catch (e) { setErr(t("change_failed_safe")); }
+    catch (e) {
+      if (e instanceof ApiError && e.code === "content_sharing_disabled") {
+        setServerDisabled(true);
+        setErr(null);
+      } else setErr(t("change_failed_safe"));
+    }
     finally { setBusy(false); }
   }, [load, fireChanged, t]);
 
@@ -112,7 +127,7 @@ export function ShareDialog(props: ShareDialogProps) {
   const downgradeLocked = props.kind === "team_skill" && !!props.downgradeLocked && state?.audience === "team_wide";
 
   const pickAudience = useCallback((target: Audience) => {
-    if (!state) return;
+    if (!state || (!sharingAllowed && target !== "private")) return;
     if (target === "team_wide" && teamWideLocked) {
       setErr(t("team_wide_locked_hint"));  // Double guard: segmented already disabled, keyboard/extreme-state fallback.
       return;
@@ -134,7 +149,7 @@ export function ShareDialog(props: ShareDialogProps) {
     if (target === state.audience) return;
     if (target === "private" && hasRoster(state)) { setConfirmRevoke(true); return; }
     void mutate(() => putAudience(props.kind, props.resourceId, target));
-  }, [state, mutate, props.kind, props.resourceId, teamWideLocked, downgradeLocked, t]);
+  }, [state, mutate, props.kind, props.resourceId, teamWideLocked, downgradeLocked, sharingAllowed, t]);
 
   // Effective rendered audience = user-intent override ?? server-derived value.
   const effectiveAudience: Audience = view ?? state?.audience ?? "private";
@@ -144,7 +159,9 @@ export function ShareDialog(props: ShareDialogProps) {
       t={t} meta={meta} state={state} audience={effectiveAudience} err={err} busy={busy} mobile={isMobile}
       teamWideLocked={teamWideLocked}
       downgradeLocked={downgradeLocked}
-      onAddGrant={(p) => mutate(() => addShareGrant(props.kind, props.resourceId, p))}
+      sharingAllowed={sharingAllowed}
+      sharingNotice={sharingNotice}
+      onAddGrant={(p) => { if (sharingAllowed) void mutate(() => addShareGrant(props.kind, props.resourceId, p)); }}
       onRevokeGrant={(gid) => mutate(() => revokeShareGrant(props.kind, props.resourceId, gid))}
       onPickAudience={pickAudience}
     />
@@ -199,13 +216,15 @@ export function ShareDialog(props: ShareDialogProps) {
 
 /* ───────── audience-aware body (shared desktop + mobile) ───────── */
 function DialogBody({
-  t, meta, state, audience, err, busy, mobile, teamWideLocked, downgradeLocked, onAddGrant, onRevokeGrant, onPickAudience,
+  t, meta, state, audience, err, busy, mobile, teamWideLocked, downgradeLocked, sharingAllowed, sharingNotice, onAddGrant, onRevokeGrant, onPickAudience,
 }: {
   t: Tr;
   meta: { typeLabel: string; verb: string; perm: string };
   state: ShareState | null; audience: Audience; err: string | null; busy: boolean; mobile: boolean;
   teamWideLocked?: boolean;
   downgradeLocked?: boolean;
+  sharingAllowed: boolean;
+  sharingNotice?: string;
   onAddGrant: (p: { principal_type: "user" | "group"; principal_id: string }) => void;
   onRevokeGrant: (grantId: string) => void;
   onPickAudience: (a: Audience) => void;
@@ -219,10 +238,11 @@ function DialogBody({
   const pending = state.pending_requests ?? 0;
   return (
     <div className={`legacy-share-body${mobile ? " is-mobile" : ""}`}>
+      {sharingNotice && <p role="status">{sharingNotice}</p>}
       <ShSegmented active={audience} onPick={onPickAudience} busy={busy}
-        lockedIds={teamWideLocked ? ["team_wide"] : downgradeLocked ? ["custom", "private"] : undefined}
+        lockedIds={!sharingAllowed ? ["custom", "team_wide"] : teamWideLocked ? ["team_wide"] : downgradeLocked ? ["custom", "private"] : undefined}
         lockedTitle={
-          teamWideLocked ? t("team_wide_locked_hint") : downgradeLocked ? t("team_wide_downgrade_locked_hint") : undefined
+          sharingNotice ?? (teamWideLocked ? t("team_wide_locked_hint") : downgradeLocked ? t("team_wide_downgrade_locked_hint") : undefined)
         }
         height={mobile ? 42 : 38} fontSize={mobile ? 12.5 : 13} />
 
@@ -241,7 +261,7 @@ function DialogBody({
 
       {audience === "custom" && (
         <CustomBody t={t} grants={grants} perm={meta.perm} verb={meta.verb} typeLabel={meta.typeLabel}
-          busy={busy} onAddGrant={onAddGrant} onRevokeGrant={onRevokeGrant} />
+          busy={busy} sharingAllowed={sharingAllowed} onAddGrant={onAddGrant} onRevokeGrant={onRevokeGrant} />
       )}
 
       {audience === "team_wide" && (
@@ -266,19 +286,20 @@ function DialogBody({
 }
 
 function CustomBody({
-  t, grants, perm, verb, typeLabel, busy, onAddGrant, onRevokeGrant,
+  t, grants, perm, verb, typeLabel, busy, sharingAllowed, onAddGrant, onRevokeGrant,
 }: {
   t: Tr;
   grants: ShareState["grants"]; perm: string; verb: string; typeLabel: string; busy: boolean;
+  sharingAllowed: boolean;
   onAddGrant: (p: { principal_type: "user" | "group"; principal_id: string }) => void;
   onRevokeGrant: (grantId: string) => void;
 }) {
   const rows = grants ?? [];
   return (
     <>
-      <div className="legacy-share-search-row">
+      {sharingAllowed && <div className="legacy-share-search-row">
         <DirectorySearch t={t} busy={busy} existing={new Set(rows.map((g) => g.principal_id))} onPick={onAddGrant} />
-      </div>
+      </div>}
       {rows.length === 0 ? (
         <div className="legacy-share-roster-empty">
           <ShQuietState icon="users" title={t("empty_roster_title")}

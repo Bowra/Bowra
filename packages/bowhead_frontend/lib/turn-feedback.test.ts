@@ -79,6 +79,11 @@ describe("step outcome copy (D6)", () => {
     expect(stepIssueSummary(outcome, 3)).toEqual({ key: "step_issues_affecting_n", count: 1, tone: "warning" });
   });
 
+  it("preserves a delivery-gap warning after operational recovery", () => {
+    const outcome = done({ issue_steps: 1, recovered_steps: 1, unresolved_steps: 0, answer_affected: true });
+    expect(stepIssueSummary(outcome, 1)).toEqual({ key: "step_issues_n", count: 1, tone: "warning" });
+  });
+
   it("keeps the neutral local count for old turns and failed turns", () => {
     expect(stepIssueSummary(null, 2)).toEqual({ key: "step_issues_n", count: 2, tone: "secondary" });
     expect(stepIssueSummary(null, 0)).toBeNull();

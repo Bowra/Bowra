@@ -5,7 +5,7 @@ from importlib import import_module
 
 import pytest
 import respx
-from bowhead_cli.migrate import TARGET_FILES
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _upgrade
 from test_reference_bi_continuation import claimed_case as _claimed_case
 from test_reference_bi_continuation import continuation_case as _continuation_case

@@ -244,7 +244,7 @@ async def test_current_roster_and_scope_revocation_override_cached_candidates(re
 
 
 @pytest.mark.parametrize("receiver_case", ["admission_optional_unused_invoke"], indirect=True)
-async def test_separate_system_receivers_cannot_collectively_satisfy_a_single_primary(receiver_case, monkeypatch):
+async def test_temporary_method_reads_do_not_collect_other_receivers_invocation_grants(receiver_case, monkeypatch):
     from bowhead_core.agents.registry import AgentRegistry
     from bowhead_core.subagent import PROFILES
     from bowhead_core.system_agent_reference_metadata import build_system_agent_reference_metadata
@@ -284,8 +284,10 @@ async def test_separate_system_receivers_cannot_collectively_satisfy_a_single_pr
         return await read(input_document=skill_document(case, resources), lead_peers=peers, system_agent_index=index)
 
     assert [item.resource.id for item in (await choices([case.selected])).candidates] == ["system:compute"]
-    assert [item.resource.id for item in (await choices([case.unused])).candidates] == ["system:consultant"]
-    assert not (await choices([case.selected, case.unused])).candidates
+    assert [item.resource.id for item in (await choices([case.unused])).candidates] == ["system:compute", "system:consultant"]
+    assert [item.resource.id for item in (await choices([case.selected, case.unused])).candidates] == ["system:compute"]
+    assert PROFILES["compute"].skill_runtime_scope.invoke_names == ()
+    assert PROFILES["consultant"].skill_runtime_scope.invoke_names == ("unused",)
     assert not (await read(lead_peers=[], system_agent_index=index)).candidates
 
 

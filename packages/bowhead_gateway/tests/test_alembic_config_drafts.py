@@ -9,12 +9,12 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 EXPECTED_INDEXES = {
     "idx_config_copilot_draft_owner",
@@ -44,9 +44,9 @@ def test_config_draft_revision_upgrades_all_eight_targets(tmp_path) -> None:
     core_path = tmp_path / TARGET_FILES["core"]
     _create_1_0_fixture(core_path)
 
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     # Repeated execution is idempotent.
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     for filename in TARGET_FILES.values():
         with sqlite3.connect(tmp_path / filename) as connection:
@@ -69,7 +69,7 @@ def test_config_draft_revision_upgrades_all_eight_targets(tmp_path) -> None:
 def test_config_draft_kind_check_constraint(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as connection:
         with pytest.raises(sqlite3.IntegrityError):

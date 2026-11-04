@@ -54,6 +54,7 @@ from bowhead_core.skill_read_closure import (
 from bowhead_core.skill_read_receiver import require_prepared_primary_skill_baseline
 from bowhead_core.skill_read_render import validate_prepared_skill_read_parameters
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 def reference_start_receiver(document: InputDocument, automatic_receiver: AgentResourceRef | None = None) -> AgentResourceRef:
@@ -105,6 +106,7 @@ class ReferenceStartAdmission:
     mcp_access: AccessControlStore | None = field(default=None, repr=False)
     # Server preparation metadata for entry support; never a permission grant.
     required_skill_modes: tuple[Literal["baseline", "readonly_extension"], ...] = ()
+    task_method_reference: bool = False
     require_released_entry: bool = False
     # Preparation must distinguish an attachment-only task from an empty task.
     # Attachment identities remain solely in the canonical Turn source.
@@ -114,7 +116,7 @@ class ReferenceStartAdmission:
     automatic_receiver: AgentResourceRef | None = None
 
     def snapshot(self) -> ReferenceStartAdmission:
-        if type(self.require_released_entry) is not bool or type(self.has_attachments) is not bool:
+        if type(self.require_released_entry) is not bool or type(self.has_attachments) is not bool or type(self.task_method_reference) is not bool:
             raise ValueError("reference_start_invalid")
         if (
             type(self.required_skill_modes) is not tuple
@@ -286,7 +288,9 @@ async def admit_reference_start_in_connection(
         )
         if closure is None:
             closure = empty_baseline_selection(expected_scope)
-        if closure.scope != expected_scope or Path(sources.db_path) != Path(bindings.db_path):
+        if closure.scope != expected_scope or Path(domain_database_path(sources.db_path, "core")) != Path(
+            domain_database_path(bindings.db_path, "core")
+        ):
             raise ValueError("reference_skill_preparation_scope_mismatch")
         for item in closure.items:
             await sources.revalidate_in_connection(db, item.proof)
@@ -388,7 +392,13 @@ async def admit_reference_start_in_connection(
         }
     )
     if closure is not None:
-        await require_prepared_primary_skill_baseline(db, ReferencePrimaryInput(source, plan, binding), closure, sources=admission.skill_sources)
+        await require_prepared_primary_skill_baseline(
+            db,
+            ReferencePrimaryInput(source, plan, binding),
+            closure,
+            sources=admission.skill_sources,
+            task_method_reference=admission.task_method_reference,
+        )
     scope = ReferenceScope(
         team_id=team_id, user_id=source.user_id, workspace_id=source.workspace_id, session_id=source.session_id, policy_epoch=admission.policy_epoch
     )

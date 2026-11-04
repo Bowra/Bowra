@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "@/lib/api-client";
 import type { DocumentJob } from "@/lib/document-drafts";
 import messages from "@/messages/en-US.json";
+import wordFixture from "@/__tests__/fixtures/document-word-canvas.json";
+import { parseDocumentJob } from "@/lib/document-draft-client";
 import { DocumentDraftReview, PAGE_VIEW_DWELL_MS, isDefaultShapeName } from "./document-draft-review";
 
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
@@ -50,6 +52,38 @@ function view(job = draft, onConfirm = vi.fn(), busy = false) {
     </NextIntlClientProvider>
   );
 }
+
+it("reviews Word source locations using the original page and confirmation controls", async () => {
+  const job = parseDocumentJob(structuredClone(wordFixture.source.review), wordFixture.source.context.jobId);
+  job.draft!.manifest.changes.push({
+    before: "SYNTHETIC BRAND",
+    after: "HARBOR DEMO · INTERNAL",
+    evidence: [],
+    location: {
+      kind: "word_block",
+      part: "word/header1.xml",
+      block_id: `${wordFixture.source.review.draft.manifest.source_sha256}:word/header1.xml#paragraph:0`,
+      block_index: 0,
+      story: "header",
+      sections: [1, 2],
+      table_id: null,
+      row: null,
+      column: null,
+    },
+  });
+  const onConfirm = vi.fn();
+  render(view(job, onConfirm));
+  expect(screen.getByText("Body · paragraph 1")).toBeTruthy();
+  expect(screen.getByText("Header · paragraph 1 · Sections 1, 2")).toBeTruthy();
+  expect(screen.getByText(messages.documents.word_source_locations)).toBeTruthy();
+  expect(screen.queryByText(messages.documents.changes_on_page)).toBeNull();
+  const image = await screen.findByRole("img", { name: "Page 1 of 1" });
+  view_(image);
+  fireEvent.click(screen.getByRole("checkbox"));
+  await waitFor(() => expect(blocked(confirmButton())).toBe(false));
+  fireEvent.click(confirmButton());
+  expect(onConfirm).toHaveBeenCalledWith(job.draft_digest);
+});
 
 /** A blocked footer primary stays focusable (aria-disabled); busy primaries are natively disabled. */
 function blocked(button: HTMLButtonElement) {

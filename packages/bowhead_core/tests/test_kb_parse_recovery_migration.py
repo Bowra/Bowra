@@ -8,6 +8,7 @@ from importlib import import_module
 import pytest
 from alembic import command
 from bowhead_core.kb.files_store import KbFilesStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from test_artifact_workspace_cutover_migration import _config
 
 MIGRATION = import_module("bowhead_core.migrations.versions.0114_kb_parse_recovery")
@@ -51,7 +52,7 @@ async def test_store_initialized_database_then_migration_converges(tmp_path) -> 
     path = tmp_path / "kb_files.db"
     await KbFilesStore(path).initialize()
     config = _config(path, "files")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
 
     with sqlite3.connect(path) as db:
         names = [row[1] for row in db.execute("PRAGMA table_info(kb_files)")]

@@ -35,31 +35,6 @@ ChartColumnType = Literal["numeric", "categorical", "date", "geo"]
 ChartColumnRole = Literal["x", "y", "color", "size", "facet"]
 ChartColumnFormat = Literal["int", "float", "percent", "currency", "datetime"]
 
-ChartHint = Literal[
-    "trend",
-    "rank",
-    "share",
-    "compare",
-    "correlation",
-    "composition",
-    "raw",
-    "bridge",
-    "flow",  # WP2: waterfall contribution decomposition / Sankey flow.
-]
-VALID_HINTS: frozenset[str] = frozenset(
-    [
-        "trend",
-        "rank",
-        "share",
-        "compare",
-        "correlation",
-        "composition",
-        "raw",
-        "bridge",
-        "flow",
-    ]
-)
-
 
 @dataclass
 class ChartColumn:
@@ -157,6 +132,8 @@ class ChartSpec:
     calculation_missing: dict[str, int] | None = None
     # Canonical host-compiled evidence; input refs and viewer projection remain separate.
     presentation_plan: dict[str, Any] | None = None
+    # Exact field/axis declarations for the explicit native presentation contract.
+    explicit_presentation: dict[str, Any] | None = None
 
 
 def capped_series(spec: Any) -> tuple[int, int] | None:
@@ -210,7 +187,11 @@ def spec_to_dict(spec: ChartSpec) -> dict[str, Any]:
 
 def _drop_empty(d: Any) -> Any:
     if isinstance(d, dict):
-        return {k: v if k == "presentation_plan" else _drop_empty(v) for k, v in d.items() if v is not None and v not in ([], {})}
+        return {
+            k: v if k in {"presentation_plan", "explicit_presentation"} else _drop_empty(v)
+            for k, v in d.items()
+            if v is not None and v not in ([], {})
+        }
     if isinstance(d, list):
         return [_drop_empty(x) for x in d]
     return d

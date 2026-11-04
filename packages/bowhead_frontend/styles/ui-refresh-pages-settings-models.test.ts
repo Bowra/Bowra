@@ -118,7 +118,7 @@ describe("模型页映射（Page Layout Spec：页头、分组卡片、垂直节
 describe("模型页调用点", () => {
   const src = read("components/settings/models.tsx");
   it("a dirty draft shows the save bar (Review goes through the review flow, Discard drops the draft, the page keeps its leave guard)", () => {
-    expect(src).toMatch(/\{LLM_SETTINGS_V4_ENABLED \? <SaveBar dirty=\{pageMode === "edit" && isDirty && !reviewOpen\} guard=\{false\}/);
+    expect(src).toMatch(/\{LLM_SETTINGS_V4_ENABLED \? <SaveBar dirty=\{pageMode === "edit" && isDirty && !connect && !reviewOpen\} guard=\{false\}/);
     expect(src).toMatch(/saveLabel=\{t\("v4\.review"\)\} onDiscard=\{discardDraft\} onSave=\{\(\) => void reviewDraft\(\)\}/);
   });
   it("loading renders the skeleton", () => {

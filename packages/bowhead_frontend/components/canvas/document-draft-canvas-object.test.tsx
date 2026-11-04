@@ -9,6 +9,7 @@ import {
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixture from "@/__tests__/fixtures/document-draft-canvas.json";
+import wordFixture from "@/__tests__/fixtures/document-word-canvas.json";
 import { apiFetch, apiJson, ApiError } from "@/lib/api-client";
 import { parseDocumentJob } from "@/lib/document-draft-client";
 import messages from "@/messages/en-US.json";
@@ -32,6 +33,25 @@ const post = vi.fn<(body: string) => Promise<unknown>>();
 const isCurrent = vi.fn(() => true);
 const onPublished = vi.fn();
 const onStateChange = vi.fn();
+
+it.each([wordFixture.source, wordFixture.source_pdf])("reports only the real requested Word publication outputs", async (value) => {
+  get.mockResolvedValue(value.published);
+  const onOpenPublished = vi.fn();
+  render(view({ context: value.context, onOpenPublished }));
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+  const receipt = onPublished.mock.calls[0][0];
+  expect(receipt.context).toEqual(value.context);
+  expect(receipt.source.artifactId).toBe(value.published.draft.files["candidate.docx"].artifact_id);
+  if (value.published.draft.descriptor.published_outputs.includes("pdf")) {
+    expect(receipt.pdf.artifactId).toBe(value.published.draft.files["candidate.pdf"].artifact_id);
+    expect(screen.getByRole("button", { name: "Open PDF" })).toBeTruthy();
+  } else {
+    expect(receipt).not.toHaveProperty("pdf");
+    expect(screen.queryByRole("button", { name: "Open PDF" })).toBeNull();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Open Word" }));
+  expect(onOpenPublished).toHaveBeenCalledWith(value.context, receipt.source.artifactId);
+});
 
 function view(overrides: Partial<DocumentDraftCanvasObjectProps> = {}) {
   return (

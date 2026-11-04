@@ -55,6 +55,18 @@ def names_of(hint):
     return [entry["name"] for entry in json.loads(hint[0].split("\n", 1)[1])["authorized_source_sample"]]
 
 
+@pytest.mark.parametrize("identity", ["kbf_012345abcdef", "art_012345abcdef"])
+async def test_explicit_source_identity_omits_optional_hints_but_not_read_authority(identity):
+    ctx, rows = with_sources(source("kbf_012345abcdef", "Policy.pdf"))
+    ctx.user_text = f"Use the explicitly selected source {identity}."
+    assert await build_source_hint(ctx) is None
+    ctx.kb_files_store.list_for_scopes_filtered.assert_not_awaited()
+    record_source_uses(ctx, {"kbf_012345abcdef": "generation-kbf_012345abcdef"})
+    rows["kbf_012345abcdef"].soft_deleted_at = "removed"
+    with pytest.raises(KnowledgeAccessError, match="source_changed"):
+        await validate_retained_sources(ctx, ctx.knowledge_source_uses)
+
+
 async def test_hint_intersects_current_user_and_selected_sources_without_hidden_counts():
     ctx, _ = with_sources(
         source("kbf_allowed", "Travel policy.pdf"),

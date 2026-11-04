@@ -7,6 +7,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.openapi_store import OpenApiStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.edition_extensions import GatewayExtensions
 from bowhead_gateway.routes import team_openapi
@@ -25,7 +26,7 @@ async def community(tmp_path, monkeypatch):
     config.set_main_option("script_location", str(Path(migrations.__file__).parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{users.db_path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     await users.initialize()
     team = await users.create_team(name="Community")
     owner = await users.create_user(team_id=team.id, email="owner@example.com", password="Passw0rd!")

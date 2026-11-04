@@ -50,6 +50,33 @@ def _store(request: Request) -> UserStore:
     return s
 
 
+@router.get("/{workspace_id}/leave")
+async def check_self_leave(
+    workspace_id: str,
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, bool]:
+    try:
+        return {"can_leave": await store.can_leave_workspace(user.team_id, workspace_id, user.id)}
+    except SpaceGovernanceError as exc:
+        raise HTTPException(403 if exc.code == "not_workspace_member" else 409, {"code": exc.code}) from exc
+
+
+@router.post("/{workspace_id}/leave")
+async def leave_workspace(
+    workspace_id: str,
+    user: User = Depends(_current_user),
+    store: UserStore = Depends(_store),
+) -> dict[str, bool]:
+    """Self-exit is independent of governance and never accepts another user ID."""
+    try:
+        await store.leave_workspace(user.team_id, workspace_id, user.id)
+    except SpaceGovernanceError as exc:
+        status_code = 422 if exc.code == "last_workspace_admin" else 403 if exc.code == "not_workspace_member" else 409
+        raise HTTPException(status_code, {"code": exc.code}) from exc
+    return {"ok": True}
+
+
 @router.get("/{workspace_id}/members")
 async def list_members(
     workspace_id: str,

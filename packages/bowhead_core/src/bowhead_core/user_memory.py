@@ -29,6 +29,8 @@ from bowhead_core.memory_privacy import (
     ensure_memory_write_allowed,
     is_memory_read_hidden,
 )
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 _TABLE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_entries (
@@ -341,7 +343,7 @@ class UserMemoryStore:
     """异步 SQLite 封装。生产可换 PG，保持 API 一致."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     @property
     def db_path(self) -> str:
@@ -354,8 +356,14 @@ class UserMemoryStore:
         reference deleted_at, which is added by ALTER on pre-existing tables.
         Reversing this order crashes startup on legacy DBs (P0 caught in smoke).
         """
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+                await _mark_empty_policy_cutover(db)
+                await db.commit()
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(_TABLE_SCHEMA)
             await _migrate_deleted_at(db)
             await _migrate_workspace_id(db)
@@ -592,7 +600,7 @@ class UserMemoryStore:
     ) -> list[MemoryEntry]:
         """M158-18: 跨 user 拉某 kind 的全部 entries (cron 聚合用).
         key_prefix 非空时按前缀 filter. 始终排除 trashed."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             if key_prefix:
                 sql = (
@@ -1281,7 +1289,7 @@ class UserMemoryStore:
         )
 
     async def list_trashed(self, user_id: str) -> list[MemoryEntry]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM memory_entries "
@@ -1294,7 +1302,7 @@ class UserMemoryStore:
 
     async def count_trashed(self, user_id: str) -> int:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM memory_entries WHERE subject_type='user' AND subject_id=? AND deleted_at IS NOT NULL",
                 (user_id,),
@@ -2086,7 +2094,7 @@ class UserMemoryStore:
         return snap_id
 
     async def hard_delete_old_reset_snapshots(self, *, max_age_days: int = 30) -> int:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
                 """
@@ -2170,7 +2178,7 @@ class UserMemoryStore:
         user_id: str,
     ) -> dict | None:
         """V3 PRD-B: read snapshot for undo-reset (only if owned by user_id)."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -2390,7 +2398,7 @@ class UserMemoryStore:
 
         session_scoped=True 读 session 覆盖层（换 XX / 不记住的临时选择）。"""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT value FROM memory_entries "
                 "WHERE subject_type='user' AND subject_id=? "
@@ -2577,12 +2585,16 @@ class ProjectMemoryStore:
     """
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
         """复用 user_memory schema (memory_entries), 仅 subject_type='project'."""
+        if domain_layout_active(self._db_path):
+            async with open_shared_ctx(self._db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(_TABLE_SCHEMA)
             await _migrate_deleted_at(db)
             await _migrate_workspace_id(db)
@@ -2593,7 +2605,7 @@ class ProjectMemoryStore:
             await db.commit()
 
     async def list_for_workspace(self, workspace_id: str) -> list[MemoryEntry]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM memory_entries WHERE subject_type='project' AND subject_id=? AND deleted_at IS NULL ORDER BY kind, key",
@@ -2617,7 +2629,7 @@ class ProjectMemoryStore:
         now = datetime.now(tz=UTC).isoformat(timespec="seconds")
         entry_id = f"prj_{uuid4().hex[:12]}"
         val_json = json.dumps(value, ensure_ascii=False)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute(
                 """
@@ -2689,7 +2701,7 @@ class ProjectMemoryStore:
         prefer over ``workspace_id``. None → callers fall back to ``workspace_id``
         (== pre-decouple behavior, before migration seeds the default project)."""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT value FROM memory_entries "
                 "WHERE subject_type='project' AND subject_id=? "
@@ -2713,7 +2725,7 @@ class ProjectMemoryStore:
         tools; the gateway prefers it over the seeded ``default_project`` so a workspace stays
         on the project the user last actually used (project continuity across turns)."""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT value FROM memory_entries "
                 "WHERE subject_type='project' AND subject_id=? "

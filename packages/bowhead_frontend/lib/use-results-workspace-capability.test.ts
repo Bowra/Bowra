@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/auth-session-context", () => ({
 }));
 
 function negotiated(
-  values: Partial<{ workspace: boolean; complete_list: boolean; scale_nav: boolean; interactive_html: boolean }> = {},
+  values: Partial<{ workspace: boolean; complete_list: boolean; scale_nav: boolean; interactive_html: boolean; content_sharing: unknown }> = {},
 ): Response {
   return new Response(JSON.stringify({
     dto_version: 1,
@@ -59,6 +59,8 @@ describe("useResultsWorkspaceCapability", () => {
       completeList: false,
       scaleNav: false,
       interactiveHtml: false,
+      contentSharing: false,
+      sharingDisabled: false,
       resolved: false,
       error: null,
     });
@@ -67,6 +69,8 @@ describe("useResultsWorkspaceCapability", () => {
       completeList: true,
       scaleNav: true,
       interactiveHtml: false,
+      contentSharing: false,
+      sharingDisabled: false,
       resolved: true,
       error: null,
     }));
@@ -79,6 +83,31 @@ describe("useResultsWorkspaceCapability", () => {
     const { result } = renderHook(() => useResultsCapabilities());
     await waitFor(() => expect(result.current.resolved).toBe(true));
     expect(result.current.interactiveHtml).toBe(flag === true);
+  });
+
+  it.each([
+    [{ enabled: true, reason: null }, true, false],
+    [{ enabled: false, reason: "deployment_disabled" }, false, true],
+    [{ enabled: "true", reason: null }, false, false],
+    [{ enabled: true, reason: "deployment_disabled" }, false, false],
+    [null, false, false],
+    [undefined, false, false],
+  ])("negotiates sharing without enabling malformed or missing capability: %j", async (content_sharing, enabled, disabled) => {
+    appFetchMock.mockResolvedValue(negotiated({ content_sharing, complete_list: false }));
+    const { result } = renderHook(() => useResultsCapabilities());
+    await waitFor(() => expect(result.current.resolved).toBe(true));
+    expect(result.current.contentSharing).toBe(enabled);
+    expect(result.current.sharingDisabled).toBe(disabled);
+  });
+
+  it("drops a previously enabled sharing capability after refresh failure", async () => {
+    appFetchMock.mockResolvedValueOnce(negotiated({ content_sharing: { enabled: true, reason: null } }))
+      .mockRejectedValueOnce(new Error("unavailable"));
+    const { result } = renderHook(() => useResultsCapabilities());
+    await waitFor(() => expect(result.current.contentSharing).toBe(true));
+    await act(() => retryResultsCapabilities());
+    expect(result.current.contentSharing).toBe(false);
+    expect(result.current.sharingDisabled).toBe(false);
   });
 
   it("revokes interactive execution on authenticated capability refresh", async () => {
@@ -118,6 +147,8 @@ describe("useResultsWorkspaceCapability", () => {
       completeList: false,
       scaleNav: false,
       interactiveHtml: false,
+      contentSharing: false,
+      sharingDisabled: false,
       resolved: false,
       error: "unavailable",
     });
@@ -244,6 +275,8 @@ describe("useResultsWorkspaceCapability", () => {
       completeList: true,
       scaleNav: true,
       interactiveHtml: false,
+      contentSharing: false,
+      sharingDisabled: false,
       error: null,
     });
   });
@@ -315,6 +348,8 @@ describe("useResultsWorkspaceCapability", () => {
       workspace: true,
       scaleNav: true,
       interactiveHtml: false,
+      contentSharing: false,
+      sharingDisabled: false,
     });
   });
 

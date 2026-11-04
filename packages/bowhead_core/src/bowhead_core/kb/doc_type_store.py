@@ -25,6 +25,8 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -468,7 +470,7 @@ class KbDocTypeStore:
         self._rows_db_path = str(rows_db_path) if rows_db_path is not None else None
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             for stmt in _SCHEMA.split(";"):
                 stmt = stmt.strip()
                 if stmt:
@@ -529,7 +531,7 @@ class KbDocTypeStore:
             raise ValueError(f"graduated_mode 必须 ∈ {GRADUATED_MODE_VALUES} (got {graduated_mode!r})")
         doc_type_id = f"dt_{uuid4().hex[:12]}"
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "INSERT INTO kb_doc_types "
                 "(doc_type_id, workspace_id, name, description, extract_schema_json, "
@@ -580,7 +582,7 @@ class KbDocTypeStore:
         return doc_type_id
 
     async def get(self, doc_type_id: str) -> KbDocTypeDTO | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_doc_types WHERE doc_type_id = ? AND soft_deleted_at IS NULL",
@@ -612,7 +614,7 @@ class KbDocTypeStore:
         placeholders = ",".join("?" * len(dt_ids))
         stats_map: dict[str, DocTypeStats] = {}
         try:
-            async with aiosqlite.connect(self._records_db_path) as db:
+            async with diagnostic_connect(self._records_db_path) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
                     f"SELECT doc_type_id, "  # noqa: S608 — placeholders bound, ids from list
@@ -643,7 +645,7 @@ class KbDocTypeStore:
         # (kb_list_tables/template page/classification candidates all use this); self-healing sweep closes crash window.
         # ⚠ Filter in Python, not SQL—WHERE on new column would cause OperationalError in
         # pre-migration databases (defensive-col-missing UT caught it; _row_to_dto missing column→None always passes).
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_doc_types WHERE workspace_id = ? AND soft_deleted_at IS NULL ORDER BY name",
@@ -663,7 +665,7 @@ class KbDocTypeStore:
             batch = workspace_ids[offset : offset + 400]
             placeholders = ",".join("?" for _ in batch)
             async with (
-                aiosqlite.connect(self._db_path) as db,
+                diagnostic_connect(self._db_path) as db,
                 db.execute(
                     "SELECT 1 FROM kb_doc_types "
                     f"WHERE workspace_id IN ({placeholders}) "
@@ -736,7 +738,7 @@ class KbDocTypeStore:
         sets.append("updated_at = ?")
         vals.append(_now())
         vals.append(doc_type_id)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 f"UPDATE kb_doc_types SET {', '.join(sets)} WHERE doc_type_id = ? AND soft_deleted_at IS NULL",
                 vals,
@@ -770,7 +772,7 @@ class KbDocTypeStore:
         ``flip_graduated_snapshot``（winner-only + 绝对计数）。"""
         if mode not in GRADUATED_MODE_VALUES:
             raise ValueError(f"graduated_mode 必须 ∈ {GRADUATED_MODE_VALUES}")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_doc_types SET graduated_mode = ?, updated_at = ? WHERE doc_type_id = ? AND soft_deleted_at IS NULL",
                 (mode, _now(), doc_type_id),
@@ -783,7 +785,7 @@ class KbDocTypeStore:
         `WHERE graduated_mode='pending_snapshot'` winner-only（并发自愈两路同 flip
         → loser no-op 不重复计数）+ row_count **绝对写入**（相对 delta 基于 stale
         读会永久翻倍；flip 时刻的 rows 真 COUNT 就是权威）。返回是否赢得 flip。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_doc_types SET graduated_mode = 'snapshot', row_count = ?, updated_at = ? "
                 "WHERE doc_type_id = ? AND graduated_mode = 'pending_snapshot' AND soft_deleted_at IS NULL",
@@ -807,7 +809,7 @@ class KbDocTypeStore:
             sql += " AND graduated_from_seq = ?"
             params.append(seq)
         sql += " ORDER BY created_at DESC"
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, params) as cur:
                 rows = await cur.fetchall()
@@ -817,7 +819,7 @@ class KbDocTypeStore:
         """转正/重命名撞名前置查（UNIQUE(ws,name) 兜底 IntegrityError 仍要 catch——
         本查询只为给出结构化 409 + 建议名，非并发安全依据）。"""
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT 1 FROM kb_doc_types WHERE workspace_id = ? AND name = ? AND soft_deleted_at IS NULL LIMIT 1",
                 (workspace_id, name),
@@ -830,7 +832,7 @@ class KbDocTypeStore:
         """自愈 sweep 候选：pending_snapshot 且 updated_at 早于阈值（全 ws——boot
         级任务）。谓词绝不触碰 template/snapshot 态（r3 review：r2 的 row_count=0
         谓词会误删全部合法 template）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_doc_types WHERE graduated_mode = 'pending_snapshot' AND soft_deleted_at IS NULL AND updated_at < ?",
@@ -844,7 +846,7 @@ class KbDocTypeStore:
         # is a table constraint including soft-deleted rows (cannot use partial index without table rebuild, violating additive discipline);
         # retaining name loops through deleted-but-duplicate-name errors + guarantees regraduation collision. Deliberate global behavior change:
         # get() may show tombstone name (lists already exclude soft-deleted rows).
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             # Suffix uses doc_type_id (unique by construction), not timestamp—delete→create same name→delete again
             # within a second would hit UNIQUE 500 (wave-1 review P3-3).
             cur = await db.execute(
@@ -866,7 +868,7 @@ class KbDocTypeStore:
 
     async def update_record_count(self, doc_type_id: str, delta: int) -> None:
         """+/- record_count cache. Called by KbExtractedRecordStore on insert/delete."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_doc_types SET record_count = record_count + ? WHERE doc_type_id = ?",
                 (delta, doc_type_id),
@@ -883,7 +885,7 @@ class KbDocTypeStore:
         Per P0-TD-ENG-R2-1 (Eng r2 review): admin UI displays both counts
         consistently.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE kb_doc_types SET row_count = row_count + ? WHERE doc_type_id = ?",
                 (delta, doc_type_id),

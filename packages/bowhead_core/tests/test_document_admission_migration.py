@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -41,8 +42,8 @@ def test_upgrade_preserves_old_files_and_does_not_backfill_jobs(tmp_path) -> Non
     with sqlite3.connect(path) as db:
         # Verify replay reached this revision (checking after stamp head is tautological and meaningless).
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (MIGRATION.revision,)
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute(f"SELECT {columns} FROM artifacts").fetchall() == before  # noqa: S608
         assert db.execute("SELECT count(*) FROM document_jobs").fetchone()[0] == 0
@@ -56,7 +57,7 @@ def test_upgrade_preserves_old_files_and_does_not_backfill_jobs(tmp_path) -> Non
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "extracted_rows", "per_row_jobs", "team_templates", "matrix"])
 def test_non_core_target_has_no_document_schema(tmp_path, target) -> None:
     path = tmp_path / "other.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT name FROM sqlite_schema WHERE name LIKE 'document_%'").fetchall() == []
 
@@ -77,4 +78,4 @@ def test_drift_is_rejected_instead_of_reusing_incompatible_objects(tmp_path, kin
             db.execute("DROP TRIGGER trg_document_job_identity")
             db.execute("CREATE TRIGGER trg_document_job_identity BEFORE UPDATE ON document_jobs WHEN 0 BEGIN SELECT RAISE(ABORT,'disabled'); END")
     with pytest.raises(RuntimeError, match="schema drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)

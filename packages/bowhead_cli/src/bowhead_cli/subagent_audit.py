@@ -17,6 +17,7 @@ from bowhead_core.custom_subagent_store import (
     REPORT_WRITE_TOOLS,
 )
 from bowhead_core.openapi_tool_source import op_tool_name, parse_openapi_ops
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from bowhead_core.tool_registry import build_default_registry
 
 from bowhead_skill.catalog import builtin_skill_names
@@ -95,7 +96,7 @@ def audit_subagents(
     if checked_at.tzinfo is None:
         raise ValueError("now must be timezone-aware")
 
-    connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = connect_sync(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         connection.execute("PRAGMA query_only=ON")
@@ -139,7 +140,7 @@ def report_subagent_migration_impact(
     if checked_at.tzinfo is None:
         raise ValueError("now must be timezone-aware")
 
-    connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = connect_sync(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         connection.execute("PRAGMA query_only=ON")

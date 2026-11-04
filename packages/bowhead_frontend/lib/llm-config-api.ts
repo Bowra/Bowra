@@ -22,7 +22,15 @@ export interface LlmCatalog {
   };
 }
 
+export interface ModelAssignmentChange {
+  path: string;
+  previous: { provider?: string; model?: string; real_id?: string; follow?: string; auto?: boolean } | unknown[] | null;
+  selected: { provider?: string; model?: string; real_id?: string; follow?: string; auto?: boolean } | unknown[] | null;
+}
+
 export interface AdminLlmConfigResp {
+  assignment_changes?: ModelAssignmentChange[];
+  assignment_review_required?: boolean;
   field_contracts?: Record<string, FieldContract>;
   version: number;
   config: Record<string, unknown>;
@@ -35,6 +43,7 @@ export interface AdminLlmConfigResp {
   }>;
   features?: {
     model_discovery_v2?: boolean;
+    model_assignment_reconciliation?: boolean;
     bowra_connect?: boolean;
     model_runtime_parameters?: boolean;
     capability_probes?: boolean;
@@ -137,6 +146,7 @@ export interface LlmConfigValidationIssue {
 }
 
 export interface LlmConfigValidationResp {
+  assignment_changes?: ModelAssignmentChange[];
   valid: boolean;
   version: number;
   issues: LlmConfigValidationIssue[];
@@ -359,4 +369,8 @@ export function verifyDraftProviderCapability(
 
 export function discoverDraftProviderModels(providerName: string, body: VerifyDraftProviderBody): Promise<VerifyProviderResult & { models: string[] }> {
   return apiJson("/api/v1/admin/llm-config/providers/discover-draft-models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, provider_name: providerName }) });
+}
+
+export function reconcileVerifiedAssignments(): Promise<AdminLlmConfigResp> {
+  return apiJson<AdminLlmConfigResp>("/api/v1/admin/llm-config/reconcile-assignments", { method: "POST" });
 }

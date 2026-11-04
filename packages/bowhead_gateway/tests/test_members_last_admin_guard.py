@@ -218,3 +218,95 @@ async def test_remove_nonmember_returns_stable_code(client, store):
 
     assert r.status_code == 404, r.text
     assert r.json()["detail"] == {"code": "workspace_member_not_found"}
+
+
+@pytest.mark.parametrize("role", ["member", "viewer", "admin", "ws_admin"])
+async def test_member_self_exit_preserves_team_and_other_members(client: TestClient, store: UserStore, role: str) -> None:
+    await _seed_team(store)
+    await _seed_user(store, "u_self", "self@t.com")
+    await _seed_user(store, "u_peer", "peer@t.com")
+    await _seed_ws_member(store, "ws_1", "u_self", role)
+    await _seed_ws_member(store, "ws_1", "u_peer", "admin")
+    await store.set_user_preference_key("u_self", "last_workspace_id", "ws_1")
+    await store.set_user_preference_key("u_self", "ui_language", "zh-CN")
+    cookies = {"bowhead_jwt": _jwt("u_self")}
+    preview = client.get("/api/v1/workspaces/ws_1/leave", cookies=cookies)
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == {"can_leave": True}
+    result = client.post("/api/v1/workspaces/ws_1/leave", json={"user_id": "u_peer"}, cookies=cookies)
+    assert result.status_code == 200, result.text
+    assert await store.get_member_role("ws_1", "u_self") is None
+    assert await store.get_member_role("ws_1", "u_peer") == "admin"
+    assert await store.user_has_active_team_membership("u_self", "team_t")
+    assert await store.workspace_in_team("team_t", "ws_1")
+    assert await store.list_workspaces_for_user("u_self", team_id="team_t") == []
+    user = await store.get_user("u_self")
+    assert user is not None
+    assert "last_workspace_id" not in user.preferences
+    assert user.preferences["ui_language"] == "zh-CN"
+
+
+async def test_last_admin_self_exit_rechecked_after_preview(client: TestClient, store: UserStore) -> None:
+    await _seed_team(store)
+    for user_id in ("u_self", "u_peer"):
+        await _seed_user(store, user_id, f"{user_id}@t.com")
+        await _seed_ws_member(store, "ws_1", user_id, "admin")
+    cookies = {"bowhead_jwt": _jwt("u_self")}
+    assert client.get("/api/v1/workspaces/ws_1/leave", cookies=cookies).json() == {"can_leave": True}
+    await store.leave_workspace("team_t", "ws_1", "u_peer")
+    assert client.get("/api/v1/workspaces/ws_1/leave", cookies=cookies).json() == {"can_leave": False}
+    blocked = client.post("/api/v1/workspaces/ws_1/leave", cookies=cookies)
+    assert blocked.status_code == 422
+    assert blocked.json()["detail"]["code"] == "last_workspace_admin"
+    assert await store.get_member_role("ws_1", "u_self") == "admin"
+
+
+@pytest.mark.parametrize("boundary", ["cross_team", "removed", "inactive_team_member", "archived", "inactive_peer"])
+async def test_self_exit_boundaries(client: TestClient, store: UserStore, boundary: str) -> None:
+    await _seed_team(store)
+    await _seed_user(store, "u_self", "self@t.com")
+    await _seed_user(store, "u_peer", "peer@t.com")
+    await _seed_ws_member(store, "ws_1", "u_self", "admin")
+    await _seed_ws_member(store, "ws_1", "u_peer", "admin")
+    async with aiosqlite.connect(store.db_path) as db:
+        if boundary == "cross_team":
+            await db.execute("UPDATE workspaces SET team_id='team_other' WHERE id='ws_1'")
+        elif boundary == "removed":
+            await db.execute("UPDATE workspace_members SET status='removed' WHERE user_id='u_self'")
+        elif boundary == "inactive_team_member":
+            await db.execute("UPDATE team_members SET status='removed' WHERE user_id='u_self'")
+        elif boundary == "archived":
+            await db.execute("UPDATE workspaces SET status='archived' WHERE id='ws_1'")
+        else:
+            await db.execute("UPDATE team_members SET status='removed' WHERE user_id='u_peer'")
+        await db.commit()
+    result = client.post("/api/v1/workspaces/ws_1/leave", cookies={"bowhead_jwt": _jwt("u_self")})
+    assert result.status_code in {401, 403, 409, 422}, result.text
+    if boundary == "inactive_peer":
+        assert result.json()["detail"]["code"] == "last_workspace_admin"
+    if boundary != "removed":
+        assert await store.get_member_role("ws_1", "u_self") == "admin"
+
+
+async def test_simultaneous_self_exits_retain_one_admin(store: UserStore) -> None:
+    import anyio
+    from bowhead_core.space_governance import SpaceGovernanceError
+
+    await _seed_team(store)
+    for user_id in ("u_one", "u_two"):
+        await _seed_user(store, user_id, f"{user_id}@t.com")
+        await _seed_ws_member(store, "ws_1", user_id, "admin")
+    outcomes: list[str] = []
+
+    async def leave(user_id: str) -> None:
+        try:
+            await store.leave_workspace("team_t", "ws_1", user_id)
+            outcomes.append("left")
+        except SpaceGovernanceError as exc:
+            outcomes.append(exc.code)
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(leave, "u_one")
+        group.start_soon(leave, "u_two")
+    assert sorted(outcomes) == ["last_workspace_admin", "left"]
+    assert await store.count_active_workspace_admins("ws_1") == 1

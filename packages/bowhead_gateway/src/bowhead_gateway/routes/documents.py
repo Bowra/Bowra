@@ -65,7 +65,14 @@ async def _scope(request: Request, *, session_id: str | None = None, job_id: str
 
 
 def _error(exc: DocumentRequestError):
-    inaccessible = {"document_not_found", "document_canvas_unavailable", "document_canvas_source_unavailable", "document_canvas_input_unavailable"}
+    inaccessible = {
+        "document_not_found",
+        "document_canvas_unavailable",
+        "document_canvas_source_unavailable",
+        "document_canvas_input_unavailable",
+        "document_task_source_unavailable",
+        "document_task_source_changed",
+    }
     return HTTPException(404 if exc.code in inaccessible else 409, detail={"error": {"code": exc.code}})
 
 
@@ -137,7 +144,7 @@ async def cancel_document(job_id: str, body: CancelDraft, request: Request):
 async def document_file(job_id: str, name: str, request: Request):
     scope = await _scope(request, job_id=job_id)
     preview = "/preview/" in request.url.path
-    if not preview and name not in {"candidate.pptx", "candidate.pdf"}:
+    if not preview and name not in {"candidate.pptx", "candidate.docx", "candidate.pdf"}:
         raise HTTPException(404, detail={"error": {"code": "document_not_found"}})
     try:
         service = _service(request)
@@ -149,6 +156,6 @@ async def document_file(job_id: str, name: str, request: Request):
     headers = {"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff"}
     if not preview:
         job = await _service(request).delivery.get(scope=scope, job_id=job_id)
-        filename = job["draft"]["output_stem"] + (".pdf" if name.endswith(".pdf") else ".pptx")
+        filename = job["draft"]["output_stem"] + "." + name.rsplit(".", 1)[1]
         headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(filename, safe="")
     return Response(content=content, media_type=mime, headers=headers)

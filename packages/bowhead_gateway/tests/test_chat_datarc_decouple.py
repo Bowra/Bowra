@@ -17,7 +17,6 @@ from typing import Any
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.chat_turn_source import current_attachment_positions
@@ -29,6 +28,7 @@ from bowhead_gateway.routes import chat as chat_routes
 from bowhead_gateway.settings import Settings
 from cryptography.fernet import Fernet
 from fakes_tool_context import FakeUserMemoryToolContext
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_bi_bridge import BIConnectionError, BIPermissionError
 
@@ -126,7 +126,7 @@ async def _exercise_chat_send(monkeypatch, tmp_path, *, upload_owner=None, membe
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", _JWT_SECRET)
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
     session_store = SessionStore(core_path)
     await session_store.initialize()
     turn_log_store = TurnLogStore(str(core_path))

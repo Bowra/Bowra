@@ -21,7 +21,9 @@ from urllib.parse import urlsplit
 
 import aiosqlite
 
-from bowhead_core._db import open_pooled_read_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 PublicEntryStatus = Literal["active", "disabled", "pending_verification"]
 
@@ -194,11 +196,15 @@ def normalize_public_base_url(value: str) -> NormalizedPublicUrl:
 
 class PublicEntryStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(self.db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute("PRAGMA foreign_keys = ON")
             await db.executescript(SCHEMA)
             await db.commit()
@@ -281,7 +287,7 @@ class PublicEntryStore:
         token = secrets.token_urlsafe(32)
         entry_id = _id("pe")
         expires_at = (datetime.now(UTC) + timedelta(minutes=ttl_minutes)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys = ON")
             await db.execute("BEGIN IMMEDIATE")
@@ -337,7 +343,7 @@ class PublicEntryStore:
         token = secrets.token_urlsafe(32)
         now = _now()
         expires_at = (datetime.now(UTC) + timedelta(minutes=ttl_minutes)).isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             entry = await self._get_in_transaction(db, entry_id)
@@ -371,7 +377,7 @@ class PublicEntryStore:
         token: str,
     ) -> PublicEntry:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             entry = await self._get_in_transaction(db, entry_id)
@@ -412,7 +418,7 @@ class PublicEntryStore:
 
     async def set_default(self, *, team_id: str, entry_id: str, actor_id: str) -> PublicEntry:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             entry = await self._get_in_transaction(db, entry_id)
@@ -447,7 +453,7 @@ class PublicEntryStore:
         disable_last: bool = False,
     ) -> PublicEntry:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             entry = await self._get_in_transaction(db, entry_id)
@@ -495,7 +501,7 @@ class PublicEntryStore:
             return await self._get_in_transaction(db, entry_id)
 
     async def delete(self, *, team_id: str, entry_id: str, actor_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys = ON")
             await db.execute("BEGIN IMMEDIATE")
@@ -524,7 +530,7 @@ class PublicEntryStore:
         normalized = normalize_public_base_url(base_url)
         now = _now()
         inserted = 0
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -605,7 +611,7 @@ class PublicEntryStore:
                 verification_method=verification_method,
                 now=now,
             )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -651,7 +657,7 @@ class PublicEntryStore:
         """
         normalized = normalize_public_base_url(base_url)
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -782,7 +788,7 @@ class PublicEntryStore:
         now = datetime.now(UTC)
         cutoff = (now - timedelta(minutes=window_minutes)).isoformat(timespec="seconds")
         now_text = now.isoformat(timespec="seconds")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -811,7 +817,7 @@ class PublicEntryStore:
             return True
 
     async def clear_challenge_attempts(self, entry_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "DELETE FROM public_entry_challenge_attempts WHERE entry_id=?",
                 (entry_id,),

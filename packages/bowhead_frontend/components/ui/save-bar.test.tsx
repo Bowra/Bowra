@@ -34,6 +34,15 @@ describe("SaveBar", () => {
     expect(bar.className).toContain("is-inline");
   });
 
+  it("keeps connection actions visible without reporting unsaved changes on a clean form", () => {
+    const onVerify = vi.fn();
+    renderIntl(<SaveBar dirty={false} message="Connection actions" actions={<button onClick={onVerify}>Verify</button>} onSave={vi.fn()} onDiscard={vi.fn()} />);
+    expect(screen.queryByRole("region", { name: "有未保存的更改" })).toBeNull();
+    expect(screen.getByRole("region", { name: "保存" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(onVerify).toHaveBeenCalledOnce();
+  });
+
   it("「放弃」「保存」各自调用处理函数", () => {
     const onSave = vi.fn();
     const onDiscard = vi.fn();

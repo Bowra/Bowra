@@ -18,6 +18,7 @@ from bowhead_core.email_config import SmtpConfig
 from bowhead_core.email_send_confirmation import EmailSendConfirmations
 from bowhead_core.language_context import LanguageContext
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 from bowhead_core import send_email_tool as tool
@@ -33,7 +34,7 @@ def schema(tmp_path_factory: pytest.TempPathFactory) -> Path:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return path
 
 

@@ -5,11 +5,11 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_revision_store import AgentReleaseStaleError, AgentRevisionStore
 from bowhead_core.agent_runtime_extension_store import read_published_extension_policy_in_connection
 from bowhead_core.agent_runtime_extensions import AgentRuntimeExtensionError
+from core_legacy_database import TARGET_FILES
 from test_agent_revision_store import _candidate_hash_of, _Clock, _definition, _Validator
 from test_agent_runtime_extension_publication import native_binding, save, seed_release, setup
 from test_agent_runtime_extensions import policy

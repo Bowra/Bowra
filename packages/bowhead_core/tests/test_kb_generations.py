@@ -62,6 +62,22 @@ async def source(tmp_path, initialize_migrated_kb_files_database, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("many_chunks", [False, True])
+async def test_source_description_sampling_covers_current_generation(source, many_chunks: bool) -> None:
+    if many_chunks:
+        source.path.write_text("\n\n".join(f"## Section {index}\n\n" + f"Synthetic source section {index}. " * 100 for index in range(25)))
+        await source.worker.parse_and_index(source.fid, allow_terminal=True)
+    file = await source.files.get(source.fid)
+    current = await source.index.list_active_chunks(file)
+    sampled = await source.index.sample_current_chunks(file)
+
+    assert len(current) > 12 if many_chunks else len(current) == 1
+    assert len(sampled) == min(12, len(current))
+    assert sampled[0] == current[0]
+    assert sampled[-1] == current[-1]
+    assert all(row[2]["generation_id"] == file.active_generation_id for row in sampled)
+
+
 async def test_publication_keeps_old_citations_and_failed_reparse_keeps_current(source):
     old = await source.files.get(source.fid)
     assert old.parse_status == "done" and old.active_generation_id

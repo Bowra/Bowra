@@ -1507,6 +1507,8 @@ async def _replay_existing_web_action(
         # paradigm_v2 comes from lookup.paradigm_v2 (never None here: legacy
         # envelopes without it were already rejected above).
         candidate_intent["language_context"] = dict(lookup.language_context) if lookup.language_context is not None else None
+        if "datarc_selection" in admitted_resolution:
+            candidate_intent["datarc_selection"] = admitted_resolution["datarc_selection"]
         # The zone carried beside a missing language snapshot is first-admission state too.
         candidate_intent.pop("viewer_time_zone", None)
         if lookup.viewer_time_zone:
@@ -4097,6 +4099,13 @@ async def _send_impl(
             if isinstance(_pte, (AgentExecutionBindingError, SkillReadResolutionError)) or (
                 isinstance(_pte, ValueError) and str(_pte) in {"reference_scope_unavailable", "reference_policy_changed"}
             ):
+                from bowhead_gateway.chat_reference_start import _rejection_chain
+
+                _log.warning(
+                    "reference_start.persist_rejected code=resource_unavailable submission=%s chain=%s",
+                    body.client_submission_id,
+                    _rejection_chain(_pte),
+                )
                 raise HTTPException(409, detail={"error": {"code": "resource_unavailable"}}) from None
         _log.exception("chat.turn_persist_before_stream_failed turn=%s err=%s", turn_req.turn_id, _pte)
         if _active_conflict:

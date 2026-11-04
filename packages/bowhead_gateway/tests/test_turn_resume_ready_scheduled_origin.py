@@ -15,9 +15,9 @@ import sqlite3
 
 import anyio
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.session_store import SessionStore
+from gateway_legacy_database import upgrade
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def migrated_db(tmp_path):
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
     with sqlite3.connect(db_path) as connection:
         assert (
             connection.execute(

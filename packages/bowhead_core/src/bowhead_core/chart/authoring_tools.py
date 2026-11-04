@@ -96,7 +96,7 @@ def _views(spec: dict[str, Any]) -> list[tuple[str | None, dict[str, Any]]]:
 
 def _simple_chart_kinds(spec: dict[str, Any]) -> list[str]:
     """Admit only complete, single-measure shapes shared by the existing native controls."""
-    if "views" in spec or "presentation_plan" in spec:
+    if "views" in spec or "presentation_plan" in spec or spec.get("explicit_presentation"):
         return []
     columns = [column for column in spec.get("columns") or [] if isinstance(column, dict)]
     numeric = [column for column in columns if column.get("type") == "numeric"]

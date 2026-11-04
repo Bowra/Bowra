@@ -36,7 +36,6 @@ import jwt
 import pytest
 import respx
 from bi_mock.main import app as bi_mock_app
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.session_store import SessionStore
 from bowhead_core.subagent import PROFILES
 from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
@@ -45,6 +44,7 @@ from bowhead_gateway.main import create_app
 from bowhead_gateway.routes import chat as chat_routes
 from bowhead_gateway.settings import Settings
 from fakes_tool_context import FakeUserMemoryToolContext
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_bi_bridge import DatarcClient
 from bowhead_core import (
@@ -128,7 +128,12 @@ class _RoleScriptedAdapter:
                         name="subagent_spawn",
                         # The whole request is delegated, so compute's return is the final answer;
                         # helper or unlabelled dispatches return to Lead (composer-reference-closeout.md).
-                        arguments={"profile": "compute", "task": "查询今年营业额并返回结果", "delegation_role": "primary"},
+                        arguments={
+                            "profile": "compute",
+                            "task": "查询今年营业额并返回结果",
+                            "delegation_role": "primary",
+                            "required_source_urls": [],
+                        },
                     )
                 ],
             )
@@ -250,6 +255,13 @@ class _TeamConnectionStore:
         self.teams.append(team_id)
         return [SimpleNamespace(id="conn_team", base_url=_TEAM_BASE_URL)] if self.connected and team_id == _TEAM_ID else []
 
+    async def resolve_active_binding(self, team_id: str):
+        connections = await self.list_connections(team_id)
+        if not connections:
+            return None
+        connection = connections[0]
+        return connection, await self.get_connection_auth(connection.id, team_id), "synthetic-revision-1"
+
     async def get_connection_auth(self, conn_id: str, team_id: str) -> str:
         assert (conn_id, team_id) == ("conn_team", _TEAM_ID)
         return _TEAM_AUTH
@@ -330,7 +342,9 @@ def _seed_membership(core_path: Any) -> None:
 
 
 @asynccontextmanager
-async def _gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, team_connected: bool) -> AsyncIterator[SimpleNamespace]:
+async def _gateway(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, team_connected: bool, complete_community_http_installation
+) -> AsyncIterator[SimpleNamespace]:
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", _JWT_SECRET)
     monkeypatch.setenv("BOWHEAD_PLANNING_MODE", "0")
     # This hand-built Orchestrator has no reference materializer (main.py wires one); 5a7b5fed7 defaults it on.
@@ -348,7 +362,9 @@ async def _gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, team_conne
         router.bind(AgentBinding(agent_type=agent_type, primary=("p1", "mock-model")))
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
+    users = UserStore(str(core_path))
+    await complete_community_http_installation(users)
     _seed_membership(core_path)
     session_store = SessionStore(core_path)
     await session_store.initialize()
@@ -395,7 +411,8 @@ async def _gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, team_conne
     app.state.orchestrator = orchestrator
     app.state.session_store = session_store
     # Chat send binds Coach resources to the signed-in user, which it reads from the user store.
-    app.state.user_store = UserStore(str(core_path))
+    app.state.user_store = users
+    await complete_community_http_installation(users, app=app)
     app.state.turn_log_store = turn_log_store
     app.state.datarc_connection_store = connections
     app.state.datarc_client_factory = factory
@@ -445,15 +462,17 @@ async def _gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, *, team_conne
 
 
 @pytest.fixture
-async def gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> AsyncIterator[SimpleNamespace]:
-    async with _gateway(monkeypatch, tmp_path, team_connected=True) as gw:
+async def gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, complete_community_http_installation) -> AsyncIterator[SimpleNamespace]:
+    async with _gateway(monkeypatch, tmp_path, team_connected=True, complete_community_http_installation=complete_community_http_installation) as gw:
         yield gw
 
 
 @pytest.fixture
-async def gateway_without_team_connection(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> AsyncIterator[SimpleNamespace]:
+async def gateway_without_team_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, complete_community_http_installation
+) -> AsyncIterator[SimpleNamespace]:
     """The team registry has no connection, while deployment-level Datarc decoys are wired."""
-    async with _gateway(monkeypatch, tmp_path, team_connected=False) as gw:
+    async with _gateway(monkeypatch, tmp_path, team_connected=False, complete_community_http_installation=complete_community_http_installation) as gw:
         yield gw
 
 
@@ -564,10 +583,11 @@ async def test_team_without_connection_never_falls_back_to_deployment_datarc(
     assert live[-1]["event"] == "done", [e["event"] for e in live]
     # The Lead is told this space has no data source (the no-connection variant of the notice).
     assert gw.adapter.lead_systems
-    assert all("no BI data source (datarc) connected" in system for system in gw.adapter.lead_systems)
+    assert all("There is no usable Datarc connection for this turn." in system for system in gw.adapter.lead_systems)
     bi_results = [e["data"] for e in live if e["event"] == "tool_result" and e["data"]["tool_name"] == "bi_query"]
     assert bi_results and not any(result["ok"] for result in bi_results), bi_results
-    assert all("DatarcUnavailableError" in json.dumps(result, ensure_ascii=False) for result in bi_results), bi_results
+    assert all(result["error"] == "tool_execution_failed" for result in bi_results), bi_results
+    assert all(result["diagnostics"]["diagnostic_code"] == "tool_failure" for result in bi_results), bi_results
 
     # Neither deployment-level decoy nor the team fake saw a single request.
     assert gw.deploy_datarc.requests == []

@@ -7,13 +7,13 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_gateway.llm_request_recorder import LLMRequestRecorder
 from bowhead_router.invocation import canonical_transport_bytes
 from bowhead_router.request_record import RequestRecordEntry
 from bowhead_router.usage import UsageContext
 from cryptography.fernet import Fernet
+from gateway_legacy_database import TARGET_FILES
 
 BODY = canonical_transport_bytes({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
 
@@ -55,10 +55,10 @@ async def test_a_failed_write_drops_the_batch_instead_of_retrying(tmp_path):
 
 
 def _core_db(tmp_path):
-    from bowhead_cli.migrate import upgrade
+    from gateway_legacy_database import upgrade
 
     path = tmp_path / TARGET_FILES["core"]
-    upgrade(f"sqlite:///{path}", "core")
+    upgrade(f"sqlite:///{(path).with_name('bowhead.db')}", "core")
     with sqlite3.connect(path) as db:
         db.execute("PRAGMA foreign_keys=OFF")
         for table, values in (("sessions", {"id": "s_1", "deleted_at": None}), ("turns", {"id": "t_1", "session_id": "s_1", "seq": 0})):
@@ -113,3 +113,26 @@ async def test_the_flush_loop_purges_at_most_once_per_interval(tmp_path, monkeyp
     await recorder._before_flush()
     await recorder._before_flush()
     assert runs == [1]
+
+
+async def test_request_encryption_does_not_hold_the_database_writer(tmp_path, monkeypatch):
+    path = _core_db(tmp_path)
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE diagnostic_preparation_probe(value INTEGER)")
+    cipher = _cipher()
+    original_seal = cipher.seal
+    prepared: list[bool] = []
+
+    def seal(**kwargs):
+        with sqlite3.connect(path, timeout=0.05) as other:
+            other.execute("INSERT INTO diagnostic_preparation_probe VALUES(1)")
+        prepared.append(True)
+        return original_seal(**kwargs)
+
+    monkeypatch.setattr(cipher, "seal", seal)
+    recorder = LLMRequestRecorder(str(path), cipher)
+    recorder.record(_entry())
+    assert await recorder.flush_once() == 1
+    assert prepared
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM diagnostic_preparation_probe").fetchone()[0] == len(prepared)

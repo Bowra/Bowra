@@ -15,6 +15,7 @@ from alembic.config import Config
 from bowhead_core.chat_references import InputDocument
 from bowhead_core.chat_turn_source import ChatTurnUserSource, chat_turn_user_source_projection, snapshot_chat_turn_user_source
 from bowhead_core.session_store import SessionStore, _insert_chat_turn_user_source_in_tx
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.terminal_protocol import canonical_json_v1
 from test_chat_reference_storage import assert_rows_survive_upgrade
 
@@ -77,7 +78,7 @@ def _seed_turn(path: Path, source: ChatTurnUserSource) -> None:
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     _seed_turn(path, _source())
     return path
 
@@ -107,13 +108,13 @@ async def test_upgrade_preserves_legacy_source_bytes_and_reader(tmp_path: Path) 
             ("t_1", "s_1", "u_1", "ws_1", source.user_text, "[]", "[]", None, NOW),
         )
         before = db.execute("SELECT * FROM chat_turn_user_sources").fetchone()
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         after = db.execute("SELECT * FROM chat_turn_user_sources").fetchone()
         assert_rows_survive_upgrade({"chat_turn_user_sources": [before]}, {"chat_turn_user_sources": [after]})
         assert db.execute("SELECT input_document_json,document_revision_target_json FROM chat_turn_user_sources").fetchone() == (None, None)
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
     await SessionStore(str(path)).initialize()
     assert await _read(path) == source
     expected = {
@@ -132,10 +133,10 @@ async def test_upgrade_preserves_legacy_source_bytes_and_reader(tmp_path: Path) 
 @pytest.mark.parametrize("target", ["files", "doc_types", "extracted_records", "extracted_rows", "per_row_jobs", "team_templates", "matrix"])
 def test_non_core_targets_remain_noop(tmp_path: Path, target: str) -> None:
     path = tmp_path / f"{target}.db"
-    command.upgrade(_config(path, target), "head")
+    command.upgrade(_config(path, target), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT name FROM sqlite_schema WHERE name LIKE 'trg_chat_input_document_%'").fetchall() == []
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
 
 
 @pytest.mark.asyncio
@@ -211,7 +212,7 @@ def test_column_drift_rejects_upgrade(tmp_path: Path) -> None:
     with sqlite3.connect(path) as db:
         db.execute("ALTER TABLE chat_turn_user_sources ADD COLUMN input_document_json INTEGER")
     with pytest.raises(RuntimeError, match="column drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)
 
 
 def test_trigger_drift_rejects_upgrade(tmp_path: Path) -> None:
@@ -221,7 +222,7 @@ def test_trigger_drift_rejects_upgrade(tmp_path: Path) -> None:
     with sqlite3.connect(path) as db:
         db.execute("CREATE TRIGGER trg_chat_input_document_immutable BEFORE UPDATE ON chat_turn_user_sources BEGIN SELECT 1; END")
     with pytest.raises(RuntimeError, match="trigger drift"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)
 
 
 @pytest.mark.asyncio
@@ -283,7 +284,7 @@ async def test_system_agent_document_at_byte_limit_can_be_saved_and_restored(tmp
     document = decode_input_document(wire)
     source = replace(_source(with_document=False), user_text=document.display_text(), input_document=document)
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     _seed_turn(path, source)
     assert await _insert(path, source)
     assert await _read(path) == source

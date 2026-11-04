@@ -22,6 +22,9 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals (
@@ -85,14 +88,7 @@ def _arguments_digest(arguments: dict[str, Any]) -> str:
 async def _has_protocol_projection_tables(
     db: aiosqlite.Connection,
 ) -> bool:
-    async with db.execute(
-        """
-        SELECT COUNT(*) FROM sqlite_master
-        WHERE type='table' AND name IN ('turns','turn_terminal_receipts')
-        """
-    ) as cursor:
-        row = await cursor.fetchone()
-    return bool(row is not None and int(row[0]) == 2)
+    return await readable_table_exists(db, "turns") and await readable_table_exists(db, "turn_terminal_receipts")
 
 
 @dataclass
@@ -126,9 +122,16 @@ class Approval:
 class ApprovalStore:
     db_path: str
 
+    def __post_init__(self) -> None:
+        self.db_path = str(domain_database_path(self.db_path, "execution"))
+
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             await db.executescript(SCHEMA)
             await self._migrate(db)
             await db.commit()
@@ -144,7 +147,7 @@ class ApprovalStore:
         if ttl_hours <= 0 or not 1 <= limit <= 100:
             raise ValueError("approval expiry bounds are invalid")
         cutoff = (datetime.now(tz=UTC) - timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -172,7 +175,7 @@ class ApprovalStore:
 
         if not 1 <= limit <= 100 or (after_id is not None and (not isinstance(after_id, str) or not after_id)):
             raise ValueError("approval pending bounds are invalid")
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -289,7 +292,7 @@ class ApprovalStore:
         aid = f"apr_{uuid4().hex[:12]}"
         now = _now()
         arg_digest = _arguments_digest(arguments)
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             await db.execute(
                 "INSERT INTO approvals(id, turn_id, session_id, workspace_id, member_uid, user_id, "
                 "tool_name, arguments_json, request_key, arguments_digest, reason, "
@@ -340,7 +343,7 @@ class ApprovalStore:
         )
 
     async def get(self, approval_id: str) -> Approval | None:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM approvals WHERE id=?",
@@ -350,7 +353,7 @@ class ApprovalStore:
         return _row(row) if row else None
 
     async def get_by_request_key(self, request_key: str) -> Approval | None:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM approvals WHERE request_key=?",
@@ -367,7 +370,7 @@ class ApprovalStore:
     ) -> list[Approval]:
         """Pending administrator approvals."""
         params: list = []
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             protocol_tables = await _has_protocol_projection_tables(db)
             sql = (
@@ -395,7 +398,7 @@ class ApprovalStore:
         return [_row(r) for r in rows]
 
     async def list_recent(self, *, limit: int = 50) -> list[Approval]:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM approvals ORDER BY created_at DESC LIMIT ?",
@@ -426,7 +429,7 @@ class ApprovalStore:
         decided_by: str,
     ) -> tuple[Approval | None, bool]:
         now = _now()
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             cur = await db.execute(
                 "UPDATE approvals SET status=?, decided_by=?, decided_at=?, updated_at=? WHERE id=? AND status='pending'",
                 (status, decided_by, now, now, approval_id),
@@ -446,7 +449,7 @@ class ApprovalStore:
         now = _now()
         status: ApprovalStatus = "executed" if ok else "execution_failed"
         result_json = _canonical_json(result) if ok else None
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             cur = await db.execute(

@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.datarc_selection import DatarcPreferenceScope
 from bowhead_core.user_memory import UserMemoryStore
 from bowhead_gateway.connector_context_provider import DefaultContextLadder
 from bowhead_gateway.connector_context_service import DatarcWorkspaceRef
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema

@@ -5,7 +5,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.subagent_draft_store import (
     REQUEST_LEASE_SECONDS,
@@ -21,6 +20,7 @@ from bowhead_core.team_subagent_store import (
     TeamSubagentStore,
 )
 from bowhead_core.user_store import TeamSubagent
+from core_legacy_database import upgrade
 
 
 class FakeClock:
@@ -36,7 +36,7 @@ def _migrated_db(tmp_path) -> str:
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     return str(db_path)
 
 

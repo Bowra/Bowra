@@ -208,3 +208,77 @@ async def test_a_continuation_generation_omits_the_field() -> None:
 
     fresh = TurnEventBus()
     assert step_outcome_field(fresh, "completed")["step_outcome"]["issue_steps"] == 0
+
+
+def test_operational_recovery_does_not_override_reviewed_delivery_gap() -> None:
+    from types import SimpleNamespace
+
+    facts = _Facts()
+    facts.step("ranking", "failure")
+    facts.step("different_chart", "success")
+    bus = SimpleNamespace(_step_outcome_facts=facts.items)
+    outcome = step_outcome_field(bus, "completed", delivery_completion="partial")["step_outcome"]
+    assert outcome["recovered_steps"] == 1
+    assert outcome["unresolved_steps"] == 0
+    assert outcome["answer_affected"] is True
+    assert step_outcome_field(bus, "cancelled", delivery_completion="partial")["step_outcome"]["answer_affected"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hint,affected", [("partial", True), ("unverified", True), ("complete", True), ("reviewed_complete", False)])
+async def test_review_input_is_consumed_before_persisting_terminal_event(tmp_path, hint, affected) -> None:
+    from bowhead_core.agents.lead_orchestrator import _emit_event
+    from bowhead_core.events import OrchestratorEvent
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    store = TurnLogStore(tmp_path / "review-events.db")
+    await store.initialize()
+    live = []
+
+    async def persist(event):
+        await store.record(turn_id=event.turn_id, event_type=event.event_type, payload=event.payload)
+        live.append(event)
+
+    bus = TurnEventBus(log_sink=persist, persist_before_live=True)
+    for kind, payload in [
+        ("step_done", {"step_id": "refused", "tool_name": "subagent_spawn", "call_id": "invalid", "state": "failure"}),
+        ("peer_dispatch_failed", {"subagent_id": "sub_invalid", "peer_name": "invalid-profile", "call_id": "invalid"}),
+        ("step_done", {"step_id": "valid", "tool_name": "subagent_spawn", "call_id": "valid", "state": "success"}),
+        ("lead.subagent_summary", {"subagent_id": "sub_valid", "profile": "compute", "status": "succeeded", "call_id": "valid"}),
+        ("step_done", {"step_id": "review_refused", "tool_name": "review_delivery", "state": "failure"}),
+        ("step_done", {"step_id": "review_accepted", "tool_name": "review_delivery", "state": "success"}),
+    ]:
+        await bus.emit(OrchestratorEvent(event_type=kind, turn_id="t_review", payload=payload))
+    await _emit_event(bus, "t_review", "done", {"turn_id": "t_review", "status": "completed", "_delivery_completion": hint})
+    done = next(event.payload for event in live if event.event_type == "done")
+    assert done["status"] == "completed"
+    assert done["step_outcome"] == {"schema_version": 1, "issue_steps": 2, "recovered_steps": 1, "unresolved_steps": 1, "answer_affected": affected}
+    assert "_delivery_completion" not in done and "delivery_completion" not in done and "reviewed_delivery_complete" not in done
+    rows = await store.list_events("t_review")
+    assert next(event.payload for event in rows if event.event_type == "done") == done
+
+
+@pytest.mark.parametrize("hint,affected", [(None, True), ("complete", True), ("reviewed_complete", False), ("partial", True), ("unverified", True)])
+def test_reviewed_delivery_aligns_impact_without_rewriting_peer_recovery(hint, affected) -> None:
+    from types import SimpleNamespace
+
+    facts = _Facts()
+    facts.step("invalid_spawn", "failure", tool="subagent_spawn", call_id="invalid")
+    facts.peer_failed("sub_invalid", "invalid-profile", call_id="invalid")
+    facts.step("valid_spawn", "success", tool="subagent_spawn", call_id="valid")
+    facts.peer("sub_valid", "compute", "succeeded", call_id="valid")
+    outcome = step_outcome_field(SimpleNamespace(_step_outcome_facts=facts.items), "completed", delivery_completion=hint)["step_outcome"]
+    assert outcome == {"schema_version": 1, "issue_steps": 1, "recovered_steps": 0, "unresolved_steps": 1, "answer_affected": affected}
+
+
+def test_reviewed_completion_does_not_settle_an_unfinished_step() -> None:
+    from types import SimpleNamespace
+
+    facts = _Facts()
+    facts.step("invalid_spawn", "failure", tool="subagent_spawn", call_id="invalid")
+    facts.peer_failed("sub_invalid", "invalid-profile", call_id="invalid")
+    facts.started("still_running")
+    outcome = step_outcome_field(SimpleNamespace(_step_outcome_facts=facts.items), "completed", delivery_completion="reviewed_complete")[
+        "step_outcome"
+    ]
+    assert outcome["unresolved_steps"] == 2 and outcome["answer_affected"] is True

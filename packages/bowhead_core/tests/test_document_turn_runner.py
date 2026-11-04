@@ -222,12 +222,14 @@ async def claim_resume(ctx, native, outcome, answer="Quarter two", *, already_pa
         if not dispatch_settled:
             assert await ctx.sessions.mark_chat_spawn_dispatch_terminal(turn_id=worker.turn_id, owner_id=worker.owner_id)
     else:
-        store, card = await pause(ctx, SimpleNamespace(worker=worker, job_id=outcome.job_id, ref=outcome.checkpoint, snapshot=snapshot))
+        store, card = await pause(
+            ctx, SimpleNamespace(worker=worker, job_id=outcome.job_id, ref=outcome.checkpoint, snapshot=snapshot), question=outcome.question
+        )
     assert (
         await store.resolve_once(
             card.request_id,
             chosen_value=answer,
-            answers=[{"question": QUESTION, "source": "custom", "answer": answer, "skipped": False, "option_index": None}],
+            answers=[{"question": outcome.question, "source": "custom", "answer": answer, "skipped": False, "option_index": None}],
         )
     )[1]
     generation = await ctx.sessions.advance_turn_execution_generation(turn_id=native.context.turn_id, document_clarification_id=card.request_id)

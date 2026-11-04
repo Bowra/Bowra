@@ -26,6 +26,7 @@ from bowhead_core.agent_change_proposal_store import (
     _proposal_by_source_conn,
     _require_owner_conn,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 def _hash(value: str) -> str:
@@ -74,7 +75,7 @@ class CoachGenerationClaim:
 
 class CoachGenerationStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def authorize_invocation(self, claim: CoachGenerationClaim) -> None:
         """Reserve the single invocation immediately before the provider boundary."""

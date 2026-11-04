@@ -57,7 +57,43 @@ class StreamingToolAdapter(MockAdapter):
         if not hasattr(self, "requests"):
             self.requests = []
         self.requests.append(request)
-        return await super().invoke(request)
+        if getattr(self, "reviewed_answer", None) is not None:
+            answer = self.reviewed_answer
+            self.reviewed_answer = None
+            return LLMResponse(content=answer)
+        guidance = next(
+            (
+                message.content
+                for message in reversed(request.messages)
+                if isinstance(message.content, str) and "review_context (JSON data): " in message.content
+            ),
+            None,
+        )
+        if guidance and getattr(self, "last_answer", None):
+            if any(tool.name == "review_delivery" for tool in request.tools):
+                evidence = json.loads(guidance.split("review_context (JSON data): ", 1)[1])
+                review = {
+                    "requirements": [{"requirement": "Complete the settings handoff", "status": "unfulfilled", "evidence_call_ids": []}],
+                    "issues": [
+                        {
+                            "call_id": item["call_id"],
+                            "resolution": "unfulfilled",
+                            "explanation": "The specialist handoff did not finish.",
+                            "evidence_call_ids": [],
+                        }
+                        for item in evidence["failed_calls"]
+                    ],
+                }
+                self.reviewed_answer = self.last_answer
+                return LLMResponse(
+                    content="",
+                    tool_calls=[ToolCall(id="settings-delivery-review", name="review_delivery", arguments={"payload": {"delivery_review": review}})],
+                )
+            return LLMResponse(content=self.last_answer)
+        response = await super().invoke(request)
+        if response.content:
+            self.last_answer = response.content
+        return response
 
     async def stream(self, request):
         response = await self.invoke(request)
@@ -511,6 +547,8 @@ async def test_lead_direct_receipt_requires_a_complete_settings_only_task(settin
     if scenario == "prior_work":
         scripted.insert(0, LLMResponse(content="", tool_calls=[business_call]))
     narration = "The business work and any incomplete configuration still need this explanation."
+    if scenario == "failed":
+        scripted.append(LLMResponse(content=narration))
     scripted.append(LLMResponse(content=narration))
     router = _router(*scripted)
     lead = context()
@@ -518,8 +556,12 @@ async def test_lead_direct_receipt_requires_a_complete_settings_only_task(settin
         profile_name="lead", task=lead.user_text, parent_turn_id=lead.turn_id, parent_bus=lead.parent_bus, parent_ctx=lead
     )
     assert final.ok
-    assert final.final_answer == (message if scenario == "only_config" else narration)
-    assert router._registry._adapters["p1"]._script_index == (1 if scenario == "only_config" else 3 if scenario == "prior_work" else 2)
+    if scenario == "failed":
+        assert final.final_answer.startswith(narration)
+        assert final.completion == "partial"
+    else:
+        assert final.final_answer == (message if scenario == "only_config" else narration)
+    assert router._registry._adapters["p1"]._script_index == (1 if scenario == "only_config" else 3 if scenario in {"prior_work", "failed"} else 2)
 
 
 async def test_selected_target_is_fixed_and_persisted(settings):
@@ -710,6 +752,7 @@ async def test_spawn_uses_real_runner_and_existing_confirmation(
         "profile": AGENT_NAME,
         "task": "Read current preferences and request opening without changes." if read_only else "Start weeks on Sunday.",
         "configuration_form_id": "workspace_i18n",
+        "required_source_urls": [],
         "canvas_mode": "new_report",
         "keep_prior_report": True,
     }
@@ -801,7 +844,11 @@ async def test_spawn_uses_real_runner_and_existing_confirmation(
         final = await runner.run(profile_name="lead", task=lead.user_text, parent_turn_id=lead.turn_id, parent_bus=lead.parent_bus, parent_ctx=lead)
         invocation = next(inv for inv in final.tool_invocations if inv.tool_name == "subagent_spawn")
         assert final.ok
-        assert final.final_answer == (continuation_message if omit_submission else terminal_message)
+        if omit_submission:
+            assert final.final_answer.startswith(continuation_message)
+            assert final.completion == "partial"
+        else:
+            assert final.final_answer == terminal_message
         assert adapter._script_index == (6 if omit_submission else 5)
     else:
         invocation = await registry.execute("subagent_spawn", spawn_args, lead)

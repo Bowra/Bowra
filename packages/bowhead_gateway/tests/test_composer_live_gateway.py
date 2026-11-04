@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-import sqlite3
+import sys
 import time
+from pathlib import Path
 
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.public_entries import PublicEntryStore
+from bowhead_core.sqlite_domain_runtime import connect_sync
+from bowhead_core.sqlite_domains import TABLE_DOMAINS, domain_database_path
 from bowhead_core.user_store import UserStore
+from bowhead_gateway.installation import prepare_installation
 from bowhead_gateway.main import create_app
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_router import AgentBinding, ProviderConfig, ProviderRegistry, Router
 
@@ -71,10 +76,11 @@ class _StaticTeamRouterRegistry:
 async def test_real_gateway_replays_one_sqlite_submission(
     tmp_path,
     monkeypatch,
+    complete_community_http_installation,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
     fingerprint_key = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
     jwt_secret = "composer-live-jwt-secret-at-least-32-bytes"
     monkeypatch.setenv("BOWHEAD_DB_URL", f"sqlite+aiosqlite:///{db_path}")
@@ -97,6 +103,7 @@ async def test_real_gateway_replays_one_sqlite_submission(
 
     users = UserStore(db_path)
     await users.initialize()
+    await complete_community_http_installation(users)
 
     team = await users.create_team(name="Composer Live", max_seats=2)
     user = await users.create_user(
@@ -123,6 +130,9 @@ async def test_real_gateway_replays_one_sqlite_submission(
     )
 
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
+    await asyncio.to_thread(
+        prepare_installation, db_url=f"sqlite+aiosqlite:///{db_path}", migration_command=str(Path(sys.executable).with_name("bowhead"))
+    )
     app = create_app()
     access_token = jwt.encode(
         {
@@ -168,11 +178,13 @@ async def test_real_gateway_replays_one_sqlite_submission(
             mime="text/csv",
             created_by=user.id,
         )
-        async with open_shared_ctx(db_path) as connection:
+        async with open_shared_ctx(domain_database_path(db_path, "content")) as connection:
             await connection.executemany(
                 "INSERT INTO artifact_upload_bindings(artifact_id,workspace_id,user_id,session_id,created_at) VALUES (?,?,?,?,datetime('now'))",
                 [(artifact.id, workspace_id, user.id, None) for artifact in (bundle, child_a, child_b)],
             )
+            await connection.commit()
+        async with open_shared_ctx(domain_database_path(db_path, "execution")) as connection:
             await connection.executemany(
                 "INSERT INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,datetime('now'))",
                 [(bundle.id, child_a.id), (bundle.id, child_b.id)],
@@ -193,9 +205,11 @@ async def test_real_gateway_replays_one_sqlite_submission(
             transport=transport,
             base_url="http://localhost:8090",
             cookies={"bowhead_jwt": access_token},
+            headers={"Origin": "http://localhost:8090"},
         ) as client:
             me = await client.get("/api/v1/auth/me")
             first = await client.post("/api/v1/chat/send", json=payload)
+            assert first.status_code == 200, first.text
             replay = await client.post("/api/v1/chat/send", json=payload)
             receipt = await client.get(
                 f"/api/v1/chat/submissions/{submission_id}",
@@ -225,7 +239,7 @@ async def test_real_gateway_replays_one_sqlite_submission(
                     ],
                 }
             )
-            async with open_shared_ctx(db_path) as connection:
+            async with open_shared_ctx(domain_database_path(db_path, TABLE_DOMAINS["sessions"])) as connection:
                 await connection.execute("BEGIN IMMEDIATE")
                 await connection.execute(
                     "INSERT INTO sessions(id,workspace_id,user_id,started_at,last_active_at) VALUES('s_reference_replay',?,?,datetime('now'),datetime('now'))",
@@ -235,6 +249,9 @@ async def test_real_gateway_replays_one_sqlite_submission(
                     "INSERT INTO turns(id,session_id,seq,user_text,status,started_at) VALUES('t_reference_replay','s_reference_replay',1,?,'completed',datetime('now'))",
                     (document.display_text(),),
                 )
+                await connection.commit()
+            async with open_shared_ctx(domain_database_path(db_path, "execution")) as connection:
+                await connection.execute("BEGIN IMMEDIATE")
                 await _insert_chat_turn_user_source_in_tx(
                     connection,
                     source=ChatTurnUserSource(
@@ -269,7 +286,7 @@ async def test_real_gateway_replays_one_sqlite_submission(
             assert downgrade.json() == {
                 "detail": {"error": {"code": "unsupported_entry", "message": app.state.error_catalog.render("unsupported_entry", "en-US")}}
             }
-            with sqlite3.connect(db_path) as connection:
+            with connect_sync(db_path) as connection:
                 assert connection.execute("SELECT COUNT(*) FROM turns WHERE session_id='s_reference_replay'").fetchone() == (1,)
                 for table in ("chat_submission_receipts", "chat_submission_inflight"):
                     assert connection.execute(f"SELECT COUNT(*) FROM {table} WHERE client_submission_id=?", (downgrade_id,)).fetchone() == (0,)
@@ -302,7 +319,7 @@ async def test_real_gateway_replays_one_sqlite_submission(
             "bundle_artifact_ids": [child_a.id, child_b.id],
         }
     ]
-    with sqlite3.connect(db_path) as connection:
+    with connect_sync(db_path) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM turns WHERE id=?",
             (first.json()["turn_id"],),
@@ -322,7 +339,9 @@ async def test_real_gateway_replays_one_sqlite_submission(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sqlite(tmp_path, monkeypatch) -> None:
+async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sqlite(
+    tmp_path, monkeypatch, complete_community_http_installation
+) -> None:
     import copy
     import json
     from pathlib import Path
@@ -336,7 +355,7 @@ async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sq
     document = next(case["input"] for case in cases["valid"] if case["name"] == "exact_agent_and_parameterized_skill")
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / TARGET_FILES["core"]
-    upgrade(f"sqlite+aiosqlite:///{db_path}")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}")
     jwt_secret = "reference-live-jwt-secret-at-least-32-bytes"
     for key, value in {
         "BOWHEAD_DB_URL": f"sqlite+aiosqlite:///{db_path}",
@@ -358,6 +377,7 @@ async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sq
     monkeypatch.delenv("BOWHEAD_SUBMISSION_FINGERPRINT_KEY", raising=False)
     users = UserStore(db_path)
     await users.initialize()
+    await complete_community_http_installation(users)
     team = await users.create_team(name="Reference contract", max_seats=3)
     owner = await users.create_user(team_id=team.id, email="ref-owner@example.com", display_name="Owner", tier="ultra", email_verified=True)
     await users.set_team_creator(team.id, owner.id)
@@ -382,11 +402,19 @@ async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sq
         "model_control_batch": "references",
         "attachments": ["art_unavailable"],
     }
-    headers = {"content-type": REFERENCE_MEDIA_TYPE}
+    headers = {"content-type": REFERENCE_MEDIA_TYPE, "Origin": "http://localhost:8090"}
+    await asyncio.to_thread(
+        prepare_installation, db_url=f"sqlite+aiosqlite:///{db_path}", migration_command=str(Path(sys.executable).with_name("bowhead"))
+    )
     app = create_app()
     async with (
         app.router.lifespan_context(app),
-        httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://localhost:8090", cookies={"bowhead_jwt": token}) as client,
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app),
+            base_url="http://localhost:8090",
+            cookies={"bowhead_jwt": token},
+            headers={"Origin": "http://localhost:8090"},
+        ) as client,
     ):
         me = await client.get("/api/v1/auth/me")
         assert me.status_code == 200, me.text
@@ -421,7 +449,7 @@ async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sq
                     }
                 }
             }
-        with sqlite3.connect(db_path) as connection:
+        with connect_sync(db_path) as connection:
             for table in ("turns", "chat_submission_receipts", "chat_submission_inflight"):
                 assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         generation = me.json()["auth_session_generation"]
@@ -471,6 +499,6 @@ async def test_reference_wire_recovery_and_closed_dispatch_with_real_auth_and_sq
         abandon_denied = await client.post(lookup_url + "/abandon", json={"workspace_id": workspace_id})
         assert abandon_denied.status_code == 403, abandon_denied.text
         assert await users.get_member_role(workspace_id, user.id) is None
-        with sqlite3.connect(db_path) as connection:
+        with connect_sync(db_path) as connection:
             assert connection.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
             assert connection.execute("SELECT COUNT(*) FROM chat_submission_inflight").fetchone()[0] == 0

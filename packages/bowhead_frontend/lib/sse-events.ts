@@ -9,6 +9,8 @@
  * 0.9.1 removes legacy `meta_intent` field on `done` event.
  */
 
+import { TOOL_FAILURE_CODES } from "./tool-failure";
+
 import {
   parseErrorDiagnosticsWire,
   type ErrorDiagnostics,
@@ -194,13 +196,16 @@ export function normalizeStepError(e: WireStepError | null | undefined): {
       : undefined;
   // A denied Skill call arrives as a tool result whose `error_kind` becomes the error type; keep it as
   // the code so the step names the Skill problem instead of a generic failure.
-  const code = wireCode ?? (SKILL_DENIAL_ERROR_TYPES.has(e.type) ? e.type : undefined);
+  const code = e.type === "tool_arguments_invalid" && (!wireCode || wireCode === "tool_execution_failed")
+    ? "tool_arguments_invalid"
+    : wireCode ?? (SKILL_DENIAL_ERROR_TYPES.has(e.type) ? e.type : undefined);
   const parsedDiagnostics = parseErrorDiagnosticsWire(e.diagnostics);
   const diagnostics =
     parsedDiagnostics &&
     code &&
     parsedDiagnostics.disclosure === "authenticated" &&
-    parsedDiagnostics.diagnosticCode === "powerbi_query_failure"
+    (parsedDiagnostics.diagnosticCode === "powerbi_query_failure"
+      || parsedDiagnostics.diagnosticCode === "tool_failure" && TOOL_FAILURE_CODES.has(code))
     ? {
         ...parsedDiagnostics,
         code,
@@ -213,7 +218,7 @@ export function normalizeStepError(e: WireStepError | null | undefined): {
       : undefined;
   return {
     kind: isPermanent ? "permanent" : "transient",
-    message: e.message_zh,
+    message: e.type === "non_query_text" && code === "tool_execution_failed" ? "non_query_text" : e.message_zh,
     retryable: e.is_transient,
     ...(code ? { code } : {}),
     ...(diagnostics ? { diagnostics } : {}),

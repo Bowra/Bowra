@@ -104,8 +104,15 @@ export function localizeNotification(item: NotificationCopySource, t: Translate,
           : c("memory_new_body", { count: created }),
       };
     }
-    case "space_assignment_requested":
-      return { title: c("space_requested_title"), body: c("space_requested_body") };
+    case "space_assignment_requested": {
+      const name = str(meta, "requesterName");
+      return {
+        title: name
+          ? c("space_requested_named_title", { name })
+          : c("space_requested_title"),
+        body: c("space_requested_body"),
+      };
+    }
     case "space_assignment_ready":
       return { title: c("space_ready_title"), body: c("space_ready_body") };
     case "approval.required":

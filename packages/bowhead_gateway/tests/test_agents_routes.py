@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import AgentAssignmentStore
 from bowhead_core.agent_automation_context import AgentAutomationContextStore
 from bowhead_core.agent_change_proposal_store import AgentChangeProposalStore
@@ -29,6 +28,7 @@ from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import agents, team_openapi
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI, HTTPException
+from gateway_legacy_database import upgrade
 
 from bowhead_skill import default_catalog
 
@@ -1135,7 +1135,7 @@ def _enable_revisioned_agent(
 async def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-marketplace-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     _seed(db_path)
     user_store = UserStore(db_path)
     assignment_store = AgentAssignmentStore(db_path)
@@ -2639,7 +2639,7 @@ async def test_authoring_catalog_python_sandbox_grant_carries_invoke(app_client)
     sandbox = next(item for item in skills if item["name"] == "python_sandbox")
     # The dependency compiler requires read+invoke here (precise_skill_scope_required otherwise).
     assert sorted(sandbox["grant"]["permissions"]) == ["invoke", "read"]
-    other = next(item for item in skills if item["name"] == "doc-coauthoring")
+    other = next(item for item in skills if item["name"] == "analyst-framework")
     assert other["grant"]["permissions"] == ["read"]
 
 
@@ -3435,7 +3435,7 @@ def test_marketplace_router_is_always_mounted() -> None:
     from bowhead_gateway.main import create_app
 
     app = create_app()
-    assert any(route.path.startswith("/api/v1/agents") for route in app.routes)
+    assert any(path.startswith("/api/v1/agents") for path in app.openapi()["paths"])
 
 
 @pytest.mark.asyncio
@@ -3589,7 +3589,7 @@ async def test_authoring_catalog_lists_selectable_plugins_while_the_switch_is_on
     assert plugins["viewer_can_manage"] is True
     assert builtin["settings-space-preferences"] == {
         **builtin["settings-space-preferences"],
-        "version": 5,
+        "version": 6,
         "locked_reason": "settings_assistant_only",
     }
     assert plugins["team"] == []

@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
 
 def _utc_bounds(day: date, zone: ZoneInfo) -> tuple[str, str]:
     start = datetime.combine(day, time.min, zone).astimezone(UTC)
@@ -24,7 +26,7 @@ async def get_team_operations_report(
 ) -> dict:
     if days not in {1, 7, 30}:
         raise ValueError("days must be 1, 7, or 30")
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT report_timezone FROM teams WHERE id=?", (team_id,)) as cur:
             team = await cur.fetchone()
@@ -98,6 +100,6 @@ async def get_team_operations_report(
 
 async def set_team_report_timezone(db_path: str | Path, *, team_id: str, timezone: str) -> None:
     ZoneInfo(timezone)
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         await db.execute("UPDATE teams SET report_timezone=? WHERE id=?", (timezone, team_id))
         await db.commit()

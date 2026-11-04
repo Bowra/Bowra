@@ -32,6 +32,8 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ def _semantic_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key not in {"seq", "evt_seq"}}
 
 
-async def _is_canonical_clarification_resolution_receipt(
+async def _is_canonical_clarification_receipt(
     db: aiosqlite.Connection,
     *,
     turn_id: str,
@@ -66,28 +68,48 @@ async def _is_canonical_clarification_resolution_receipt(
     event_id: str | None,
     payload: dict[str, Any],
 ) -> bool:
-    """Allow one already-committed clarification decision through a failed fence.
+    """Allow an exact committed clarification projection through a failed fence.
 
-    A failed dispatch continues to reject every ordinary legacy writer. The
-    sole exception is the deterministic delivery receipt for a decision that
-    is already canonical in both the clarification row and its completed
-    outbox. This commits no new business fact; it only makes that durable fact
-    replayable before resume advances the dispatch generation.
+    A failed dispatch continues to reject every ordinary legacy writer.
+    Exceptions project a completed resolution or pending invalidation outbox
+    whose fact already agrees with the clarification row. Neither admits a
+    new business fact or revives the failed worker.
     """
     request_id = payload.get("request_id")
-    if (
-        event_type != "clarification.resolved"
-        or not isinstance(request_id, str)
-        or not request_id
-        or event_id != f"evt_clarification_resolution_{request_id}"
-    ):
+    if not isinstance(request_id, str) or not request_id:
+        return False
+    if event_type == "clarification.resolved":
+        outbox = "clarification_resolution_outbox"
+        expected_id = f"evt_clarification_resolution_{request_id}"
+    elif event_type == "clarification.dismissed":
+        outbox = "clarification_invalidation_outbox"
+        expected_id = f"evt_clarification_invalidation_{request_id}"
+    else:
+        return False
+    if event_id != expected_id:
         return False
     async with db.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('clarification_requests','clarification_resolution_outbox')",
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('clarification_requests',?)",
+        (outbox,),
     ) as schema_cursor:
         schema_row = await schema_cursor.fetchone()
     if schema_row is None or int(schema_row[0]) != 2:
         return False
+    if event_type == "clarification.dismissed":
+        async with db.execute(
+            "SELECT o.target_status,o.reason_code,o.actor_kind FROM clarification_requests c "
+            "JOIN clarification_invalidation_outbox o ON o.request_id=c.request_id AND o.turn_id=c.turn_id "
+            "WHERE c.request_id=? AND c.turn_id=? AND c.status=o.target_status "
+            "AND o.event_id=? AND o.state='pending' AND o.target_status IN ('dismissed','expired') "
+            "AND o.actor_kind IN ('user','system')",
+            (request_id, turn_id, event_id),
+        ) as receipt_cursor:
+            receipt = await receipt_cursor.fetchone()
+        return bool(
+            receipt is not None
+            and _semantic_payload(payload)
+            == {"request_id": request_id, "turn_id": turn_id, "status": receipt[0], "reason": receipt[1], "actor": receipt[2]}
+        )
     async with db.execute(
         "SELECT o.payload_json FROM clarification_requests c "
         "JOIN clarification_resolution_outbox o "
@@ -122,9 +144,16 @@ class TurnLogStore:
     db_path: str
     _write_lock: asyncio.Lock | None = None
 
+    def __post_init__(self) -> None:
+        self.db_path = str(domain_database_path(self.db_path, "execution"))
+
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with diagnostic_connect(domain_database_path(self.db_path, "execution")) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -145,7 +174,7 @@ class TurnLogStore:
             self._write_lock = asyncio.Lock()
         async with self._write_lock:
             try:
-                async with open_shared_ctx(self.db_path) as db:
+                async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
                     await db.execute("BEGIN IMMEDIATE")
                     try:
                         rid = event_id or f"evt_{uuid4().hex[:12]}"
@@ -190,9 +219,9 @@ class TurnLogStore:
                         # A dispatch may enter `failed` only after its ordered
                         # log tail drains, or through lease recovery. Serialize
                         # behind that transaction and reject every later
-                        # writer. A completed clarification outbox may still
-                        # project its one deterministic resolution receipt; it
-                        # is durable business truth, not a stale worker tail.
+                        # writer. Canonical clarification outboxes can still
+                        # project their deterministic receipts; those are
+                        # committed business truth, not a stale worker tail.
                         async with db.execute(
                             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_turn_spawn_dispatch'",
                         ) as schema_cursor:
@@ -203,7 +232,7 @@ class TurnLogStore:
                                 (turn_id,),
                             ) as fence_cursor:
                                 failed_dispatch_fence = await fence_cursor.fetchone()
-                            if failed_dispatch_fence is not None and not await _is_canonical_clarification_resolution_receipt(
+                            if failed_dispatch_fence is not None and not await _is_canonical_clarification_receipt(
                                 db,
                                 turn_id=turn_id,
                                 event_type=event_type,
@@ -263,7 +292,7 @@ class TurnLogStore:
     ) -> list[TurnEventRow]:
         """event_types(批4 review P2-8): SQL 侧类型过滤——单 turn 可上千行且含
         section_chunk 等大 payload, 溯源导出只要 tool_result 一类时禁全量拉。"""
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             if event_types:
                 _ph = ", ".join("?" for _ in event_types)
@@ -306,7 +335,7 @@ class TurnLogStore:
     async def max_seq(self, turn_id: str) -> int:
         """Return the highest persisted event seq for a turn, or 0 if none."""
         async with (
-            open_shared_ctx(self.db_path) as db,
+            open_shared_ctx(domain_database_path(self.db_path, "execution")) as db,
             db.execute(
                 "SELECT COALESCE(MAX(seq), 0) FROM turn_events WHERE turn_id=?",
                 (turn_id,),
@@ -321,7 +350,7 @@ class TurnLogStore:
         limit: int = 100,
     ) -> list[str]:
         async with (
-            open_shared_ctx(self.db_path) as db,
+            open_shared_ctx(domain_database_path(self.db_path, "execution")) as db,
             db.execute(
                 "SELECT DISTINCT turn_id FROM turn_events ORDER BY occurred_at DESC LIMIT ?",
                 (limit,),

@@ -183,9 +183,9 @@ function deriveSeries(spec: ChartSpec): {
     // Identity columns include geo, matching buildScatter; otherwise provincial scatter counts here as
     // one series (showLegend disabled), while the builder creates five provincial datasets:
     // five chart colors with no matching legend, worse than a uniform color.
-    const groupColumn = dimensions.find(
-      (column) => column.type === "categorical" || column.type === "geo",
-    );
+    const groupColumn = spec.explicit_presentation?.mode === "plot"
+      ? dimensions.find((column) => column.key === spec.explicit_presentation!.group_by?.[0])
+      : dimensions.find((column) => column.type === "categorical" || column.type === "geo");
     if (!xColumn || !yColumn) return { categoryCount: rows.length, series: [], valuesBySeries: [] };
     if (!groupColumn) {
       const valid = rows.filter((row) => finiteNumber(row[xColumn.key]) !== null && finiteNumber(row[yColumn.key]) !== null);
@@ -372,17 +372,27 @@ function normalizeAxisQuantities(spec: ChartSpec): ChartSpec {
 }
 
 /** The sole render normalization entry; temporary projection never mutates the caller. */
+export function explicitPlotColumns(spec: ChartSpec): ChartSpec {
+  const binding = spec.explicit_presentation;
+  if (!binding || binding.mode !== "plot" || spec.kind === "table" || spec._explicit_pivoted) return spec;
+  const axes = binding.axes!;
+  const keys = [...(axes.x ? [axes.x] : []), ...(binding.group_by ?? []), ...axes.y];
+  const columns = keys.map((key) => spec.columns.find((column) => column.key === key)!);
+  if (columns.some((column) => !column)) throw new Error("Explicit plot binding has a missing field");
+  return columns.every((column, index) => column === spec.columns[index]) && columns.length === spec.columns.length ? spec : { ...spec, columns };
+}
+
 export function normalizeChartForRenderingV1(rawSpec: ChartSpec, opts: { trackOrigins?: boolean; scopeSource?: ChartSpec } = {}): NormalizedChartForRenderingV1 {
-  let spec = rawSpec;
-  if (!spec.columns || spec.columns.length === 0) {
+  let spec = explicitPlotColumns(rawSpec);
+  if (!spec.explicit_presentation && (!spec.columns || spec.columns.length === 0)) {
     spec = { ...spec, columns: inferColumnsFromRows(spec.rows ?? []) };
   }
   if (spec._export_analytical) return { spec, shape: deriveNormalizedChartRenderShapeV1(spec) };
   const pivot = pivotLongSpec(spec, opts.trackOrigins, opts.scopeSource ?? spec);
   spec = pivot?.spec ?? spec;
-  const transpose = transposeTimeWideSpec(spec, opts.trackOrigins, pivot?.origins);
+  const transpose = spec.explicit_presentation ? null : transposeTimeWideSpec(spec, opts.trackOrigins, pivot?.origins);
   spec = transpose?.spec ?? spec;
-  const observedSpec = orderDateAxisRows(spec);
+  const observedSpec = spec.explicit_presentation ? spec : orderDateAxisRows(spec);
   spec = normalizeAxisQuantities(observedSpec);
   const origins = transpose?.origins ?? pivot?.origins;
   return { spec, shape: deriveNormalizedChartRenderShapeV1(spec), ...(origins ? { origins } : {}), ...(spec !== observedSpec ? { observedSpec } : {}) };

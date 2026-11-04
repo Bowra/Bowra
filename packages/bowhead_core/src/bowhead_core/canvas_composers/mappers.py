@@ -279,7 +279,7 @@ def _map_code_block(mi: MapperInput) -> list[dict[str, Any]]:
 
 
 def _truncate_stdout(s: str, *, limit: int = 1024) -> str:
-    """Inline stdout preview cap; full text persists to artifact_stdout table."""
+    """Cap the scrubbed stdout preview retained in the Canvas payload."""
     if not s:
         return ""
     if len(s) <= limit:

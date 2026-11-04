@@ -2,16 +2,16 @@
 name: settings-space-instructions
 description: Explain or change the current Space's instructions, the text every conversation in the Space follows, through authorized reads and version-protected user confirmation. Exclude other Spaces, Space name or description, personal preferences and Agent prompts.
 version: 1.0.1
-title: Configure current Space instructions
+title: Configure current AI work instructions
 category: platform
 audience: peer
 ---
 
-# Configure current Space instructions
+# Configure current AI work instructions
 
 Use the latest read receipt’s `schema` and `guidance` for field meanings, constraints and supported choices. `editable_fields`, `actions` and `save_policy` determine what this caller may do. Examples below describe the workflow; they do not override the registered read contract.
 
-Space instructions are one free text per Space, written by its administrators, that every conversation in that Space follows: shared definitions, preferred sources, house style. Read `configuration_read(form_id="space_instructions")` and use only the server-bound current Space. They are not the Space name or description, not a personal preference and not another Agent's prompt.
+AI work instructions are one free text per Space, written by its administrators, that every conversation in that Space follows: shared definitions, preferred sources, house style. Read `configuration_read(form_id="space_instructions")` and use only the server-bound current Space. They are not the Space name or description, not a personal preference and not another Agent's prompt.
 
 Members may read them. Only Space administrators and Team managers change them, and only while the Space is active. If the read reports `space_archived`, say the Space is archived and must be restored before its instructions can change. Otherwise, if editable fields or write actions are unavailable, say who can change them and that the user can ask an administrator. Do not stage anything in either case.
 

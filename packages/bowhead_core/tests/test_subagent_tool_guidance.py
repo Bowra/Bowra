@@ -93,7 +93,8 @@ def _profile(monkeypatch: pytest.MonkeyPatch, tools: tuple[str, ...]) -> Subagen
 
 
 @pytest.mark.parametrize("distinct_arguments", [False, True], ids=["same-call-refusal", "tool-circuit-breaker"])
-async def test_failed_tool_recovers_with_an_available_tool(monkeypatch: pytest.MonkeyPatch, distinct_arguments: bool) -> None:
+async def test_disabled_review_preserves_tool_recovery_guidance(monkeypatch: pytest.MonkeyPatch, distinct_arguments: bool) -> None:
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
     attempted: list[str] = []
 
     async def validate(_args: dict, _ctx: ToolExecutionContext) -> dict:
@@ -289,3 +290,229 @@ async def test_sandbox_guidance_respects_the_skill_permission_without_removing_t
         assert f"{expected_entry}(" in query_feedback
     else:
         assert "python_exec(" not in query_feedback and "skill_invoke(" not in query_feedback
+
+
+@pytest.mark.parametrize("covered", [False, True], ids=["required-gap", "equivalent-table"])
+async def test_delivery_review_preserves_execution_success_and_reports_requirement_status(monkeypatch: pytest.MonkeyPatch, covered: bool) -> None:
+    from bowhead_core.subagent_return_tool import register_subagent_return_tool
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    events = []
+
+    class RecordingBus(TurnEventBus):
+        async def emit(self, event):
+            events.append(event)
+            return await super().emit(event)
+
+    async def chart(_args, _ctx):
+        return {"ok": False, "error_kind": "invalid_chart_expression", "path": "/column_units"}
+
+    async def table(_args, _ctx):
+        return {"ok": True, "columns": ["Store", "Revenue"], "rows": [["Store 1", 100]]}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(ToolSchema("add_chart", "", {}), chart))
+    registry.register(ToolSpec(ToolSchema("add_table", "", {}), table))
+    register_subagent_return_tool(registry)
+    review = {
+        "requirements": [
+            {
+                "requirement": "Store performance",
+                "status": "fulfilled" if covered else "unfulfilled",
+                "evidence_call_ids": ["table"] if covered else [],
+            }
+        ],
+        "issues": [
+            {
+                "call_id": "chart",
+                "resolution": "covered" if covered else "unfulfilled",
+                "explanation": "The table contains the requested store ranking." if covered else "The required ranking was not produced.",
+                "evidence_call_ids": ["table"] if covered else [],
+            }
+        ],
+    }
+    payload = {"delivery_surface": "chat", "exec_summary": "Confirmed annual revenue.", "delivery_review": review}
+    responses = [LLMResponse(content="", tool_calls=[ToolCall(id="chart", name="add_chart", arguments={})])]
+    if covered:
+        responses.append(LLMResponse(content="", tool_calls=[ToolCall(id="table", name="add_table", arguments={})]))
+    responses.extend(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="premature", name="subagent_return", arguments={"payload": {"delivery_surface": "chat", "exec_summary": "Done"}})
+                ],
+            ),
+            LLMResponse(content="", tool_calls=[ToolCall(id="reviewed", name="subagent_return", arguments={"payload": payload})]),
+        ]
+    )
+    profile = _profile(monkeypatch, ("add_chart", "add_table", "subagent_return"))
+    result = await SubagentRunner(router=_ScriptedRouter(*responses), tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Deliver store performance.",
+        parent_turn_id="t_guidance",
+        parent_bus=RecordingBus(),
+        parent_ctx=_context(),
+    )
+    assert result.ok, result.error
+    assert result.completion == ("complete" if covered else "partial")
+    assert result.payload["exec_summary"] == "Confirmed annual revenue."
+    assert result.payload.get("caveats")
+    if covered:
+        assert "table" in result.payload["caveats"][0]
+    terminal = [event.payload for event in events if event.event_type == "tool_result" and event.payload.get("call_id") == "reviewed"]
+    assert terminal and terminal[0]["ok"] is True
+    assert any(event.event_type == "step_done" and event.payload["state"] == ("success" if covered else "partial") for event in events)
+
+
+async def test_repeated_terminal_review_is_bounded_without_triggering_tool_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.subagent_return_tool import register_subagent_return_tool
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    registry = ToolRegistry()
+
+    async def chart(_args, _ctx):
+        return {"ok": False, "error_kind": "invalid_chart_expression"}
+
+    registry.register(ToolSpec(ToolSchema("add_chart", "", {}), chart))
+    register_subagent_return_tool(registry)
+    router = _ScriptedRouter(
+        LLMResponse(content="", tool_calls=[ToolCall(id="chart", name="add_chart", arguments={})]),
+        *[
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id=f"return_{i}",
+                        name="subagent_return",
+                        arguments={"payload": {"delivery_surface": "chat", "exec_summary": "Confirmed annual revenue."}},
+                    )
+                ],
+            )
+            for i in range(3)
+        ],
+    )
+    profile = _profile(monkeypatch, ("add_chart", "subagent_return"))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Deliver store performance.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+    assert result.ok and result.completion == "partial"
+    assert len(router.requests) == 4
+    assert len([inv for inv in result.tool_invocations if inv.tool_name == "subagent_return"]) == 3
+    assert result.payload["caveats"]
+
+
+@pytest.mark.parametrize("parallel", ["0", "1"], ids=["sequential", "parallel"])
+async def test_terminal_review_waits_for_all_sibling_outcomes(monkeypatch: pytest.MonkeyPatch, parallel: str) -> None:
+    import asyncio
+
+    from bowhead_core.subagent_return_tool import register_subagent_return_tool
+    from bowhead_core.tool_delivery_review import DeliveryReviewRefusal
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", parallel)
+    registry = ToolRegistry()
+
+    async def chart(_args, _ctx):
+        await asyncio.sleep(0.01)
+        return {"ok": False, "error_kind": "invalid_chart_expression"}
+
+    registry.register(ToolSpec(ToolSchema("add_chart", "", {}), chart))
+    register_subagent_return_tool(registry)
+    review = {
+        "requirements": [{"requirement": "Store analysis", "status": "unfulfilled", "evidence_call_ids": []}],
+        "issues": [{"call_id": "chart", "resolution": "unfulfilled", "explanation": "The sibling chart failed.", "evidence_call_ids": []}],
+    }
+    router = _ScriptedRouter(
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="premature", name="subagent_return", arguments={"payload": {"delivery_surface": "chat", "exec_summary": "Done"}}),
+                ToolCall(id="chart", name="add_chart", arguments={}),
+            ],
+        ),
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="reviewed",
+                    name="subagent_return",
+                    arguments={"payload": {"delivery_surface": "chat", "exec_summary": "Confirmed results retained.", "delivery_review": review}},
+                )
+            ],
+        ),
+    )
+    profile = _profile(monkeypatch, ("add_chart", "subagent_return"))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Deliver store analysis.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+    assert result.ok and result.completion == "partial"
+    assert len(router.requests) == 2
+    assert isinstance(result.tool_invocations[0].result, DeliveryReviewRefusal)
+    assert result.payload["exec_summary"] == "Confirmed results retained."
+
+
+async def test_default_review_discloses_unverified_plain_text_closeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
+    registry = ToolRegistry()
+
+    async def validate(_args, _ctx):
+        return {"ok": False, "error_kind": "invalid_args"}
+
+    async def inspect(_args, _ctx):
+        return {"ok": True, "revision": "v2"}
+
+    registry.register(ToolSpec(ToolSchema("document_validate", "", {}), validate))
+    registry.register(ToolSpec(ToolSchema("document_inspect", "", {}), inspect))
+    router = _ScriptedRouter(
+        LLMResponse(content="", tool_calls=[ToolCall(id="validate", name="document_validate", arguments={})]),
+        LLMResponse(content="", tool_calls=[ToolCall(id="inspect", name="document_inspect", arguments={})]),
+        LLMResponse(content="The current document revision is v2."),
+        LLMResponse(content="The current document revision is v2; validation remains unverified."),
+    )
+    profile = _profile(monkeypatch, ("document_validate", "document_inspect"))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Inspect and validate the document revision.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+    assert result.ok and result.completion == "partial"
+    assert len(router.requests) == 4
+    assert "v2" in result.final_answer and "unverified" in result.final_answer
+    assert [inv.call_id for inv in result.tool_invocations] == ["validate", "inspect"]
+
+
+@pytest.mark.parametrize("chart_available", [False, True])
+async def test_chart_guidance_follows_admitted_tool_availability(monkeypatch: pytest.MonkeyPatch, chart_available: bool) -> None:
+    from bowhead_core.canvas_tools import _add_chart_schema
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0")
+    schema = _add_chart_schema()
+
+    async def chart(_args: dict, _ctx: ToolExecutionContext) -> dict:
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(schema=schema, handler=chart, visible_to_llm=chart_available))
+    router = _ScriptedRouter(LLMResponse(content="The existing chart remains available."))
+    profile = _profile(monkeypatch, ("add_chart",))
+    result = await SubagentRunner(router=router, tool_registry=registry).run(
+        profile_name=profile.name,
+        task="Inspect the available chart contract.",
+        parent_turn_id="t_guidance",
+        parent_bus=TurnEventBus(),
+        parent_ctx=_context(),
+    )
+    assert result.ok, result.error
+    system = router.requests[0].system or ""
+    assert ("This execution uses explicit native presentation" in system) == chart_available

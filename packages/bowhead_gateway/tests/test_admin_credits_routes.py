@@ -18,25 +18,25 @@ import aiosqlite
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.credit_admin_store import _reset_for_tests as _reset_cache
 from bowhead_core.metrics_log import MetricsLog
 from bowhead_core.user_store import UserStore, _id, _now
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from fastapi import FastAPI
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_core import SessionStore
 
 
 @pytest.fixture
-async def app_ctx(tmp_path, monkeypatch):
+async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_secret_credits_admin_e2e_xxx")
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "prod")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     db = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core") == ("core",)
     sess = SessionStore(str(db))
     await sess.initialize()
     user_store = UserStore(str(db))
@@ -48,6 +48,7 @@ async def app_ctx(tmp_path, monkeypatch):
     app.state.settings = Settings()
     app.state.session_store = sess
     app.state.user_store = user_store
+    await complete_community_http_installation(user_store, app=app)
     app.state.metrics_log = metrics_log
     app.state.canvas_store = None
     app.state.orchestrator = None
@@ -139,7 +140,7 @@ async def _make_jwt(user_id: str, team_id: str = "team_a") -> str:
 async def _admin_client(app, user_id: str = "u_admin", team_id: str = "team_a"):
     """返回带 JWT cookie 的 client (admin)."""
     transport = httpx2.ASGITransport(app=app)
-    c = httpx2.AsyncClient(transport=transport, base_url="http://gw")
+    c = httpx2.AsyncClient(transport=transport, base_url="http://gw", headers={"Origin": "http://gw"})
     token = await _make_jwt(user_id, team_id)
     c.cookies.set("bowhead_jwt", token)
     return c
@@ -685,30 +686,6 @@ async def test_user_ledger_drilldown(app_ctx) -> None:
 
 
 @pytest.mark.integration
-async def test_audit_log_returns_credit_admin_events(app_ctx) -> None:
-    app, store = app_ctx
-    await _seed_team(store)
-    await _seed_user(store, user_id="u_admin", is_creator=True)
-    await _seed_user(store, user_id="u_alice", balance=0)
-    async with await _admin_client(app) as c:
-        # Trigger grant + set.
-        await c.post(
-            "/api/v1/admin/credits/users/u_alice/grant",
-            json={"amount": 1000, "idempotency_key": "k1aaaaaaaaaa"},
-        )
-        await c.patch(
-            "/api/v1/admin/credits/users/u_alice",
-            json={"credit_balance": 2000},
-        )
-        r = await c.get("/api/v1/admin/credits/audit-log")
-        assert r.status_code == 200
-        d = r.json()
-        assert d["total"] == 2
-        types = sorted([i["event_type"] for i in d["items"]])
-        assert types == ["credit_admin_grant", "credit_admin_set_user"]
-
-
-@pytest.mark.integration
 async def test_export_csv_summary(app_ctx) -> None:
     app, store = app_ctx
     await _seed_team(store)
@@ -808,9 +785,12 @@ async def test_non_admin_blocked_on_all_endpoints(app_ctx) -> None:
             ("POST", "/api/v1/admin/credits/period-reset"),
             ("POST", "/api/v1/admin/credits/attention/attn_missing/state"),
             ("GET", "/api/v1/admin/credits/users/u_admin/ledger"),
-            ("GET", "/api/v1/admin/credits/audit-log"),
             ("GET", "/api/v1/admin/credits/export.csv?scope=summary"),
         ]
+        from bowhead_gateway.edition_extensions import read_build_edition
+
+        if read_build_edition() != "community":
+            cases.append(("GET", "/api/v1/admin/credits/audit-log"))
         for method, path in cases:
             r = await c.request(
                 method,

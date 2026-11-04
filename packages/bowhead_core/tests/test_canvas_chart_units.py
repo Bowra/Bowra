@@ -57,7 +57,7 @@ def _ctx_with_source(source: Any | None) -> tuple[Any, _CapturingCanvasStore]:
 
 async def _run(ctx: Any) -> dict[str, Any]:
     return await _add_chart(
-        {"data_artifact_id": "art_333333333333", "hint": "rank", "title": "各品牌达成率"},
+        {"data_artifact_id": "art_333333333333", "title": "各品牌达成率"},
         ctx,
     )
 

@@ -25,6 +25,7 @@ from bowhead_core.agent_listing_safety import scan_agent_listing
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.resource_dependency_projection import invalidate_working_copy_projection_conn
 from bowhead_core.secret_redaction import extract_secrets
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.user_store import UserStore
 
 TAXONOMY_VERSION = "agent-taxonomy-v1"
@@ -298,7 +299,7 @@ def normalize_taxonomy_suggestion(
 
 class AgentTaxonomyStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def agent_manager_snapshot(
         self,

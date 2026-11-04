@@ -5,7 +5,6 @@ import json
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import (
     AgentAssignmentAccessError,
     AgentAssignmentCutoverCompleteError,
@@ -24,6 +23,7 @@ from bowhead_core.team_subagent_store import (
     TeamSubagentStore,
 )
 from bowhead_core.user_store import TeamSubagent, UserStore
+from core_legacy_database import upgrade
 
 
 def _seed(db_path) -> None:
@@ -78,7 +78,7 @@ def _seed(db_path) -> None:
 @pytest.fixture
 def marketplace_db(tmp_path):
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     _seed(db_path)
     return db_path
 
@@ -416,7 +416,7 @@ async def test_assignment_schema_readiness_checks_all_m1_tables_and_columns(mark
 @pytest.mark.asyncio
 async def test_assignment_schema_readiness_rejects_missing_key_column(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute("ALTER TABLE agent_catalog_projection DROP COLUMN projection_hash")
         connection.commit()

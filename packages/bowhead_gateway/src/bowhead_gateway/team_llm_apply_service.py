@@ -80,6 +80,7 @@ class V2ApplyResult:
     version: int
     snapshot_id: str
     decision: ReadinessDecision
+    provider_ids: dict[str, str]
 
 
 def _now_iso(value: datetime) -> str:
@@ -836,6 +837,7 @@ async def apply_team_llm_v2(
             await db.rollback()
             raise
     return V2ApplyResult(
+        provider_ids=draft_provider_ids,
         version=new_version,
         snapshot_id=snapshot_id,
         decision=decision,

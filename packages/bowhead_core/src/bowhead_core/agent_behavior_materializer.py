@@ -37,6 +37,7 @@ from bowhead_core.agent_dependency_compiler import (
 )
 from bowhead_core.agents.exceptions import ManifestValidationError
 from bowhead_core.metrics import inc
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +294,7 @@ class AgentBehaviorBackfillService:
         *,
         materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._materializer = materializer or default_agent_behavior_materializer()
 
     async def run_page(

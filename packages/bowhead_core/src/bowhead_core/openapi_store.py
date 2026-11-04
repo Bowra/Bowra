@@ -11,6 +11,9 @@ from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
+
 SCOPES = frozenset(
     {
         "users:read",
@@ -41,7 +44,7 @@ def _new_token() -> str:
 
 class OpenApiStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     async def create_key(self, *, team_id: str, name: str, scopes: list[str], expires_at: str | None) -> tuple[dict, str]:
         if not set(scopes).issubset(SCOPES) or not scopes:
@@ -49,7 +52,7 @@ class OpenApiStore:
         token = _new_token()
         key_id = "oak_" + secrets.token_urlsafe(12)
         row = (key_id, team_id, name.strip(), _hash(token), token[:12], json.dumps(sorted(set(scopes))), expires_at, _now())
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO team_openapi_keys(id,team_id,name,token_hash,token_prefix,scopes_json,expires_at,status,created_at) VALUES(?,?,?,?,?,?,?,'active',?)",
                 row,
@@ -58,7 +61,7 @@ class OpenApiStore:
         return await self.get_key(team_id, key_id), token
 
     async def get_key(self, team_id: str, key_id: str) -> dict:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,name,token_prefix,scopes_json,expires_at,status,created_at,last_used_at FROM team_openapi_keys WHERE team_id=? AND id=?",
@@ -72,7 +75,7 @@ class OpenApiStore:
         return value
 
     async def list_keys(self, team_id: str) -> list[dict]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,name,token_prefix,scopes_json,expires_at,status,created_at,last_used_at FROM team_openapi_keys WHERE team_id=? AND status<>'deleted' ORDER BY created_at DESC",
@@ -87,7 +90,7 @@ class OpenApiStore:
         return values
 
     async def set_status(self, team_id: str, key_id: str, status: str) -> dict:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             result = await db.execute("UPDATE team_openapi_keys SET status=? WHERE team_id=? AND id=?", (status, team_id, key_id))
             await db.commit()
         if result.rowcount != 1:
@@ -97,7 +100,7 @@ class OpenApiStore:
     async def update_key(self, *, team_id: str, key_id: str, scopes: list[str], expires_at: str | None) -> dict:
         if not set(scopes).issubset(SCOPES) or not scopes:
             raise ValueError("invalid scopes")
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             result = await db.execute(
                 "UPDATE team_openapi_keys SET scopes_json=?,expires_at=? WHERE team_id=? AND id=? AND status<>'deleted'",
                 (json.dumps(sorted(set(scopes))), expires_at, team_id, key_id),
@@ -109,7 +112,7 @@ class OpenApiStore:
 
     async def rotate(self, team_id: str, key_id: str) -> tuple[dict, str]:
         token = _new_token()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             result = await db.execute(
                 "UPDATE team_openapi_keys SET token_hash=?,token_prefix=?,status='active',last_used_at=NULL WHERE team_id=? AND id=?",
                 (_hash(token), token[:12], team_id, key_id),
@@ -121,7 +124,7 @@ class OpenApiStore:
 
     async def authenticate(self, token: str) -> dict | None:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id,team_id,name,token_prefix,scopes_json,expires_at FROM team_openapi_keys WHERE token_hash=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
@@ -143,7 +146,7 @@ class OpenApiStore:
         request_summary: str | None,
         response_summary: str | None = None,
     ) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO team_openapi_call_logs(id,team_id,key_id,key_name,key_prefix,http_method,path,status_code,request_summary,response_summary,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -163,7 +166,7 @@ class OpenApiStore:
             await db.commit()
 
     async def list_logs(self, team_id: str, limit: int = 100) -> list[dict]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT key_id,key_name,key_prefix,http_method,path,status_code,request_summary,response_summary,created_at FROM team_openapi_call_logs WHERE team_id=? ORDER BY created_at DESC LIMIT ?",
@@ -173,7 +176,7 @@ class OpenApiStore:
 
     async def prune_logs(self, retention_days: int) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             result = await db.execute("DELETE FROM team_openapi_call_logs WHERE created_at<?", (cutoff,))
             await db.commit()
             return result.rowcount

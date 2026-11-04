@@ -52,6 +52,14 @@ class ReportRelations:
     relations: tuple[ReportArtifactRelation, ...]
     projection_revision: str
 
+    def restricted_to(self, artifact_ids: frozenset[str]) -> ReportRelations:
+        """Keep authorized relations and bind the revision to that exact set."""
+        builder = _RelationBuilder()
+        for relation in self.relations:
+            if relation.artifact_id in artifact_ids:
+                builder.add(relation.artifact_id, *relation.roles)
+        return builder.build()
+
     @property
     def closure_ids(self) -> tuple[str, ...]:
         return tuple(relation.artifact_id for relation in self.relations)

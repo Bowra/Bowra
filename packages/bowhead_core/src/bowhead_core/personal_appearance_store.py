@@ -11,6 +11,7 @@ from bowhead_core.personal_theme_models import (
     KEY_APPEARANCE_THEME_CONFIG_V3,
     KEY_APPEARANCE_THEME_UNDO_V3,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.theme_config import KEY_APPEARANCE_THEME_CONFIG, KEY_TEAM_THEME_POLICY
 
 if TYPE_CHECKING:
@@ -57,7 +58,7 @@ class PersonalAppearanceStore:
     """Owns atomic reads and compare-and-write for internal appearance rows."""
 
     def __init__(self, path: str | Path) -> None:
-        self.db_path = str(path)
+        self.db_path = str(domain_database_path(path, "core"))
 
     async def initialize(self) -> None:
         """Verify the generic settings schema without creating or migrating it."""

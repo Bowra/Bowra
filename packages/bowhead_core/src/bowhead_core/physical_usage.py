@@ -21,6 +21,7 @@ from bowhead_router.usage import current_usage_context
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.rate_card import ModelCreditRates, ModelTokenUsage, ModelUsageLine
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 
 MAX_SOURCE_BYTES = 64 * 1024
 
@@ -116,7 +117,7 @@ class PhysicalUsageObserver:
         plan_id: str | None = None,
         model_credit_rates: Mapping[tuple[str, str], Mapping[str, str]] | None = None,
     ):
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "execution")
         self.cipher = cipher
         self.turn_id = turn_id
         self.generation = generation
@@ -130,13 +131,15 @@ class PhysicalUsageObserver:
         identity = "lu_" + uuid4().hex
         now = datetime.now(UTC)
         sources, _fragments, exact = source_fragments(request, body, family)
-        async with open_shared_ctx(self.db_path) as db:
+        privacy_scope = " AND NOT EXISTS(SELECT 1 FROM account_deletions d WHERE d.user_id=s.user_id)" if domain_layout_active(self.db_path) else ""
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
                 async with db.execute(
                     "SELECT t.execution_generation,s.id AS session_id FROM turns t JOIN sessions s ON s.id=t.session_id "
-                    "JOIN workspaces w ON w.id=s.workspace_id WHERE t.id=? AND s.user_id=? AND s.workspace_id=? AND w.team_id=? AND t.execution_generation=?",
+                    "JOIN workspaces w ON w.id=s.workspace_id WHERE t.id=? AND s.user_id=? AND s.workspace_id=? AND w.team_id=? AND t.execution_generation=?"
+                    + privacy_scope,
                     (ctx.turn_id, ctx.user_id, ctx.workspace_id, ctx.team_id, self.generation),
                 ) as cursor:
                     row = await cursor.fetchone()
@@ -217,7 +220,7 @@ class _UsageAttempt:
             usage.output_tokens if usage else 0,
             usage.cached_tokens if usage else 0,
         )
-        async with open_shared_ctx(self.observer.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.observer.db_path, "execution")) as db:
             await db.execute(
                 "UPDATE llm_usage_events SET receipt_state=?,outcome_code=?,response_digest=?,tokens_input=?,tokens_output=?,tokens_cached=?,settled_at=? "
                 "WHERE id=? AND receipt_state='pending'",
@@ -302,7 +305,7 @@ async def read_turn_credit_usage(
     projected_input: int,
     projected_output: int,
 ) -> tuple[str, tuple[ModelUsageLine, ...]]:
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "execution")) as db:
         async with db.execute("SELECT billing_rate_card_version FROM turns WHERE id=?", (turn_id,)) as cursor:
             turn = await cursor.fetchone()
         if turn is None:

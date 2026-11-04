@@ -15,6 +15,7 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -59,7 +60,6 @@ async def update_profile(
     user: User = Depends(_current_user),
     store: UserStore = Depends(_store),
 ) -> dict:
-    import aiosqlite
 
     fields = []
     params: list[Any] = []
@@ -81,7 +81,7 @@ async def update_profile(
     if not fields:
         return {"ok": True, "no_change": True}
     params.append(user.id)
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         await db.execute(
             f"UPDATE users SET {', '.join(fields)} WHERE id = ?",
             params,

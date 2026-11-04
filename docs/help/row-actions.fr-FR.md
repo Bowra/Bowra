@@ -13,7 +13,7 @@ Les interrupteurs d’état et actions principales, comme ouvrir un rapport, peu
 ## Exemples courants
 
 - Paramètres d’équipe : membres, invitations, espaces, connexions de modèles et de données, outils, Agents intégrés, workflows et tâches planifiées.
-- Paramètres d’espace : membres et instructions d’espace.
+- Paramètres d’espace : membres et consignes de travail de l’IA.
 - Paramètres personnels : appareils connectés, mémoires et éléments récemment effacés.
 - Bibliothèque et rapports : fichiers, tables d’extraction, liens de rapports et suppression.
 - Agents et Skills : partage, gestion et activation personnelle pris en charge.

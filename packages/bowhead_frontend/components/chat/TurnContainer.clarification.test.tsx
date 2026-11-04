@@ -29,10 +29,13 @@ vi.mock("next-intl", () => ({
 const resolveMock = vi.fn();
 const resumeMock = vi.fn();
 const listMock = vi.fn();
+const dismissMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   resolveClarification: (...a: unknown[]) => resolveMock(...a),
   resumeTurnAfterClarification: (...a: unknown[]) => resumeMock(...a),
   listClarificationsForTurn: (...a: unknown[]) => listMock(...a),
+  dismissClarification: (...a: unknown[]) => dismissMock(...a),
+  listPendingSessionQuestions: () => Promise.resolve([]),
 }));
 
 const toastMock = vi.fn();
@@ -48,6 +51,7 @@ beforeEach(() => {
   resolveMock.mockReset();
   resumeMock.mockReset();
   listMock.mockReset();
+  dismissMock.mockReset();
   toastMock.mockReset();
 });
 
@@ -115,6 +119,26 @@ const PENDING_MULTI_RELABELED = {
 };
 
 describe("TurnContainer clarification orchestration", () => {
+  it("dismisses the native card without resolving or resuming it", async () => {
+    dismissMock.mockResolvedValue({ dismissed: true });
+    const clear = vi.fn();
+    render(<TurnContainer runner={runner({ turnId: "t_original", clarificationPending: PENDING, clearClarificationPending: clear })} />);
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(clear).toHaveBeenCalledWith("c1"));
+    expect(dismissMock).toHaveBeenCalledWith("c1");
+    expect(resolveMock).not.toHaveBeenCalled();
+    expect(resumeMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the native question available when cancellation fails", async () => {
+    dismissMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const clear = vi.fn();
+    render(<TurnContainer runner={runner({ turnId: "t_original", clarificationPending: PENDING, clearClarificationPending: clear })} />);
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.getByTestId("clarification-card")).toHaveTextContent("transport.serviceUnreachable"));
+    expect(clear).not.toHaveBeenCalled();
+    expect(resolveMock).not.toHaveBeenCalled();
+  });
   it("keeps an answered clarification blocked without retrying its resolve request", async () => {
     const diagnostics = {
       schemaVersion: 1 as const, disclosure: "authenticated" as const,

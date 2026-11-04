@@ -7,11 +7,11 @@
       "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
       "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
       "personal_appearance.typographyProfile": "029ba279130883f32ec1",
-      "space_instructions.content": "549977c9bacde339fdb0",
+      "space_instructions.content": "b8ca910cfa1a9492f7b0",
       "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
       "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
       "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
-      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb": "cc36c501dceb5761aa4e",
       "team_model_config.kb.active": "8d87acecb64b960561f2",
       "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
       "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
@@ -198,7 +198,9 @@
       "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
       "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
-      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
+      "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
     },
     "de-DE": {
       "personal_appearance.density": "fb786b2502f26f4eb94f",
@@ -207,11 +209,11 @@
       "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
       "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
       "personal_appearance.typographyProfile": "029ba279130883f32ec1",
-      "space_instructions.content": "549977c9bacde339fdb0",
+      "space_instructions.content": "b8ca910cfa1a9492f7b0",
       "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
       "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
       "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
-      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb": "cc36c501dceb5761aa4e",
       "team_model_config.kb.active": "8d87acecb64b960561f2",
       "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
       "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
@@ -398,7 +400,9 @@
       "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
       "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
-      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
+      "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
     },
     "fr-FR": {
       "personal_appearance.density": "fb786b2502f26f4eb94f",
@@ -407,11 +411,11 @@
       "personal_appearance.radius": "ef0f5b6ba9b0ab8e0261",
       "personal_appearance.typeScale": "2537ddeaf976421f5c2c",
       "personal_appearance.typographyProfile": "029ba279130883f32ec1",
-      "space_instructions.content": "549977c9bacde339fdb0",
+      "space_instructions.content": "b8ca910cfa1a9492f7b0",
       "team_execution_limits.html_max_bytes": "534b2e9ca836c2bacf0e",
       "team_execution_limits.sandbox_default_timeout_s": "04e9c80aeff658fcc9c5",
       "team_execution_limits.sandbox_max_timeout_s": "a4a413397809d729429d",
-      "team_model_config.kb": "745abe5ec82019355e0f",
+      "team_model_config.kb": "cc36c501dceb5761aa4e",
       "team_model_config.kb.active": "8d87acecb64b960561f2",
       "team_model_config.kb.active.embed": "537aa3cd90b58650fae1",
       "team_model_config.kb.active.rerank": "537aa3cd90b58650fae1",
@@ -598,7 +602,9 @@
       "team_model_config.providers.*.models.*.context_policy": "065e23ef99edb9fe31ef",
       "team_model_config.providers.*.models.*.context_policy.enabled": "ba0edcb37f0b7cca655a",
       "team_model_config.providers.*.models.*.context_policy.keep_recent_tokens": "2dd48ed330a5549d31aa",
-      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1"
+      "team_model_config.providers.*.models.*.context_policy.trigger_input_tokens": "9df89261dc4bba1ed0e1",
+      "team_model_config.kb.active.source_description": "bc9d337db968981e07a6",
+      "team_model_config.kb.auto_assign_disabled": "c75be04929c50dffa2ff"
     }
   },
   "fields": {
@@ -627,8 +633,8 @@
       "revision": "029ba279130883f32ec1"
     },
     "space_instructions.content": {
-      "key": "d_f4aed1aa02abed8580b4",
-      "revision": "549977c9bacde339fdb0"
+      "key": "d_f6ce942fbba9c47980fe",
+      "revision": "b8ca910cfa1a9492f7b0"
     },
     "team_execution_limits.html_max_bytes": {
       "key": "d_c8661ad2504825cbbd34",
@@ -643,8 +649,8 @@
       "revision": "a4a413397809d729429d"
     },
     "team_model_config.kb": {
-      "key": "d_f1ef59b319a884ab994d",
-      "revision": "745abe5ec82019355e0f"
+      "key": "d_5351928bd1475f951a2a",
+      "revision": "cc36c501dceb5761aa4e"
     },
     "team_model_config.kb.active": {
       "key": "d_bc7b188f3fab108ba12e",
@@ -662,9 +668,17 @@
       "key": "d_ddb754c5303c2114d8ed",
       "revision": "537aa3cd90b58650fae1"
     },
+    "team_model_config.kb.active.source_description": {
+      "key": "d_db65a4d59c05244006c6",
+      "revision": "bc9d337db968981e07a6"
+    },
     "team_model_config.kb.active.vision": {
       "key": "d_ddb754c5303c2114d8ed",
       "revision": "537aa3cd90b58650fae1"
+    },
+    "team_model_config.kb.auto_assign_disabled": {
+      "key": "d_37d82cf26c6b5a5d5176",
+      "revision": "c75be04929c50dffa2ff"
     },
     "team_model_config.kb.models": {
       "key": "d_0524af6a4020bfa125de",

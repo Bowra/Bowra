@@ -27,6 +27,7 @@ from bowhead_core.documents.upload_confirmation import (
     register_confirmation,
 )
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -207,7 +208,7 @@ async def _atomic_insert_pending(
     _PRESIGN_PENDING_CAP. Eliminates the race where N concurrent presign
     calls all read count=cap-N and all INSERT.
     """
-    async with _open_db(db_path) as db:
+    async with _open_db(domain_database_path(db_path, "content")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             cur = await db.execute(
@@ -262,10 +263,22 @@ async def _atomic_insert_pending(
             if has_owned_writes:
                 await db.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (aid,))
             await db.execute("COMMIT")
-            return True
         except Exception:
             await db.execute("ROLLBACK")
             raise
+
+    if domain_layout_active(db_path):
+        try:
+            async with _open_db(domain_database_path(db_path, "core")) as core:
+                await core.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (aid,))
+                await core.commit()
+        except Exception as exc:
+            log.warning(
+                "files_presign.ownership_cleanup_pending diagnostic_id=%s error_type=%s",
+                getattr(exc, "bowhead_diagnostic_id", None),
+                type(exc).__name__,
+            )
+    return True
 
 
 def _new_artifact_id() -> str:
@@ -677,16 +690,19 @@ async def files_presign_confirm(
         # Pin to session_attachments if session_id provided
         if final_session_id:
             try:
-                await db.execute(
-                    "INSERT INTO session_attachments(session_id, artifact_id, pinned_at, detached_at) "
-                    "VALUES (?, ?, ?, NULL) "
-                    "ON CONFLICT(session_id, artifact_id) DO UPDATE SET detached_at=NULL",
-                    (
-                        final_session_id,
-                        file_id,
-                        ready_at,
-                    ),
-                )
+                await db.commit()
+                async with _open_db(domain_database_path(store.db_path, "execution")) as association_db:
+                    await association_db.execute(
+                        "INSERT INTO session_attachments(session_id, artifact_id, pinned_at, detached_at) "
+                        "VALUES (?, ?, ?, NULL) "
+                        "ON CONFLICT(session_id, artifact_id) DO UPDATE SET detached_at=NULL",
+                        (
+                            final_session_id,
+                            file_id,
+                            ready_at,
+                        ),
+                    )
+                    await association_db.commit()
             except Exception as _e:
                 log.warning(
                     "files_presign_confirm: session_attachments insert failed session=%s art=%s err=%s",

@@ -34,6 +34,7 @@ from bowhead_core.resource_dependency_projection import (
     replace_subject_projection_conn,
     stable_edges_from_definition,
 )
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.team_plugin_store import TeamPluginError, expand_plugins_conn, selected_plugin_ids
 from bowhead_core.team_subagent_access import TeamSubagentAccessResolver
 from bowhead_core.team_subagent_store import release_semantics_active_conn
@@ -282,6 +283,76 @@ def project_system_agent_revision(
     )
 
 
+async def persist_prepared_system_revision(
+    db_path: str | Path,
+    *,
+    team_id: str,
+    prepared: ProjectedSystemAgentRevision,
+    manifest_fingerprint: str,
+    override_version: int | None,
+) -> None:
+    """Persist immutable core revision data before opening an execution transaction."""
+    if not domain_layout_active(db_path):
+        return
+    definition_json = _canonical_json(prepared.definition)
+    if _hash_text(definition_json) != prepared.definition_hash:
+        raise AgentExecutionBindingError("agent_system_revision_preparation_mismatch")
+    timestamp = _now()
+    async with open_shared_ctx(domain_database_path(db_path, "core")) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT revision.*,behavior.descriptor_json AS behavior_descriptor_json
+            FROM system_agent_effective_revision revision
+            LEFT JOIN system_agent_revision_behavior behavior ON behavior.team_id=revision.team_id
+              AND behavior.agent_id=revision.agent_id AND behavior.revision_id=revision.id
+            WHERE revision.team_id=? AND revision.agent_id=? AND revision.definition_hash=?""",
+            (team_id, prepared.agent_id, prepared.definition_hash),
+        ) as cursor:
+            existing = await cursor.fetchone()
+        if existing is not None:
+            _validate_system_snapshot(existing)
+            return
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            inserted = await db.execute(
+                """INSERT INTO system_agent_effective_revision(
+                    id,team_id,agent_id,manifest_fingerprint,override_version,definition_json,definition_hash,created_at
+                ) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(team_id,agent_id,definition_hash) DO NOTHING""",
+                (
+                    prepared.revision_ref,
+                    team_id,
+                    prepared.agent_id,
+                    manifest_fingerprint,
+                    override_version,
+                    definition_json,
+                    prepared.definition_hash,
+                    timestamp,
+                ),
+            )
+            if inserted.rowcount == 1:
+                await AgentBehaviorMaterializer.persist_system_revision_conn(
+                    db,
+                    revision_id=prepared.revision_ref,
+                    team_id=team_id,
+                    agent_id=prepared.agent_id,
+                    descriptor=prepared.behavior_descriptor,
+                    created_at=timestamp,
+                )
+            projection, edges = stable_edges_from_definition(
+                team_id=team_id,
+                subject_kind="system_agent_revision",
+                subject_ref=prepared.revision_ref,
+                agent_id=prepared.agent_id,
+                subject_fingerprint=prepared.definition_hash,
+                definition=prepared.definition,
+            )
+            await replace_subject_projection_conn(db, projection=projection, edges=edges, projected_at=timestamp)
+            await db.commit()
+        except BaseException:
+            await db.rollback()
+            raise
+
+
 class AgentExecutionBindingStore:
     """Admission/read store for exact root and dynamic Agent bindings."""
 
@@ -291,7 +362,7 @@ class AgentExecutionBindingStore:
         *,
         behavior_materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "execution"))
         # Keep existing-revision reads independent of the shadow compiler and
         # its catalog. Only a newly inserted immutable revision requires the
         # sidecar, in the same transaction.
@@ -717,6 +788,13 @@ class AgentExecutionBindingStore:
                 definition=definition_value,
                 behavior_materializer=self._behavior_materializer,
             )
+            await persist_prepared_system_revision(
+                self.db_path,
+                team_id=team_id,
+                prepared=prepared_revision,
+                manifest_fingerprint=manifest_fingerprint,
+                override_version=override_version,
+            )
 
     async def admit_system_execution_in_connection(
         self,
@@ -785,8 +863,9 @@ class AgentExecutionBindingStore:
                 triggers = [OUTPUT_BUDGET_TRIGGER] if definition_value["schema_version"] == 3 else []
                 if definition_value["schema_version"] == 2 or "skill_runtime_scope" in definition_value:
                     triggers.append(MIGRATION_TRIGGER)
+                schema = "domain_core.sqlite_master" if domain_layout_active(self.db_path) else "sqlite_master"
                 for trigger in triggers:
-                    async with db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?", (trigger,)) as cursor:
+                    async with db.execute(f"SELECT 1 FROM {schema} WHERE type='trigger' AND name=?", (trigger,)) as cursor:
                         if await cursor.fetchone() is None:
                             raise AgentExecutionBindingError("agent_system_skill_snapshot_migration_required")
             await _require_turn_scope(
@@ -841,7 +920,7 @@ class AgentExecutionBindingStore:
                 if not source_bindings_enabled():
                     raise AgentExecutionBindingError("agent_knowledge_access_admission_closed")
                 await require_knowledge_migration(db)
-            if prepared_revision is None:
+            if prepared_revision is None or domain_layout_active(self.db_path):
                 async with db.execute(
                     "SELECT 1 FROM system_agent_effective_revision WHERE team_id=? AND agent_id=? AND definition_hash=?",
                     (team_id, agent_id, definition_hash),
@@ -849,35 +928,36 @@ class AgentExecutionBindingStore:
                     if await cursor.fetchone() is None:
                         raise AgentExecutionBindingError("agent_system_revision_preparation_required")
 
-            inserted_revision = await db.execute(
-                """
-                INSERT INTO system_agent_effective_revision(
-                  id,team_id,agent_id,manifest_fingerprint,override_version,
-                  definition_json,definition_hash,created_at
-                ) VALUES (?,?,?,?,?,?,?,?)
-                ON CONFLICT(team_id,agent_id,definition_hash) DO NOTHING
-                """,
-                (
-                    revision_id,
-                    team_id,
-                    agent_id,
-                    manifest_fingerprint,
-                    override_version,
-                    definition_json,
-                    definition_hash,
-                    timestamp,
-                ),
-            )
-            if inserted_revision.rowcount == 1:
-                assert prepared_revision is not None
-                await AgentBehaviorMaterializer.persist_system_revision_conn(
-                    db,
-                    revision_id=revision_id,
-                    team_id=team_id,
-                    agent_id=agent_id,
-                    descriptor=behavior,
-                    created_at=timestamp,
+            if not domain_layout_active(self.db_path):
+                inserted_revision = await db.execute(
+                    """
+                    INSERT INTO system_agent_effective_revision(
+                      id,team_id,agent_id,manifest_fingerprint,override_version,
+                      definition_json,definition_hash,created_at
+                    ) VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(team_id,agent_id,definition_hash) DO NOTHING
+                    """,
+                    (
+                        revision_id,
+                        team_id,
+                        agent_id,
+                        manifest_fingerprint,
+                        override_version,
+                        definition_json,
+                        definition_hash,
+                        timestamp,
+                    ),
                 )
+                if inserted_revision.rowcount == 1:
+                    assert prepared_revision is not None
+                    await AgentBehaviorMaterializer.persist_system_revision_conn(
+                        db,
+                        revision_id=revision_id,
+                        team_id=team_id,
+                        agent_id=agent_id,
+                        descriptor=behavior,
+                        created_at=timestamp,
+                    )
             async with db.execute(
                 """
                 SELECT revision.*,
@@ -904,20 +984,21 @@ class AgentExecutionBindingStore:
                 release_id=None,
                 snapshot=snapshot,
             )
-            projection, edges = stable_edges_from_definition(
-                team_id=team_id,
-                subject_kind="system_agent_revision",
-                subject_ref=str(snapshot["id"]),
-                agent_id=agent_id,
-                subject_fingerprint=definition_hash,
-                definition=definition_value,
-            )
-            await replace_subject_projection_conn(
-                db,
-                projection=projection,
-                edges=edges,
-                projected_at=timestamp,
-            )
+            if not domain_layout_active(self.db_path):
+                projection, edges = stable_edges_from_definition(
+                    team_id=team_id,
+                    subject_kind="system_agent_revision",
+                    subject_ref=str(snapshot["id"]),
+                    agent_id=agent_id,
+                    subject_fingerprint=definition_hash,
+                    definition=definition_value,
+                )
+                await replace_subject_projection_conn(
+                    db,
+                    projection=projection,
+                    edges=edges,
+                    projected_at=timestamp,
+                )
             policy_fingerprint = _system_policy_fingerprint(
                 assignment, override_version, system_required=system_required, enforce_current_override=enforce_current_override
             )

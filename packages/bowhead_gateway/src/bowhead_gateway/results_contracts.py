@@ -143,12 +143,18 @@ class ResultItemDTOV1(_ContractModel):
         return self
 
 
+class ContentSharingCapabilityV1(_ContractModel):
+    enabled: bool
+    reason: Literal["deployment_disabled"] | None = None
+
+
 class ResultsCapabilitiesResponseV1(_ContractModel):
     dto_version: Literal[1] = 1
     workspace: bool
     complete_list: bool
     scale_nav: bool
     interactive_html: bool = False
+    content_sharing: ContentSharingCapabilityV1 = Field(default_factory=lambda: ContentSharingCapabilityV1(enabled=False))
     max_page_size: Literal[50] = 50
 
 

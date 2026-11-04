@@ -26,6 +26,10 @@ import {
 import { getAuthCapabilities } from "@/lib/invite-api";
 import { fetchTeamSpaces } from "@/lib/admin-spaces-api";
 
+const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }));
+vi.mock("@/lib/use-app-router", () => ({ useAppRouter: () => ({ replace }) }));
+
 vi.mock("@/lib/auth-api", () => ({ fetchMe: vi.fn() }));
 vi.mock("@/lib/invite-api", () => ({ getAuthCapabilities: vi.fn() }));
 vi.mock("@/lib/admin-members-api", () => ({
@@ -164,6 +168,46 @@ describe("SettingsPeople", () => {
       invite_activation: false,
     });
   }
+
+  it("opens a notified member outside the current list page and removes the link context on close", async () => {
+    arrangeCommon();
+    window.history.replaceState({}, "", "/team/settings/people/?member=u_other&team=team_1&page=2");
+    vi.mocked(fetchAdminMembers).mockResolvedValue({ ...members, total: 60 });
+    vi.mocked(fetchMe).mockResolvedValue(baseMe);
+    vi.mocked(fetchMemberWorkspaceGrants).mockResolvedValue({
+      user_id: "u_other", display_name: "Alice", email: "alice@example.com", items: [],
+    });
+    renderIntl(<SettingsPeople />);
+    await screen.findByRole("dialog", { name: "Alice 的空间授权" });
+    expect(fetchMemberWorkspaceGrants).toHaveBeenCalledWith("u_other");
+    expect(upsertMemberWorkspaceGrant).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining("/team/settings/people/?page=2"));
+    expect(replace.mock.calls[0][0]).not.toContain("member=");
+  });
+
+  it("does not open member grants from a link without governance access", async () => {
+    arrangeCommon();
+    window.history.replaceState({}, "", "/team/settings/people/?member=u_other");
+    vi.mocked(fetchAdminMembers).mockResolvedValue({ ...members, your_role: "member" });
+    vi.mocked(fetchMe).mockResolvedValue({ ...baseMe, team_role: "member", is_team_admin: false });
+    renderIntl(<SettingsPeople />);
+    await screen.findByRole("searchbox", { name: "搜索成员" });
+    expect(fetchMemberWorkspaceGrants).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("requires the notification's team even when the member belongs to multiple teams", async () => {
+    arrangeCommon();
+    window.history.replaceState({}, "", "/team/settings/people/?member=u_other&team=team_other");
+    vi.mocked(fetchAdminMembers).mockResolvedValue(members);
+    vi.mocked(fetchMe).mockResolvedValue(baseMe);
+    renderIntl(<SettingsPeople />);
+    await screen.findByText("请先切换至发出通知的团队，再打开此通知以管理该成员的空间权限。");
+    expect(fetchMemberWorkspaceGrants).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 
   function arrangeInviteAvailable() {
     arrangeCommon();

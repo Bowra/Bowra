@@ -102,6 +102,7 @@ from bowhead_gateway.dtos import (
 )
 from bowhead_gateway.kb_citation_access import kb_file_access_for_request
 from bowhead_gateway.media_preview import INLINE_MEDIA_MIMES, VIDEO_PREVIEW_MIMES
+from bowhead_gateway.report_artifact_access import authorized_report_artifact_ids
 from bowhead_gateway.request_access_cache import request_with_cached_access
 from bowhead_gateway.results_capabilities import resolve_results_capabilities
 from bowhead_gateway.results_contracts import (
@@ -536,6 +537,7 @@ async def _viewer_safe_projector(
     canonical_sections = [section.to_report_section() for section in projection_sections]
     canonical_sections.extend(additional_sections or [])
     closure = _closure_with_source_refs(_closure_from_sections(projection_sections), source_refs)
+    closure = list(await authorized_report_artifact_ids(request, canvas, closure))
     try:
         return await ViewerSafeCanvasProjector.build(
             root_secret=getattr(request.app.state, "artifact_fetch_secret", None),
@@ -648,7 +650,9 @@ async def _turn_citations_sidecar(
 
     # rendered uses the same closure as byte delivery: linked_accessible must match the actual set admitted by
     # /by-session/{sid}/artifacts/{aid}.
-    rendered = frozenset(_closure_with_source_refs(_closure_from_sections(projection_sections), source_refs))
+    rendered = await authorized_report_artifact_ids(
+        request, canvas, _closure_with_source_refs(_closure_from_sections(projection_sections), source_refs)
+    )
     # Same branch as events: artifacts produced by this turn (created_by_turn == citing turn,
     # server-stamped ownership) have byte access. Event batch 2 already includes them
     # via _event_projector's owned_event_ids. Detail must also include them, or a citation is accessible
@@ -867,6 +871,7 @@ async def _report_results_relations(
         strict=strict_source_refs,
     )
     relations = project_report_relations(sections, source_refs=refs)
+    relations = relations.restricted_to(await authorized_report_artifact_ids(request, canvas, list(relations.closure_ids)))
     return canvas, sections, relations
 
 
@@ -1417,6 +1422,19 @@ async def patch_section(
                     "refresh_required": conflict,
                 },
             },
+        )
+    from types import SimpleNamespace
+
+    from bowhead_core.results_report_relations import project_report_relations
+
+    proposed = SimpleNamespace(kind=current.kind, payload={**current.payload, **protected_patch})
+    proposed_ids = set(project_report_relations([proposed]).closure_ids)
+    current_ids = set(project_report_relations([current]).closure_ids)
+    added_ids = proposed_ids - current_ids
+    if added_ids and added_ids != set(await authorized_report_artifact_ids(request, canvas, list(added_ids))):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "report_artifact_reference_denied", "message": "Select a file you can access in this Team, then try again."},
         )
     # citation-audit M1-6① (permanent ingress boundary): revision rollback writes prevPayload unchanged,
     # users paste, AI rewrites; bake retired gen2/[ref:]/[chart:] markers from **any** write path

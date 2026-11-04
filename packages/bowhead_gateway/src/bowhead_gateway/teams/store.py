@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 
 def _now() -> str:
@@ -65,7 +66,7 @@ class TeamsStore:
         if existing:
             fields.update({name: getattr(existing, name) for name in fields})
         fields.update(values)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO teams_connections(
                 id,team_id,cloud,entra_tenant_id,microsoft_app_id,app_type,app_secret_ref,
@@ -88,7 +89,7 @@ class TeamsStore:
 
     async def get_identity(self, tenant_id: str, oid: str) -> tuple[str, str] | None:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT bowhead_user_id,team_id FROM teams_identity_bindings WHERE entra_tenant_id=? AND entra_oid=?", (tenant_id, oid)
             ) as cur,
@@ -98,7 +99,7 @@ class TeamsStore:
 
     async def bind_identity(self, *, tenant_id: str, oid: str, user_id: str, team_id: str) -> None:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO teams_identity_bindings(entra_tenant_id,entra_oid,bowhead_user_id,team_id,created_at,updated_at)
                 VALUES(?,?,?,?,?,?) ON CONFLICT(entra_tenant_id,entra_oid) DO UPDATE SET bowhead_user_id=excluded.bowhead_user_id,team_id=excluded.team_id,updated_at=excluded.updated_at""",
@@ -108,7 +109,7 @@ class TeamsStore:
 
     async def get_workspace(self, tenant_id: str, conversation_id: str, oid: str) -> str | None:
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            diagnostic_connect(self.db_path) as db,
             db.execute(
                 "SELECT workspace_id FROM teams_workspace_bindings WHERE entra_tenant_id=? AND conversation_id=? AND entra_oid=?",
                 (tenant_id, conversation_id, oid),
@@ -118,7 +119,7 @@ class TeamsStore:
         return str(row[0]) if row else None
 
     async def set_workspace(self, tenant_id: str, conversation_id: str, oid: str, workspace_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO teams_workspace_bindings(entra_tenant_id,conversation_id,entra_oid,workspace_id,updated_at)
             VALUES(?,?,?,?,?) ON CONFLICT(entra_tenant_id,conversation_id,entra_oid) DO UPDATE SET workspace_id=excluded.workspace_id,updated_at=excluded.updated_at""",
@@ -129,7 +130,7 @@ class TeamsStore:
     async def claim_activity(self, activity_id: str) -> bool:
         if not activity_id:
             return True
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             try:
                 await db.execute("INSERT INTO teams_activity_dedup(activity_id,received_at) VALUES(?,?)", (activity_id, _now()))
                 await db.commit()
@@ -138,7 +139,7 @@ class TeamsStore:
                 return False
 
     async def _one(self, query: str, params: tuple[str, ...]) -> TeamsConnection | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(query, params) as cur:
                 row = await cur.fetchone()

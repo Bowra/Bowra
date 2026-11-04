@@ -27,6 +27,8 @@ from bowhead_core.clarification_store import (
     record_clarification_invalidation_metrics,
 )
 from bowhead_core.scheduled_agent_binding import ScheduledAgentBindingSeed
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scheduled_jobs (
@@ -234,15 +236,19 @@ def _row_to_run(row: aiosqlite.Row) -> ScheduledJobRun:
 
 class ScheduledJobStore:
     def __init__(self, db_path: str):
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "execution"))
 
     @property
     def db_path(self) -> str:
         return self._db_path
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with diagnostic_connect(self._db_path) as db:
+                await require_domain_schema(db, "execution")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(SCHEMA)
             # Batch 2/c9: add snapshot column to old DBs (idempotent).
             async with db.execute("PRAGMA table_info(scheduled_jobs)") as cur:
@@ -356,7 +362,7 @@ class ScheduledJobStore:
             cols.append("recipe_ref")
             vals.append(job.recipe_ref)
         placeholders = ", ".join("?" for _ in cols)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             try:
                 await db.execute(
@@ -381,7 +387,7 @@ class ScheduledJobStore:
         return job
 
     async def get(self, job_id: str) -> ScheduledJob | None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_jobs WHERE id = ?",
@@ -391,7 +397,7 @@ class ScheduledJobStore:
         return _row_to_job(row) if row else None
 
     async def list_for_user(self, user_id: str) -> list[ScheduledJob]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_jobs WHERE user_id = ? ORDER BY created_at DESC",
@@ -402,7 +408,7 @@ class ScheduledJobStore:
 
     async def count_active(self, user_id: str) -> int:
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT COUNT(*) FROM scheduled_jobs WHERE user_id = ? AND status = 'active'",
                 (user_id,),
@@ -486,7 +492,7 @@ class ScheduledJobStore:
         if expected_updated_at is not None:
             where += " AND updated_at = ?"
             vals.append(expected_updated_at)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             if expected_agent_assignment is not None:
@@ -545,7 +551,7 @@ class ScheduledJobStore:
         active Space with archive-paused jobs.
         """
 
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE scheduled_jobs SET status='paused',pause_reason=?,updated_at=? "
                 "WHERE workspace_id=? AND status='active' "
@@ -581,7 +587,7 @@ class ScheduledJobStore:
         stamp = _now()
         resumed: list[str] = []
         over_limit: list[str] = []
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -633,7 +639,7 @@ class ScheduledJobStore:
 
     async def set_next_run_at(self, job_id: str, next_run_at: str | None) -> None:
         """Set (or clear, when None — e.g. @manual) a job's next_run_at. Used after the schedule changes."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.execute(
                 "UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE id = ?",
                 (next_run_at, _now(), job_id),
@@ -646,7 +652,7 @@ class ScheduledJobStore:
     ) -> ScheduledDeleteResult:
         """Delete a job without orphaning an active or awaiting clarification."""
 
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -758,7 +764,7 @@ class ScheduledJobStore:
             status="running",
             error=None,
         )
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -815,7 +821,7 @@ class ScheduledJobStore:
             raise ValueError(
                 "awaiting scheduled runs require an atomic settlement API",
             )
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE scheduled_job_runs SET finished_at=?,status=?,turn_id=COALESCE(?,turn_id),error=? WHERE id=? AND status='running'",
                 (_now(), status, turn_id, error, run_id),
@@ -856,7 +862,7 @@ class ScheduledJobStore:
     ) -> ScheduledAwaitingTransitionResult:
         """Publish ``awaiting_input`` only for a durable legacy pending card."""
 
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -901,7 +907,7 @@ class ScheduledJobStore:
         producer-local Turn persistence drain.  Keeping this low-level CAS
         avoids silently changing old data/fixture construction utilities.
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cursor = await db.execute(
                 "UPDATE scheduled_job_runs SET status='awaiting_input',turn_id=? WHERE id=? AND status='running'",
                 (turn_id, run_id),
@@ -953,7 +959,7 @@ class ScheduledJobStore:
             clarification_reason,
         ):
             raise ValueError("scheduled awaiting terminal transition is invalid")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -1091,7 +1097,7 @@ class ScheduledJobStore:
 
         if run_status not in {"success", "failed"}:
             raise ValueError("scheduled answered run status is invalid")
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -1143,7 +1149,7 @@ class ScheduledJobStore:
 
     async def list_awaiting_runs(self) -> list[ScheduledJobRun]:
         """所有挂起中的 run（reconciliation 扫描用）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_job_runs WHERE status='awaiting_input' ORDER BY started_at ASC",
@@ -1159,7 +1165,7 @@ class ScheduledJobStore:
         生命周期归 scheduled 侧管。
         """
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT turn_id FROM scheduled_job_runs WHERE status='awaiting_input' AND turn_id IS NOT NULL",
             ) as cur,
@@ -1173,7 +1179,7 @@ class ScheduledJobStore:
         'normal'，anchor 模式下 session 本就是用户自己的会话，两者都判不出来；而这一查
         同时把 job 和它的绑定/pin 一起带回来。索引 idx_sjr_turn（alembic 0011）。
         """
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_job_runs WHERE turn_id=? ORDER BY started_at DESC LIMIT 1",
@@ -1183,7 +1189,7 @@ class ScheduledJobStore:
         return _row_to_run(row) if row else None
 
     async def list_runs(self, job_id: str, limit: int = 10) -> list[ScheduledJobRun]:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
@@ -1200,7 +1206,7 @@ class ScheduledJobStore:
         会让两条结果撞车。与 ``idx_sjr_one_running`` 的谓词保持一致。
         """
         async with (
-            aiosqlite.connect(self._db_path) as db,
+            diagnostic_connect(self._db_path) as db,
             db.execute(
                 "SELECT 1 FROM scheduled_job_runs WHERE job_id = ? AND status IN ('running','awaiting_input') LIMIT 1",
                 (job_id,),
@@ -1216,7 +1222,7 @@ class ScheduledJobStore:
         ⚠️ Assumes a SINGLE gateway instance (the in-process scheduler already does — multiple replicas
         would double-fire cron). With >1 replica this would mark a peer's legitimately in-flight runs
         failed; a distributed scheduler must replace this boot-sweep with lease/heartbeat ownership."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE scheduled_job_runs SET status = 'failed', finished_at = ?, error = 'scheduled_run_interrupted' WHERE status = 'running'",
                 (_now(),),

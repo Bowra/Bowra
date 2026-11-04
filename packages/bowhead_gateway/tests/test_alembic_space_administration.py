@@ -3,14 +3,14 @@ from __future__ import annotations
 import sqlite3
 
 import anyio
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.scheduled_store import ScheduledJobStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from bowhead_core.user_store import UserStore
+from gateway_legacy_database import upgrade
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SQLITE_LEGACY_REVISION
 
 
 def _column_names(connection: sqlite3.Connection, table: str) -> set[str]:

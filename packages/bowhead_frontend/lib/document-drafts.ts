@@ -8,11 +8,7 @@ export type DocumentJobState =
   | "published"
   | "failed"
   | "cancelled";
-interface Change {
-  slide: number;
-  /** PowerPoint shape name and table cell (0-based row, column) when the change is inside a table. */
-  shape_name?: string;
-  cell?: [number, number] | null;
+interface ChangeContent {
   before: string;
   after: string;
   evidence: {
@@ -22,6 +18,27 @@ interface Change {
     value: string;
   }[];
 }
+interface SlideChange extends ChangeContent {
+  slide: number;
+  /** PowerPoint shape name and table cell (0-based row, column) when the change is inside a table. */
+  shape_name?: string;
+  cell?: [number, number] | null;
+}
+interface WordChange extends ChangeContent {
+  location: {
+    kind: "word_block";
+    part: string;
+    block_id: string;
+    block_index: number;
+    story: "body" | "header" | "footer";
+    /** One-based section numbers from the original Word reader. */
+    sections: number[];
+    table_id: string | null;
+    row: number | null;
+    column: number | null;
+  };
+}
+type Change = SlideChange | WordChange;
 export interface DocumentJob {
   /** Last execution change (ISO); for a review draft, when it was produced. Older servers omit it. */
   updated_at?: string | null;
@@ -46,13 +63,19 @@ export interface DocumentJob {
     settlement_pending?: boolean;
   };
   draft?: {
+    descriptor?: {
+      format: "docx";
+      source_name: "candidate.docx";
+      pdf_name: "candidate.pdf";
+      published_outputs: ("source" | "pdf")[];
+    };
     /** Script-authored drafts need every page reviewed; observed text changes are not exhaustive. */
     requires_full_review?: boolean;
     output_stem?: string;
     files: Record<string, { artifact_id: string; sha256: string }>;
     manifest: {
       schema_version?: number;
-      comparison?: "observed_object_facts" | "unavailable";
+      comparison?: "observed_object_facts" | "unavailable" | "source_preserving_word_text";
       limitations?: string[];
       changes: Change[];
       retained_unsupported_text: {
@@ -68,9 +91,14 @@ export interface DocumentJob {
         environment_fallback: string;
         /** Slides whose own content declares the face (newer drafts only). */
         slides?: number[];
+        parts?: string[];
       }[];
     };
   };
+}
+
+export function documentDraftSourceName(job: DocumentJob): string {
+  return job.draft?.descriptor?.source_name ?? "candidate.pptx";
 }
 
 export interface DocumentPreviewAccess {
@@ -101,6 +129,7 @@ export function documentCanvasTitle(job: DocumentJob, fallback: string): string 
 
 /** Extension of the editable source file (pptx / docx), from the draft's file names. */
 export function documentSourceExtension(job: DocumentJob): string | null {
+  if (job.draft?.descriptor?.format === "docx") return "docx";
   const names = Object.keys(job.draft?.files ?? {});
   const source = names.find((name) => !name.toLowerCase().endsWith(".pdf"));
   const match = source ? /\.([a-z0-9]+)$/i.exec(source) : null;

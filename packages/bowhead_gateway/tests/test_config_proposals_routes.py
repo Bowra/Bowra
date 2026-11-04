@@ -14,7 +14,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.config_copilot import reset_registry_for_tests
 from bowhead_core.config_draft_store import ConfigDraftStore
 from bowhead_core.migrations.baseline_schema import initial_schema
@@ -26,6 +25,7 @@ from bowhead_gateway.routes.auth import _current_user
 from bowhead_gateway.routes.auth import _store as _user_store_dep
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 _APPEARANCE_KEY = "appearance_theme_config"
 
@@ -68,7 +68,7 @@ def db_path(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     return str(path)
 
 
@@ -676,7 +676,7 @@ def test_lifespan_boot_flag_on_initializes_store_and_maintenance(tmp_path: Path,
     with sqlite3.connect(db) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db}")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}")
     app = create_app()
     _prepare_community_boot(app, db)
     with TestClient(app):
@@ -696,7 +696,7 @@ def test_lifespan_boot_schema_absent_tolerant(tmp_path: Path, monkeypatch: pytes
     with sqlite3.connect(db) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db}")
+    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}")
     with sqlite3.connect(db) as connection:
         connection.execute("DROP TABLE config_copilot_draft")
         connection.commit()

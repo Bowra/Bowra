@@ -7,17 +7,12 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION, SPLIT_REVISION, run_domain_upgrade
+from bowhead_core.sqlite_domains import DOMAIN_LAYOUT, DOMAIN_TARGET_FILES, ORIGINAL_TARGET_FILES
+from bowhead_core.sqlite_upgrade import _load_state, run_legacy_upgrade
 
-TARGET_FILES: dict[str, str] = {
-    "core": "bowhead.db",
-    "files": "kb_files.db",
-    "doc_types": "kb_doc_types.db",
-    "extracted_records": "kb_extracted_records.db",
-    "extracted_rows": "kb_extracted_rows.db",
-    "per_row_jobs": "kb_per_row_jobs.db",
-    "team_templates": "kb_team_templates.db",
-    "matrix": "kb_matrix.db",
-}
+TARGET_FILES = dict(DOMAIN_TARGET_FILES)
 
 
 def resolve_database_directory(db_url: str | None = None) -> Path:
@@ -25,28 +20,50 @@ def resolve_database_directory(db_url: str | None = None) -> Path:
     if not value or not value.startswith("sqlite") or "///" not in value:
         msg = "BOWHEAD_DB_URL must be a SQLite URL"
         raise ValueError(msg)
-    return Path(value.split("///", 1)[1]).parent
+    path = Path(value.split("///", 1)[1])
+    if path.name != "bowhead.db":
+        raise ValueError("BOWHEAD_DB_URL must identify the migration-managed bowhead.db file")
+    return path.parent
 
 
-def upgrade(db_url: str | None = None, target: str | None = None) -> tuple[str, ...]:
+def upgrade(db_url: str | None = None) -> tuple[str, ...]:
     directory = resolve_database_directory(db_url)
-    names = (target,) if target else tuple(TARGET_FILES)
-    unknown = set(names).difference(TARGET_FILES)
-    if unknown:
-        msg = f"unknown migration target: {', '.join(sorted(unknown))}"
-        raise ValueError(msg)
 
     from bowhead_core import migrations
 
     script_location = str(Path(migrations.__file__).resolve().parent)
-    completed: list[str] = []
-    for name in names:
-        path = directory / TARGET_FILES[name]
-        path.parent.mkdir(parents=True, exist_ok=True)
+    migration_config = Config()
+    migration_config.set_main_option("script_location", script_location)
+    scripts = ScriptDirectory.from_config(migration_config)
+    heads = scripts.get_heads()
+    if len(heads) != 1:
+        raise ValueError("SQLite migration history must have exactly one head")
+    known_revisions = frozenset(revision.revision for revision in scripts.walk_revisions())
+
+    def run_revision(name: str, path: Path, revision: str, *, cleanup: bool = False) -> None:
         config = Config()
         config.set_main_option("script_location", script_location)
         config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
         config.attributes["bowhead_target"] = name
-        command.upgrade(config, "head")
-        completed.append(name)
-    return tuple(completed)
+        config.attributes["bowhead_split_cleanup"] = cleanup
+        config.attributes["bowhead_domain_coordinator"] = revision != SOURCE_REVISION
+        command.upgrade(config, revision)
+
+    state = _load_state(directory) if directory.exists() else None
+    domain_layout = state is not None and state["layout"] == DOMAIN_LAYOUT
+    if not domain_layout:
+        run_legacy_upgrade(
+            directory,
+            tuple(ORIGINAL_TARGET_FILES),
+            SOURCE_REVISION,
+            known_revisions,
+            lambda name, path: run_revision(name, path, SOURCE_REVISION),
+        )
+    return run_domain_upgrade(
+        directory,
+        lambda name, path, cleanup: run_revision(name, path, SPLIT_REVISION, cleanup=cleanup),
+        target_head=heads[0],
+        known_revisions=known_revisions,
+        upgrade_append=lambda name, path: run_revision(name, path, heads[0]),
+        revision_order=tuple(revision.revision for revision in reversed(list(scripts.iterate_revisions(heads[0], "base")))),
+    )

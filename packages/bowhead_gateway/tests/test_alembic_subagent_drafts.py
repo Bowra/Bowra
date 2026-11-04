@@ -5,14 +5,14 @@ import sqlite3
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import TARGET_FILES, upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 from bowhead_core import migrations
 
 # Never hardcode revision numbers; see bowhead_core.migrations.chain_head.
-HEAD_REVISION = chain_head()
+HEAD_REVISION = SOURCE_REVISION
 
 EXPECTED_TABLES = {
     "team_subagent_authoring_context",
@@ -83,8 +83,8 @@ def test_subagent_draft_revision_upgrades_all_eight_targets(tmp_path) -> None:
     core_path = tmp_path / TARGET_FILES["core"]
     _create_1_0_fixture(core_path)
 
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
 
     for filename in TARGET_FILES.values():
         with sqlite3.connect(tmp_path / filename) as connection:
@@ -151,8 +151,8 @@ def test_manual_draft_migration_preserves_existing_ai_draft(tmp_path) -> None:
         cursor = connection.execute("SELECT * FROM team_subagent_draft WHERE id='sad_legacy'")
         old_columns = [column[0] for column in cursor.description]
         before = cursor.fetchone()
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(core_path) as connection:
         after = connection.execute(
             f"SELECT {', '.join(old_columns)} FROM team_subagent_draft WHERE id='sad_legacy'",
@@ -172,7 +172,7 @@ def test_manual_draft_migration_preserves_existing_ai_draft(tmp_path) -> None:
 def test_subagent_draft_constraints_and_attribution_guard(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
 
     with sqlite3.connect(db_path) as connection:
         with pytest.raises(sqlite3.IntegrityError):

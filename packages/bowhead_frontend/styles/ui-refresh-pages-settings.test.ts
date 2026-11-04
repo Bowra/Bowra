@@ -172,9 +172,9 @@ describe("分组卡片与左标签右控件（取舍 15、16；Page Layout Spec�
   });
 
   it("places grouped Field labels and hints on the left and controls on the right", () => {
-    expect(exact(".ui-group-card > .settings-field > .settings-field__label")).toMatchObject({ "grid-column": "1", "grid-row": "1" });
+    expect(exact(".ui-group-card > .settings-field > :is(.settings-field__label, .settings-field__label-row)")).toMatchObject({ "grid-column": "1", "grid-row": "1" });
     expect(exact(".ui-group-card > .settings-field > .settings-field__hint")).toMatchObject({ "grid-column": "1", "grid-row": "2", color: "var(--c-ink-4)" });
-    expect(exact(".ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__hint, .settings-field__error)")).toMatchObject({
+    expect(exact(".ui-group-card > .settings-field > :not(.settings-field__label, .settings-field__label-row, .settings-field__hint, .settings-field__error)")).toMatchObject({
       "grid-column": "2",
       "max-width": "var(--group-control-max)",
     });

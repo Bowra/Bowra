@@ -14,7 +14,6 @@ from typing import Any
 
 import lark_oapi.ws.client as lark_ws_client
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.clarification_store import ClarificationCandidate, ClarificationStore
 from bowhead_core.events import OrchestratorEvent, get_event_registry
@@ -54,6 +53,7 @@ from bowhead_gateway.settings import Settings
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import TARGET_FILES, upgrade
 from lark_oapi.ws.const import (
     HEADER_MESSAGE_ID,
     HEADER_SEQ,
@@ -1762,7 +1762,7 @@ async def test_bridge_auto_binds_email_and_mirrors_turn_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     user_store = UserStore(db_path)
     await user_store.initialize()
@@ -3100,7 +3100,7 @@ async def _build_bridge_fixture(
     orchestrator_cls: type[Any] | None = None,
 ) -> BridgeFixture:
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     user_store = UserStore(db_path)
     await user_store.initialize()
@@ -3410,6 +3410,12 @@ class FakeDatarcConnectionStore:
     def __init__(self, *, auth_key: str | None) -> None:
         self.auth_key = auth_key
         self.listed_team_ids: list[str] = []
+
+    async def resolve_active_binding(self, team_id: str):
+        self.listed_team_ids.append(team_id)
+        if self.auth_key is None:
+            return None
+        return SimpleNamespace(id="dc_1", base_url="https://org.datarc.example"), self.auth_key, "test-binding-revision"
 
     async def list_connections(self, team_id: str) -> list[Any]:
         self.listed_team_ids.append(team_id)

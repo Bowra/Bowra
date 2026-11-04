@@ -34,6 +34,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -264,6 +265,7 @@ class MemoryCandidate:
 @dataclass
 class MemoryCandidateStore:
     db_path: str
+    connect_factory: Callable[[str], aiosqlite.Connection] = field(default=aiosqlite.connect, repr=False, compare=False, kw_only=True)
     fingerprint_key: str | bytes | None = field(default=None, repr=False)
     _fingerprint_secret: bytes = field(init=False, repr=False)
 
@@ -278,8 +280,8 @@ class MemoryCandidateStore:
 
     async def initialize(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA secure_delete=ON")
+        async with self.connect_factory(self.db_path) as db:
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.executescript(SCHEMA)
             cur = await db.execute("PRAGMA table_info(memory_candidates)")
             existing = {row[1] for row in await cur.fetchall()}
@@ -334,7 +336,7 @@ class MemoryCandidateStore:
         )
         cid = f"cand_{uuid4().hex[:12]}"
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             await _prepare_user_write(
                 db,
                 user_id=user_id,
@@ -379,7 +381,7 @@ class MemoryCandidateStore:
             params.append(user_id)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if user_id and await is_memory_read_hidden(db, user_id=user_id):
                 return []
@@ -413,7 +415,7 @@ class MemoryCandidateStore:
             params.append(source_turn_id)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if await is_memory_read_hidden(db, user_id=user_id):
                 return []
@@ -475,7 +477,7 @@ class MemoryCandidateStore:
 
         cid = f"cand_{uuid4().hex[:12]}"
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             await _prepare_user_write(
                 db,
                 user_id=user_id,
@@ -606,7 +608,7 @@ class MemoryCandidateStore:
     ) -> list[str]:
         """review-fix P1: auto_reject_stale 前查受影响用户（GC 清零后解 badge 用）。"""
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            self.connect_factory(self.db_path) as db,
             db.execute(
                 # ★ Batch 1b allowlist: automatic expiry rejection also touches only background-distilled candidates.
                 # Draft candidates are explicit user requests; inactivity must not automatically reject them.
@@ -632,7 +634,7 @@ class MemoryCandidateStore:
         且 `expiry_warned_at IS NULL`。上下界不重叠 auto_reject（age>max_age_days），一生一次。
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            self.connect_factory(self.db_path) as db,
             db.execute(
                 "SELECT DISTINCT user_id FROM memory_candidates "
                 "WHERE status='pending' AND expiry_warned_at IS NULL "
@@ -656,7 +658,7 @@ class MemoryCandidateStore:
         与 list_users_with_unwarned_expiring 同窗口——emit 成功后调，保证一生一次。
         """
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             await _prepare_user_write(
                 db,
                 user_id=user_id,
@@ -683,7 +685,7 @@ class MemoryCandidateStore:
         Returns count of newly rejected rows.
         """
         async with (
-            aiosqlite.connect(self.db_path) as db,
+            self.connect_factory(self.db_path) as db,
             db.execute(
                 """
                 SELECT user_id
@@ -711,7 +713,7 @@ class MemoryCandidateStore:
         rejected = 0
         for user_id in user_ids:
             now = _now()
-            async with aiosqlite.connect(self.db_path) as db:
+            async with self.connect_factory(self.db_path) as db:
                 await _prepare_user_write(
                     db,
                     user_id=user_id,
@@ -786,7 +788,7 @@ class MemoryCandidateStore:
         return rejected
 
     async def get(self, cid: str) -> MemoryCandidate | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM memory_candidates WHERE id=?",
@@ -808,9 +810,9 @@ class MemoryCandidateStore:
         decided_by: str,
     ) -> MemoryCandidate | None:
         now = _now()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.connect_factory(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("PRAGMA secure_delete=ON")
+            await db.execute("PRAGMA main.secure_delete=ON")
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
                 """
@@ -1298,7 +1300,7 @@ async def _prepare_user_write(
     *,
     user_id: str,
 ) -> None:
-    await db.execute("PRAGMA secure_delete=ON")
+    await db.execute("PRAGMA main.secure_delete=ON")
     await db.execute("BEGIN IMMEDIATE")
     await ensure_memory_write_allowed(
         db,

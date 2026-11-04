@@ -31,6 +31,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 from bowhead_core.agent_run_limits import (
     TurnToolCallBudget,
     reset_run_limits,
@@ -47,6 +48,7 @@ from bowhead_core.published_diagnostics import (
     chat_failure_error_kind,
     get_or_build_chat_turn_failure,
 )
+from bowhead_core.tool_delivery_review import delivery_summary_input
 from bowhead_core.turn_failure_text import keep_sections_visible_on_failure
 from bowhead_core.types import IntentType, TurnStatus, utc_now_iso
 from bowhead_router import InvocationOutcomeUnknownError
@@ -109,12 +111,14 @@ _PUBLIC_TURN_FAILURE_CODES = frozenset(
         "peer_dispatch_network_error",
         "peer_dispatch_timeout",
         "lead_internal_error",
+        "tool_call_not_executed",
         "lead_empty_answer",
         "lead_output_exhausted",
         "document_request_rejected",
         "document_routing_invalid",
         "document_routing_uncertain",
         "document_routing_source_unavailable",
+        "knowledge_source_changed",
         "reference_policy_changed",
         "reference_continuation_unavailable",
         "reference_primary_incomplete",
@@ -230,6 +234,7 @@ _BARE_ART_RE = re.compile(
     r"\s*[\(（\[【]?\s*(?:artifact(?:_id)?\s*[=:：]\s*|artifact\s+)?art_[a-fA-F0-9]{8,}\s*[\)）\]】]?",
     re.IGNORECASE,
 )
+_INLINE_CODE_RE = re.compile(r"(?<!`)(?P<delimiter>`{1,2})(?P<content>[^`\r\n]*)(?P=delimiter)(?!`)")
 # prod-bug-bash-039 #6 (0.39.2 citation reform): [cite:N] is the NEW LLM-facing
 # citation marker, replacing complex [data:art_<hex>]. Backend rewrites old
 # pattern to new + validates orphans.
@@ -273,6 +278,14 @@ _DATA_INT_MARKER_RE = re.compile(r"\[data:(\d+)\]")
 # finalize).
 
 
+def _strip_bare_artifact_ids(text: str) -> str:
+    """Remove prose code wrappers only when their content is a suppressed ID."""
+    parts = _FENCE_SPLIT_RE.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = _INLINE_CODE_RE.sub(lambda match: "" if _BARE_ART_RE.fullmatch(match.group("content")) else match.group(0), parts[index])
+    return _BARE_ART_RE.sub("", "".join(parts))
+
+
 def _strip_data_markers(text: str) -> str:
     """Strip backend-only citation markers `[data:art_*]`, `[num:V:*]`, and bare
     `art_<hex>` ids from text emitted to user-visible surfaces (final_answer SSE).
@@ -297,7 +310,7 @@ def _strip_data_markers(text: str) -> str:
     from bowhead_core.citation_marks import strip_legacy as _strip_legacy
 
     s = _strip_legacy(s)
-    s = _BARE_ART_RE.sub("", s)
+    s = _strip_bare_artifact_ids(s)
     return s
 
 
@@ -392,7 +405,7 @@ def _resolve_citations(text: str, parent_ctx: object | None, *, invocations: lis
     from bowhead_core.citation_marks import strip_legacy as _strip_legacy
 
     s = _strip_legacy(s)
-    s = _BARE_ART_RE.sub("", s)
+    s = _strip_bare_artifact_ids(s)
     return _tidy_space_before_cjk_punct(s)
 
 
@@ -2001,6 +2014,8 @@ async def run_turn(
         error_code = (
             "clarification_resume_unavailable"
             if isinstance(exc, OrdinaryContinuationUnavailable)
+            else "knowledge_source_changed"
+            if isinstance(exc, KnowledgeAccessError) and exc.code == "knowledge_source_changed"
             else "reference_policy_changed"
             if getattr(runtime.parent_ctx, "_reference_runtime", None) is not None
             and isinstance(exc, ValueError)
@@ -2038,7 +2053,7 @@ async def run_turn(
                     "error_kind": "configuration"
                     if error_code == "clarification_resume_unavailable"
                     else "access"
-                    if error_code == "reference_policy_changed"
+                    if error_code in {"reference_policy_changed", "knowledge_source_changed"}
                     else "internal",
                 }
             )
@@ -2059,7 +2074,7 @@ async def run_turn(
                 "error_kind": "configuration"
                 if error_code == "clarification_resume_unavailable"
                 else "access"
-                if error_code == "reference_policy_changed"
+                if error_code in {"reference_policy_changed", "knowledge_source_changed"}
                 else "internal",
                 "diagnostics": failure.diagnostics,
             },
@@ -5491,8 +5506,13 @@ async def _lead_loop(
     - Heuristic catches obvious ambiguous queries (100% recall on Spike #2 fixtures)
     - LLM via SubagentRunner handles nuanced cases (75%+ via decision tree prompt)
     """
-    from bowhead_core.agents.response_kind_scanner import has_uninvoked_clarification, humanize_stray_clarification_ask, strip_response_kind_markers
-    from bowhead_core.subagent import PROFILES, SubagentRunner
+    from bowhead_core.agents.response_kind_scanner import (
+        has_uninvoked_clarification,
+        humanize_stray_clarification_ask,
+        strip_response_kind_markers,
+        uninvoked_tool_names,
+    )
+    from bowhead_core.subagent import PROFILES, FinalAnswerCorrection, SubagentRunner
     from bowhead_core.types import TurnResult
 
     from .prompts.lead import build_lead_system_prompt, planning_auto_from_mode
@@ -5732,6 +5752,7 @@ async def _lead_loop(
         facts=facts,
         peers=lead_peers,
         knowledge_direct_use=runtime.parent_ctx.knowledge_direct_use,
+        unconfigured_capability_tools=frozenset(getattr(runtime.parent_ctx, "unconfigured_capability_tools", ()) or ()),
         # Built-in subagent management: remove disabled built-ins from named prompt paragraphs (review P1-3)
         team_tools=_team_tool_entries,
         custom_skills=_custom_skill_entries,
@@ -5980,10 +6001,10 @@ async def _lead_loop(
 
     if _bounded_questions_available:
         lead_prompt += (
-            "\nThis task permits at most three clarification rounds before any other tool action. "
-            "Use clarification_ask alone only for a genuinely missing required input, combining related questions. "
-            "Keep all previous answers. Never repeat an answered question or ask after dispatching a tool/Agent. "
-            "If the tool refuses another question, finish with known information and state any remaining limitation."
+            "\nIf you need a user answer to finish this task, invoke clarification_ask alone. "
+            "A question in the final answer ends the Turn and creates no resumable question. "
+            "Necessary read-only inspection may precede the question; the original Tool controls pause availability and question limits. "
+            "Retain previous answers and completed work. If the Tool refuses capture, state the missing input and limitation without inventing an answer."
         )
 
     try:
@@ -6775,6 +6796,32 @@ async def _lead_loop(
     _final_bounce_count = _ordinary_state.final_bounce_count if _ordinary_state is not None else {"n": 0}
     _FINAL_BOUNCE_MAX = 2
     _stream_reset_hook = _stream_state_reset
+    _pending_protocol: tuple[frozenset[str], int] | None = None
+
+    def _protocol_corrected(invocations: list[Any]) -> bool:
+        if _pending_protocol is None:
+            return True
+        # A domain-owned planning result follows its original authorized
+        # finalizer, including any question owned by that workflow.
+        if getattr(getattr(runtime.parent_ctx, "document_turn_state", None), "planning_result", None) is not None:
+            return True
+        intended, prefix_size = _pending_protocol
+        remaining = set(intended)
+        for inv in invocations[prefix_size:]:
+            if getattr(inv, "error", None) or not getattr(inv, "ended_at", None):
+                continue
+            value = getattr(inv, "result", None)
+            if is_clarification_sentinel(value):
+                return True
+            if isinstance(value, dict) and value.get("error_kind") == "schema_invalid":
+                continue
+            name = getattr(inv, "tool_name", "")
+            if not intended:
+                return True
+            remaining.discard(name)
+            if not remaining:
+                return True
+        return False
 
     # r8 zero-tool evidence pool = user-visible text (all turn-history messages + current user request).
     def _build_zero_evidence_pool() -> set[float] | None:
@@ -6813,7 +6860,7 @@ async def _lead_loop(
             with contextlib.suppress(Exception):
                 _stream_reset_hook()
 
-    def _bounce(cause: str) -> str:
+    def _bounce(cause: str) -> str | FinalAnswerCorrection:
         _final_bounce_count["n"] += 1
         _reject_final_narrative()
         try:
@@ -6840,19 +6887,32 @@ async def _lead_loop(
         from bowhead_core.report_chrome_text import chrome_lang as _bounce_lang
 
         if cause == "clarification_protocol_text":
-            return (
-                "Your answer contains native tool syntax as text; prose alone neither executes an operation nor pauses the task. "
-                "Use the native tool-call interface with the advertised schema for the intended authorized action. "
-                "If a question is required, use clarification_ask through that interface. "
-                "When the requested domain workflow owns the missing input, invoke that workflow instead. "
-                "Do not print tool calls or argument assignments. If the user requested a code explanation, explain it normally "
-                "and quote examples as Markdown code without executing them. Keep all existing permissions and clarification limits."
+            from bowhead_router.runtime_notes import REJECTED_TOOL_SYNTAX_HISTORY_NAME
+
+            return FinalAnswerCorrection(
+                instruction=(
+                    "Your answer contains native tool syntax as text; prose alone neither executes an operation nor pauses the task. "
+                    "No native call was completed for that output. Rewording it as an ordinary question or quoting it as code does not repair it. "
+                    "Use the native tool-call interface with the advertised schema for the intended authorized action. "
+                    "Keep completed work; do not repeat successful operations. Correct only the missing authorized action. "
+                    "If a question is required, use clarification_ask through that interface. "
+                    "When the requested domain workflow owns the missing input, invoke that workflow instead. "
+                    "Do not print tool calls or argument assignments. If the user requested a code explanation, explain it normally "
+                    "and quote examples as Markdown code without executing them. Keep all existing permissions and clarification limits."
+                ),
+                assistant_history_name=REJECTED_TOOL_SYNTAX_HISTORY_NAME,
             )
         return final_answer_bounce_directive(_bounce_lang(getattr(runtime.parent_ctx, "language_context", None)), cause=cause)
 
-    async def _final_answer_gate(text: str, profile_name: str, invocations: list[Any]) -> str | None:
-        if profile_name == "lead" and has_uninvoked_clarification(text):
-            return _bounce("clarification_protocol_text") if _final_bounce_count["n"] < _FINAL_BOUNCE_MAX else None
+    async def _final_answer_gate(text: str, profile_name: str, invocations: list[Any]) -> str | FinalAnswerCorrection | None:
+        nonlocal _pending_protocol
+        if profile_name == "lead":
+            intended = uninvoked_tool_names(text, tool_names=(runtime.parent_ctx.tool_view or runtime.tool_registry).list_names())
+            if intended is not None:
+                _pending_protocol = (intended, len(invocations))
+            if not _protocol_corrected(invocations):
+                return _bounce("clarification_protocol_text") if _final_bounce_count["n"] < _FINAL_BOUNCE_MAX else None
+            _pending_protocol = None
         if profile_name == "lead" and reference_lead_input is not None:
             if getattr(runtime.parent_bus, "_reference_continuation_unavailable", False):
                 return None
@@ -6999,14 +7059,23 @@ async def _lead_loop(
             # Chat turn feedback D3: the failure card states the rejection from its public reason.
             result.final_answer = ""
             result.error = "document_request_rejected"
-        if result.ok and direct_reference_runtime is None and has_uninvoked_clarification(result.final_answer or ""):
+        if (
+            result.ok
+            and direct_reference_runtime is None
+            and (
+                not _protocol_corrected(result.tool_invocations)
+                or has_uninvoked_clarification(
+                    result.final_answer or "", tool_names=(runtime.parent_ctx.tool_view or runtime.tool_registry).list_names()
+                )
+            )
+        ):
             # A real card takes its existing sentinel path. Text alone cannot
             # become a successful pause, including at the runner's call limit.
             if not any(is_clarification_sentinel(inv.result) for inv in result.tool_invocations):
                 _reject_final_narrative()
                 result.ok = False
                 result.final_answer = ""
-                result.error = "lead_internal_error"
+                result.error = "tool_call_not_executed"
                 logger.warning("lead.uninvoked_clarification_rejected turn=%s", sctx.turn_id)
         if reference_lead_input is not None and getattr(runtime.parent_bus, "_reference_continuation_unavailable", False):
             result.ok = False
@@ -7084,8 +7153,14 @@ async def _lead_loop(
             _stash_streamed_lead_section_ids(runtime.parent_bus, sd)
         raise  # Propagate to run_turn for turn_aborted emission
     except Exception as exc:
-        reason_code = "clarification_resume_unavailable" if isinstance(exc, OrdinaryContinuationUnavailable) else "lead_internal_error"
-        error_kind = chat_failure_error_kind(reason_code)
+        reason_code = (
+            "clarification_resume_unavailable"
+            if isinstance(exc, OrdinaryContinuationUnavailable)
+            else "knowledge_source_changed"
+            if isinstance(exc, KnowledgeAccessError) and exc.code == "knowledge_source_changed"
+            else "lead_internal_error"
+        )
+        error_kind = "access" if reason_code == "knowledge_source_changed" else chat_failure_error_kind(reason_code)
         # κ-11 P1-PM-2: ensure streaming sections close on exception path
         if sd is not None:
             try:
@@ -7288,6 +7363,9 @@ async def _lead_loop(
     if _reference_lead_postdispatch_question and reference_runtime.generation > 1:
         _bounded_question = _bounded_questions_available
     _ordinary_checkpoint = result.ordinary_lead_checkpoint
+    if _ordinary_checkpoint is not None:
+        # A retained ordinary checkpoint owns this pause, including navigation-only questions.
+        _bounded_question = False
     if _is_resume and _ch2_sentinels and not _bounded_question:
         logger.info(
             "lead_loop resume_clarification_suppressed turn=%s dropped=%d — no second clarification round in a resumed turn",
@@ -8233,6 +8311,7 @@ async def _lead_loop(
             {
                 "turn_id": sctx.turn_id,
                 "status": "completed",
+                **delivery_summary_input(result),
                 "duration_ms": result.duration_ms,
                 "tokens_input": result.tokens_input,
                 "tokens_output": result.tokens_output,
@@ -8515,6 +8594,7 @@ async def _lead_loop(
         {
             "turn_id": sctx.turn_id,
             "status": "completed",
+            **delivery_summary_input(result),
             "duration_ms": result.duration_ms,
             "tokens_input": result.tokens_input,
             "tokens_output": result.tokens_output,
@@ -9588,12 +9668,14 @@ def _is_degenerate_inline(art: dict[str, Any]) -> bool:
     spec = art.get("spec")
     if not isinstance(spec, dict):
         return False
+    if spec.get("explicit_presentation"):
+        return False
     rows = spec.get("rows")
     cols = spec.get("columns")
     if not isinstance(rows, list) or not isinstance(cols, list):
         return False
     try:
-        from bowhead_core.chart.infer import indistinguishable_rows_reason
+        from bowhead_core.chart.validation import indistinguishable_rows_reason
 
         return indistinguishable_rows_reason([r for r in rows if isinstance(r, dict)], cols) is not None
     except Exception:  # Fallback must never create failure
@@ -9923,6 +10005,7 @@ async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict)
     did. Per-turn bus instance (registry get_or_create per turn_id) so flag
     is single-use, no pollution.
     """
+    delivery_completion = payload.pop("_delivery_completion", None) if name == "done" else None
     from bowhead_core.events import OrchestratorEvent
 
     # These semantic terminal events are paired with a subsequent done.  Hold
@@ -10065,7 +10148,7 @@ async def _emit_event(bus: TurnEventBus, turn_id: str, name: str, payload: dict)
         # (live == persisted == replayed). Missing means unknown.
         from bowhead_core.turn_step_outcome import step_outcome_field
 
-        payload.update(step_outcome_field(bus, payload.get("status")))
+        payload.update(step_outcome_field(bus, payload.get("status"), delivery_completion=delivery_completion))
         pending_terminal_events = getattr(bus, "_pending_terminal_events", [])
         bus._pending_terminal_events = []  # type: ignore[attr-defined]
         for pending_name, pending_payload in pending_terminal_events:

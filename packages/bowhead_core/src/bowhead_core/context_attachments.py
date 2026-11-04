@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bowhead_core.sqlite_domains import domain_database_path
+
 
 class ContextAttachment(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -31,7 +33,10 @@ async def _authorize(ctx, db, source, files: list[ContextAttachment]) -> list:
     from bowhead_core.chat_attachment_access import validate_chat_attachment_access_in_connection
 
     store = ctx.artifact_store
-    if store is None or Path(store.db_path).resolve() != Path(ctx.session_store.db_path).resolve():
+    if (
+        store is None
+        or Path(domain_database_path(store.db_path, "core")).resolve() != Path(domain_database_path(ctx.session_store.db_path, "core")).resolve()
+    ):
         raise ValueError("context_attachment_store_unavailable")
     await validate_chat_attachment_access_in_connection(
         db,

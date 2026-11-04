@@ -28,6 +28,7 @@ from bowhead_core.agent_eval_judge import POINTS_PROMPT_VERSION, EvalPointsGradi
 from bowhead_core.agent_eval_points import BLOCKING_POINT_KINDS, MODEL_GRADED_KINDS, case_points
 from bowhead_core.agent_eval_product import _require_agent_owner
 from bowhead_core.agent_eval_store import AgentEvalStoreError
+from bowhead_core.sqlite_domains import domain_database_path
 
 _log = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ class AgentEvalPointStore:
     """Examples and calibration outcomes of points; every write is the Agent Owner's."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = domain_database_path(db_path, "core")
 
     # ── reads ────────────────────────────────────────────────────────────
 

@@ -15,6 +15,7 @@ from bowhead_core.llm_config_crypto import (
     decrypt_llm_config,
     encrypt_llm_config,
 )
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_llm_evidence import SIGNATURE_VERSION
 
 if TYPE_CHECKING:
@@ -143,6 +144,7 @@ class ItemCompletion:
     #: Provider-reported model ID. Diagnostic only when it differs from config, but always record it:
     #: without the actual returned ID, operators cannot tell whether a mismatch reflects bad config or a bad criterion.
     actual_model_id: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +153,15 @@ class RetentionSweepResult:
     items: int
     batches: int
     plans: int
+
+
+def _read_diagnostics(ciphertext: str | None) -> dict[str, Any] | None:
+    if not ciphertext:
+        return None
+    try:
+        return decrypt_llm_config(ciphertext)
+    except (ValueError, TypeError):
+        return None
 
 
 def _id(prefix: str) -> str:
@@ -185,7 +196,7 @@ def _plan_item(raw: dict[str, Any]) -> VerificationPlanItem:
 
 class TeamLlmBatchStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def create_plan(
         self,
@@ -587,6 +598,13 @@ class TeamLlmBatchStore:
                 raise BatchOwnershipLost("verification Item lease is no longer owned")
             state = "cancelled" if current["cancel_requested_at"] else completion.state
             safe_code = "cancelled" if current["cancel_requested_at"] else completion.safe_code
+            diagnostics_ciphertext = None
+            if completion.diagnostics and state == "failed":
+                try:
+                    diagnostics_ciphertext = encrypt_llm_config(completion.diagnostics)
+                except (TypeError, ValueError):
+                    # Optional diagnostics must not prevent the original result from being saved.
+                    diagnostics_ciphertext = None
             revision = await self._next_revision(db, item.batch_id)
             await db.execute(
                 """
@@ -594,7 +612,7 @@ class TeamLlmBatchStore:
                 SET state = ?, safe_code = ?, safe_http_status = ?,
                     safe_summary_code = ?, duration_ms = ?, completed_at = ?,
                     lease_until = NULL, revision = ?,
-                    actual_model_id = ?
+                    actual_model_id = ?, diagnostics_ciphertext = ?
                 WHERE id = ? AND state = 'verifying' AND runner_id = ?
                 """,
                 (
@@ -606,6 +624,7 @@ class TeamLlmBatchStore:
                     _iso(timestamp),
                     revision,
                     completion.actual_model_id,
+                    diagnostics_ciphertext,
                     item.item_id,
                     item.runner_id,
                 ),
@@ -1077,7 +1096,7 @@ class TeamLlmBatchStore:
                 SELECT id, ordinal, provider_id, model_id, capability, state,
                        revision, safe_code, safe_http_status,
                        safe_summary_code, duration_ms, request_started_at,
-                       completed_at
+                       completed_at, diagnostics_ciphertext
                 FROM team_llm_verification_items
                 WHERE team_id = ? AND batch_id = ?
             """
@@ -1124,6 +1143,7 @@ class TeamLlmBatchStore:
                     "duration_ms": row["duration_ms"],
                     "request_started_at": row["request_started_at"],
                     "completed_at": row["completed_at"],
+                    "diagnostics": _read_diagnostics(row["diagnostics_ciphertext"]),
                 }
                 for row in items
             ],

@@ -464,7 +464,11 @@ class RefAllowlist:
         )
         parts.append("  * 画新图: add_chart.data_artifact_id 只能用 data 列表的 id 数字, 不能用 chart / image 列表的 id")
         parts.append('  * 引数据: evidence kind=table 或 computation, *_artifact_id="<id>" (从 data 列表选)')
-        parts.append("  * 引 KB: narrative 写 [ref:<id>], <id> 必须从上面 doc 列表选")
+        parts.append(
+            "  * KB evidence read in this run: use [ref:<id>] from the doc list above. "
+            "When reusing a peer's answer, preserve its resolved [ref:chunk_...] citations exactly; "
+            "they belong to the peer's reference namespace and must not be renumbered with this list."
+        )
         # ⚠ Removed the former instruction to use actual tool call_id for numeric-source `[num:V:U:src:<id>]` markers for two reasons:
         #   ① It directly contradicted the same peer prompt's `subagent.py` prohibition on any [num:...] marker (baked
         #      into plain text anyway). gen2 markers retired with citation-audit M1-0; 116 production

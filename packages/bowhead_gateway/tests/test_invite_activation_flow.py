@@ -75,6 +75,7 @@ def app(store: UserStore, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
                 base_path="",
                 app_root=f"{ORIGIN}/",
                 match_source="direct",
+                prefix_known=True,
             )
         )
         token = set_public_access_context(context)

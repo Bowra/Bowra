@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.terminal_event_writer import TurnEventWriter
 from bowhead_core.terminal_generation_bus import (
@@ -35,6 +34,7 @@ from bowhead_core.terminal_protocol_store import TerminalProtocolStore, Terminal
 from bowhead_core.terminal_runtime_factory import (
     terminal_auth_resolve_context_values,
 )
+from core_legacy_database import upgrade
 
 _NOW = datetime(2026, 8, 3, 8, 9, 10, tzinfo=UTC)
 
@@ -45,7 +45,7 @@ def db_path(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     return str(path)
 
 

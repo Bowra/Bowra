@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from bowhead_core.llm_config_crypto import decrypt_llm_config
+from bowhead_core.sqlite_domain_runtime import connect_sync
 from bowhead_core.team_llm_config import (
     TeamLlmConfigError,
     build_router_from_v2_config,
@@ -81,7 +82,7 @@ def audit_team_model_boundary(
     if checked_at.tzinfo is None:
         raise ValueError("now must be timezone-aware")
 
-    connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = connect_sync(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         connection.execute("PRAGMA query_only=ON")

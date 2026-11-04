@@ -137,15 +137,20 @@ _STREAM_FALLBACK_ELIGIBLE_KINDS = frozenset(
 )
 
 
+def redact_upstream_credentials(value: str) -> str:
+    """Hide credential-shaped text while preserving diagnostic whitespace."""
+    value = _BEARER_RE.sub("Bearer [REDACTED]", value)
+    value = _KEY_SHAPE_RE.sub("[REDACTED_KEY]", value)
+    return _SECRET_FIELD_RE.sub(r"\1\2[REDACTED]", value)
+
+
 def sanitize_upstream_text(value: object, *, max_length: int = _MAX_UPSTREAM_MESSAGE) -> str | None:
     """Return a bounded credential-scrubbed log field, never a UI message."""
 
     if not isinstance(value, str):
         return None
     clean = _CONTROL_RE.sub(" ", value)
-    clean = _BEARER_RE.sub("Bearer [REDACTED]", clean)
-    clean = _KEY_SHAPE_RE.sub("[REDACTED_KEY]", clean)
-    clean = _SECRET_FIELD_RE.sub(r"\1\2[REDACTED]", clean)
+    clean = redact_upstream_credentials(clean)
     clean = " ".join(clean.split()).strip()
     return clean[:max_length] or None
 

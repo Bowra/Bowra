@@ -6,7 +6,6 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.events import TerminalDurabilityAbort
 from bowhead_core.migrations.baseline_schema import initial_schema
@@ -17,6 +16,7 @@ from bowhead_gateway.turn_service import (
     admit_legacy_chat_execution as _real_admit_legacy_chat_execution,
 )
 from bowhead_gateway.turn_service import spawn_turn as _real_spawn_turn
+from gateway_legacy_database import upgrade
 
 from bowhead_core import OrchestratorEvent, TurnRequest, get_event_registry
 
@@ -88,7 +88,7 @@ async def _admit_legacy_test_worker(
 @pytest.mark.asyncio
 async def test_persist_turn_row_for_stream_creates_turn_before_sse(tmp_path) -> None:
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     store = SessionStore(path)
     await store.initialize()
     req = TurnRequest(
@@ -132,7 +132,7 @@ async def test_steer_followup_halt_recovers_durable_child(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(session_id="s1", workspace_id="ws_sales", user_id="u_alice")
@@ -246,7 +246,7 @@ async def test_steer_admission_failure_lost_cas_publishes_no_false_terminal(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(session_id="s1", workspace_id="ws_sales", user_id="u_alice")
@@ -333,7 +333,7 @@ async def test_live_steer_follow_up_precedes_parent_done_and_is_persisted(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(
@@ -474,7 +474,7 @@ async def test_legacy_worker_rejects_live_event_when_persistence_rejects(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(
@@ -546,7 +546,7 @@ async def test_legacy_materialize_failure_creates_durable_recovery_marker(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(
@@ -681,7 +681,7 @@ async def test_cancelled_legacy_finalizer_retires_bus_for_recovery(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(
@@ -816,7 +816,7 @@ async def test_cancelled_marker_outage_retires_worker_bus_without_barrier(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(
@@ -941,7 +941,7 @@ async def test_steer_drain_failure_becomes_durable_recovery_work(
     with sqlite3.connect(db_path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     store = SessionStore(db_path)
     await store.initialize()
     await store.ensure_session(

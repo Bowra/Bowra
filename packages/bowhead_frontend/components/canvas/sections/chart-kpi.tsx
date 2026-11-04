@@ -15,7 +15,7 @@ import type { ChartSpec } from "@/lib/chart/types";
 /**
  * KPI card group for a single row of multiple numeric columns. Pure DIV layout matches product cards, without Chart.js.
  *
- * Trigger: spec.kind === "kpi" (infer_chart_spec emits this for n=1 + all numeric).
+ * Trigger: spec.kind === "kpi" with an explicitly bound prepared value.
  * Each numeric column of spec.rows[0] becomes a card.
  */
 export function ChartKPI({ spec, switcher, embedded = false }: {

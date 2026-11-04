@@ -24,6 +24,8 @@ from bowhead_core.kb.parse_recovery import heartbeat_iso
 from bowhead_core.kb.permission import KbPermission
 from bowhead_core.kb.schemas import KbFileDTO, KbScopeIn
 from bowhead_core.kb.telemetry import emit_audit
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -487,7 +489,7 @@ async def kb_presign_confirm(
 
     # 5a. Flip kb_files.parse_status to 'queued' FIRST (recoverable failure
     # mode: artifact still in 'confirming' → next confirm CAS will succeed).
-    async with aiosqlite.connect(files_store._db_path) as db:
+    async with diagnostic_connect(files_store._db_path) as db:
         await db.execute(
             "UPDATE kb_files SET parse_status='queued', parse_heartbeat_at=? WHERE file_id=?",
             (heartbeat_iso(), file_id),
@@ -1017,14 +1019,17 @@ async def kb_presign_bundle_confirm(
                                 datetime.now(tz=UTC).isoformat(timespec="seconds"),
                             ),
                         )
-                        await db.execute(
-                            "INSERT OR IGNORE INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,?)",
-                            (
-                                artifact_id,
-                                art.id,
-                                datetime.now(tz=UTC).isoformat(timespec="seconds"),
-                            ),
-                        )
+                        await db.commit()
+                        async with _open_db(domain_database_path(artifact_store.db_path, "execution")) as association_db:
+                            await association_db.execute(
+                                "INSERT OR IGNORE INTO chat_attachment_bundle_members(bundle_artifact_id,child_artifact_id,created_at) VALUES (?,?,?)",
+                                (
+                                    artifact_id,
+                                    art.id,
+                                    datetime.now(tz=UTC).isoformat(timespec="seconds"),
+                                ),
+                            )
+                            await association_db.commit()
                         await db.commit()
                     # Phase 1.4c review P0-2: children INSERT with
                     # parse_status='queued' per tech-design §5.3c step 5.
@@ -1127,7 +1132,7 @@ async def kb_presign_bundle_confirm(
     # would require the same 3-file atomic Literal coordination (CHECK +
     # Pydantic + FE mirror) that Phase 1.3 already paid. Defer until/unless
     # an analytics query actually needs the distinction.
-    async with aiosqlite.connect(files_store._db_path) as db:
+    async with diagnostic_connect(files_store._db_path) as db:
         await db.execute(
             "UPDATE kb_files SET parse_status='done', soft_deleted_at=? WHERE file_id=?",
             (now_iso, file_id),

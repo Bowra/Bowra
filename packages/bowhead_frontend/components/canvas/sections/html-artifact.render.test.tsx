@@ -1,3 +1,4 @@
+import { installHtmlPreviewWorker } from "@/__tests__/helpers/html-preview-worker";
 /**
  * WP4/S4 — EmbedCard rendering contract: badge cluster + embedded provenance footer + expand.
  * Assert only surrounding chrome (header/footer independent of iframe content). Script execution round-trips inside the iframe
@@ -135,3 +136,6 @@ describe("HtmlArtifactSection · D4 EmbedCard chrome", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   });
 });
+
+
+beforeEach(() => installHtmlPreviewWorker());

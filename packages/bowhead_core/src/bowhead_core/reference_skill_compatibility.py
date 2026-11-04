@@ -12,8 +12,10 @@ from dataclasses import dataclass
 
 from bowhead_skill.readonly_entry import ReadOnlyEntry, skill_reference_read_entry
 
+from bowhead_core.agent_behavior_contract import canonical_fingerprint, supports_skill_method_input
 from bowhead_core.chat_references import SkillResourceRef
 from bowhead_core.reference_receiver_metadata import ReferenceReceiverMetadata
+from bowhead_core.skill_method_policy import TaskMethodReadPolicy
 from bowhead_core.skill_read_closure import MAX_CLOSURE_DEPTH, MAX_CLOSURE_SKILLS, MAX_SELECTED_SKILLS
 from bowhead_core.skill_read_extensions import require_extension_member_name, require_extension_roots, skill_read_provenance
 
@@ -30,11 +32,17 @@ def reference_skill_modes(
     receiver: ReferenceReceiverMetadata,
     roots: Sequence[SkillResourceRef],
     skills: Mapping[SkillResourceRef, ReferenceSkillMetadata],
+    *,
+    allow_task_methods: bool = False,
 ) -> tuple[str, ...] | None:
     try:
+        if roots and not supports_skill_method_input(
+            receiver.behavior, allow_unproven_primary=allow_task_methods, declared_primary=receiver.declared_primary_capability_ref
+        ):
+            return None
         # Agent-only selection uses its ordinary system execution. Missing
         # exact grants must never become authorization for a selected Skill.
-        if receiver.ordinary_system_scope:
+        if receiver.ordinary_system_scope and not allow_task_methods:
             return None if roots else ()
         if len(roots) > MAX_SELECTED_SKILLS or len({(root.source_kind, root.id) for root in roots}) != len(roots):
             return None
@@ -46,7 +54,24 @@ def reference_skill_modes(
             baseline.add(resource)
             if metadata is None or not metadata.available or metadata.name != grant.name:
                 return None
-        require_extension_roots(receiver.grants, roots, receiver.policy)
+        policy = receiver.policy
+        outside = [resource for resource in roots if resource not in baseline]
+        if (
+            allow_task_methods
+            and outside
+            and (
+                policy is None
+                or len(outside) > policy.skill_read.max_selected
+                or any(
+                    not policy.skill_read.permits(resource) or skills.get(resource) is not None and skills[resource].entry_json is None
+                    for resource in outside
+                )
+            )
+        ):
+            policy = TaskMethodReadPolicy(
+                input_digest=canonical_fingerprint([root.model_dump(mode="json") for root in roots]), resources=tuple(roots)
+            )
+        require_extension_roots(receiver.grants, roots, policy)
         visiting = set()
         heights: dict[SkillResourceRef, int] = {}
         versions = {}
@@ -64,7 +89,13 @@ def reference_skill_modes(
             if identity in versions and versions[identity] != resource.version or len(versions) >= MAX_CLOSURE_SKILLS:
                 raise ValueError("dependency version or count")
             metadata = skills.get(resource)
-            if metadata is None or not metadata.available or metadata.entry_json is None and resource not in baseline:
+            if (
+                metadata is None
+                or not metadata.available
+                or metadata.entry_json is None
+                and resource not in baseline
+                and not isinstance(policy, TaskMethodReadPolicy)
+            ):
                 raise ValueError("missing current method")
             entry = ReadOnlyEntry(json.loads(metadata.entry_json)) if metadata.entry_json is not None else skill_reference_read_entry({})
             if resource not in roots:
@@ -74,7 +105,7 @@ def reference_skill_modes(
                 raise ValueError("ambiguous method name")
             names[metadata.name] = resource
             versions[identity] = resource.version
-            modes.add(skill_read_provenance(receiver.grants, resource, receiver.policy))
+            modes.add(skill_read_provenance(receiver.grants, resource, policy))
             visiting.add(resource)
             height = 1 + max(
                 (visit(SkillResourceRef.model_validate(child), depth + 1) for child in entry.to_dict()["required_skill_refs"]), default=0

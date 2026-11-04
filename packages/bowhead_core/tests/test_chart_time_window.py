@@ -31,11 +31,17 @@ def window_args(prepared):
     _, _, _, _, args, _, _, raw = prepared
     bid = next(candidate["id"] for candidate in catalog(raw)["candidates"] if candidate["kind"] == "time")
     return {
-        **{key: value for key, value in args.items() if key not in {"force_kind", "series", "presentation_plan"}},
+        **{key: value for key, value in args.items() if key not in {"force_kind", "series", "presentation_plan", "columns", "axes", "group_by"}},
         "title": "Saved monthly observations",
         "views": [
-            {"id": "trend", "title": "Revenue trend", "hint": "trend", "force_kind": "line", "series": ["revenue"]},
-            {"id": "detail", "title": "Original observations", "hint": "raw", "force_kind": "table", "series": ["revenue", "cost"]},
+            {
+                "id": "trend",
+                "title": "Revenue trend",
+                "force_kind": "line",
+                "axes": {"x": "month", "y": ["revenue"], "x_scale": "category"},
+                "group_by": [],
+            },
+            {"id": "detail", "title": "Original observations", "force_kind": "table"},
         ],
         "layout": "primary_aside",
         "presentation_plan": {
@@ -65,7 +71,7 @@ async def test_time_window_and_focus_round_trip_exact_scope_and_protected_descri
     safe, aliases, access, validity = await project(prepared, section)
     validate_projected_notes_plan(safe["spec"]["presentation_plan"])
     changed = copy.deepcopy(safe["spec"])
-    changed["views"][0]["spec"]["kind"] = "bar"
+    changed["views"][0]["spec"]["show_legend"] = False
     restored = merge_viewer_patch_preserving_provenance(
         section.to_report_section(),
         {"spec": changed},
@@ -239,6 +245,30 @@ async def test_automatic_binding_does_not_guess_or_bypass_admission(prepared, da
     result = await _add_chart(args, ctx)
     assert "error" in result, result
     if damage == "ambiguous":
-        assert len(result["corrective_ids"]) == 2
+        assert result["code"] == "binding_unknown"
     assert await canvas.get_canvas_by_session(ctx.session_id) is None
     assert set(artifacts.backend.root_dir.rglob("*")) == before
+
+
+@pytest.mark.parametrize("with_binding_ids", [False, True])
+async def test_numeric_year_observations_keep_source_identity_through_time_windows(prepared, with_binding_ids):
+    raw = (
+        RAW.replace(b"month", b"year")
+        .replace(b"2026-03", b"2026")
+        .replace(b"2026-01", b"2024")
+        .replace(b"2026-02", b"2025")
+        .replace(b"2026-04", b"2027")
+    )
+    value = await time_prepared(prepared, raw)
+    _, canvas, _, ctx, *_ = value
+    args = window_args(value)
+    args["views"][0]["axes"]["x"] = "year"
+    if not with_binding_ids:
+        args["presentation_plan"].pop("view_bindings")
+        for interaction in args["presentation_plan"]["interactions"]:
+            interaction.pop("binding_id")
+    result = await _add_chart(args, ctx)
+    assert "error" not in result, result
+    spec = (await canvas.list_sections(result["canvas_id"]))[0].payload["spec"]
+    assert all([row["year"] for row in view["spec"]["rows"]] == [2026, 2024, 2025, 2027] for view in spec["views"])
+    validate_stored_composition(spec)

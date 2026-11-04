@@ -8,6 +8,7 @@ from typing import Any
 
 import bowhead_gateway.kb_citation_access as kb_access
 import bowhead_gateway.source_access_projection as projection
+import jwt
 import pytest
 from bowhead_core.kb_citations import kb_citation_identity
 from bowhead_core.source_access_projection import SOURCE_ALIAS_PREFIX
@@ -30,8 +31,8 @@ class _FilesStore:
 
 
 class _ArtifactStore:
-    async def get_many(self, ids: list[str]) -> list[SimpleNamespace]:
-        return [SimpleNamespace(id=i, status="ready", created_by_turn="turn_1") for i in ids if i == ART]
+    async def get_many(self, ids: list[str], *, include_deleted: bool = False) -> list[SimpleNamespace]:
+        return [SimpleNamespace(id=i, status="ready", created_by="u_owner", created_by_turn="turn_1") for i in ids if i == ART]
 
 
 class _SessionStore:
@@ -39,7 +40,7 @@ class _SessionStore:
         return SimpleNamespace(id=turn_id, session_id="ses_1")
 
     async def get_session(self, session_id: str) -> SimpleNamespace:
-        return SimpleNamespace(id=session_id, workspace_id="ws_chat")
+        return SimpleNamespace(id=session_id, workspace_id="ws_chat", user_id="u_owner")
 
     async def list_turns(self, session_id: str) -> list[SimpleNamespace]:
         return [SimpleNamespace(id="turn_1")]
@@ -62,7 +63,10 @@ def _file(file_id: str, *, scope: str = "space", scope_id: str = "ws_kb", upload
 
 
 def _request(files: dict[str, SimpleNamespace], *, user: SimpleNamespace | None) -> SimpleNamespace:
+    token = jwt.encode({"sub": user.id}, "synthetic-kb-projection-jwt-secret-32bytes", algorithm="HS256") if user else None
     return SimpleNamespace(
+        headers={"Authorization": "Bearer " + token} if token else {},
+        cookies={},
         app=SimpleNamespace(
             state=SimpleNamespace(
                 session_store=_SessionStore(),
@@ -84,6 +88,7 @@ def _viewer(user_id: str = "u_viewer", team_id: str = "team_1") -> SimpleNamespa
 
 @pytest.fixture(autouse=True)
 def _membership(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BOWHEAD_JWT_SECRET", "synthetic-kb-projection-jwt-secret-32bytes")
     member_of = {"ws_kb"}
 
     async def fake_build(request: object, *, user: object, workspace_id: str, allow_missing_workspace: bool, operation: object) -> object:
@@ -132,7 +137,7 @@ async def _project(
     sections: list[dict[str, Any]] | None = None,
 ) -> tuple[ViewerSafeCanvasProjector, list[dict[str, Any]], list[dict[str, Any]]]:
     sections = sections if sections is not None else _report()
-    canvas = SimpleNamespace(id="cv_1", workspace_id="ws_chat", session_id="ses_1")
+    canvas = SimpleNamespace(id="cv_1", workspace_id="ws_chat", session_id="ses_1", user_id="u_owner")
     projector = await _viewer_safe_projector(request, canvas, [], source_refs, additional_sections=sections)
     projected, refs = projector.project(sections, source_refs)
     return projector, projected, refs
@@ -306,3 +311,55 @@ async def test_live_section_event_matches_detail_projection(monkeypatch: pytest.
     _, projected, _ = await _project(request, source_refs=[_kb_source_ref(CHUNK, "kbf_1")])
     detail_entry = _entries(projected)[0]
     assert live_entry == detail_entry
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("revocation", ["restricted", "deleted"])
+async def test_kb_citation_replay_matches_events_and_rechecks_current_access(monkeypatch: pytest.MonkeyPatch, revocation: str) -> None:
+    from datetime import UTC, datetime
+
+    from bowhead_gateway.routes import turns
+
+    file = _file("kbf_1")
+    file.filename = "Synthetic Helios notes.pdf"
+    request = _request({"kbf_1": file}, user=_viewer())
+    citation = {
+        "citation_seq": 1,
+        "kind": "kb_chunk",
+        "artifact_id": kb_citation_identity("kbf_1", CHUNK),
+        "label": "Synthetic preview",
+    }
+    row = SimpleNamespace(seq=1, event_type="turn.citation_registered", payload=dict(citation), occurred_at=datetime.now(UTC).isoformat())
+
+    async def rows(_turn_id: str) -> list[SimpleNamespace]:
+        return [row]
+
+    async def require_access(*args: object, **kwargs: object) -> SimpleNamespace:
+        return request.state.bowhead_user
+
+    async def refs_for_session(_request: object, _session_id: str) -> list[dict[str, Any]]:
+        return [_kb_source_ref(CHUNK, "kbf_1")]
+
+    monkeypatch.setattr(turns, "_require_turn_access", require_access)
+    monkeypatch.setattr(projection, "_source_refs_for_session", refs_for_session)
+    store = SimpleNamespace(list_events=rows)
+
+    async def replay_payload() -> dict[str, Any]:
+        response = await turns.replay("turn_1", request, store)
+        frames = [frame async for frame in response.body_iterator]
+        return json.loads(frames[0]["data"])
+
+    before = (await turns.list_events("turn_1", request, store)).events[0].payload
+    assert before["access_state"] == "linked_accessible"
+    assert before["label"] == "Synthetic Helios notes.pdf"
+    assert await replay_payload() == before
+
+    if revocation == "restricted":
+        file.scope_id = "ws_forbidden"
+    else:
+        file.soft_deleted_at = "2026-11-02"
+    after = (await turns.list_events("turn_1", request, store)).events[0].payload
+    assert after["access_state"] == ("linked_restricted" if revocation == "restricted" else "linked_missing")
+    assert "label" not in after
+    assert await replay_payload() == after
+    assert row.payload == citation

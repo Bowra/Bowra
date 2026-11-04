@@ -13,6 +13,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_llm_evidence import Capability, canonical_json
 from bowhead_core.team_llm_readiness import RequiredAssignment
 
@@ -87,7 +88,7 @@ def acceptance_key_from_row(
 
 class TeamLlmReadinessStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def ensure_enrollment(
         self,

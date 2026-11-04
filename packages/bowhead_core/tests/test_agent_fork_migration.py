@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import migrations
 
@@ -104,8 +105,8 @@ def test_existing_agents_survive_upgrade_without_implicit_policy_or_lineage(tmp_
     with sqlite3.connect(path) as db:
         _seed_team(db)
         before = db.execute("SELECT id,name FROM team_subagent ORDER BY id").fetchall()
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT id,name FROM team_subagent ORDER BY id").fetchall() == before
         assert db.execute("SELECT count(*) FROM team_subagent_fork_policy").fetchone()[0] == 0
@@ -130,19 +131,19 @@ def test_same_name_fork_schema_drift_fails_closed(tmp_path, kind) -> None:
                 "CREATE TRIGGER trg_team_subagent_fork_lineage_update BEFORE UPDATE ON team_subagent_fork_lineage WHEN 0 BEGIN SELECT RAISE(ABORT, 'disabled'); END",
             )
     with pytest.raises(RuntimeError, match="0045 found incompatible"):
-        command.upgrade(config, "head")
+        command.upgrade(config, SOURCE_REVISION)
 
 
 def test_non_core_target_does_not_gain_fork_tables(tmp_path) -> None:
     path = tmp_path / "files.db"
-    command.upgrade(_config(path, "files"), "head")
+    command.upgrade(_config(path, "files"), SOURCE_REVISION)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='team_subagent_fork_policy'").fetchone() is None
 
 
 def test_policy_is_owner_cas_and_lineage_is_immutable(tmp_path) -> None:
     path = tmp_path / "core.db"
-    command.upgrade(_config(path), "head")
+    command.upgrade(_config(path), SOURCE_REVISION)
     timestamp = "2026-09-06T00:00:00+00:00"
     with sqlite3.connect(path) as db:
         _seed_team(db)

@@ -8,6 +8,7 @@ Production always uses DocumentExecutor and its fixed Docker worker.
 import hashlib
 import json
 import os
+from dataclasses import replace
 
 import anyio
 import pytest
@@ -146,7 +147,7 @@ class HostWorker:
         return read_result(target, image_id=IMAGE, operation=operation, context_digest=context_digest, planner_profile=planner_profile)
 
 
-async def setup_job(ctx, case):
+async def setup_job(ctx, case, *, with_task_source=False):
     turn_id = "t_pipeline"
     text = case[1] + " The first file is the template; the second file supplies the data. Return editable PPTX and its PDF."
     artifacts = [
@@ -172,15 +173,35 @@ async def setup_job(ctx, case):
     await ctx.sessions.record_turn_attachments(turn_id=turn_id, artifact_ids=[item.id for item in artifacts])
     await ctx.sessions.pin_session_attachments(session_id="s_pipeline", artifact_ids=[item.id for item in artifacts])
     quote = UserQuote(start=0, text=text)
+    evidence = quote
+    if with_task_source:
+        from test_document_revision import finish_chat_turn
+
+        original = await ctx.sessions.get_chat_turn_user_source(turn_id=turn_id, user_id=SCOPE.user_id, workspace_id=SCOPE.workspace_id)
+        await finish_chat_turn(ctx, "s_pipeline")
+        turn_id = "t_pipeline_supplement"
+        source = replace(
+            original,
+            turn_id=turn_id,
+            user_text="Continue with the original task and preserve its other requirements.",
+            attachment_ids=(),
+            attachment_refs=(),
+        )
+        await ctx.sessions.record_turn(turn_id=turn_id, session_id="s_pipeline", user_text=source.user_text, user_source=source)
+        evidence = UserQuote(text=source.user_text)
     proposal = DocumentProposal(
-        evidence=quote,
+        evidence=evidence,
+        task_source=quote if with_task_source else None,
         inputs=tuple(
             InputRoleProposal(artifact_id=item.id, role=role, evidence=quote, current_message_position=index)
             for index, (item, role) in enumerate(zip(artifacts, ("template", "data"), strict=True), 1)
         ),
         requested_outputs=("source", "pdf"),
     )
-    receipt = await ctx.store.submit_from_turn(scope=SCOPE, turn_id=turn_id, command_id="pipeline", proposal=proposal)
+    prepared = await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=turn_id, proposal=proposal)
+    receipt = await ctx.store.submit_from_turn(
+        scope=SCOPE, turn_id=turn_id, command_id="pipeline", proposal=prepared.proposal, _task_source=prepared.task_source
+    )
     async with open_shared_ctx(ctx.path) as db:
         await db.execute("UPDATE users SET credit_balance=100 WHERE id=?", (SCOPE.user_id,))
         await db.execute("UPDATE teams SET team_credit_balance=100 WHERE id=?", (SCOPE.team_id,))
@@ -240,22 +261,27 @@ async def test_unknown_transport_never_replays_and_is_not_zero_usage(ctx, case, 
     assert len(calls) == 1 and worker.runs == ["inventory"]
 
 
-async def test_question_successor_worker_receives_original_request_and_answer(ctx, case, tmp_path):
+@pytest.mark.parametrize("with_task_source", [False, True], ids=["current-request", "explicit-earlier-task"])
+async def test_question_successor_worker_receives_original_request_and_answer(ctx, case, tmp_path, monkeypatch, with_task_source):
     from test_document_capability import runtime
     from test_document_recovery import turn
 
-    parent = await setup_job(ctx, case)
+    monkeypatch.setenv("FEATURE_DOCUMENT_TASK_SOURCES", "1" if with_task_source else "0")
+    parent = await setup_job(ctx, case, with_task_source=with_task_source)
     worker, calls = HostWorker(tmp_path / "worker"), []
     delivery = DocumentDeliveryStore(ctx.artifacts)
     response = json.dumps({"action": "ask", "reason": "comparison", "slots": ["s0"], "question": "Which comparison period?"})
     await run_document(delivery=delivery, executor=worker, scope=SCOPE, job_id=parent, invoke=transport([response], calls), expected_image_id=IMAGE)
     assert (await delivery.get(scope=SCOPE, job_id=parent))["state"] == "question"
     async with open_shared_ctx(ctx.path) as db:
-        await db.execute("UPDATE turns SET status='completed' WHERE id='t_pipeline'")
+        await db.execute("UPDATE turns SET status='completed' WHERE id=?", ("t_pipeline_supplement" if with_task_source else "t_pipeline",))
         await db.commit()
-    await ctx.sessions.finalize_turn(session_id="s_pipeline", current_turn_id="t_pipeline", next_turn_id=None)
+    await ctx.sessions.finalize_turn(
+        session_id="s_pipeline", current_turn_id="t_pipeline_supplement" if with_task_source else "t_pipeline", next_turn_id=None
+    )
     answer = "Use the same quarter last year."
     turn_id = await turn(ctx, "pipeline_answer", text=answer, session_id="s_pipeline", attach=False)
+    monkeypatch.setenv("FEATURE_DOCUMENT_TASK_SOURCES", "0")
     successor = await ctx.store.answer_from_turn(
         scope=SCOPE,
         turn_id=turn_id,
@@ -278,6 +304,10 @@ async def test_question_successor_worker_receives_original_request_and_answer(ct
     instruction = json.loads(successor_calls[0])["instruction"]
     assert json.loads(calls[0])["instruction"] in instruction
     assert "Which comparison period?" in instruction and answer in instruction
+    if with_task_source:
+        assert "Original user request:\n" in instruction and "Current user supplement:\nContinue with the original task" in instruction
+        child = await ctx.store.get(scope=SCOPE, job_id=successor.job_id)
+        assert child.proposal.task_source is not None
     assert worker.runs == ["inventory", "apply_verify", "inventory", "apply_verify"]
 
 

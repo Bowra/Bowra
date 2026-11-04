@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -254,14 +254,31 @@ def _clarification_prose(text: str) -> str:
     return "".join(lines)
 
 
-def has_uninvoked_clarification(text: str) -> bool:
+def has_uninvoked_clarification(text: str, *, tool_names: Iterable[str] = ()) -> bool:
     """Recognize non-executed native Tool syntax, never execute its arguments."""
+    return uninvoked_tool_names(text, tool_names=tool_names) is not None
+
+
+def uninvoked_tool_names(text: str, *, tool_names: Iterable[str] = ()) -> frozenset[str] | None:
+    """Identify intended Tools for correction; an empty set means unknown syntax."""
     visible = _clarification_prose(text)
-    return bool(
-        _UNINVOKED_CLARIFICATION_RE.search(visible)
-        or re.search(r"<\s*(?:tool_call|tool_calls|function_call)(?=[\s/>\"':=]|$)", visible, re.IGNORECASE)
-        or (re.search(r"^\s*questions\s*=\s*\[", visible, re.MULTILINE) and re.search(r"^\s*fallback_text\s*=", visible, re.MULTILINE))
-    )
+    # Some responses use the native Tool name as the XML tag instead of an
+    # invoke/tool_call wrapper. Match registered names, including truncated
+    # openings, without treating arbitrary XML or quoted examples as calls.
+    known_tools = frozenset({"clarification_ask", *tool_names})
+    names = {match.group(1) for match in re.finditer(r"<\s*([A-Za-z_][A-Za-z0-9_]{0,63})(?=[\s/>\"':=]|$)", visible) if match.group(1) in known_tools}
+    wrapper = re.search(r"<\s*(?:tool_call|tool_calls|function_call)(?=[\s/>\"':=]|$)", visible, re.IGNORECASE)
+    if wrapper:
+        names.update(
+            match.group(1)
+            for match in re.finditer(r"(?:<\s*(?:name|tool_name)\s*>\s*|\b(?:name|tool_name)\s*=\s*[\"'])([A-Za-z_][A-Za-z0-9_]{0,63})", visible)
+            if match.group(1) in known_tools
+        )
+    if _UNINVOKED_CLARIFICATION_RE.search(visible) or (
+        re.search(r"^\s*questions\s*=\s*\[", visible, re.MULTILINE) and re.search(r"^\s*fallback_text\s*=", visible, re.MULTILINE)
+    ):
+        names.add("clarification_ask")
+    return frozenset(names) if names or wrapper else None
 
 
 def _clarification_block_to_prose(payload: str) -> str:

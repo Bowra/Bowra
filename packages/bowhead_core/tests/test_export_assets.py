@@ -25,6 +25,7 @@ from bowhead_core.export_snapshot import (
     ExportSnapshotStore,
 )
 from bowhead_core.session_store import SessionStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
 from bowhead_core import export_assets as export_assets_module
 
@@ -69,7 +70,7 @@ async def stores(tmp_path: Path) -> Stores:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     sessions = SessionStore(path)
     canvases = CanvasStore(path)
     snapshots = ExportSnapshotStore(path)

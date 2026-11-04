@@ -71,7 +71,7 @@ const CATALOG_OVERRIDES: Record<string, Partial<Omit<ToolMeta, "name" | "activeN
   // preview rendering as label (`· {}` rows on trace expand).
   // Registry alias for `skill_list`; the bare `skill_list` name is covered by the generated table.
   skill_list_for_role: { icon: "📒", cat: "query" },
-  subagent_return: { icon: "✅", cat: "agent" },
+  subagent_return: { icon: "", cat: "agent" },
   memory_search: { icon: "🧠", cat: "query" },
   memory_write: { icon: "🧠", cat: "write" },
   // `remember` / `recall` names and icons come from tool_aliases.yaml; the generated category (kb) reads as a
@@ -227,10 +227,11 @@ export function writingDisplayKey(
   return WRITING_DISPLAY_KEYS[canonicalToolName(toolName)] ?? null;
 }
 
-/** Catalog lookup key for step rows: switch preparing code/query-writing rows to writing entries; leave others unchanged. */
+/** Display lookup only: reuse the closeout label for native review and writing labels while arguments are prepared. */
 export function stepDisplayToolName(
   stepType: string | null | undefined,
   toolName: string | null | undefined,
 ): string | null | undefined {
+  if (toolName === "review_delivery") return "subagent_return";
   return writingDisplayKey(stepType, toolName) ?? toolName;
 }

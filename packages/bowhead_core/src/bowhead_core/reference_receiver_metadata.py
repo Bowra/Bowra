@@ -24,6 +24,7 @@ from bowhead_core.agent_runtime_extensions import AgentRuntimeExtensions
 from bowhead_core.chat_references import AgentResourceRef, decode_reference_json
 from bowhead_core.skill_read_extensions import published_extension_policy
 from bowhead_core.skill_read_receiver import exact_reference_skill_grants, require_supported_skill_grants
+from bowhead_core.sqlite_domains import domain_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class ReferenceReceiverMetadata:
     team_tools: tuple[ReferenceTeamToolBaseline, ...] = ()
     tool_refs: tuple[str, ...] = ()
     ordinary_system_scope: bool = False
+    declared_primary_capability_ref: str | None = None
 
     def __post_init__(self):
         if type(self.team_tools) is not tuple or any(not isinstance(item, ReferenceTeamToolBaseline) for item in self.team_tools):
@@ -187,10 +189,19 @@ class ReferenceReceiverMetadata:
             from bowhead_core.system_skill_snapshot import has_ordinary_system_skill_scope
 
             if has_ordinary_system_skill_scope(definition):
-                return cls((), behavior=behavior, ordinary_system_scope=True)
+                return cls(
+                    (), behavior=behavior, ordinary_system_scope=True, declared_primary_capability_ref=definition.get("primary_capability_ref")
+                )
         grants = exact_reference_skill_grants(definition)
         require_supported_skill_grants(grants)
-        return cls(grants, policy, behavior, team_tools, tuple(sorted(_definition_tool_refs(definition))))
+        return cls(
+            grants,
+            policy,
+            behavior,
+            team_tools,
+            tuple(sorted(_definition_tool_refs(definition))),
+            declared_primary_capability_ref=definition.get("primary_capability_ref"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +340,7 @@ async def build_reference_receiver_metadata(db_path: str | Path) -> ReferenceRec
 
 class ReferenceReceiverMetadataCache:
     def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
+        self.db_path = Path(domain_database_path(db_path, "core"))
         self._index = ReferenceReceiverMetadataIndex(self.db_path)
         self._expires_at = 0.0
         self._lock = anyio.Lock()

@@ -24,6 +24,7 @@ test("notification center shows action/update counts and supports read-all/archi
     actions: [{ id: "review", label: "Review", kind: "link", url: "/admin/approvals/?approvalId=apr_action" }],
     metadata: { approvalId: "apr_action" },
     state: "open",
+      actionRequired: true,
     recipientRole: "approver_admin",
     deliveredAt: "2026-06-10T08:00:00Z",
     readAt: null,
@@ -46,6 +47,7 @@ test("notification center shows action/update counts and supports read-all/archi
     actions: [{ id: "view", label: "View", kind: "link", url: "/" }],
     metadata: { approvalId: "apr_update" },
     state: "open",
+      actionRequired: false,
     recipientRole: "requester",
     deliveredAt: "2026-06-10T08:01:00Z",
     readAt: null as string | null,
@@ -141,6 +143,7 @@ test("scheduled notification action opens the live scheduled settings tab", asyn
     }],
     metadata: { jobId: "job_1", jobName: "日报", reason: "repeated_failures" },
     state: "open",
+      actionRequired: true,
     recipientRole: "owner",
     deliveredAt: "2026-07-17T08:00:00Z",
     readAt: null,
@@ -176,4 +179,77 @@ test("scheduled notification action opens the live scheduled settings tab", asyn
 
   await expect(page).toHaveURL(/\/team\/settings\/scheduled\/?$/);
   await expect(page.getByRole("heading", { name: "定时任务" })).toBeVisible();
+});
+
+test("update-only badge and retry preserve composer text and keyboard focus", async ({ page }) => {
+  await mockAuthedApp(page);
+  let unavailable = true;
+  await page.route("**/api/v1/notifications/unread-count", (route) => route.fulfill({
+    json: { actionRequired: 0, updatesUnread: 3, totalBadge: 0 },
+  }));
+  await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, (route) => route.fulfill(
+    unavailable ? { status: 503, json: {} } : { json: { items: [], nextCursor: null } },
+  ));
+  await page.goto("/");
+  const composer = page.locator("textarea").first();
+  await composer.fill("保留这条未发送的问题");
+  const bell = page.getByRole("button", { name: zh.notifications.bell_aria_updates.replace("{updates}", "3") });
+  await expect(bell.locator(".notification-bell__dot")).toBeVisible();
+  await bell.focus();
+  await bell.press("Enter");
+  await expect(page.getByText(zh.notifications.load_failed_notice)).toBeVisible();
+  unavailable = false;
+  await page.getByRole("button", { name: zh.notifications.retry, exact: true }).click();
+  await expect(page.locator("[data-notification-center]").getByText(zh.notifications.empty_action, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(bell).toBeFocused();
+  await expect(page.locator("[data-notification-center]")).toHaveCount(0);
+  await expect(composer).toHaveValue("保留这条未发送的问题");
+});
+
+test("space assignment notification opens the named member's grants and requires explicit authorization", async ({ page }) => {
+  await mockAuthedApp(page, { subagentManagement: true });
+  const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
+  const actionUrl = "/team/settings/people/?member=u_requester&team=team_smoke";
+  const notification = {
+    id: "ntf_space", teamId: "team_smoke", category: "space_assignment", type: "space_assignment_requested",
+    priority: "p1", title: "Alice needs a space", body: null, subjectType: "team_space_assignment",
+    subjectId: "team_smoke", actorUserId: "u_requester", actionUrl, actions: [],
+    metadata: { requesterUserId: "u_requester", requesterName: "Alice" }, state: "open", actionRequired: true,
+    recipientRole: "space_assignment_admin", deliveredAt: "2026-11-02T00:00:00Z", readAt: null,
+    archivedAt: null, createdAt: "2026-11-02T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z",
+  };
+  await page.route("**/api/v1/notifications/unread-count", route => route.fulfill(json({ actionRequired: 1, updatesUnread: 0, totalBadge: 1 })));
+  await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, route => route.fulfill(json({ items: [notification], nextCursor: null })));
+  await page.route("**/api/v1/notifications/ntf_space/read", route => route.fulfill(json({ ok: true })));
+  await page.route(/\/api\/v1\/admin\/members(?:\?.*)?$/, route => route.fulfill(json({
+    items: [], total: 60, page: 1, size: 25, your_role: "owner", owner_id: "u_smoke",
+  })));
+  await page.route(/\/api\/v1\/admin\/members\/invites(?:\?.*)?$/, route => route.fulfill(json({ invites: [], total: 0, page: 1, size: 25 })));
+  let granted = false;
+  await page.route("**/api/v1/admin/members/u_requester/workspace-grants", async route => {
+    if (route.request().method() === "PUT") {
+      expect(route.request().postDataJSON()).toEqual({ workspace_id: "ws_sales", role: "member" });
+      granted = true;
+      await route.fulfill(json({ ok: true }));
+    } else {
+      await route.fulfill(json({ user_id: "u_requester", display_name: "Alice", email: "alice@example.com", items: [
+        { workspace_id: "ws_sales", name: "Sales", description: null, status: "active", role: granted ? "member" : null, joined_at: null },
+      ] }));
+    }
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "通知，1 个待处理" }).click();
+  await page.getByRole("button", { name: /Alice 需要分配空间/ }).click();
+  await expect(page).toHaveURL(/\/team\/settings\/people\/?\?.*member=u_requester/, { timeout: 30_000 });
+  const dialog = page.getByRole("dialog", { name: "Alice 的空间授权" });
+  await expect(dialog).toBeVisible();
+  expect(granted).toBe(false);
+  await dialog.getByRole("button", { name: "添加空间", exact: true }).click();
+  await expect(dialog.getByText("Sales", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "授权", exact: true }).click();
+  await expect.poll(() => granted).toBe(true);
+  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).not.toHaveURL(/member=/);
 });

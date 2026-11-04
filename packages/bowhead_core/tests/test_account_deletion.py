@@ -13,6 +13,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from bowhead_core.account_deletion import AccountDeletionError, adopt_deleted_accounts, request_account_deletion
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.user_store import UserStore
 
 from bowhead_core import migrations
@@ -30,7 +31,7 @@ def account_schema(tmp_path_factory) -> Path:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return path
 
 
@@ -275,7 +276,7 @@ async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(do
 
     ctx = document_ctx
     if with_canvas:
-        from test_document_canvas_inputs import admit_canvas, freeze_canvas, setup_canvas
+        from document_canvas_fixture import admit_canvas, freeze_canvas, setup_canvas
 
         canvas = await setup_canvas(ctx)
         receipt, _ = await admit_canvas(ctx, canvas)
@@ -457,10 +458,10 @@ def test_incremental_migration_preserves_existing_data_without_starting_erasure(
             db.execute(
                 "INSERT INTO users(id,team_id,email,status,created_at) VALUES ('usr_existing','team_existing','old@example.com','deleted','2020-01-01')"
             )
-    command.upgrade(config, "head")
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
+    command.upgrade(config, SOURCE_REVISION)
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (migrations.chain_head(),)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
         if target == "core":
             assert db.execute("SELECT email,status FROM users").fetchone() == ("old@example.com", "deleted")
             assert db.execute("SELECT count(*) FROM account_deletions").fetchone() == (0,)

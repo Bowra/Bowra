@@ -101,7 +101,7 @@ export function observationViewEligible(spec: ChartSpec, binding: FocusBinding):
     new Set((spec.rows ?? []).map((row) => tupleKey(binding.observation_keys.map((key) => row[key])))).size === spec.rows?.length;
   const dimensions = spec.columns.filter((column) => column.type !== "numeric").map((column) => column.key);
   const rows = spec.rows ?? [], numeric = spec.columns.filter((column) => column.type === "numeric");
-  if (!focusKinds.has(spec.kind) || !rows.length || spec._view_folded || JSON.stringify(dimensions) !== JSON.stringify(binding.observation_keys) || !numeric.length || numeric.some((column) => !binding.measure_keys.includes(column.key)) || rows.some((row) => dimensions.some((key) => !(key in row))) || new Set(rows.map((row) => tupleKey(binding.observation_keys.map((key) => row[key])))).size !== rows.length) return false;
+  if (!focusKinds.has(spec.kind) || !rows.length || spec._view_folded || JSON.stringify([...dimensions].sort()) !== JSON.stringify([...binding.observation_keys].sort()) || !numeric.length || numeric.some((column) => !binding.measure_keys.includes(column.key)) || rows.some((row) => dimensions.some((key) => !(key in row))) || new Set(rows.map((row) => tupleKey(binding.observation_keys.map((key) => row[key])))).size !== rows.length) return false;
   if (spec.kind === "table") return true;
   if (dimensions.some((key) => new Set(rows.map((row) => String(row[key] ?? ""))).size !== new Set(rows.map((row) => tupleKey([row[key]]))).size)) return false;
   if (spec.kind === "scatter") return numeric.length >= 2;
@@ -113,7 +113,7 @@ export function observationViewEligible(spec: ChartSpec, binding: FocusBinding):
 /** The normalizer moves source cells with values; labels and array positions are never identities. */
 export function markBindings(spec: ChartSpec, data: ChartData, binding: FocusBinding, digest: string, rendered = spec, origins?: CellOrigins): MarkBinding[][] {
   const dimensions = spec.columns.filter((column) => column.type !== "numeric").map((column) => column.key);
-  if (JSON.stringify(dimensions) !== JSON.stringify(binding.observation_keys) || (spec.rows ?? []).some((row) => dimensions.some((key) => !(key in row))) || new Set((spec.rows ?? []).map((row) => tupleKey(dimensions.map((key) => row[key])))).size !== spec.rows?.length) return [];
+  if (JSON.stringify([...dimensions].sort()) !== JSON.stringify([...binding.observation_keys].sort()) || (spec.rows ?? []).some((row) => dimensions.some((key) => !(key in row))) || new Set((spec.rows ?? []).map((row) => tupleKey(dimensions.map((key) => row[key])))).size !== spec.rows?.length) return [];
   if (!observationViewEligible(spec, binding) && !origins) return [];
   const rows = rendered.rows ?? [];
   return data.datasets.map((dataset) => {

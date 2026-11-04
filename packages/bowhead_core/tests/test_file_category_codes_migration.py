@@ -6,9 +6,10 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.artifact_classifier import CATEGORIES, ZH_LABEL_TO_CATEGORY
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -80,7 +81,7 @@ async def test_migrated_codes_are_what_the_store_filter_and_writer_use(tmp_path)
     with sqlite3.connect(path) as db:
         _insert(db, "art_deck", "汇报材料")
         db.execute("UPDATE artifacts SET created_by='u1', kind='user_upload', status='ready' WHERE id='art_deck'")
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     store = ArtifactStore(backend=LocalBackend(root_dir=tmp_path / "files"), db_path=path)
     await store.initialize()
     items, total, _ = await store.list_for_user(user_id="u1", category="report", sources=None, limit=10, offset=0)

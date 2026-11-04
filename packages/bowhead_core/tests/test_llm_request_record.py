@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.llm_request_record import (
     CHANGE_PURPOSE,
@@ -20,9 +19,11 @@ from bowhead_core.llm_request_record import (
     split_body,
     write_request_records,
 )
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
 from bowhead_router.invocation import canonical_transport_bytes
 from bowhead_router.request_record import RequestChange, RequestRecordEntry
 from bowhead_router.usage import UsageContext
+from core_legacy_database import TARGET_FILES
 from cryptography.fernet import Fernet
 from test_chat_reference_storage import _upgrade
 
@@ -99,7 +100,7 @@ def _insert_minimal(db: sqlite3.Connection, table: str, values: dict[str, object
 @pytest.fixture
 def core_db(tmp_path):
     path = tmp_path / TARGET_FILES["core"]
-    _upgrade(path, "head", "core")
+    _upgrade(path, SQLITE_LEGACY_REVISION, "core")
     with sqlite3.connect(path) as db:
         db.execute("PRAGMA foreign_keys=OFF")
         _insert_minimal(db, "sessions", {"id": "s_1", "deleted_at": None})

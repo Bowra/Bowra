@@ -7,8 +7,9 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -81,7 +82,7 @@ async def test_upgrade_repairs_notification_links_and_preserves_recipient_state(
     repaired = ("notification_items", "notification_recipients")
     after = {name: rows for name, rows in snapshot(path).items() if name in repaired}
     assert set(after) == set(repaired)
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     # This assertion proves that later revisions do not rewrite the links and recipient state repaired by `0098`,
     # rather than forbidding later revisions from rebuilding or retiring other tables (`0122` legitimately removes old Power BI tables).
     assert {name: rows for name, rows in snapshot(path).items() if name in repaired} == after

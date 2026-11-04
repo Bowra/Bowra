@@ -57,6 +57,15 @@ for (const width of [412, 1440]) {
         expect(Math.abs(geometry.right - geometry.control.right - Number.parseFloat(geometry.padding))).toBeLessThanOrEqual(1);
       }
       if (scene === "general") {
+        const description = page.locator("#space-general-description");
+        const field = description.locator("..");
+        const label = field.locator("label");
+        await expect(label).toBeVisible();
+        const labelBox = (await label.boundingBox())!;
+        const controlBox = (await description.boundingBox())!;
+        if (width < 768) expect(controlBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height);
+        else expect(controlBox.x).toBeGreaterThanOrEqual(labelBox.x + labelBox.width + 31);
+
         const groupGap = await page
           .locator(".ui-ws-i18n-group")
           .evaluate((group) => group.getBoundingClientRect().top - document.querySelector(".ui-space-general-group")!.getBoundingClientRect().bottom);

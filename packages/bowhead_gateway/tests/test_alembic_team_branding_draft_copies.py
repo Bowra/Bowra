@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from bowhead_cli.migrate import upgrade
-from bowhead_core.migrations import chain_head
 from bowhead_core.migrations.baseline_schema import initial_schema
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from gateway_legacy_database import upgrade
 
 
 def _create_1_0_fixture(db_path) -> None:
@@ -94,11 +94,11 @@ def test_team_branding_draft_copy_migration_is_strict_and_idempotent(tmp_path) -
     db_path = tmp_path / "bowhead.db"
     _create_1_0_fixture(db_path)
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     with sqlite3.connect(db_path) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (chain_head(),)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (SQLITE_LEGACY_REVISION,)
         indexes = {
             row[0]
             for row in connection.execute(

@@ -8,7 +8,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.resource_usage_projection import ResourceUsageProjectionService, ResourceUsageUnavailableError
 from bowhead_core.skill_instance_store import SkillInstanceStore
 from bowhead_core.user_store import UserStore
@@ -17,6 +16,7 @@ from bowhead_gateway.routes import team_skills as team_skills_route
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gateway_legacy_database import upgrade
 
 
 def _run(coro):
@@ -43,7 +43,7 @@ def _skill_md(name: str) -> str:
 
 def _stores(tmp_path: Path):
     requested = tmp_path / "requested.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     db_path = tmp_path / "bowhead.db"
     user_store = UserStore(str(db_path))
     skill_store = SkillInstanceStore(str(db_path))

@@ -1,0 +1,732 @@
+{
+  "format": 1,
+  "source_revision": "0219_retire_unused_tables",
+  "variants": [
+    {
+      "source": [
+        "index",
+        "idx_credit_exhaustion_team_code_at",
+        "credit_exhaustion_events",
+        "CREATE INDEX idx_credit_exhaustion_team_code_at ON credit_exhaustion_events(team_id, code, created_at DESC)"
+      ],
+      "canonical": [
+        "index",
+        "idx_credit_exhaustion_team_code_at",
+        "credit_exhaustion_events",
+        "CREATE INDEX idx_credit_exhaustion_team_code_at\n  ON credit_exhaustion_events(team_id, code, created_at DESC)"
+      ]
+    },
+    {
+      "source": [
+        "index",
+        "idx_credit_exhaustion_team_user_at",
+        "credit_exhaustion_events",
+        "CREATE INDEX idx_credit_exhaustion_team_user_at ON credit_exhaustion_events(team_id, user_id, created_at DESC)"
+      ],
+      "canonical": [
+        "index",
+        "idx_credit_exhaustion_team_user_at",
+        "credit_exhaustion_events",
+        "CREATE INDEX idx_credit_exhaustion_team_user_at\n  ON credit_exhaustion_events(team_id, user_id, created_at DESC)"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "approvals",
+        "approvals",
+        "CREATE TABLE approvals (\n    id                TEXT PRIMARY KEY,\n    turn_id           TEXT NOT NULL,\n    session_id        TEXT,\n    workspace_id      TEXT NOT NULL,\n    member_uid        TEXT NOT NULL,\n    user_id           TEXT NOT NULL,\n    tool_name         TEXT NOT NULL,\n    arguments_json    TEXT NOT NULL,\n    reason            TEXT,\n    risk_level        TEXT NOT NULL DEFAULT 'medium',\n    status            TEXT NOT NULL DEFAULT 'pending',\n    decided_by        TEXT,\n    decided_at        TEXT,\n    execution_ok      INTEGER,                   -- 0/1 NULL=未执行\n    execution_result  TEXT,                      -- JSON\n    execution_error   TEXT,\n    executed_at       TEXT,\n    created_at        TEXT NOT NULL,\n    updated_at        TEXT NOT NULL\n, request_key TEXT, arguments_digest TEXT, datarc_workspace_id TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "approvals",
+        "approvals",
+        "CREATE TABLE approvals (\n    id                TEXT PRIMARY KEY,\n    turn_id           TEXT NOT NULL,\n    session_id        TEXT,\n    workspace_id      TEXT NOT NULL,\n    member_uid        TEXT NOT NULL,\n    -- 批2/c9 (PRD §3.9): 请求时点的北极九章工作区快照——重放 pin 这个，\n    -- 不用审批人当前偏好（B 批 A 的报告绝不悄悄换数据域）。NULL=非 BI/pre-批2 行。\n    datarc_workspace_id TEXT,\n    user_id           TEXT NOT NULL,\n    tool_name         TEXT NOT NULL,\n    arguments_json    TEXT NOT NULL,\n    request_key       TEXT,\n    arguments_digest  TEXT,\n    reason            TEXT,\n    risk_level        TEXT NOT NULL DEFAULT 'medium',\n    status            TEXT NOT NULL DEFAULT 'pending',\n    decided_by        TEXT,\n    decided_at        TEXT,\n    execution_ok      INTEGER,                   -- 0/1 NULL=未执行\n    execution_result  TEXT,                      -- JSON\n    execution_error   TEXT,\n    executed_at       TEXT,\n    created_at        TEXT NOT NULL,\n    updated_at        TEXT NOT NULL\n)"
+      ],
+      "columns": [
+        "id",
+        "turn_id",
+        "session_id",
+        "workspace_id",
+        "member_uid",
+        "datarc_workspace_id",
+        "user_id",
+        "tool_name",
+        "arguments_json",
+        "request_key",
+        "arguments_digest",
+        "reason",
+        "risk_level",
+        "status",
+        "decided_by",
+        "decided_at",
+        "execution_ok",
+        "execution_result",
+        "execution_error",
+        "executed_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "canvas_sections",
+        "canvas_sections",
+        "CREATE TABLE canvas_sections (\n    id              TEXT PRIMARY KEY,\n    canvas_id       TEXT NOT NULL REFERENCES canvases(id),\n    seq             INTEGER NOT NULL,\n    kind            TEXT NOT NULL,\n    payload         TEXT NOT NULL,                       -- JSON\n    rev             INTEGER NOT NULL DEFAULT 1,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL,\n    quarantined     INTEGER NOT NULL DEFAULT 0,          -- i18n v1 R4: 1 = export 拒绝\n    quarantine_reason TEXT,                               -- 标 quarantine 时的人话理由\n    -- D6 (canvas-empty bug 2026-05-25): hide canvas section for chat-mode turns.\n    -- Set after turn finalize when turn sections lack insight_card/recommendations\n    -- → chat bubble inline_artifacts 仍能 surface 这些 sections; canvas tab 隐藏.\n    -- surface_rationale: human-readable why (audit/admin/debug).\n    hidden_for_chat_mode INTEGER NOT NULL DEFAULT 0,\n    surface_rationale TEXT\n, schema_version INTEGER NOT NULL DEFAULT 1, owner TEXT, superseded INTEGER NOT NULL DEFAULT 0, superseded_by_turn TEXT, turn_id TEXT, surface_target TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "canvas_sections",
+        "canvas_sections",
+        "CREATE TABLE canvas_sections (\n    id              TEXT PRIMARY KEY,\n    canvas_id       TEXT NOT NULL REFERENCES canvases(id),\n    seq             INTEGER NOT NULL,\n    kind            TEXT NOT NULL,\n    payload         TEXT NOT NULL,                       -- JSON\n    rev             INTEGER NOT NULL DEFAULT 1,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL,\n    quarantined     INTEGER NOT NULL DEFAULT 0,          -- i18n v1 R4: 1 = export 拒绝\n    quarantine_reason TEXT,                               -- 标 quarantine 时的人话理由\n    -- D6 (canvas-empty bug 2026-05-25): hide canvas section for chat-mode turns.\n    -- Set after turn finalize when turn sections lack insight_card/recommendations\n    -- → chat bubble inline_artifacts 仍能 surface 这些 sections; canvas tab 隐藏.\n    -- surface_rationale: human-readable why (audit/admin/debug).\n    hidden_for_chat_mode INTEGER NOT NULL DEFAULT 0,\n    surface_rationale TEXT,\n    -- report-agent-authorship α v1 (2026-06-24): collapse-in-place. A prior turn's\n    -- report block is marked `superseded` when a LATER report-worthy turn composes\n    -- a fresh report (BOWHEAD_CANVAS_LATEST_WINS). DISTINCT from hidden_for_chat_mode\n    -- (chat-mode hide): superseded sections are STILL returned by list_sections (NOT\n    -- filtered) — the frontend renders them as a collapsed, expandable \"previous\n    -- report\" header IN PLACE (not removed). So hydration stays consistent + the\n    -- block is user-recoverable by expanding (no separate unhide route needed).\n    -- superseded_by_turn = the later turn whose report superseded this one (audit).\n    superseded INTEGER NOT NULL DEFAULT 0,\n    superseded_by_turn TEXT,\n    -- report-agent-authorship α v1 (2026-06-24): the turn that appended this section,\n    -- denormalized from canvas_revisions.by_turn_id so the FE can GROUP sections by\n    -- their originating turn (the history-collapse accordion shows one foldable entry\n    -- per prior report: \"第 N 轮 · <title> · N 段 · time\"). NULL on legacy rows.\n    turn_id TEXT\n, schema_version INTEGER NOT NULL DEFAULT 1, owner TEXT, surface_target TEXT)"
+      ],
+      "columns": [
+        "id",
+        "canvas_id",
+        "seq",
+        "kind",
+        "payload",
+        "rev",
+        "created_at",
+        "updated_at",
+        "quarantined",
+        "quarantine_reason",
+        "hidden_for_chat_mode",
+        "surface_rationale",
+        "superseded",
+        "superseded_by_turn",
+        "turn_id",
+        "schema_version",
+        "owner",
+        "surface_target"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "credit_exhaustion_events",
+        "credit_exhaustion_events",
+        "CREATE TABLE \"credit_exhaustion_events\" (\n                  id TEXT PRIMARY KEY,\n                  team_id TEXT NOT NULL,\n                  user_id TEXT NOT NULL,\n                  workspace_id TEXT,\n                  code TEXT NOT NULL CHECK(code IN (\n                    'user_credit_exhausted',\n                    'team_pool_exhausted',\n                    'credit_deduct_failed'\n                  )),\n                  credit_balance INTEGER,\n                  credit_quota INTEGER,\n                  team_credit_balance INTEGER,\n                  team_credit_quota INTEGER,\n                  turn_id TEXT,\n                  created_at TEXT NOT NULL\n                )"
+      ],
+      "canonical": [
+        "table",
+        "credit_exhaustion_events",
+        "credit_exhaustion_events",
+        "CREATE TABLE credit_exhaustion_events (\n  id TEXT PRIMARY KEY,\n  team_id TEXT NOT NULL,\n  user_id TEXT NOT NULL,\n  workspace_id TEXT,\n  code TEXT NOT NULL CHECK(code IN ('user_credit_exhausted','team_pool_exhausted','credit_deduct_failed')),\n  credit_balance INTEGER,\n  credit_quota INTEGER,\n  team_credit_balance INTEGER,\n  team_credit_quota INTEGER,\n  turn_id TEXT,\n  created_at TEXT NOT NULL\n)"
+      ],
+      "columns": [
+        "id",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "code",
+        "credit_balance",
+        "credit_quota",
+        "team_credit_balance",
+        "team_credit_quota",
+        "turn_id",
+        "created_at"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "mcp_oauth_pending",
+        "mcp_oauth_pending",
+        "CREATE TABLE mcp_oauth_pending (\n  state          TEXT PRIMARY KEY,\n  team_id         TEXT NOT NULL REFERENCES \"teams\"(id) ON DELETE CASCADE,\n  source_id      TEXT NOT NULL,\n  code_verifier  TEXT NOT NULL,                  -- ephemeral PKCE secret; single-use, short TTL\n  redirect_uri   TEXT NOT NULL,                  -- exact redirect_uri used at authorize (RFC 6749 §4.1.3)\n  token_endpoint TEXT NOT NULL,\n  client_id      TEXT NOT NULL,\n  resource       TEXT,                            -- RFC 8707 resource binding (nullable)\n  created_by     TEXT,\n  expires_at     TEXT NOT NULL,\n  created_at     TEXT NOT NULL\n, public_entry_id TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "mcp_oauth_pending",
+        "mcp_oauth_pending",
+        "CREATE TABLE mcp_oauth_pending (\n  state          TEXT PRIMARY KEY,\n  team_id         TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,\n  source_id      TEXT NOT NULL,\n  code_verifier  TEXT NOT NULL,                  -- ephemeral PKCE secret; single-use, short TTL\n  redirect_uri   TEXT NOT NULL,                  -- exact redirect_uri used at authorize (RFC 6749 §4.1.3)\n  token_endpoint TEXT NOT NULL,\n  client_id      TEXT NOT NULL,\n  resource       TEXT,                            -- RFC 8707 resource binding (nullable)\n  public_entry_id TEXT,                           -- browser-visible callback entry\n  created_by     TEXT,\n  expires_at     TEXT NOT NULL,\n  created_at     TEXT NOT NULL\n)"
+      ],
+      "columns": [
+        "state",
+        "team_id",
+        "source_id",
+        "code_verifier",
+        "redirect_uri",
+        "token_endpoint",
+        "client_id",
+        "resource",
+        "public_entry_id",
+        "created_by",
+        "expires_at",
+        "created_at"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "memory_candidates",
+        "memory_candidates",
+        "CREATE TABLE memory_candidates (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    subject_type    TEXT NOT NULL DEFAULT 'user',\n    kind            TEXT NOT NULL,          -- preference | glossary | constraint | datarc_binding\n    key             TEXT NOT NULL,\n    value_json      TEXT NOT NULL,          -- JSON\n    reason          TEXT,                   -- LLM 的推理\n    source_turn_id  TEXT,\n    status          TEXT NOT NULL DEFAULT 'pending',\n    decided_by      TEXT,\n    decided_at      TEXT,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL\n, workspace_id TEXT, expiry_warned_at TEXT, version INTEGER NOT NULL DEFAULT 1, content_fingerprint TEXT, decision_kind TEXT, target_scope_type TEXT, target_workspace_id TEXT, approved_resource_type TEXT, approved_resource_id TEXT, duplicate_of_candidate_id TEXT, duplicate_count INTEGER NOT NULL DEFAULT 1, content_redacted_at TEXT, memory_type TEXT, supersedes_json TEXT, origin TEXT NOT NULL DEFAULT 'dreaming_light')"
+      ],
+      "canonical": [
+        "table",
+        "memory_candidates",
+        "memory_candidates",
+        "CREATE TABLE memory_candidates (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    subject_type    TEXT NOT NULL DEFAULT 'user',\n    kind            TEXT NOT NULL,          -- preference | glossary | constraint | datarc_binding\n    key             TEXT NOT NULL,\n    value_json      TEXT NOT NULL,          -- JSON\n    reason          TEXT,                   -- LLM 的推理\n    source_turn_id  TEXT,\n    status          TEXT NOT NULL DEFAULT 'pending',\n    decided_by      TEXT,\n    decided_at      TEXT,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL,\n    version         INTEGER NOT NULL DEFAULT 1,\n    content_fingerprint TEXT,\n    decision_kind   TEXT,\n    target_scope_type TEXT,\n    target_workspace_id TEXT,\n    approved_resource_type TEXT,\n    approved_resource_id TEXT,\n    duplicate_of_candidate_id TEXT,\n    duplicate_count INTEGER NOT NULL DEFAULT 1,\n    content_redacted_at TEXT\n, workspace_id TEXT, expiry_warned_at TEXT, memory_type TEXT, supersedes_json TEXT, origin TEXT NOT NULL DEFAULT 'dreaming_light')"
+      ],
+      "columns": [
+        "id",
+        "user_id",
+        "subject_type",
+        "kind",
+        "key",
+        "value_json",
+        "reason",
+        "source_turn_id",
+        "status",
+        "decided_by",
+        "decided_at",
+        "created_at",
+        "updated_at",
+        "version",
+        "content_fingerprint",
+        "decision_kind",
+        "target_scope_type",
+        "target_workspace_id",
+        "approved_resource_type",
+        "approved_resource_id",
+        "duplicate_of_candidate_id",
+        "duplicate_count",
+        "content_redacted_at",
+        "workspace_id",
+        "expiry_warned_at",
+        "memory_type",
+        "supersedes_json",
+        "origin"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "memory_notes",
+        "memory_notes",
+        "CREATE TABLE memory_notes (\n    id                    TEXT PRIMARY KEY,\n    subject_type          TEXT NOT NULL,\n    subject_id            TEXT NOT NULL,\n    content               TEXT NOT NULL,\n    source                TEXT NOT NULL,\n    source_turn_id        TEXT,\n    editing_locked_until  TEXT,\n    created_at            TEXT NOT NULL,\n    updated_at            TEXT NOT NULL,\n    deleted_at            TEXT,\n    verification_anchor   TEXT,                                -- V4 PRD-D-5 (JSON)\n    verification_status   TEXT NOT NULL DEFAULT 'valid', version INTEGER NOT NULL DEFAULT 1, created_source_type TEXT, created_source_turn_id TEXT, created_source_candidate_id TEXT, created_source_workspace_id TEXT, last_modified_actor_type TEXT, last_modified_actor_id TEXT, last_modified_at TEXT, editing_lock_token_hash TEXT, editing_lock_owner_type TEXT,       -- V4 PRD-D-5\n    UNIQUE(subject_type, subject_id)\n)"
+      ],
+      "canonical": [
+        "table",
+        "memory_notes",
+        "memory_notes",
+        "CREATE TABLE memory_notes (\n    id                    TEXT PRIMARY KEY,\n    subject_type          TEXT NOT NULL,\n    subject_id            TEXT NOT NULL,\n    content               TEXT NOT NULL,\n    source                TEXT NOT NULL,\n    source_turn_id        TEXT,\n    editing_locked_until  TEXT,\n    created_at            TEXT NOT NULL,\n    updated_at            TEXT NOT NULL,\n    deleted_at            TEXT,\n    verification_anchor   TEXT,                                -- V4 PRD-D-5 (JSON)\n    verification_status   TEXT NOT NULL DEFAULT 'valid',       -- V4 PRD-D-5\n    version               INTEGER NOT NULL DEFAULT 1,\n    created_source_type   TEXT,\n    created_source_turn_id TEXT,\n    created_source_candidate_id TEXT,\n    created_source_workspace_id TEXT,\n    last_modified_actor_type TEXT,\n    last_modified_actor_id TEXT,\n    last_modified_at      TEXT,\n    editing_lock_token_hash TEXT,\n    editing_lock_owner_type TEXT,\n    UNIQUE(subject_type, subject_id)\n)"
+      ],
+      "columns": [
+        "id",
+        "subject_type",
+        "subject_id",
+        "content",
+        "source",
+        "source_turn_id",
+        "editing_locked_until",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "verification_anchor",
+        "verification_status",
+        "version",
+        "created_source_type",
+        "created_source_turn_id",
+        "created_source_candidate_id",
+        "created_source_workspace_id",
+        "last_modified_actor_type",
+        "last_modified_actor_id",
+        "last_modified_at",
+        "editing_lock_token_hash",
+        "editing_lock_owner_type"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "memory_reset_snapshots",
+        "memory_reset_snapshots",
+        "CREATE TABLE memory_reset_snapshots (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    snapshot_json   TEXT NOT NULL,            -- JSON dump of all entries before reset\n    created_at      TEXT NOT NULL\n, schema_version INTEGER NOT NULL DEFAULT 1, snapshot_type TEXT NOT NULL DEFAULT 'reset', target_resource_type TEXT, target_resource_id TEXT, expires_at TEXT, consumed_at TEXT, counts_json TEXT NOT NULL DEFAULT '{}')"
+      ],
+      "canonical": [
+        "table",
+        "memory_reset_snapshots",
+        "memory_reset_snapshots",
+        "CREATE TABLE memory_reset_snapshots (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    snapshot_json   TEXT NOT NULL,            -- JSON dump of all entries before reset\n    created_at      TEXT NOT NULL,\n    schema_version  INTEGER NOT NULL DEFAULT 1,\n    snapshot_type   TEXT NOT NULL DEFAULT 'reset',\n    target_resource_type TEXT,\n    target_resource_id TEXT,\n    expires_at      TEXT,\n    consumed_at     TEXT,\n    counts_json     TEXT NOT NULL DEFAULT '{}'\n)"
+      ],
+      "columns": [
+        "id",
+        "user_id",
+        "snapshot_json",
+        "created_at",
+        "schema_version",
+        "snapshot_type",
+        "target_resource_type",
+        "target_resource_id",
+        "expires_at",
+        "consumed_at",
+        "counts_json"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "oauth_state",
+        "oauth_state",
+        "CREATE TABLE oauth_state (\n  state       TEXT PRIMARY KEY,\n  provider    TEXT NOT NULL,\n  expires_at  TEXT NOT NULL,\n  created_at  TEXT NOT NULL\n, next_path TEXT, public_entry_id TEXT, flow_kind TEXT NOT NULL DEFAULT 'normal', invite_intent_hash TEXT, redirect_uri TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "oauth_state",
+        "oauth_state",
+        "CREATE TABLE oauth_state (\n  state       TEXT PRIMARY KEY,\n  provider    TEXT NOT NULL,\n  next_path   TEXT,\n  public_entry_id TEXT,\n  expires_at  TEXT NOT NULL,\n  created_at  TEXT NOT NULL\n, flow_kind TEXT NOT NULL DEFAULT 'normal', invite_intent_hash TEXT, redirect_uri TEXT)"
+      ],
+      "columns": [
+        "state",
+        "provider",
+        "next_path",
+        "public_entry_id",
+        "expires_at",
+        "created_at",
+        "flow_kind",
+        "invite_intent_hash",
+        "redirect_uri"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "plan_steps",
+        "plan_steps",
+        "CREATE TABLE plan_steps (\n    id                  TEXT PRIMARY KEY,\n    plan_id             TEXT NOT NULL,\n    seq                 INTEGER NOT NULL,\n    level               INTEGER NOT NULL DEFAULT 0,\n    agent_name          TEXT NOT NULL,\n    objective           TEXT NOT NULL DEFAULT '',\n    deliverable         TEXT NOT NULL DEFAULT '',\n    depends_on          TEXT NOT NULL DEFAULT '[]',\n    needs_corpus        INTEGER NOT NULL DEFAULT 0,\n    status              TEXT NOT NULL DEFAULT 'pending',\n    origin              TEXT NOT NULL DEFAULT 'initial',\n    included            INTEGER NOT NULL DEFAULT 1,\n    turn_id             TEXT,\n    output_section_ids  TEXT NOT NULL DEFAULT '[]',\n    result_digest       TEXT,\n    payload_json        TEXT,\n    tokens_input        INTEGER NOT NULL DEFAULT 0,\n    tokens_output       INTEGER NOT NULL DEFAULT 0,\n    error               TEXT,\n    error_kind          TEXT,\n    created_at          TEXT NOT NULL,\n    updated_at          TEXT NOT NULL, needs_web INTEGER NOT NULL DEFAULT 0, success_criteria TEXT NOT NULL DEFAULT '[]', verify_json TEXT, superseded_by TEXT, input_manifest_json TEXT, agent_choice_json TEXT,\n    FOREIGN KEY (plan_id) REFERENCES plans(id)\n)"
+      ],
+      "canonical": [
+        "table",
+        "plan_steps",
+        "plan_steps",
+        "CREATE TABLE plan_steps (\n    id                  TEXT PRIMARY KEY,\n    plan_id             TEXT NOT NULL,\n    seq                 INTEGER NOT NULL,\n    level               INTEGER NOT NULL DEFAULT 0,\n    agent_name          TEXT NOT NULL,\n    objective           TEXT NOT NULL DEFAULT '',\n    deliverable         TEXT NOT NULL DEFAULT '',\n    depends_on          TEXT NOT NULL DEFAULT '[]',\n    needs_corpus        INTEGER NOT NULL DEFAULT 0,\n    needs_web           INTEGER NOT NULL DEFAULT 0,\n    status              TEXT NOT NULL DEFAULT 'pending',\n    origin              TEXT NOT NULL DEFAULT 'initial',\n    included            INTEGER NOT NULL DEFAULT 1,\n    turn_id             TEXT,\n    output_section_ids  TEXT NOT NULL DEFAULT '[]',\n    result_digest       TEXT,\n    payload_json        TEXT,\n    tokens_input        INTEGER NOT NULL DEFAULT 0,\n    tokens_output       INTEGER NOT NULL DEFAULT 0,\n    error               TEXT,\n    error_kind          TEXT,\n    created_at          TEXT NOT NULL,\n    updated_at          TEXT NOT NULL, success_criteria TEXT NOT NULL DEFAULT '[]', verify_json TEXT, superseded_by TEXT, input_manifest_json TEXT, agent_choice_json TEXT,\n    FOREIGN KEY (plan_id) REFERENCES plans(id)\n)"
+      ],
+      "columns": [
+        "id",
+        "plan_id",
+        "seq",
+        "level",
+        "agent_name",
+        "objective",
+        "deliverable",
+        "depends_on",
+        "needs_corpus",
+        "needs_web",
+        "status",
+        "origin",
+        "included",
+        "turn_id",
+        "output_section_ids",
+        "result_digest",
+        "payload_json",
+        "tokens_input",
+        "tokens_output",
+        "error",
+        "error_kind",
+        "created_at",
+        "updated_at",
+        "success_criteria",
+        "verify_json",
+        "superseded_by",
+        "input_manifest_json",
+        "agent_choice_json"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "scheduled_jobs",
+        "scheduled_jobs",
+        "CREATE TABLE scheduled_jobs (\n    id                  TEXT PRIMARY KEY,\n    user_id             TEXT NOT NULL,\n    workspace_id        TEXT NOT NULL,\n    name                TEXT NOT NULL,\n    cron                TEXT NOT NULL,\n    tz                  TEXT NOT NULL DEFAULT 'Asia/Shanghai',\n    query               TEXT NOT NULL,\n    session_strategy    TEXT NOT NULL DEFAULT 'fresh',\n    anchor_session_id   TEXT,\n    notify_channels     TEXT NOT NULL DEFAULT '{}',\n    status              TEXT NOT NULL DEFAULT 'active',\n    failure_count       INTEGER NOT NULL DEFAULT 0,\n    next_run_at         TEXT,\n    last_run_at         TEXT,\n    last_turn_id        TEXT,\n    created_at          TEXT NOT NULL,\n    updated_at          TEXT NOT NULL\n, datarc_workspace_id TEXT, public_entry_id TEXT, pause_reason TEXT, recipe_ref TEXT, run_params TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "scheduled_jobs",
+        "scheduled_jobs",
+        "CREATE TABLE scheduled_jobs (\n    id                  TEXT PRIMARY KEY,\n    user_id             TEXT NOT NULL,\n    workspace_id        TEXT NOT NULL,\n    name                TEXT NOT NULL,\n    cron                TEXT NOT NULL,\n    tz                  TEXT NOT NULL DEFAULT 'Asia/Shanghai',\n    query               TEXT NOT NULL,\n    session_strategy    TEXT NOT NULL DEFAULT 'fresh',\n    anchor_session_id   TEXT,\n    notify_channels     TEXT NOT NULL DEFAULT '{}',\n    status              TEXT NOT NULL DEFAULT 'active',\n    failure_count       INTEGER NOT NULL DEFAULT 0,\n    next_run_at         TEXT,\n    last_run_at         TEXT,\n    last_turn_id        TEXT,\n    created_at          TEXT NOT NULL,\n    updated_at          TEXT NOT NULL,\n    datarc_workspace_id TEXT,            -- 批2/c9: 创建时快照（routine pin）\n    public_entry_id     TEXT             -- 创建时公开入口快照（通知深链）\n, pause_reason TEXT, recipe_ref TEXT, run_params TEXT)"
+      ],
+      "columns": [
+        "id",
+        "user_id",
+        "workspace_id",
+        "name",
+        "cron",
+        "tz",
+        "query",
+        "session_strategy",
+        "anchor_session_id",
+        "notify_channels",
+        "status",
+        "failure_count",
+        "next_run_at",
+        "last_run_at",
+        "last_turn_id",
+        "created_at",
+        "updated_at",
+        "datarc_workspace_id",
+        "public_entry_id",
+        "pause_reason",
+        "recipe_ref",
+        "run_params"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "skill_instances",
+        "skill_instances",
+        "CREATE TABLE skill_instances (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    name            TEXT NOT NULL,\n    source_type     TEXT NOT NULL,            -- builtin | user_upload | user_generated\n    source_path     TEXT NOT NULL,            -- 绝对路径（builtin 指向 catalog；user 指 .data/user_skills/）\n    version         TEXT,\n    description     TEXT,\n    enabled         INTEGER NOT NULL DEFAULT 1,\n    source_turn_id  TEXT,\n    size_bytes      INTEGER DEFAULT 0,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL, verdict TEXT, verdict_json TEXT, risk_report_json TEXT, import_status TEXT, import_report_json TEXT,\n    UNIQUE(user_id, name)\n)"
+      ],
+      "canonical": [
+        "table",
+        "skill_instances",
+        "skill_instances",
+        "CREATE TABLE skill_instances (\n    id              TEXT PRIMARY KEY,\n    user_id         TEXT NOT NULL,\n    name            TEXT NOT NULL,\n    source_type     TEXT NOT NULL,            -- builtin | user_upload | user_generated\n    source_path     TEXT NOT NULL,            -- 绝对路径（builtin 指向 catalog；user 指 .data/user_skills/）\n    version         TEXT,\n    description     TEXT,\n    enabled         INTEGER NOT NULL DEFAULT 1,\n    source_turn_id  TEXT,\n    size_bytes      INTEGER DEFAULT 0,\n    verdict         TEXT,                     -- workflow-solidify S3 (§4.3): dry-run judge 结论 pass|fail|skipped\n    verdict_json    TEXT,                     -- judge 结构化结果（checkpoint 逐条）\n    risk_report_json TEXT,                    -- skill-multiruntime S1 (G5): 上传时 risk report(语言/关键词/shebang)\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL, import_status TEXT, import_report_json TEXT,\n    UNIQUE(user_id, name)\n)"
+      ],
+      "columns": [
+        "id",
+        "user_id",
+        "name",
+        "source_type",
+        "source_path",
+        "version",
+        "description",
+        "enabled",
+        "source_turn_id",
+        "size_bytes",
+        "verdict",
+        "verdict_json",
+        "risk_report_json",
+        "created_at",
+        "updated_at",
+        "import_status",
+        "import_report_json"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "smtp_outbox",
+        "smtp_outbox",
+        "CREATE TABLE smtp_outbox (\n  id                TEXT PRIMARY KEY,\n  to_email          TEXT NOT NULL,\n  subject           TEXT NOT NULL,\n  body              TEXT NOT NULL,\n  purpose           TEXT NOT NULL,\n  status            TEXT NOT NULL DEFAULT 'pending',\n  attempts          INTEGER NOT NULL DEFAULT 0,\n  last_error        TEXT,\n  created_at        TEXT NOT NULL,\n  sent_at           TEXT,\n  next_attempt_at   TEXT\n, team_id TEXT, html_body TEXT, public_entry_id TEXT, brand_revision_id TEXT, branding_snapshot TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "smtp_outbox",
+        "smtp_outbox",
+        "CREATE TABLE smtp_outbox (\n  id                TEXT PRIMARY KEY,\n  to_email          TEXT NOT NULL,\n  subject           TEXT NOT NULL,\n  body              TEXT NOT NULL,\n  purpose           TEXT NOT NULL,\n  status            TEXT NOT NULL DEFAULT 'pending',\n  attempts          INTEGER NOT NULL DEFAULT 0,\n  last_error        TEXT,\n  created_at        TEXT NOT NULL,\n  sent_at           TEXT,\n  next_attempt_at   TEXT\n  ,team_id           TEXT\n  ,html_body         TEXT\n  ,public_entry_id   TEXT\n  ,brand_revision_id TEXT\n  ,branding_snapshot TEXT\n)"
+      ],
+      "columns": [
+        "id",
+        "to_email",
+        "subject",
+        "body",
+        "purpose",
+        "status",
+        "attempts",
+        "last_error",
+        "created_at",
+        "sent_at",
+        "next_attempt_at",
+        "team_id",
+        "html_body",
+        "public_entry_id",
+        "brand_revision_id",
+        "branding_snapshot"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "team_skill",
+        "team_skill",
+        "CREATE TABLE team_skill (\n  id                 TEXT PRIMARY KEY,\n  team_id             TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,\n  name               TEXT NOT NULL,                   -- skill slug; immutable post-create\n  display_name       TEXT NOT NULL DEFAULT '',\n  description        TEXT NOT NULL DEFAULT '',         -- advertise/trigger desc (untrusted → sanitized)\n  source_path        TEXT NOT NULL DEFAULT '',         -- .data/team_skills/<team_id>/<name>/ (SKILL.md + scripts)\n  visibility         TEXT NOT NULL DEFAULT 'team_wide', -- team_wide | creator_only (reserved)\n  verdict            TEXT,                             -- dry-run judge: pass|fail|skipped|error|NULL\n  verdict_json       TEXT,\n  risk_report_json   TEXT,                             -- skill-multiruntime S1 (G5): 上传 risk report\n  created_by         TEXT,\n  status             TEXT NOT NULL DEFAULT 'enabled',  -- enabled | disabled\n  size_bytes         INTEGER NOT NULL DEFAULT 0,\n  created_at         TEXT NOT NULL,\n  updated_at         TEXT NOT NULL\n, approval TEXT NOT NULL DEFAULT 'approved', approved_sha256 TEXT, approved_by TEXT, approved_at TEXT, rejected_reason TEXT, rejected_at TEXT, candidate_path TEXT, candidate_submitted_at TEXT, candidate_sha256 TEXT, candidate_state TEXT, candidate_rejected_reason TEXT, submitted_by TEXT, import_provenance_json TEXT)"
+      ],
+      "canonical": [
+        "table",
+        "team_skill",
+        "team_skill",
+        "CREATE TABLE team_skill (\n  id                 TEXT PRIMARY KEY,\n  team_id             TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,\n  name               TEXT NOT NULL,                   -- skill slug; immutable post-create\n  display_name       TEXT NOT NULL DEFAULT '',\n  description        TEXT NOT NULL DEFAULT '',         -- advertise/trigger desc (untrusted → sanitized)\n  source_path        TEXT NOT NULL DEFAULT '',         -- .data/team_skills/<team_id>/<name>/ (SKILL.md + scripts)\n  visibility         TEXT NOT NULL DEFAULT 'team_wide', -- team_wide | creator_only (reserved)\n  verdict            TEXT,                             -- dry-run judge: pass|fail|skipped|error|NULL\n  verdict_json       TEXT,\n  risk_report_json   TEXT,                             -- skill-multiruntime S1 (G5): 上传 risk report\n  created_by         TEXT,\n  status             TEXT NOT NULL DEFAULT 'enabled',  -- enabled | disabled\n  size_bytes         INTEGER NOT NULL DEFAULT 0,\n  created_at         TEXT NOT NULL,\n  updated_at         TEXT NOT NULL,\n  -- skill-team-governance P1b — 双槽审批状态机（tech-design §1）。approval 只描述「已批槽」\n  -- （首提生命周期）；提交更新完全走 candidate_* 候选槽、approval 保持 approved 不动——\n  -- 否则更新在审会把 live 团队版从 only_approved 面藏掉（审批期间团队继续用旧已批版）。\n  approval           TEXT NOT NULL DEFAULT 'approved', -- pending | approved | rejected（默认 approved 兼容 creator_only 缺省路）\n  approved_sha256    TEXT,                             -- 已批内容 hash（落后/已同步判定）\n  approved_by        TEXT,\n  approved_at        TEXT,\n  rejected_reason    TEXT,                             -- 首提拒（L1）；候选拒走 candidate_rejected_reason\n  rejected_at        TEXT,\n  candidate_path     TEXT,                             -- 候选 bundle 目录（<name>__candidate/）；NULL=无候选\n  candidate_submitted_at TEXT,                         -- CAS 键之一（approve/reject 带回比对）\n  candidate_sha256   TEXT,                             -- CAS 键之二 + 落后判定\n  candidate_state    TEXT,                             -- pending | rejected（仅候选腿）\n  candidate_rejected_reason TEXT,\n  submitted_by       TEXT                              -- 最近一次提交人\n, import_provenance_json TEXT)"
+      ],
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "display_name",
+        "description",
+        "source_path",
+        "visibility",
+        "verdict",
+        "verdict_json",
+        "risk_report_json",
+        "created_by",
+        "status",
+        "size_bytes",
+        "created_at",
+        "updated_at",
+        "approval",
+        "approved_sha256",
+        "approved_by",
+        "approved_at",
+        "rejected_reason",
+        "rejected_at",
+        "candidate_path",
+        "candidate_submitted_at",
+        "candidate_sha256",
+        "candidate_state",
+        "candidate_rejected_reason",
+        "submitted_by",
+        "import_provenance_json"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "teams",
+        "teams",
+        "CREATE TABLE \"teams\" (\n  id                       TEXT PRIMARY KEY,\n  name                     TEXT NOT NULL,\n  domain                   TEXT,\n  llm_config_encrypted     TEXT NOT NULL DEFAULT '',\n  max_seats                INTEGER NOT NULL DEFAULT 1,\n  default_user_tier        TEXT NOT NULL DEFAULT 'pro',\n  team_credit_balance       INTEGER NOT NULL DEFAULT 0,\n  team_credit_quota         INTEGER NOT NULL DEFAULT 0,\n  team_credit_period_start  TEXT,\n  tier_credits_json        TEXT NOT NULL DEFAULT '{\"pro\":5000,\"ultra\":30000}',\n  status                   TEXT NOT NULL DEFAULT 'active',\n  created_at               TEXT NOT NULL,\n  contract_expires_at      TEXT\n, created_by_user_id TEXT, llm_config_version INTEGER NOT NULL DEFAULT 0, email_config_encrypted TEXT NOT NULL DEFAULT '', email_config_version INTEGER NOT NULL DEFAULT 0, report_timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai')"
+      ],
+      "canonical": [
+        "table",
+        "teams",
+        "teams",
+        "CREATE TABLE teams (\n  id                       TEXT PRIMARY KEY,\n  name                     TEXT NOT NULL,\n  domain                   TEXT,\n  llm_config_encrypted     TEXT NOT NULL DEFAULT '',\n  max_seats                INTEGER NOT NULL DEFAULT 1,\n  default_user_tier        TEXT NOT NULL DEFAULT 'pro',\n  team_credit_balance       INTEGER NOT NULL DEFAULT 0,\n  team_credit_quota         INTEGER NOT NULL DEFAULT 0,\n  team_credit_period_start  TEXT,\n  tier_credits_json        TEXT NOT NULL DEFAULT '{\"pro\":5000,\"ultra\":30000}',\n  status                   TEXT NOT NULL DEFAULT 'active',\n  created_at               TEXT NOT NULL,\n  contract_expires_at      TEXT\n, created_by_user_id TEXT, llm_config_version INTEGER NOT NULL DEFAULT 0, email_config_encrypted TEXT NOT NULL DEFAULT '', email_config_version INTEGER NOT NULL DEFAULT 0, report_timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai')"
+      ],
+      "columns": [
+        "id",
+        "name",
+        "domain",
+        "llm_config_encrypted",
+        "max_seats",
+        "default_user_tier",
+        "team_credit_balance",
+        "team_credit_quota",
+        "team_credit_period_start",
+        "tier_credits_json",
+        "status",
+        "created_at",
+        "contract_expires_at",
+        "created_by_user_id",
+        "llm_config_version",
+        "email_config_encrypted",
+        "email_config_version",
+        "report_timezone"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "users",
+        "users",
+        "CREATE TABLE users (\n  id                       TEXT PRIMARY KEY,\n  team_id                   TEXT NOT NULL,\n  email                    TEXT UNIQUE NOT NULL,\n  email_verified           INTEGER NOT NULL DEFAULT 0,\n  display_name             TEXT,\n  avatar_url               TEXT,\n  password_hash            TEXT,\n  oauth_providers_json     TEXT NOT NULL DEFAULT '[]',\n  tier                     TEXT NOT NULL DEFAULT 'pro',\n  credit_balance           INTEGER NOT NULL DEFAULT 0,\n  credit_quota             INTEGER NOT NULL DEFAULT 0,\n  credit_period_start      TEXT,\n  locale                   TEXT NOT NULL DEFAULT 'zh-CN',\n  timezone                 TEXT NOT NULL DEFAULT 'Asia/Shanghai',\n  preferences_json         TEXT NOT NULL DEFAULT '{}',\n  status                   TEXT NOT NULL DEFAULT 'active',\n  created_at               TEXT NOT NULL,\n  last_active_at           TEXT, verify_token_jti TEXT, datarc_member_uid TEXT, pwd_version INTEGER NOT NULL DEFAULT 0, session_token_version INTEGER NOT NULL DEFAULT 0, password_change_in_progress TEXT, last_password_change_at TEXT, active_team_id TEXT,\n  FOREIGN KEY (team_id) REFERENCES \"teams\"(id)\n)"
+      ],
+      "canonical": [
+        "table",
+        "users",
+        "users",
+        "CREATE TABLE users (\n  id                       TEXT PRIMARY KEY,\n  team_id                   TEXT NOT NULL,\n  email                    TEXT UNIQUE NOT NULL,\n  email_verified           INTEGER NOT NULL DEFAULT 0,\n  display_name             TEXT,\n  avatar_url               TEXT,\n  password_hash            TEXT,\n  oauth_providers_json     TEXT NOT NULL DEFAULT '[]',\n  tier                     TEXT NOT NULL DEFAULT 'pro',\n  credit_balance           INTEGER NOT NULL DEFAULT 0,\n  credit_quota             INTEGER NOT NULL DEFAULT 0,\n  credit_period_start      TEXT,\n  locale                   TEXT NOT NULL DEFAULT 'zh-CN',\n  timezone                 TEXT NOT NULL DEFAULT 'Asia/Shanghai',\n  preferences_json         TEXT NOT NULL DEFAULT '{}',\n  status                   TEXT NOT NULL DEFAULT 'active',\n  created_at               TEXT NOT NULL,\n  last_active_at           TEXT, verify_token_jti TEXT, datarc_member_uid TEXT, pwd_version INTEGER NOT NULL DEFAULT 0, session_token_version INTEGER NOT NULL DEFAULT 0, password_change_in_progress TEXT, last_password_change_at TEXT, active_team_id TEXT,\n  FOREIGN KEY (team_id) REFERENCES teams(id)\n)"
+      ],
+      "columns": [
+        "id",
+        "team_id",
+        "email",
+        "email_verified",
+        "display_name",
+        "avatar_url",
+        "password_hash",
+        "oauth_providers_json",
+        "tier",
+        "credit_balance",
+        "credit_quota",
+        "credit_period_start",
+        "locale",
+        "timezone",
+        "preferences_json",
+        "status",
+        "created_at",
+        "last_active_at",
+        "verify_token_jti",
+        "datarc_member_uid",
+        "pwd_version",
+        "session_token_version",
+        "password_change_in_progress",
+        "last_password_change_at",
+        "active_team_id"
+      ]
+    },
+    {
+      "source": [
+        "table",
+        "workspaces",
+        "workspaces",
+        "CREATE TABLE workspaces (\n    id                       TEXT PRIMARY KEY,\n    team_id                   TEXT NOT NULL,\n    name                     TEXT NOT NULL,\n    datarc_workspace_id      TEXT,\n    description              TEXT,\n    status                   TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),\n    created_at               TEXT NOT NULL,\n    updated_at               TEXT NOT NULL,\n    last_synced_at           TEXT, name_key TEXT, revision INTEGER NOT NULL DEFAULT 1,\n    FOREIGN KEY (team_id) REFERENCES \"teams\"(id) ON DELETE CASCADE\n)"
+      ],
+      "canonical": [
+        "table",
+        "workspaces",
+        "workspaces",
+        "CREATE TABLE workspaces (\n    id                       TEXT PRIMARY KEY,\n    team_id                   TEXT NOT NULL,\n    name                     TEXT NOT NULL,\n    datarc_workspace_id      TEXT,            -- default datarc PROJECT for this workspace (connector mapping; seeds active_datarc_project). NOT the workspace identity — that is `id` (a ws_*). ws-datarc-decouple S3.\n    description              TEXT,\n    status                   TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),\n    created_at               TEXT NOT NULL,\n    updated_at               TEXT NOT NULL,\n    last_synced_at           TEXT, name_key TEXT, revision INTEGER NOT NULL DEFAULT 1,\n    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE\n)"
+      ],
+      "columns": [
+        "id",
+        "team_id",
+        "name",
+        "datarc_workspace_id",
+        "description",
+        "status",
+        "created_at",
+        "updated_at",
+        "last_synced_at",
+        "name_key",
+        "revision"
+      ]
+    }
+  ],
+  "retired_objects": [
+    [
+      "index",
+      "idx_acr_org_created",
+      "access_requests",
+      "CREATE INDEX idx_acr_org_created ON access_requests(team_id, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_audit_org_ts",
+      "admin_audit_log",
+      "CREATE INDEX idx_audit_org_ts        ON admin_audit_log(team_id, ts DESC)"
+    ],
+    [
+      "index",
+      "idx_credit_attention_org_state",
+      "credit_attention_state",
+      "CREATE INDEX idx_credit_attention_org_state\n  ON credit_attention_state(team_id, state, severity_rank, updated_at DESC)"
+    ],
+    [
+      "index",
+      "idx_datarc_connection_org",
+      "datarc_connection",
+      "CREATE INDEX idx_datarc_connection_org ON datarc_connection(team_id, status)"
+    ],
+    [
+      "index",
+      "idx_feishu_app_configs_org",
+      "feishu_app_configs",
+      "CREATE INDEX idx_feishu_app_configs_org\n    ON feishu_app_configs(team_id, updated_at DESC)"
+    ],
+    [
+      "index",
+      "idx_feishu_setup_sessions_org",
+      "feishu_setup_sessions",
+      "CREATE INDEX idx_feishu_setup_sessions_org\n    ON feishu_setup_sessions(team_id, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_groups_org_ws",
+      "groups",
+      "CREATE INDEX idx_groups_org_ws ON groups(team_id, workspace_id, status)"
+    ],
+    [
+      "index",
+      "idx_ledger_org_at",
+      "credit_ledger",
+      "CREATE INDEX idx_ledger_org_at ON credit_ledger(team_id, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_memory_pack_snapshots_org",
+      "memory_pack_snapshots",
+      "CREATE INDEX idx_memory_pack_snapshots_org\n    ON memory_pack_snapshots(team_id, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_notification_items_org_created",
+      "notification_items",
+      "CREATE INDEX idx_notification_items_org_created\n    ON notification_items(team_id, created_at DESC, id DESC)"
+    ],
+    [
+      "index",
+      "idx_obs_intent",
+      "skill_observations",
+      "CREATE INDEX idx_obs_intent ON skill_observations(intent, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_obs_sig",
+      "skill_observations",
+      "CREATE INDEX idx_obs_sig ON skill_observations(full_signature, created_at DESC)"
+    ],
+    [
+      "index",
+      "idx_orgs_domain",
+      "teams",
+      "CREATE INDEX idx_orgs_domain ON \"teams\"(domain)"
+    ],
+    [
+      "index",
+      "idx_orgs_status",
+      "teams",
+      "CREATE INDEX idx_orgs_status ON \"teams\"(status)"
+    ],
+    [
+      "index",
+      "idx_users_org",
+      "users",
+      "CREATE INDEX idx_users_org ON users(team_id, status)"
+    ],
+    [
+      "index",
+      "idx_workspaces_org_status",
+      "workspaces",
+      "CREATE INDEX idx_workspaces_org_status ON workspaces(team_id, status)"
+    ],
+    [
+      "table",
+      "citation_migration_backup",
+      "citation_migration_backup",
+      "CREATE TABLE citation_migration_backup (\n    section_id  TEXT PRIMARY KEY,\n    rev         INTEGER NOT NULL,\n    old_payload TEXT NOT NULL,\n    migrated_at TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "citation_migration_backup_revisions",
+      "citation_migration_backup_revisions",
+      "CREATE TABLE citation_migration_backup_revisions (\n    revision_id      TEXT PRIMARY KEY,\n    old_prev_payload TEXT,\n    old_new_payload  TEXT,\n    migrated_at      TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "citation_migration_backup_turns",
+      "citation_migration_backup_turns",
+      "CREATE TABLE citation_migration_backup_turns (\n    turn_id          TEXT PRIMARY KEY,\n    old_final_answer TEXT NOT NULL,\n    migrated_at      TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "citation_migration_meta",
+      "citation_migration_meta",
+      "CREATE TABLE citation_migration_meta (\n    key   TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "messages",
+      "messages",
+      "CREATE TABLE messages (\n    id              TEXT PRIMARY KEY,\n    turn_id         TEXT NOT NULL REFERENCES turns(id),\n    role            TEXT NOT NULL,            -- user | assistant | tool | system\n    content         TEXT NOT NULL,\n    created_at      TEXT NOT NULL\n)"
+    ],
+    [
+      "table",
+      "skill_observations",
+      "skill_observations",
+      "CREATE TABLE skill_observations (\n    id                 TEXT PRIMARY KEY,\n    turn_id            TEXT NOT NULL,\n    intent             TEXT NOT NULL,\n    tool_chain_sig     TEXT NOT NULL,\n    section_kinds_sig  TEXT NOT NULL,\n    full_signature     TEXT NOT NULL,            -- hash(intent+tool_chain+sections)\n    sample_json        TEXT NOT NULL,            -- 原 sample 供 admin 预览\n    created_at         TEXT NOT NULL\n)"
+    ]
+  ],
+  "empty_only_tables": [
+    "messages",
+    "skill_observations"
+  ],
+  "archived_tables": [
+    "citation_migration_backup",
+    "citation_migration_backup_revisions",
+    "citation_migration_backup_turns",
+    "citation_migration_meta"
+  ]
+}

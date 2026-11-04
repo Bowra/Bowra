@@ -35,7 +35,7 @@ export function Field({
   return (
     <div className={["settings-field", className, suggestion ? styles.suggested : null].filter(Boolean).join(" ")} style={style}>
       {suggestion || help ? (
-        <span className={styles.labelRow}>
+        <span className={`settings-field__label-row ${styles.labelRow}`}>
           <label className="settings-field__label" htmlFor={id}>{label}</label>
           {help}
           {suggestion ? <SuggestionBadge label={suggestion.label} onReveal={suggestion.onReveal} /> : null}

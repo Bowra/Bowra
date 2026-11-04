@@ -12,6 +12,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.rate_card import ModelTokenUsage, ModelUsageLine, credits_for_model_lines, credits_for_tokens
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.user_store import _id, _insert_credit_model_usage_in_tx
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ class SubagentDraftCreditAccountant:
     ) -> None:
         if not 1 <= reserved_credits <= 100:
             raise ValueError("reserved_credits must be in [1,100]")
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or SystemClock()
         self._reserved_credits = reserved_credits
 
@@ -192,6 +193,77 @@ class SubagentDraftCreditAccountant:
         attempts: int,
         model_usage: tuple[ModelUsageLine, ...] = (),
     ) -> None:
+        await self._settle_core(
+            team_id=team_id,
+            owner_user_id=owner_user_id,
+            request_key_hash=request_key_hash,
+            draft_id=draft_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            attempts=attempts,
+            model_usage=model_usage,
+        )
+        if domain_layout_active(self.db_path):
+            await self._publish_settled_usage(team_id=team_id, owner_user_id=owner_user_id, request_key_hash=request_key_hash)
+
+    async def _publish_settled_usage(self, *, team_id: str, owner_user_id: str, request_key_hash: str) -> None:
+        # Re-read committed core truth even after an idempotent settlement replay.
+        # No core transaction or writer remains while execution is updated.
+        async with open_shared_ctx(self.db_path) as core:
+            core.row_factory = aiosqlite.Row
+            async with core.execute(
+                "SELECT usage_event_id,input_tokens,output_tokens,updated_at FROM team_subagent_draft_usage "
+                "WHERE team_id=? AND owner_user_id=? AND request_key_hash=? AND state='settled'",
+                (team_id, owner_user_id, request_key_hash),
+            ) as cursor:
+                settled = await cursor.fetchone()
+            if settled is None or not settled["usage_event_id"]:
+                raise SubagentDraftCreditError("subagent_draft_committed_usage_missing")
+        values = (
+            settled["usage_event_id"],
+            team_id,
+            owner_user_id,
+            f"sadreq_{request_key_hash[:12]}",
+            settled["input_tokens"],
+            settled["output_tokens"],
+            settled["updated_at"],
+        )
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as execution:
+            await execution.execute("BEGIN IMMEDIATE")
+            try:
+                async with execution.execute("SELECT 1 FROM account_deletions WHERE user_id=?", (owner_user_id,)) as cursor:
+                    if await cursor.fetchone() is not None:
+                        return
+                await execution.execute(
+                    "INSERT OR IGNORE INTO llm_usage_events("
+                    "id,team_id,user_id,workspace_id,turn_id,reason,agent_type,provider,model,tokens_input,tokens_output,tokens_cached,streamed,created_at"
+                    ") VALUES (?,?,?,NULL,?,'subagent_draft_generation','subagent_draft',NULL,NULL,?,?,0,0,?)",
+                    values,
+                )
+                async with execution.execute(
+                    "SELECT id,team_id,user_id,turn_id,tokens_input,tokens_output,created_at FROM llm_usage_events WHERE id=?",
+                    (settled["usage_event_id"],),
+                ) as cursor:
+                    actual = await cursor.fetchone()
+                if actual is None or tuple(actual) != values:
+                    raise SubagentDraftCreditError("subagent_draft_usage_event_conflict")
+                await execution.commit()
+            except BaseException:
+                await execution.rollback()
+                raise
+
+    async def _settle_core(
+        self,
+        *,
+        team_id: str,
+        owner_user_id: str,
+        request_key_hash: str,
+        draft_id: str | None,
+        input_tokens: int,
+        output_tokens: int,
+        attempts: int,
+        model_usage: tuple[ModelUsageLine, ...] = (),
+    ) -> None:
         now_s = _timestamp(self._clock.now())
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -309,27 +381,28 @@ class SubagentDraftCreditAccountant:
                         ledger_id=str(row["reservation_ledger_id"]),
                         model_usage=lines,
                     )
-                await db.execute(
-                    """
-                    INSERT INTO llm_usage_events(
-                      id,team_id,user_id,workspace_id,turn_id,reason,
-                      agent_type,provider,model,tokens_input,tokens_output,
-                      tokens_cached,streamed,created_at
-                    ) VALUES (
-                      ?,?,?,NULL,?,'subagent_draft_generation',
-                      'subagent_draft',NULL,NULL,?,?,0,0,?
+                if not domain_layout_active(self.db_path):
+                    await db.execute(
+                        """
+                        INSERT INTO llm_usage_events(
+                          id,team_id,user_id,workspace_id,turn_id,reason,
+                          agent_type,provider,model,tokens_input,tokens_output,
+                          tokens_cached,streamed,created_at
+                        ) VALUES (
+                          ?,?,?,NULL,?,'subagent_draft_generation',
+                          'subagent_draft',NULL,NULL,?,?,0,0,?
+                        )
+                        """,
+                        (
+                            usage_event_id,
+                            team_id,
+                            owner_user_id,
+                            f"sadreq_{request_key_hash[:12]}",
+                            input_tokens,
+                            output_tokens,
+                            now_s,
+                        ),
                     )
-                    """,
-                    (
-                        usage_event_id,
-                        team_id,
-                        owner_user_id,
-                        f"sadreq_{request_key_hash[:12]}",
-                        input_tokens,
-                        output_tokens,
-                        now_s,
-                    ),
-                )
                 await db.execute(
                     """
                     UPDATE team_subagent_draft_usage
@@ -452,21 +525,33 @@ class SubagentDraftCreditAccountant:
                 raise
 
     async def settle_pending(self, *, limit: int = 100) -> int:
-        """Retry bounded recoverable settlements left by a transient failure."""
+        """Retry bounded credit settlements and unpruned execution publication."""
         if not 1 <= limit <= 1000:
             raise ValueError("settlement limit must be in [1,1000]")
+        publication = ""
+        args: tuple[object, ...] = (limit,)
+        if domain_layout_active(self.db_path):
+            from bowhead_core.user_cron import llm_usage_retention_days
+
+            days = llm_usage_retention_days()
+            cutoff = _timestamp(self._clock.now() - timedelta(days=days)) if days > 0 else None
+            # Only missing raw events inside the current retention window are
+            # repairable. Older settled history may already live in daily rollups.
+            publication = (
+                " OR (d.state='settled' AND d.usage_event_id IS NOT NULL "
+                "AND (? IS NULL OR julianday(d.updated_at)>=julianday(?)) "
+                "AND EXISTS(SELECT 1 FROM users u WHERE u.id=d.owner_user_id AND u.status='active') "
+                "AND EXISTS(SELECT 1 FROM teams t WHERE t.id=d.team_id AND t.status='active') "
+                "AND NOT EXISTS(SELECT 1 FROM account_deletions a WHERE a.user_id=d.owner_user_id) "
+                "AND NOT EXISTS(SELECT 1 FROM llm_usage_events e WHERE e.id=d.usage_event_id))"
+            )
+            args = (cutoff, cutoff, limit)
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """
-                SELECT team_id,owner_user_id,request_key_hash,draft_id,
-                       input_tokens,output_tokens,attempts
-                FROM team_subagent_draft_usage
-                WHERE state='settlement_pending'
-                ORDER BY updated_at
-                LIMIT ?
-                """,
-                (limit,),
+                "SELECT d.team_id,d.owner_user_id,d.request_key_hash,d.draft_id,d.input_tokens,d.output_tokens,d.attempts "
+                "FROM team_subagent_draft_usage d WHERE d.state='settlement_pending'" + publication + " ORDER BY d.updated_at LIMIT ?",
+                args,
             ) as cursor:
                 rows = await cursor.fetchall()
         settled = 0

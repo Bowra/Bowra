@@ -22,6 +22,8 @@ import structlog
 
 from bowhead_core.artifact_store import ArtifactReadLimitError, _open_db
 from bowhead_core.documents.package_io import MAX_OFFICE_BYTES, OfficePackageError, inspect_office_package
+from bowhead_core.sqlite_domains import domain_layout_active
+from bowhead_core.sqlite_readable_schema import readable_table_exists
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -43,8 +45,7 @@ class UploadConfirmationError(Exception):
 
 
 async def has_confirmation_schema(db: aiosqlite.Connection) -> bool:
-    cursor = await db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='artifact_upload_confirmations'")
-    return await cursor.fetchone() is not None
+    return await readable_table_exists(db, "artifact_upload_confirmations")
 
 
 async def get_confirmation(db_path: str, artifact_id: str) -> aiosqlite.Row | None:
@@ -146,7 +147,7 @@ async def confirm_upload(
 ) -> tuple[aiosqlite.Row, bool]:
     """Claim/recover on explicit POST only. Reads never start recovery work."""
     with anyio.fail_after(60):
-        return await _confirm_upload(
+        result = await _confirm_upload(
             store,
             artifact_id=artifact_id,
             user_id=user_id,
@@ -154,6 +155,10 @@ async def confirm_upload(
             checksum_sha256=checksum_sha256,
             authorize=authorize,
         )
+
+    if domain_layout_active(store.db_path) and session_id and result[0]["phase"] == "ready":
+        await store._finish_domain_publication(((artifact_id, session_id),), ())
+    return result
 
 
 async def _confirm_upload(
@@ -261,7 +266,7 @@ async def _confirm_upload(
                     "kind='user_upload', inject='full', producer_kind='upload', created_at=? WHERE id=?",
                     (row["candidate_path"], info.size_bytes, info.mime, now_iso, artifact_id),
                 )
-                if session_id:
+                if session_id and not domain_layout_active(store.db_path):
                     await db.execute(
                         "INSERT INTO session_attachments(session_id, artifact_id, pinned_at, detached_at) VALUES (?, ?, ?, NULL) "
                         "ON CONFLICT(session_id, artifact_id) DO UPDATE SET detached_at=NULL",

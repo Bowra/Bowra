@@ -4,10 +4,10 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.agent_change_proposal_store import AgentChangeProposalError, AgentChangeProposalStore
 from bowhead_core.agent_coach_generation import CoachGenerationStore
 from bowhead_core.agent_revision_store import AgentRevisionStore
+from core_legacy_database import TARGET_FILES
 from test_agent_change_proposal_store import _working
 from test_agent_revision_store import _db, _seed, _Validator
 from test_chat_reference_storage import _upgrade

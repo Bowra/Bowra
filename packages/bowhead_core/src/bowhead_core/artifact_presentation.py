@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
+from bowhead_core.html_static_check import inspect_retained_html
 from bowhead_core.results_artifact_policy import results_internal_artifact_sql
 
 CONTRACT = "artifact-presentation.v1"
@@ -116,7 +117,7 @@ async def _require_scope(ctx) -> None:
                 raise PresentationUnavailable("artifact_presentation_not_allowed")
 
 
-async def _available(ctx, artifact_id: str, *, produced: bool = False):
+async def available_artifact(ctx, artifact_id: str, *, produced: bool = False):
     store = ctx.artifact_store
     artifact = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True)
     if artifact is None or artifact.status != "ready" or artifact.workspace_id != ctx.workspace_id:
@@ -197,11 +198,28 @@ async def present_artifacts(arguments: dict, ctx) -> dict:
         # Recheck current access and original availability even for a receipt replay.
         outputs = []
         for item in items:
-            artifact = await _available(ctx, item["artifact_id"])
-            outputs.append({**item, "name": artifact.filename, "mime": artifact.mime, "size": artifact.size})
+            artifact = await available_artifact(ctx, item["artifact_id"])
+            output = {**item, "name": artifact.filename, "mime": artifact.mime, "size": artifact.size}
+            if (inspection := await inspect_retained_html(ctx.artifact_store, artifact)) is not None:
+                output["html_static_check"] = inspection
+            outputs.append(output)
         await _require_scope(ctx)
+        names = {output["name"] for output in outputs}
+        label_conflicts = [
+            {"artifact_id": output["artifact_id"], "code": "title_names_another_artifact"}
+            for output in outputs
+            if output.get("title") in names and output["title"] != output["name"]
+        ]
         return NativePresentationResult(
-            {"ok": True, "artifacts": items, "output_artifacts": outputs}, declaration=declaration, receipt=receipt, persisted=previous is not None
+            {
+                "ok": True,
+                "artifacts": items,
+                "output_artifacts": outputs,
+                **({"label_conflicts": label_conflicts} if label_conflicts else {}),
+            },
+            declaration=declaration,
+            receipt=receipt,
+            persisted=previous is not None,
         )
     except ValidationError:
         return {
@@ -265,8 +283,10 @@ async def normalize_producer_declaration(tool_name: str, arguments: dict, result
             continue
         try:
             item = PresentationItem(artifact_id=output.get("artifact_id"))
-            artifact = await _available(ctx, item.artifact_id, produced=True)
+            artifact = await available_artifact(ctx, item.artifact_id, produced=True)
             if artifact.filename == output["name"]:
+                if (inspection := await inspect_retained_html(ctx.artifact_store, artifact)) is not None:
+                    output["html_static_check"] = inspection
                 items.append(item)
         except (ValidationError, PresentationUnavailable):
             continue
@@ -291,7 +311,11 @@ def register_artifact_presentation(registry) -> None:
                 name="present_artifacts",
                 description=(
                     "Present existing retained files in this conversation without copying or regenerating them. "
-                    "Use accessible artifact IDs in the current Space. This does not publish, share, edit or validate file contents. "
+                    "Use accessible artifact IDs in the current Space. This does not publish, share, edit or certify file correctness. "
+                    "HTML outputs include bounded static structure diagnostics, not browser or data validation. "
+                    "File names, MIME types and sizes come from the original files. Never infer their identity from list order or supplied titles. "
+                    "For recovery, supply IDs only and use output_artifacts as the authoritative identity table. "
+                    "The runtime renders the file list and download links; avoid repeating unrequested raw IDs in prose. "
                     "Supply 1–16 files per call; optional title is at most 120 characters and description at most 256."
                 ),
                 input_schema=PresentationArguments.model_json_schema(),
@@ -304,3 +328,34 @@ def register_artifact_presentation(registry) -> None:
             effect_spec=TOOL_EFFECT_READ_ONLY,
         )
     )
+
+
+async def retained_failure_artifacts(invocations, ctx) -> list[dict[str, Any]]:
+    """Recover bounded native references without granting access or rerunning producers."""
+    candidates: dict[str, None] = {}
+    for invocation in invocations:
+        result = invocation.result
+        if not isinstance(result, NativePresentationResult):
+            continue
+        for item in result.declaration.get("items", []):
+            artifact_id = item.get("artifact_id")
+            if isinstance(artifact_id, str) and artifact_id.startswith("art_"):
+                candidates.setdefault(artifact_id, None)
+            if len(candidates) >= 16:
+                break
+        if len(candidates) >= 16:
+            break
+    if not candidates:
+        return []
+    try:
+        await _require_scope(ctx)
+    except Exception:  # noqa: BLE001 — optional recovery must not replace the original failure
+        return []
+    retained = []
+    for artifact_id in candidates:
+        try:
+            artifact = await available_artifact(ctx, artifact_id)
+        except Exception:  # noqa: BLE001, S112 — optional recovery omits unavailable references without exposing access details
+            continue
+        retained.append({"artifact_id": artifact_id, "filename": artifact.filename, "mime": artifact.mime, "size_bytes": artifact.size})
+    return retained

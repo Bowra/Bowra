@@ -230,6 +230,26 @@ export async function resolveClarification(
   return r.json();
 }
 
+/** Close an unanswered question without answering it or resuming its task. */
+export async function dismissClarification(requestId: string): Promise<{ ok: boolean; request_id: string; dismissed: boolean }> {
+  const response = await apiFetch(`/api/v1/clarifications/${encodeURIComponent(requestId)}/dismiss`, { method: "POST" });
+  if (!response.ok) throw await readApiError(response);
+  return response.json();
+}
+
+export interface PendingQuestionSummary {
+  request_id: string;
+  turn_id: string;
+  question: string;
+  can_dismiss: boolean;
+}
+
+export async function listPendingSessionQuestions(sessionId: string): Promise<PendingQuestionSummary[]> {
+  const response = await apiFetch(`/api/v1/clarifications/session/${encodeURIComponent(sessionId)}/pending`);
+  if (!response.ok) throw await readApiError(response);
+  return response.json();
+}
+
 // M158 #10 P1 (CTO review #5): user changes mind after resolve; revoke directive + edited_subs.
 // Allowed only before injection (injected_at IS NULL). After revocation, next-turn force_spawn omits injection.
 export async function cancelClarificationDirective(
@@ -2898,6 +2918,7 @@ export interface NotificationActionDTO {
 }
 
 export interface NotificationItemDTO {
+  actionRequired: boolean;
   id: string;
   teamId: string;
   category: string;

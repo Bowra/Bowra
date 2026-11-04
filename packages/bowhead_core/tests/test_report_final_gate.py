@@ -22,7 +22,6 @@ from bowhead_core.report_final_gate import (
     insert_stale_figure_notes,
     run_final_consistency_pass,
 )
-from bowhead_core.report_writer_loop import _evidence_block  # T5: helper moved to writer-loop.
 
 from bowhead_core import CanvasStore
 
@@ -375,7 +374,7 @@ async def test_done_chokepoint_invokes_final_gate(store: CanvasStore) -> None:
     assert any(getattr(e, "event_type", None) == "canvas.section_patched" for e in bus.events)
 
 
-# ── WP-B1 freshness notes (read_report / _evidence_block) ─────────
+# Read-report freshness remains supported independently of the retired prose scribe.
 
 
 async def test_read_report_figures_carry_fresh_flag(store: CanvasStore) -> None:
@@ -388,23 +387,3 @@ async def test_read_report_figures_carry_fresh_flag(store: CanvasStore) -> None:
     assert figs[new_chart.id]["fresh"] is True
     assert figs[old_chart.id]["fresh"] is False
     assert "历史图" in figs[old_chart.id]["note"]
-
-
-def test_evidence_block_tags_stale_figures() -> None:
-    # W-2②: historical figure keeps short machine-readable [历史图] + standalone writing-note/do-not-copy line;
-    # old full inline 〔历史图:…〕 sentence retired (writer copied as caption into body, blind-judge evidence).
-    block = _evidence_block(
-        {"title": "T"},
-        [
-            {"id": "sec_new", "title": "新图", "fresh": True},
-            {"id": "sec_old", "title": "旧图", "fresh": False},
-        ],
-    )
-    # Old tagged, new untagged.
-    assert "id=sec_old | 旧图 [历史图]" in block
-    assert "id=sec_new | 新图" in block
-    assert "新图 [历史图]" not in block
-    # Explanation on own line, explicitly writing note (do not copy into body).
-    assert "写作须知(勿抄进正文)" in block
-    # Regression pin: old copyable inline sentence must disappear.
-    assert "〔历史图" not in block

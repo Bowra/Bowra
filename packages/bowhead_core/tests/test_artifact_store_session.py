@@ -540,7 +540,9 @@ async def test_hard_delete_old_soft_deleted(tmp_path: Path) -> None:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_path / 'a.db'}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
+
+    command.upgrade(config, SOURCE_REVISION)
     store = ArtifactStore(
         db_path=tmp_path / "a.db",
         backend=LocalBackend(tmp_path),
@@ -611,3 +613,36 @@ async def test_find_turn_artifact_ids_by_filename_scopes_to_the_turn_and_takes_l
     latest = await store.put_bytes(created_by=None, content=b"2", filename="m.csv", mime="text/csv", source="python_sandbox", created_by_turn="t1")
     assert await store.find_turn_artifact_ids_by_filename("t1", ["m.csv"]) == {"m.csv": latest.id}
     assert await store.find_turn_artifact_ids_by_filename("t2", ["m.csv"]) == {}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid", [None, "foreign_owner", "foreign_space", "other_source", "deleted"])
+async def test_kb_chat_binding_retains_upload_owner_and_space_fences(store: ArtifactStore, invalid: str | None) -> None:
+    artifact = await store.put_bytes(
+        content=b"Synthetic KB source",
+        filename="synthetic.md",
+        mime="text/markdown",
+        source="upload" if invalid == "other_source" else "kb_upload",
+        kind="user_upload",
+        created_by="other" if invalid == "foreign_owner" else "owner",
+        workspace_id="other-space" if invalid == "foreign_space" else "space",
+    )
+    if invalid == "deleted":
+        async with aiosqlite.connect(store.db_path) as db:
+            await db.execute("UPDATE artifacts SET deleted_at=? WHERE id=?", (_at(0), artifact.id))
+            await db.commit()
+    assert await store.get_ready_uploads_for_chat([artifact.id], user_id="owner", workspace_id="space") == {}
+    prepared = await store.bind_owned_kb_upload_for_chat(artifact.id, user_id="owner", workspace_id="space")
+    if invalid:
+        assert prepared is None
+        assert await store.get_ready_uploads_for_chat([artifact.id], user_id="owner", workspace_id="space") == {}
+        return
+    assert prepared is not None and prepared.id == artifact.id
+    assert await store.bind_owned_kb_upload_for_chat(artifact.id, user_id="owner", workspace_id="space") == prepared
+    accepted = await store.get_ready_uploads_for_chat([artifact.id], user_id="owner", workspace_id="space")
+    assert set(accepted) == {artifact.id}
+    assert await store.get_ready_uploads_for_chat([artifact.id], user_id="other", workspace_id="space") == {}
+    assert await store.get_ready_uploads_for_chat([artifact.id], user_id="owner", workspace_id="other-space") == {}
+    async with aiosqlite.connect(store.db_path) as db:
+        count = (await (await db.execute("SELECT COUNT(*) FROM artifact_upload_bindings WHERE artifact_id=?", (artifact.id,))).fetchone())[0]
+    assert count == 1

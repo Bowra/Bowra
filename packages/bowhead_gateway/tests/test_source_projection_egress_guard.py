@@ -45,9 +45,11 @@ def test_turn_event_user_egress_cannot_bypass_viewer_safe_event_projector() -> N
     assert event_dto_routes
     assert all("project_event_payloads_for_viewer" in calls for calls in event_dto_routes.values())
 
-    replay_routes = {name: calls for name, calls in turns.items() if "EventSourceResponse" in calls and "list_events" in calls}
-    assert replay_routes
-    assert all("project_event_payloads_for_viewer" in calls for calls in replay_routes.values())
+    # Replay delegates to the guarded reader, which rechecks current viewer access.
+    # Applying the projector again to its opaque aliases is invalid.
+    assert "EventSourceResponse" in turns["replay"]
+    assert "list_events" in turns["replay"]
+    assert "project_event_payloads_for_viewer" in turns["list_events"]
 
     chat = {function.name: _called_names(function) for function in _functions(ROUTES / "chat.py")}
     stream_calls = chat["stream"]

@@ -29,6 +29,7 @@ from bowhead_core.agent_version_automation import AgentVersionAutomationError, A
 from bowhead_core.agent_version_flags import agent_version_automation_enabled
 from bowhead_core.agent_version_service import release_check_outcome_conn, release_tab_path
 from bowhead_core.openapi_store import OpenApiStore
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.team_openapi_flags import team_openapi_enabled
 from bowhead_core.user_store import User
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -753,7 +754,7 @@ async def create_automation_agent_proposal(
     request_hash = "sha256:" + hashlib.sha256(request_json.encode()).hexdigest()
     idempotency_digest = hashlib.sha256(f"{credential['id']}\0{idempotency_key}".encode()).hexdigest()
     source_ref = f"git:idempotency:{idempotency_digest}"
-    async with aiosqlite.connect(user_store.db_path) as db:
+    async with diagnostic_connect(user_store.db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT id,status,row_version,patch_hash,created_by_id,provenance_json
@@ -852,7 +853,7 @@ async def read_automation_agent_proposal(
         scope="gate:read",
     )
     user_store = request.app.state.user_store
-    async with aiosqlite.connect(user_store.db_path) as db:
+    async with diagnostic_connect(user_store.db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """

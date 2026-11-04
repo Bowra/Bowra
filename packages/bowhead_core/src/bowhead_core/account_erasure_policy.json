@@ -53,7 +53,6 @@
     "agent_team_tag",
     "agent_version_automation_preparation",
     "builtin_pbi_template",
-    "business_rules",
     "catalog_localized_listing",
     "feishu_app_configs",
     "group_memberships",
@@ -174,6 +173,17 @@
       ],
       "owner_columns": []
     },
+    "account_owned_artifact_writes": {
+      "columns": [
+        "write_id",
+        "user_id",
+        "path",
+        "created_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
     "admin_audit_log": {
       "columns": [
         "id",
@@ -190,6 +200,35 @@
         "user_agent"
       ],
       "owner_columns": []
+    },
+    "agent_answer_feedback": {
+      "columns": [
+        "turn_id",
+        "team_id",
+        "agent_id",
+        "user_id",
+        "score",
+        "reason_codes",
+        "comment",
+        "created_at",
+        "updated_at",
+        "owner_handled_at",
+        "owner_handled_action"
+      ],
+      "owner_columns": [
+        "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_assignment": {
       "columns": [
@@ -215,24 +254,6 @@
         "user_id"
       ]
     },
-    "agent_answer_feedback": {
-      "columns": [
-        "turn_id",
-        "team_id",
-        "agent_id",
-        "user_id",
-        "score",
-        "reason_codes",
-        "comment",
-        "created_at",
-        "updated_at",
-        "owner_handled_at",
-        "owner_handled_action"
-      ],
-      "owner_columns": [
-        "user_id"
-      ]
-    },
     "agent_assignment_backfill_expected": {
       "columns": [
         "run_id",
@@ -240,7 +261,18 @@
         "user_id",
         "agent_id"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_assignment_backfill_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_assignment_backfill_run": {
       "columns": [
@@ -315,7 +347,48 @@
         "base_suite_revision_id",
         "initial_suite_name"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "base_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "base_suite_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_change_proposal_decision": {
       "columns": [
@@ -333,7 +406,18 @@
         "created_at",
         "result_content_hash"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_change_proposal",
+          "columns": [
+            [
+              "proposal_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_coach_generation_request": {
       "columns": [
@@ -357,6 +441,30 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_change_proposal",
+          "columns": [
+            [
+              "result_proposal_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "agent_collaboration_operation": {
@@ -384,7 +492,62 @@
         "published",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_collaboration_participant",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "recipient_id",
+              "execution_id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_collaboration_participant",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "execution_id",
+              "execution_id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_collaboration_operation",
+          "columns": [
+            [
+              "family_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_collaboration_operation",
+          "columns": [
+            [
+              "question_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_collaboration_turn",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_collaboration_participant": {
       "columns": [
@@ -396,7 +559,27 @@
         "wait_revision",
         "coordination_attempts"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_collaboration_turn",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_collaboration_turn": {
       "columns": [
@@ -409,7 +592,27 @@
         "model_attempts",
         "tool_attempts"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "owner_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_command_receipt": {
       "columns": [
@@ -463,7 +666,116 @@
         "updated_by",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "agent_eval_alignment_loop": {
+      "columns": [
+        "id",
+        "team_id",
+        "agent_id",
+        "suite_id",
+        "owner_id",
+        "session_id",
+        "words_source",
+        "owner_words",
+        "words_by",
+        "origin_turn_id",
+        "judge_prompt_version",
+        "judge_model_fingerprint",
+        "pinned_at",
+        "state",
+        "baseline_comparison_id",
+        "draft_points_json",
+        "report_json",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "owner_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite",
+          "columns": [
+            [
+              "suite_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "agent_eval_alignment_question": {
+      "columns": [
+        "id",
+        "loop_id",
+        "point_id",
+        "point_text_hash",
+        "card_seq",
+        "row_index",
+        "answer_ref",
+        "turn_id",
+        "source_turn_id",
+        "answer_text",
+        "task_text",
+        "answer_excerpt",
+        "judge_met",
+        "judge_quote",
+        "judge_reason",
+        "graded_prompt_version",
+        "graded_model_fingerprint",
+        "pick_reason",
+        "replacement",
+        "owner_label",
+        "label_via",
+        "labelled_at",
+        "created_at"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "source_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_alignment_loop",
+          "columns": [
+            [
+              "loop_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_attempt_identity": {
       "columns": [
@@ -477,7 +789,26 @@
         "reproducibility",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_case_result",
+          "columns": [
+            [
+              "run_id",
+              "run_id"
+            ],
+            [
+              "case_revision_id",
+              "case_revision_id"
+            ],
+            [
+              "attempt",
+              "attempt"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_candidate_control": {
       "columns": [
@@ -511,7 +842,145 @@
         "updated_at",
         "review_release_note"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_override",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "review_override_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_snapshot",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "review_snapshot_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "review_plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_override",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "active_override_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_snapshot",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "active_snapshot_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_comparison_execution",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "active_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "active_plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_case_job": {
       "columns": [
@@ -529,7 +998,27 @@
         "ended_at",
         "failure_code"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_case_revision",
+          "columns": [
+            [
+              "case_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_case_result": {
       "columns": [
@@ -549,7 +1038,27 @@
         "tokens_cached",
         "model_call_count"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_case_revision",
+          "columns": [
+            [
+              "case_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_case_revision": {
       "columns": [
@@ -565,7 +1074,18 @@
         "valid_until",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "suite_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_comparison_execution": {
       "columns": [
@@ -596,7 +1116,52 @@
         "coach_delegation_id",
         "coach_client_intent_hash"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "coach_ci_delegation",
+          "columns": [
+            [
+              "coach_delegation_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_comparison_run": {
       "columns": [
@@ -605,7 +1170,59 @@
         "subject_side",
         "run_id"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "suite_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_comparison_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "agent_eval_conversation_share": {
+      "columns": [
+        "turn_id",
+        "team_id",
+        "agent_id",
+        "user_id",
+        "shared_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_evidence_state": {
       "columns": [
@@ -620,7 +1237,27 @@
         "row_version",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "current_run_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_suite",
+          "columns": [
+            [
+              "suite_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_notification_outbox": {
       "columns": [
@@ -642,6 +1279,17 @@
       ],
       "owner_columns": [
         "recipient_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "agent_eval_override": {
@@ -662,7 +1310,60 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_snapshot",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "snapshot_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_plan": {
       "columns": [
@@ -682,7 +1383,60 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "baseline_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_policy_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "policy_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_plan_suite": {
       "columns": [
@@ -700,7 +1454,54 @@
         "judge_policy_hash",
         "order_index"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "suite_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "agent_eval_point_calibration": {
+      "columns": [
+        "suite_id",
+        "point_id",
+        "team_id",
+        "agent_id",
+        "text_hash",
+        "prompt_version",
+        "model_fingerprint",
+        "state",
+        "failure_reason",
+        "rewording",
+        "updated_at"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite",
+          "columns": [
+            [
+              "suite_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_point_example": {
       "columns": [
@@ -726,35 +1527,45 @@
         "turn_id",
         "source_turn_id"
       ],
-      "owner_columns": []
-    },
-    "agent_eval_conversation_share": {
-      "columns": [
-        "turn_id",
-        "team_id",
-        "agent_id",
-        "user_id",
-        "shared_at"
-      ],
-      "owner_columns": [
-        "user_id"
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "source_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_case_revision",
+          "columns": [
+            [
+              "case_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_suite",
+          "columns": [
+            [
+              "suite_id",
+              "id"
+            ]
+          ]
+        }
       ]
-    },
-    "agent_eval_point_calibration": {
-      "columns": [
-        "suite_id",
-        "point_id",
-        "team_id",
-        "agent_id",
-        "text_hash",
-        "prompt_version",
-        "model_fingerprint",
-        "state",
-        "failure_reason",
-        "rewording",
-        "updated_at"
-      ],
-      "owner_columns": []
     },
     "agent_eval_policy_revision": {
       "columns": [
@@ -767,7 +1578,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_regression_outbox": {
       "columns": [
@@ -817,7 +1643,27 @@
         "finished_at",
         "candidate_id"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "suite_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_run_execution": {
       "columns": [
@@ -831,7 +1677,18 @@
         "cancel_requested_at",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_scratch_turn": {
       "columns": [
@@ -846,7 +1703,54 @@
         "turn_id",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_case_revision",
+          "columns": [
+            [
+              "case_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_case_job",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_snapshot": {
       "columns": [
@@ -865,7 +1769,60 @@
         "snapshot_hash",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_comparison_execution",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_suite": {
       "columns": [
@@ -886,6 +1843,28 @@
       ],
       "owner_columns": []
     },
+    "agent_eval_suite_review": {
+      "columns": [
+        "suite_revision_id",
+        "prompt_version",
+        "team_id",
+        "agent_id",
+        "result_json",
+        "created_at"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite_revision",
+          "columns": [
+            [
+              "suite_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
     "agent_eval_suite_revision": {
       "columns": [
         "id",
@@ -900,7 +1879,18 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_suite",
+          "columns": [
+            [
+              "suite_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_eval_trigger_policy": {
       "columns": [
@@ -929,7 +1919,18 @@
         "reviewer_id",
         "reviewed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_listing_safety_report",
+          "columns": [
+            [
+              "report_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_listing_safety_report": {
       "columns": [
@@ -945,7 +1946,22 @@
         "created_at",
         "completed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_marketplace_schema_meta": {
       "columns": [
@@ -1026,7 +2042,82 @@
         "imported_release_id",
         "imported_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "imported_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "imported_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_safety_report",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "safety_report_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_release_baseline_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_release_baseline_run": {
       "columns": [
@@ -1064,7 +2155,39 @@
         "claimed_at",
         "settled_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_release_eval_evidence": {
       "columns": [
@@ -1082,7 +2205,94 @@
         "readiness",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_override",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "override_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_snapshot",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "snapshot_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "release_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_revision_compatibility": {
       "columns": [
@@ -1097,7 +2307,65 @@
         "reason_codes_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "base_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_role_preference": {
       "columns": [
@@ -1113,6 +2381,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_assignment",
+          "columns": [
+            [
+              "assignment_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "agent_safety_report": {
@@ -1134,7 +2413,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_taxonomy_suggestion": {
       "columns": [
@@ -1154,7 +2448,22 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_team_tag": {
       "columns": [
@@ -1170,7 +2479,22 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_team_tag",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "merged_into_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_version_automation_grant": {
       "columns": [
@@ -1192,6 +2516,21 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "agent_version_automation_preparation": {
@@ -1210,7 +2549,77 @@
         "initial_plan_hash",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "initial_plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_change_proposal",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "proposal_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_version_automation_grant",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "grant_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "agent_version_notification_outbox": {
       "columns": [
@@ -1238,6 +2647,89 @@
       ],
       "owner_columns": [
         "recipient_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_snapshot",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "snapshot_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "api_tokens": {
@@ -1296,14 +2788,6 @@
       ],
       "owner_columns": []
     },
-    "artifact_stdout": {
-      "columns": [
-        "artifact_id",
-        "stdout",
-        "created_at"
-      ],
-      "owner_columns": []
-    },
     "artifact_upload_bindings": {
       "columns": [
         "artifact_id",
@@ -1314,6 +2798,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "artifact_upload_confirmations": {
@@ -1388,6 +2883,19 @@
         "created_by"
       ]
     },
+    "bowra_connect_pending": {
+      "columns": [
+        "token_hash",
+        "team_id",
+        "user_id",
+        "kind",
+        "payload_cipher",
+        "expires_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
     "builtin_pbi_template": {
       "columns": [
         "id",
@@ -1398,7 +2906,18 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_builtin_tool",
+          "columns": [
+            [
+              "tool_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "builtin_tool_oauth_state": {
       "columns": [
@@ -1413,6 +2932,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_builtin_tool",
+          "columns": [
+            [
+              "tool_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "builtin_tool_user_grant": {
@@ -1432,32 +2962,18 @@
       ],
       "owner_columns": [
         "user_id"
-      ]
-    },
-    "business_rules": {
-      "columns": [
-        "rule_id",
-        "rule_name",
-        "rule_type",
-        "schema_json",
-        "user_id",
-        "workspace_id",
-        "scope",
-        "status",
-        "source",
-        "source_turn_id",
-        "source_template_id",
-        "confidence",
-        "created_by",
-        "approved_by",
-        "rejected_by",
-        "created_at",
-        "approved_at",
-        "rejected_at",
-        "updated_at",
-        "version"
       ],
-      "owner_columns": []
+      "containment_foreign_keys": [
+        {
+          "parent": "team_builtin_tool",
+          "columns": [
+            [
+              "tool_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "canvas_export_job_events": {
       "columns": [
@@ -1474,7 +2990,18 @@
         "payload_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "canvas_export_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "canvas_export_jobs": {
       "columns": [
@@ -1532,7 +3059,18 @@
         "pinned_at",
         "resolved_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "canvas_export_snapshots",
+          "columns": [
+            [
+              "snapshot_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "canvas_export_snapshots": {
       "columns": [
@@ -1608,7 +3146,18 @@
         "owner",
         "surface_target"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "canvases",
+          "columns": [
+            [
+              "canvas_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "canvases": {
       "columns": [
@@ -1666,7 +3215,27 @@
         "child_artifact_id",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "child_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "bundle_artifact_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_auth_session_generations": {
       "columns": [
@@ -1712,7 +3281,27 @@
         "checkpoint_version",
         "captured_iterations"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "chat_reference_plans",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_content_snapshots": {
       "columns": [
@@ -1729,7 +3318,18 @@
         "created_at",
         "expires_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_plans",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_evidence": {
       "columns": [
@@ -1747,7 +3347,31 @@
         "created_at",
         "expires_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_resolutions",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "resolution_seq",
+              "resolution_seq"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_extension_checks": {
       "columns": [
@@ -1761,7 +3385,40 @@
         "policy_check_digest",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_model_contexts",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "context_id",
+              "context_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "chat_reference_model_invocations",
+          "columns": [
+            [
+              "invocation_id",
+              "invocation_id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_lead_postdispatch_attempts": {
       "columns": [
@@ -1772,7 +3429,36 @@
         "owner_id",
         "started_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "clarification_requests",
+          "columns": [
+            [
+              "clarification_id",
+              "request_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_mcp_calls": {
       "columns": [
@@ -1803,7 +3489,31 @@
         "completed_at",
         "expires_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_resolutions",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "resolution_seq",
+              "resolution_seq"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_model_contexts": {
       "columns": [
@@ -1821,7 +3531,31 @@
         "retention_state",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_resolutions",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "resolution_seq",
+              "resolution_seq"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_model_invocations": {
       "columns": [
@@ -1846,7 +3580,31 @@
         "created_at",
         "ended_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "chat_reference_model_contexts",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "context_id",
+              "context_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_plans": {
       "columns": [
@@ -1863,7 +3621,45 @@
         "expires_at",
         "retention_policy_version"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "snapshot_owner_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "logical_source_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "source_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_primary_continuations": {
       "columns": [
@@ -1884,7 +3680,27 @@
         "ended_at",
         "primary_ended_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "chat_reference_plans",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_reference_queued_inputs": {
       "columns": [
@@ -1909,6 +3725,35 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "materialized_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "accepted_parent_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "chat_reference_resolutions": {
@@ -1925,7 +3770,36 @@
         "composition_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "source_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "chat_reference_plans",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_submission_abandon_tombstones": {
       "columns": [
@@ -2012,7 +3886,18 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "chat_turn_user_sources": {
       "columns": [
@@ -2031,6 +3916,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "clarification_document_continuations": {
@@ -2049,7 +3945,40 @@
         "consumed_owner_id",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_planning_attempts",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ],
+            [
+              "attempt_no",
+              "attempt_no"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "clarification_requests",
+          "columns": [
+            [
+              "card_id",
+              "request_id"
+            ]
+          ]
+        }
+      ]
     },
     "clarification_invalidation_outbox": {
       "columns": [
@@ -2147,6 +4076,44 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_plan",
+          "columns": [
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_change_proposal",
+          "columns": [
+            [
+              "proposal_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "agent_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "coach_ci_invocation": {
@@ -2169,7 +4136,36 @@
         "response_digest",
         "outcome_code"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_eval_case_job",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_eval_run",
+          "columns": [
+            [
+              "run_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "coach_ci_delegation",
+          "columns": [
+            [
+              "delegation_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "coach_plugin_operation": {
       "columns": [
@@ -2215,7 +4211,18 @@
         "reference_json",
         "observed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "coach_tool_requirement",
+          "columns": [
+            [
+              "requirement_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "coach_tool_requirement": {
       "columns": [
@@ -2272,6 +4279,59 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ]
+    },
+    "continuation_payload_segments": {
+      "columns": [
+        "kind",
+        "owner_id",
+        "ordinal",
+        "session_id",
+        "turn_id",
+        "clarification_id",
+        "checkpoint_id",
+        "digest",
+        "byte_count",
+        "ciphertext"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "subagent_resume_checkpoints",
+          "columns": [
+            [
+              "checkpoint_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "clarification_requests",
+          "columns": [
+            [
+              "clarification_id",
+              "request_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "credential_recovery_tokens": {
@@ -2376,7 +4436,37 @@
         "rate_output",
         "weighted_tokens"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "credit_ledger",
+          "columns": [
+            [
+              "ledger_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "custom_subagents": {
+      "columns": [
+        "id",
+        "user_id",
+        "name",
+        "display_name",
+        "description",
+        "system_prompt",
+        "allowed_tools",
+        "auto_read_skills",
+        "max_iterations",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
     },
     "datarc_connection": {
       "columns": [
@@ -2403,7 +4493,18 @@
         "background_artifact_id",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_artifact_refs": {
       "columns": [
@@ -2420,6 +4521,64 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "owner_id",
+              "id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "owner_user_id",
+              "requested_by"
+            ]
+          ]
+        }
+      ]
+    },
+    "document_canvas_inputs": {
+      "columns": [
+        "job_id",
+        "artifact_id",
+        "path",
+        "sha256",
+        "size_bytes",
+        "manifest_json",
+        "source_job_id",
+        "verified_at",
+        "cleanup_claimed_at",
+        "cleanup_after"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "source_job_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "document_command_receipts": {
@@ -2436,6 +4595,29 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "target_id",
+              "id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "owner_user_id",
+              "requested_by"
+            ]
+          ]
+        }
       ]
     },
     "document_confirmations": {
@@ -2450,6 +4632,38 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "user_id",
+              "requested_by"
+            ]
+          ]
+        },
+        {
+          "parent": "document_executions",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
       ]
     },
     "document_continuations": {
@@ -2459,7 +4673,27 @@
         "question_digest",
         "instruction"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "parent_job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_dispatches": {
       "columns": [
@@ -2470,7 +4704,27 @@
         "capability_execution_id",
         "model_selection_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_capability_execution",
+          "columns": [
+            [
+              "capability_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_draft_files": {
       "columns": [
@@ -2483,7 +4737,18 @@
         "verified_at",
         "cleanup_after"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_executions",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
+      ]
     },
     "document_executions": {
       "columns": [
@@ -2503,7 +4768,18 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_input_copies": {
       "columns": [
@@ -2522,7 +4798,18 @@
         "cleanup_claimed_at",
         "cleanup_after"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_input_sets",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
+      ]
     },
     "document_input_sets": {
       "columns": [
@@ -2537,6 +4824,38 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "owner_user_id",
+              "requested_by"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "document_job_events": {
@@ -2549,7 +4868,18 @@
         "payload_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_job_links": {
       "columns": [
@@ -2565,6 +4895,50 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_command_receipts",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "owner_user_id",
+              "owner_user_id"
+            ],
+            [
+              "command_id",
+              "command_id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "workspace_id",
+              "workspace_id"
+            ],
+            [
+              "owner_user_id",
+              "requested_by"
+            ]
+          ]
+        }
       ]
     },
     "document_jobs": {
@@ -2609,7 +4983,18 @@
         "credit_rates_json",
         "usage_family"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_executions",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
+      ]
     },
     "document_physical_receipt_links": {
       "columns": [
@@ -2618,7 +5003,31 @@
         "call_no",
         "receipt_id"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_planning_attempts",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ],
+            [
+              "attempt_no",
+              "attempt_no"
+            ]
+          ]
+        },
+        {
+          "parent": "llm_usage_events",
+          "columns": [
+            [
+              "receipt_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_planning_attempts": {
       "columns": [
@@ -2634,7 +5043,27 @@
         "checkpoint_digest",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "clarification_requests",
+          "columns": [
+            [
+              "card_id",
+              "request_id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_turn_dispatches",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
+      ]
     },
     "document_revision_inputs": {
       "columns": [
@@ -2648,7 +5077,18 @@
         "sha256",
         "size_bytes"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_revisions": {
       "columns": [
@@ -2657,7 +5097,27 @@
         "draft_digest",
         "instruction"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "document_jobs",
+          "columns": [
+            [
+              "parent_job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "document_turn_dispatches": {
       "columns": [
@@ -2669,7 +5129,18 @@
         "runtime_snapshot_digest",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_dispatches",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ]
+          ]
+        }
+      ]
     },
     "document_usage_receipts": {
       "columns": [
@@ -2686,7 +5157,26 @@
         "credit_rates_json",
         "usage_family"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "document_model_calls",
+          "columns": [
+            [
+              "job_id",
+              "job_id"
+            ],
+            [
+              "attempt_no",
+              "attempt_no"
+            ],
+            [
+              "call_no",
+              "call_no"
+            ]
+          ]
+        }
+      ]
     },
     "entitlement_clock": {
       "columns": [
@@ -2978,23 +5468,6 @@
       ],
       "owner_columns": []
     },
-    "llm_usage_daily": {
-      "columns": [
-        "day",
-        "team_id",
-        "user_id",
-        "workspace_id",
-        "reason",
-        "calls",
-        "tokens_input",
-        "tokens_output",
-        "tokens_cached",
-        "updated_at"
-      ],
-      "owner_columns": [
-        "user_id"
-      ]
-    },
     "llm_request_changes": {
       "columns": [
         "id",
@@ -3040,6 +5513,23 @@
         "user_id"
       ]
     },
+    "llm_usage_daily": {
+      "columns": [
+        "day",
+        "team_id",
+        "user_id",
+        "workspace_id",
+        "reason",
+        "calls",
+        "tokens_input",
+        "tokens_output",
+        "tokens_cached",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ]
+    },
     "llm_usage_events": {
       "columns": [
         "id",
@@ -3075,7 +5565,18 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "local_oidc_configs",
+          "columns": [
+            [
+              "config_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "local_oidc_configs": {
       "columns": [
@@ -3120,30 +5621,6 @@
       ],
       "owner_columns": [
         "created_by"
-      ]
-    },
-    "mcp_servers": {
-      "columns": [
-        "id",
-        "user_id",
-        "workspace_id",
-        "name",
-        "transport",
-        "command",
-        "args_json",
-        "env_json",
-        "url",
-        "pinned_version",
-        "allowed_roles_json",
-        "tools_schema_json",
-        "status",
-        "last_error",
-        "created_at",
-        "updated_at",
-        "last_started_at"
-      ],
-      "owner_columns": [
-        "user_id"
       ]
     },
     "memory_applied_deletion_receipts": {
@@ -3193,7 +5670,10 @@
         "duplicate_count",
         "content_redacted_at",
         "workspace_id",
-        "expiry_warned_at"
+        "expiry_warned_at",
+        "memory_type",
+        "supersedes_json",
+        "origin"
       ],
       "owner_columns": [
         "user_id"
@@ -3356,7 +5836,8 @@
         "char_count",
         "sections_breakdown_json",
         "pack_version",
-        "created_at"
+        "created_at",
+        "executor_block"
       ],
       "owner_columns": [
         "user_id"
@@ -3449,6 +5930,176 @@
         "user_id"
       ]
     },
+    "model_context_conversation_heads": {
+      "columns": [
+        "session_id",
+        "generation_id",
+        "published_turn_id",
+        "published_turn_seq"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "published_turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "model_context_generations",
+          "columns": [
+            [
+              "generation_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "model_context_generations": {
+      "columns": [
+        "id",
+        "session_id",
+        "execution_id",
+        "turn_id",
+        "lane",
+        "worker_generation",
+        "kind",
+        "parent_id",
+        "source_refs_json",
+        "snapshot_json",
+        "policy_json",
+        "origin_json",
+        "operation_id",
+        "completion_json",
+        "created_at"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "model_context_heads": {
+      "columns": [
+        "session_id",
+        "execution_id",
+        "lane",
+        "generation_id"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "model_context_generations",
+          "columns": [
+            [
+              "generation_id",
+              "id"
+            ],
+            [
+              "session_id",
+              "session_id"
+            ],
+            [
+              "execution_id",
+              "execution_id"
+            ],
+            [
+              "lane",
+              "lane"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    "model_context_segments": {
+      "columns": [
+        "id",
+        "session_id",
+        "execution_id",
+        "lane",
+        "digest",
+        "byte_count",
+        "ciphertext",
+        "created_at"
+      ],
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
     "notification_items": {
       "columns": [
         "id",
@@ -3484,6 +6135,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "notification_items",
+          "columns": [
+            [
+              "notification_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "oauth_state": {
@@ -3544,7 +6206,27 @@
         "tombstoned_at",
         "tombstone_reason"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "public_entries",
+          "columns": [
+            [
+              "public_entry_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "identity_provider_realms",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_client_registration_revisions": {
       "columns": [
@@ -3562,7 +6244,35 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "oidc_client_secret_versions",
+          "columns": [
+            [
+              "secret_version_id",
+              "id"
+            ],
+            [
+              "client_registration_id",
+              "client_registration_id"
+            ]
+          ]
+        },
+        {
+          "parent": "oidc_client_registrations",
+          "columns": [
+            [
+              "client_registration_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_client_registrations": {
       "columns": [
@@ -3576,7 +6286,35 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "oidc_client_registration_revisions",
+          "columns": [
+            [
+              "active_revision_id",
+              "id"
+            ],
+            [
+              "id",
+              "client_registration_id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "identity_provider_realms",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_client_secret_versions": {
       "columns": [
@@ -3591,7 +6329,18 @@
         "created_at",
         "retired_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "oidc_client_registrations",
+          "columns": [
+            [
+              "client_registration_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_identities": {
       "columns": [
@@ -3608,6 +6357,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "local_oidc_configs",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "oidc_jwks_snapshots": {
@@ -3622,7 +6382,31 @@
         "hard_expires_at",
         "status"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "oidc_metadata_snapshots",
+          "columns": [
+            [
+              "metadata_snapshot_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "identity_provider_realms",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_login_transactions": {
       "columns": [
@@ -3640,7 +6424,18 @@
         "consumed_at",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "local_oidc_configs",
+          "columns": [
+            [
+              "config_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_metadata_snapshots": {
       "columns": [
@@ -3663,7 +6458,18 @@
         "hard_expires_at",
         "status"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "identity_provider_realms",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "oidc_public_entry_bindings": {
       "columns": [
@@ -3688,25 +6494,99 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
-    },
-    "pbi_connection_legacy_0022": {
-      "columns": [
-        "id",
-        "team_id",
-        "name",
-        "tenant_id",
-        "workspace_id",
-        "dataset_id",
-        "master_upn",
-        "per_user_rls",
-        "auth_ref",
-        "token_hint",
-        "status",
-        "created_at",
-        "updated_at"
-      ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "oidc_callback_routes",
+          "columns": [
+            [
+              "callback_route_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ],
+            [
+              "public_entry_id",
+              "public_entry_id"
+            ]
+          ]
+        },
+        {
+          "parent": "public_entries",
+          "columns": [
+            [
+              "public_entry_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "oidc_metadata_snapshots",
+          "columns": [
+            [
+              "attested_metadata_snapshot_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "oidc_client_registration_revisions",
+          "columns": [
+            [
+              "attested_client_revision_id",
+              "id"
+            ],
+            [
+              "client_registration_id",
+              "client_registration_id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_identity_provider_binding_revisions",
+          "columns": [
+            [
+              "attested_binding_revision_id",
+              "id"
+            ],
+            [
+              "team_binding_id",
+              "team_binding_id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_identity_provider_bindings",
+          "columns": [
+            [
+              "team_binding_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ],
+            [
+              "client_registration_id",
+              "client_registration_id"
+            ]
+          ]
+        }
+      ]
     },
     "personal_mcp_binding": {
       "columns": [
@@ -3796,7 +6676,18 @@
         "risk",
         "selected"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "personal_mcp_connection",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "personal_slack_oauth_states": {
       "columns": [
@@ -3810,6 +6701,17 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "slack_connections",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "plan_steps": {
@@ -3843,7 +6745,18 @@
         "input_manifest_json",
         "agent_choice_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "plans",
+          "columns": [
+            [
+              "plan_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "plans": {
       "columns": [
@@ -4045,7 +6958,26 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "resource_change_receipt",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "actor_user_id",
+              "actor_user_id"
+            ],
+            [
+              "idempotency_key",
+              "idempotency_key"
+            ]
+          ]
+        }
+      ]
     },
     "resource_grants": {
       "columns": [
@@ -4076,7 +7008,18 @@
         "expires_at",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_tool_source",
+          "columns": [
+            [
+              "resource_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "scheduled_job_agent_binding": {
       "columns": [
@@ -4094,7 +7037,27 @@
         "confirmed_at",
         "row_version"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_assignment",
+          "columns": [
+            [
+              "assignment_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "scheduled_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "scheduled_job_runs": {
       "columns": [
@@ -4106,7 +7069,18 @@
         "status",
         "error"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "scheduled_jobs",
+          "columns": [
+            [
+              "job_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "scheduled_jobs": {
       "columns": [
@@ -4154,7 +7128,27 @@
         "pinned_at",
         "detached_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "session_lifecycle_operations": {
       "columns": [
@@ -4192,7 +7186,18 @@
         "updated_at",
         "committed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "session_lifecycle_operations",
+          "columns": [
+            [
+              "parent_operation_id",
+              "operation_id"
+            ]
+          ]
+        }
+      ]
     },
     "session_lifecycle_targets": {
       "columns": [
@@ -4214,7 +7219,45 @@
         "updated_at",
         "committed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "session_lifecycle_operations",
+          "columns": [
+            [
+              "source_operation_id",
+              "operation_id"
+            ]
+          ]
+        },
+        {
+          "parent": "session_lifecycle_operations",
+          "columns": [
+            [
+              "bound_operation_id",
+              "operation_id"
+            ]
+          ]
+        },
+        {
+          "parent": "session_lifecycle_operations",
+          "columns": [
+            [
+              "dependency_operation_id",
+              "operation_id"
+            ]
+          ]
+        },
+        {
+          "parent": "session_lifecycle_operations",
+          "columns": [
+            [
+              "parent_operation_id",
+              "operation_id"
+            ]
+          ]
+        }
+      ]
     },
     "sessions": {
       "columns": [
@@ -4268,7 +7311,9 @@
         "verdict_json",
         "risk_report_json",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "import_status",
+        "import_report_json"
       ],
       "owner_columns": [
         "user_id"
@@ -4300,7 +7345,18 @@
         "event_id",
         "received_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "slack_connections",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "slack_identity_bindings": {
       "columns": [
@@ -4312,6 +7368,17 @@
       ],
       "owner_columns": [
         "bowhead_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "slack_connections",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "slack_oauth_states": {
@@ -4322,7 +7389,18 @@
         "created_at",
         "redirect_uri"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "slack_connections",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "slack_workspace_bindings": {
       "columns": [
@@ -4332,7 +7410,18 @@
         "workspace_id",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "slack_connections",
+          "columns": [
+            [
+              "connection_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "smtp_outbox": {
       "columns": [
@@ -4394,6 +7483,26 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "subagent_resume_requests": {
@@ -4429,7 +7538,26 @@
         "compiler_version",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "system_agent_effective_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "agent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_brand_asset_metadata": {
       "columns": [
@@ -4448,7 +7576,18 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_branding_draft_copies": {
       "columns": [
@@ -4478,7 +7617,54 @@
         "preserved_by",
         "preserved_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "favicon_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "mark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_dark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_light_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_branding_revisions",
+          "columns": [
+            [
+              "original_base_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_branding_drafts": {
       "columns": [
@@ -4499,7 +7685,54 @@
         "updated_by",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "favicon_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "mark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_dark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_light_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_branding_revisions",
+          "columns": [
+            [
+              "base_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_branding_revisions": {
       "columns": [
@@ -4528,7 +7761,54 @@
         "published_by",
         "published_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "favicon_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "mark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_dark_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "logo_light_artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_branding_revisions",
+          "columns": [
+            [
+              "parent_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_branding_state": {
       "columns": [
@@ -4539,7 +7819,27 @@
         "updated_by",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_branding_revisions",
+          "columns": [
+            [
+              "fallback_revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_branding_revisions",
+          "columns": [
+            [
+              "active_revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_builtin_subagent_override": {
       "columns": [
@@ -4604,7 +7904,22 @@
         "resource_ref",
         "grant_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_capability_revision",
+          "columns": [
+            [
+              "capability_id",
+              "capability_id"
+            ],
+            [
+              "revision",
+              "revision"
+            ]
+          ]
+        }
+      ]
     },
     "team_capability_revision": {
       "columns": [
@@ -4616,7 +7931,18 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_capability",
+          "columns": [
+            [
+              "capability_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_chart_style_drafts": {
       "columns": [
@@ -4638,7 +7964,22 @@
         "updated_by",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_chart_styles",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "style_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_chart_style_registry_state": {
       "columns": [
@@ -4677,7 +8018,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_chart_styles",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "style_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_chart_styles": {
       "columns": [
@@ -4712,7 +8068,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_identity_provider_bindings",
+          "columns": [
+            [
+              "team_binding_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        }
+      ]
     },
     "team_identity_provider_bindings": {
       "columns": [
@@ -4729,7 +8100,48 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_identity_provider_binding_revisions",
+          "columns": [
+            [
+              "active_revision_id",
+              "id"
+            ],
+            [
+              "id",
+              "team_binding_id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "oidc_client_registrations",
+          "columns": [
+            [
+              "client_registration_id",
+              "id"
+            ],
+            [
+              "provider_id",
+              "provider_id"
+            ]
+          ]
+        },
+        {
+          "parent": "identity_provider_realms",
+          "columns": [
+            [
+              "provider_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_invite_tokens": {
       "columns": [
@@ -4760,7 +8172,18 @@
         "role",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_invite_tokens",
+          "columns": [
+            [
+              "invite_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_license": {
       "columns": [
@@ -4949,7 +8372,8 @@
         "duration_ms",
         "request_started_at",
         "completed_at",
-        "actual_model_id"
+        "actual_model_id",
+        "diagnostics_ciphertext"
       ],
       "owner_columns": []
     },
@@ -5143,7 +8567,39 @@
         "revision_id",
         "capability_id"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_capability",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "capability_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_draft": {
       "columns": [
@@ -5225,6 +8681,17 @@
       ],
       "owner_columns": [
         "owner_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_draft",
+          "columns": [
+            [
+              "draft_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "team_subagent_draft_usage": {
@@ -5272,7 +8739,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "fork_agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_fork_policy": {
       "columns": [
@@ -5284,7 +8766,22 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "source_agent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_notification_outbox": {
       "columns": [
@@ -5305,6 +8802,17 @@
       ],
       "owner_columns": [
         "recipient_user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release_event",
+          "columns": [
+            [
+              "release_event_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "team_subagent_release": {
@@ -5327,7 +8835,90 @@
         "activated_by",
         "activated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "agent_safety_report",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "agent_id"
+            ],
+            [
+              "safety_report_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "source_candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "predecessor_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_release_candidate": {
       "columns": [
@@ -5358,7 +8949,90 @@
         "updated_at",
         "plugin_versions_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "activated_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_safety_report",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "agent_id"
+            ],
+            [
+              "safety_report_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "base_live_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_release_event": {
       "columns": [
@@ -5372,7 +9046,56 @@
         "payload_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release_candidate",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "candidate_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_revision": {
       "columns": [
@@ -5391,7 +9114,22 @@
         "created_by",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_revision_behavior": {
       "columns": [
@@ -5404,7 +9142,26 @@
         "compiler_version",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_revision_extensions": {
       "columns": [
@@ -5415,7 +9172,26 @@
         "extension_policy_digest",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_revision",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "agent_id",
+              "subagent_id"
+            ],
+            [
+              "revision_ref",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_subagent_schema_meta": {
       "columns": [
@@ -5446,7 +9222,39 @@
         "created_at",
         "updated_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "team_subagent_release",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "subagent_id"
+            ],
+            [
+              "base_release_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "team_subagent",
+          "columns": [
+            [
+              "team_id",
+              "team_id"
+            ],
+            [
+              "subagent_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "team_tool_call_log": {
       "columns": [
@@ -5579,6 +9387,17 @@
       ],
       "owner_columns": []
     },
+    "terminal_authority_scope_epochs": {
+      "columns": [
+        "scope_kind",
+        "team_id",
+        "scope_ref",
+        "epoch",
+        "row_version",
+        "updated_at"
+      ],
+      "owner_columns": []
+    },
     "terminal_protocol_deployment_attestations": {
       "columns": [
         "attestation_id",
@@ -5605,7 +9424,18 @@
         "lease_expires_at",
         "heartbeat_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "terminal_protocol_deployment_attestations",
+          "columns": [
+            [
+              "deployment_attestation_id",
+              "attestation_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_agent_binding": {
       "columns": [
@@ -5625,6 +9455,35 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "primary_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "agent_assignment",
+          "columns": [
+            [
+              "assignment_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "turn_agent_execution": {
@@ -5649,7 +9508,27 @@
         "failure_code",
         "resolved_definition_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "parent_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_attachments": {
       "columns": [
@@ -5657,7 +9536,27 @@
         "artifact_id",
         "seq"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "artifacts",
+          "columns": [
+            [
+              "artifact_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_cancel_receipts": {
       "columns": [
@@ -5699,7 +9598,27 @@
         "ended_at",
         "failure_code"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_agent_execution",
+          "columns": [
+            [
+              "agent_execution_id",
+              "id"
+            ]
+          ]
+        },
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_citations": {
       "columns": [
@@ -5712,7 +9631,18 @@
         "kb_generation_id",
         "kb_source_check_state"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_control_decisions": {
       "columns": [
@@ -5741,7 +9671,18 @@
         "recovery_last_code",
         "control_outcome_code"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_decision_effects": {
       "columns": [
@@ -5762,7 +9703,18 @@
         "created_at",
         "applied_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_control_decisions",
+          "columns": [
+            [
+              "decision_id",
+              "decision_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_delivery_intents": {
       "columns": [
@@ -5781,7 +9733,18 @@
         "created_at",
         "delivered_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_terminal_receipts",
+          "columns": [
+            [
+              "receipt_id",
+              "receipt_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_effect_attempts": {
       "columns": [
@@ -5802,7 +9765,31 @@
         "settlement_id",
         "retention_state"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_effect_settlements",
+          "columns": [
+            [
+              "settlement_id",
+              "settlement_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        }
+      ]
     },
     "turn_effect_evidence_links": {
       "columns": [
@@ -5834,7 +9821,22 @@
         "tombstone_id",
         "expires_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_effect_retention_tombstones",
+          "columns": [
+            [
+              "tombstone_id",
+              "tombstone_id"
+            ],
+            [
+              "team_id",
+              "team_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_effect_retention_tombstones": {
       "columns": [
@@ -5871,9 +9873,30 @@
         "evidence_link_id",
         "evidence_digest",
         "evidence_recorded_at",
-        "created_at"
+        "created_at",
+        "billing_witness_ciphertext"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_effect_evidence_links",
+          "columns": [
+            [
+              "evidence_link_id",
+              "evidence_link_id"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_effect_attempts",
+          "columns": [
+            [
+              "attempt_id",
+              "attempt_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_event_proposals": {
       "columns": [
@@ -5894,7 +9917,22 @@
         "persisted_at",
         "persisted_event_seq"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        }
+      ]
     },
     "turn_events": {
       "columns": [
@@ -5961,7 +9999,18 @@
         "claim_authz_snapshot_digest",
         "billing_usage_json"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_kb_source_checks": {
       "columns": [
@@ -5971,7 +10020,18 @@
         "check_state",
         "checked_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_operation_usage": {
       "columns": [
@@ -5981,7 +10041,18 @@
         "tool_calls",
         "recorded_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_recovery_records": {
       "columns": [
@@ -6008,7 +10079,22 @@
         "created_at",
         "resolved_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        }
+      ]
     },
     "turn_space_instructions": {
       "columns": [
@@ -6032,7 +10118,18 @@
         "raw_json",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_candidate_events": {
       "columns": [
@@ -6046,7 +10143,22 @@
         "payload_json",
         "payload_digest"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_terminal_candidate_variants",
+          "columns": [
+            [
+              "candidate_id",
+              "candidate_id"
+            ],
+            [
+              "variant_key",
+              "variant_key"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_candidate_variants": {
       "columns": [
@@ -6065,7 +10177,18 @@
         "session_mutation_template_digest",
         "variant_digest"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_terminal_candidates",
+          "columns": [
+            [
+              "candidate_id",
+              "candidate_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_candidates": {
       "columns": [
@@ -6095,7 +10218,22 @@
         "prepared_at",
         "committed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_deletion_ledgers": {
       "columns": [
@@ -6123,7 +10261,22 @@
         "created_at",
         "deletion_digest"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_receipts": {
       "columns": [
@@ -6153,7 +10306,44 @@
         "projection_extensions_json",
         "committed_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_terminal_candidate_variants",
+          "columns": [
+            [
+              "candidate_id",
+              "candidate_id"
+            ],
+            [
+              "selected_variant_key",
+              "variant_key"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_generations",
+          "columns": [
+            [
+              "turn_id",
+              "turn_id"
+            ],
+            [
+              "generation",
+              "generation"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_terminal_candidates",
+          "columns": [
+            [
+              "candidate_id",
+              "candidate_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_terminal_session_mutations": {
       "columns": [
@@ -6172,7 +10362,31 @@
         "mutation_digest",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turn_terminal_candidate_variants",
+          "columns": [
+            [
+              "candidate_id",
+              "candidate_id"
+            ],
+            [
+              "selected_variant_key",
+              "variant_key"
+            ]
+          ]
+        },
+        {
+          "parent": "turn_terminal_receipts",
+          "columns": [
+            [
+              "receipt_id",
+              "receipt_id"
+            ]
+          ]
+        }
+      ]
     },
     "turn_trace_steps": {
       "columns": [
@@ -6187,7 +10401,18 @@
         "subagent_id",
         "created_at"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "turns",
+          "columns": [
+            [
+              "turn_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "turns": {
       "columns": [
@@ -6230,7 +10455,18 @@
         "knowledge_user_request",
         "operation_kind"
       ],
-      "owner_columns": []
+      "owner_columns": [],
+      "containment_foreign_keys": [
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
+      ]
     },
     "user_audit_log": {
       "columns": [
@@ -6268,6 +10504,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "user_session_pins": {
@@ -6278,6 +10525,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "user_session_views": {
@@ -6288,6 +10546,17 @@
       ],
       "owner_columns": [
         "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "sessions",
+          "columns": [
+            [
+              "session_id",
+              "id"
+            ]
+          ]
+        }
       ]
     },
     "user_settings": {
@@ -6378,165 +10647,6 @@
         "revision"
       ],
       "owner_columns": []
-    },
-    "account_owned_artifact_writes": {
-      "columns": [
-        "write_id",
-        "user_id",
-        "path",
-        "created_at"
-      ],
-      "owner_columns": [
-        "user_id"
-      ]
-    },
-    "agent_eval_alignment_loop": {
-      "columns": [
-        "id",
-        "team_id",
-        "agent_id",
-        "suite_id",
-        "owner_id",
-        "session_id",
-        "words_source",
-        "owner_words",
-        "words_by",
-        "origin_turn_id",
-        "judge_prompt_version",
-        "judge_model_fingerprint",
-        "pinned_at",
-        "state",
-        "baseline_comparison_id",
-        "draft_points_json",
-        "report_json",
-        "created_at",
-        "updated_at"
-      ],
-      "owner_columns": [
-        "owner_id"
-      ]
-    },
-    "agent_eval_alignment_question": {
-      "columns": [
-        "id",
-        "loop_id",
-        "point_id",
-        "point_text_hash",
-        "card_seq",
-        "row_index",
-        "answer_ref",
-        "turn_id",
-        "source_turn_id",
-        "answer_text",
-        "task_text",
-        "answer_excerpt",
-        "judge_met",
-        "judge_quote",
-        "judge_reason",
-        "graded_prompt_version",
-        "graded_model_fingerprint",
-        "pick_reason",
-        "replacement",
-        "owner_label",
-        "label_via",
-        "labelled_at",
-        "created_at"
-      ],
-      "owner_columns": []
-    },
-    "agent_eval_suite_review": {
-      "columns": [
-        "suite_revision_id",
-        "prompt_version",
-        "team_id",
-        "agent_id",
-        "result_json",
-        "created_at"
-      ],
-      "owner_columns": []
-    },
-    "document_canvas_inputs": {
-      "columns": [
-        "job_id",
-        "artifact_id",
-        "path",
-        "sha256",
-        "size_bytes",
-        "manifest_json",
-        "source_job_id",
-        "verified_at",
-        "cleanup_claimed_at",
-        "cleanup_after"
-      ],
-      "owner_columns": []
-    },
-    "model_context_conversation_heads": {
-      "columns": [
-        "session_id",
-        "generation_id",
-        "published_turn_id",
-        "published_turn_seq"
-      ],
-      "owner_columns": []
-    },
-    "model_context_generations": {
-      "columns": [
-        "id",
-        "session_id",
-        "execution_id",
-        "turn_id",
-        "lane",
-        "worker_generation",
-        "kind",
-        "parent_id",
-        "source_refs_json",
-        "snapshot_json",
-        "policy_json",
-        "origin_json",
-        "operation_id",
-        "completion_json",
-        "created_at"
-      ],
-      "owner_columns": []
-    },
-    "model_context_heads": {
-      "columns": [
-        "session_id",
-        "execution_id",
-        "lane",
-        "generation_id"
-      ],
-      "owner_columns": []
-    },
-    "continuation_payload_segments": {
-      "columns": ["kind", "owner_id", "ordinal", "session_id", "turn_id", "clarification_id", "checkpoint_id", "digest", "byte_count", "ciphertext"],
-      "owner_columns": []
-    },
-    "model_context_segments": {
-      "columns": [
-        "id",
-        "session_id",
-        "execution_id",
-        "lane",
-        "digest",
-        "byte_count",
-        "ciphertext",
-        "created_at"
-      ],
-      "owner_columns": []
-    },
-    "bowra_connect_pending": {
-      "columns": [
-        "token_hash",
-        "team_id",
-        "user_id",
-        "kind",
-        "payload_cipher",
-        "expires_at"
-      ],
-      "owner_columns": [
-        "user_id"
-      ]
     }
   },
   "secondary": {
@@ -6625,6 +10735,74 @@
         "membership_revision",
         "state",
         "created_at"
+      ],
+      "kb_source_navigation": [
+        "file_id",
+        "generation_id",
+        "membership_revision",
+        "labels_override",
+        "revision"
+      ],
+      "kb_source_descriptions": [
+        "id",
+        "file_id",
+        "team_id",
+        "membership_revision",
+        "generation_id",
+        "source_version",
+        "origin_key",
+        "method",
+        "schema_version",
+        "generator_version",
+        "revision",
+        "text",
+        "topics_json",
+        "chunks_json",
+        "coverage",
+        "provider",
+        "model",
+        "matrix_workspace_id",
+        "matrix_json",
+        "actor_user_id",
+        "updated_at"
+      ],
+      "kb_source_categories": [
+        "id",
+        "team_id",
+        "scope",
+        "scope_id",
+        "name",
+        "aliases_json",
+        "parent_id",
+        "revision",
+        "actor_user_id"
+      ],
+      "kb_source_category_files": [
+        "file_id",
+        "category_id",
+        "generation_id",
+        "membership_revision"
+      ],
+      "kb_source_description_jobs": [
+        "id",
+        "team_id",
+        "file_id",
+        "admission_key",
+        "actor_user_id",
+        "workspace_id",
+        "generation_id",
+        "source_version",
+        "membership_revision",
+        "manual_revision",
+        "assignment_fingerprint",
+        "state",
+        "lease_owner",
+        "lease_until",
+        "reserved_attempts",
+        "usage_json",
+        "error_code",
+        "created_at",
+        "updated_at"
       ]
     },
     "kb_doc_types.db": {

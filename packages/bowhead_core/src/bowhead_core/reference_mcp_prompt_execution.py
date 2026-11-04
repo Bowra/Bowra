@@ -62,6 +62,7 @@ from bowhead_core.reference_mcp_preparation import (
 from bowhead_core.skill_baseline_material import PreparedSkillBaseline, prepare_primary_skill_baseline, restore_skill_baseline
 from bowhead_core.skill_read_receiver import SkillReadReceiverBaseline, primary_skill_read_receiver, require_supported_skill_grants
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
+from bowhead_core.sqlite_domains import domain_database_path
 
 MCP_PROMPT_RESULT_RESOLUTION_SEQ = 2
 MCP_PROMPT_RESULT_IDEMPOTENCY_KEY = "reference:primary:mcp-prompt-results"
@@ -683,11 +684,11 @@ async def materialize_reference_mcp_prompt_results(
         not callable(fetch)
         or type(expected_generation) is not int
         or expected_generation < 1
-        or Path(index.db_path).resolve() != Path(access.db_path).resolve()
+        or Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(access.db_path, "core")).resolve()
     ):
         raise ValueError("reference_mcp_prompt_runtime_changed")
     bindings = AgentExecutionBindingStore(index.db_path)
-    async with open_shared_ctx(index.db_path) as db:
+    async with open_shared_ctx(domain_database_path(index.db_path, "execution")) as db:
         await db.execute("PRAGMA query_only=ON")
         await db.execute("BEGIN")
         try:
@@ -726,7 +727,7 @@ async def materialize_reference_mcp_prompt_results(
             # A prior remote call may have outlived a revocation, cancellation or
             # competing idempotent commit. Recheck before issuing another call;
             # the final write transaction still repeats the same checks.
-            async with open_shared_ctx(index.db_path) as db:
+            async with open_shared_ctx(domain_database_path(index.db_path, "execution")) as db:
                 await db.execute("PRAGMA query_only=ON")
                 await db.execute("BEGIN")
                 try:
@@ -762,7 +763,7 @@ async def materialize_reference_mcp_prompt_results(
                     await db.rollback()
         candidates.append(await fetch(resource, dict(arguments), source_revision))
 
-    async with open_shared_ctx(index.db_path) as db:
+    async with open_shared_ctx(domain_database_path(index.db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             epoch = await require_reference_request_scope(db, request_scope)
@@ -893,7 +894,7 @@ class McpPromptReferenceWorkerPreparation:
         expected_scope = ReferenceRequestScope(**scope.identity())
         if self.prepared.scope != expected_scope or self.prepared.policy_epoch != scope.policy_epoch:
             raise ValueError("reference_mcp_prompt_scope_changed")
-        if Path(self.index.db_path).resolve() != Path(self.access.db_path).resolve():
+        if Path(domain_database_path(self.index.db_path, "core")).resolve() != Path(domain_database_path(self.access.db_path, "core")).resolve():
             raise ValueError("reference_mcp_prompt_scope_changed")
         if await _row(db, "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_reference_mcp_prompt_composition'", ()) is None:
             raise ValueError("reference_mcp_prompt_composition_migration_required")
@@ -973,12 +974,15 @@ async def claim_reference_mcp_prompt_primary_for_worker(
 ) -> ReferencePrimaryWorkerClaim:
     """Prepare the current local Prompt scope, then claim it atomically."""
     scope = ReferenceRequestScope.model_validate(scope.model_dump(mode="python", warnings="error"))
-    if Path(index.db_path).resolve() != Path(access.db_path).resolve():
+    if Path(domain_database_path(index.db_path, "core")).resolve() != Path(domain_database_path(access.db_path, "core")).resolve():
         raise ValueError("reference_mcp_prompt_scope_changed")
-    if sources is not None and Path(sources.db_path).resolve() != Path(index.db_path).resolve():
+    if (
+        sources is not None
+        and Path(domain_database_path(sources.db_path, "core")).resolve() != Path(domain_database_path(index.db_path, "core")).resolve()
+    ):
         raise ValueError("reference_mcp_prompt_scope_changed")
     bindings = AgentExecutionBindingStore(index.db_path)
-    async with open_shared_ctx(index.db_path) as db:
+    async with open_shared_ctx(domain_database_path(index.db_path, "execution")) as db:
         await db.execute("PRAGMA query_only=ON")
         await db.execute("BEGIN")
         try:
@@ -1013,7 +1017,7 @@ async def claim_reference_mcp_prompt_primary_for_worker(
                 raise ValueError("reference_mcp_prompt_skill_baseline_unavailable")
 
             async def current_primary():
-                async with open_shared_ctx(index.db_path) as db:
+                async with open_shared_ctx(domain_database_path(index.db_path, "execution")) as db:
                     await db.execute("PRAGMA query_only=ON")
                     await db.execute("BEGIN")
                     return await read_reference_mcp_prompt_primary_in_connection(db, scope=stored_scope, turn_id=turn_id, bindings=bindings)

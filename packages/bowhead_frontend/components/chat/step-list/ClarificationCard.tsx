@@ -134,6 +134,8 @@ export interface ClarificationCardProps {
   onSubmitMulti: (payload: ClarificationMultiSubmit) => void;
   /** Let the model decide without a user-selected answer. */
   onSkip?: () => void;
+  /** Close the question without supplying an answer or continuing computation. */
+  onCancel?: () => void;
   /** Datarc workspace selection: "Remember my choice" checkbox at the footer start. */
   showRemember?: boolean;
   /** The initial checkbox value; missing values keep the existing default. */
@@ -192,6 +194,7 @@ export function ClarificationCard({
   onSubmitSingle,
   onSubmitMulti,
   onSkip,
+  onCancel,
   showRemember = false,
   rememberDefault = true,
   allowCustomAnswers = true,
@@ -202,6 +205,7 @@ export function ClarificationCard({
   unavailableReason = null,
   documentDraft = false,
 }: ClarificationCardProps) {
+  const common = useTranslations("common");
   const t = useTranslations("clarification");
   // Unchecked keeps the workspace choice scoped to this session.
   const [remember, setRemember] = useState(rememberDefault);
@@ -409,7 +413,10 @@ export function ClarificationCard({
             </label>
           ) : undefined
         }
-        secondary={onSkip ? [{ label: t(questions.length > 1 ? "skip.all_multi" : "skip.all"), onSelect: onSkip, disabled: locked }] : undefined}
+        secondary={[
+          ...(onCancel ? [{ label: common("cancel"), onSelect: onCancel, disabled: locked }] : []),
+          ...(onSkip ? [{ label: t(questions.length > 1 ? "skip.all_multi" : "skip.all"), onSelect: onSkip, disabled: locked }] : []),
+        ]}
         primary={{
           label: error ? t("retry") : primaryLabel,
           icon: error ? RotateCcw : undefined,

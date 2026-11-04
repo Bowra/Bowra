@@ -425,3 +425,28 @@ async def test_shared_list_hides_files_whose_own_space_the_peer_cannot_read(rbac
     got = client.get("/api/v1/files/?shared_with_me=1", headers=_H_PEER).json()
     assert [i["file_id"] for i in got["items"]] == [readable.id]
     assert got["total"] == 1
+
+
+async def test_disabled_file_sharing_suspends_reads_and_preserves_owner_revocation(app_client, monkeypatch) -> None:
+    from bowhead_core import share_service
+
+    client, store, _access = app_client
+    art = await _asset(store)
+    path = f"/api/v1/files/{art.id}"
+    assert client.post(path + "/share", json={"subject_kind": "workspace", "subject_id": _WS}, headers=_H_OWNER).status_code == 201
+    assert client.get(path, headers=_H_PEER).content == b"payload"
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    for suffix in ("", "/preview", "/representations/raw", "/representations/details"):
+        assert client.get(path + suffix, headers=_H_PEER).status_code in {403, 404}
+    assert client.get("/api/v1/files/?shared_with_me=1", headers=_H_PEER).json()["items"] == []
+    assert client.get(path, headers=_H_OWNER).content == b"payload"
+    assert client.get(path + "/shares", headers=_H_OWNER).json()["shares"]
+    response = client.post(path + "/share", json={"subject_kind": "team", "subject_id": _TEAM}, headers=_H_OWNER)
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"]["code"] == "content_sharing_disabled"
+    monkeypatch.setattr(share_service, "_content_sharing_cache", True)
+    assert client.get(path, headers=_H_PEER).content == b"payload"
+    monkeypatch.setattr(share_service, "_content_sharing_cache", False)
+    assert client.delete(path + f"/share/workspace/{_WS}", headers=_H_OWNER).status_code == 204
+    monkeypatch.setattr(share_service, "_content_sharing_cache", True)
+    assert client.get(path, headers=_H_PEER).status_code == 404

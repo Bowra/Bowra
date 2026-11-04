@@ -27,6 +27,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.chart.expression import validate_stored_composition
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.terminal_llm_invocation import detached_auxiliary_scope
 
 if TYPE_CHECKING:
@@ -573,6 +574,7 @@ class CanvasStore:
     _path: str = field(init=False)
 
     def __post_init__(self) -> None:
+        self.db_path = str(domain_database_path(self.db_path, "content"))
         self._path = str(self.db_path)
         # V4 Sprint 2 PRD-D-4-1: optional invalidation hook (injected by gateway main.py)
         # Signature: async (event_kind, canvas_id, section_id|None, new_payload|None) -> None
@@ -582,6 +584,10 @@ class CanvasStore:
         self._fts_enabled = True
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._path):
+            async with open_shared_ctx(self._path) as db:
+                await require_domain_schema(db, "content")
+            return
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self._path) as db:
             # i18n v1 R4: old-database ALTER must precede SCHEMA's CREATE INDEX...quarantined,
@@ -795,7 +801,7 @@ class CanvasStore:
             open_shared_ctx(self._path) as db,
             db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_deletions'") as cur,
         ):
-            if await cur.fetchone() is None:
+            if await cur.fetchone() is None and not domain_layout_active(self._path):
                 return "1"
         return f"NOT EXISTS(SELECT 1 FROM account_deletions retired WHERE retired.user_id={alias}.user_id)"
 

@@ -12,7 +12,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.agents.lead_orchestrator import _PUBLIC_TURN_FAILURE_CODES
 from bowhead_core.canvas_store import CanvasStore
@@ -93,6 +92,7 @@ from bowhead_core.types import TurnRequest
 from bowhead_core.user_store import UserStore
 from bowhead_router.invocation import PhysicalInvocationSpec
 from bowhead_router.types import TokenUsage
+from core_legacy_database import upgrade
 
 from bowhead_core import session_lifecycle as session_lifecycle_module
 
@@ -141,7 +141,7 @@ def _create_db(tmp_path: Path) -> str:
     with sqlite3.connect(path) as connection:
         connection.executescript(initial_schema("core"))
         connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(path) as connection:
         connection.execute("INSERT INTO teams(id,name,status,created_at) VALUES ('team_1','Team','active','t')")
         connection.execute(
@@ -1417,22 +1417,32 @@ async def test_root_error_is_safe_nonterminal_until_failed_done(tmp_path: Path) 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("lead_reason", "terminal_reason"),
+    [
+        ("wallclock_exceeded", "terminal_producer_timeout"),
+        ("knowledge_source_changed", "terminal_dependency_missing"),
+        ("tool_call_not_executed", "terminal_projection_missing"),
+    ],
+)
 async def test_failed_done_freezes_lead_reason_across_event_receipt_and_done(
     tmp_path: Path,
+    lead_reason: str,
+    terminal_reason: str,
 ) -> None:
     runtime = await _runtime(_create_db(tmp_path))
     await runtime.bus.emit(
         OrchestratorEvent(
             "turn_failed",
             "t_1",
-            {"reason_code": "wallclock_exceeded", "message": "internal detail"},
+            {"reason_code": lead_reason, "message": "internal detail"},
         )
     )
     await runtime.bus.emit(
         OrchestratorEvent(
             "done",
             "t_1",
-            {"status": "failed", "error": "wallclock_exceeded"},
+            {"status": "failed", "error": lead_reason},
         )
     )
 
@@ -1448,9 +1458,9 @@ async def test_failed_done_freezes_lead_reason_across_event_receipt_and_done(
     done = next(item for item in events if item.event_type == "done")
     with sqlite3.connect(runtime.store.db_path) as connection:
         receipt_reason = connection.execute("SELECT reason_code FROM turn_terminal_receipts WHERE turn_id='t_1'").fetchone()[0]
-    assert failed.payload["reason_code"] == "terminal_producer_timeout"
-    assert done.payload["reason"] == "terminal_producer_timeout"
-    assert receipt_reason == "terminal_producer_timeout"
+    assert failed.payload["reason_code"] == terminal_reason
+    assert done.payload["reason"] == terminal_reason
+    assert receipt_reason == terminal_reason
 
 
 def test_terminal_failure_compatibility_map_pins_every_public_lead_code() -> None:
@@ -4516,3 +4526,29 @@ async def test_password_and_logout_everywhere_advance_account_fence(
             """
         ).fetchone()
     assert epoch == (2,)
+
+
+@pytest.mark.anyio
+async def test_runtime_preserves_partial_delivery_separately_from_execution_status(tmp_path: Path) -> None:
+    runtime = await _runtime(_create_db(tmp_path))
+    await runtime.bus.emit(
+        OrchestratorEvent(
+            "tool_result",
+            "t_1",
+            {
+                "tool_name": "subagent_return",
+                "call_id": "reviewed",
+                "ok": True,
+                "result_inline": {"ok": True, "completion": "partial"},
+            },
+        )
+    )
+    await runtime.bus.emit(OrchestratorEvent("final_answer", "t_1", {"text": "Confirmed results retained. Store profitability remains unfulfilled."}))
+    await runtime.bus.emit(OrchestratorEvent("done", "t_1", {"status": "completed", "tokens_input": 0, "tokens_output": 0, "cost_usd": 0.0}))
+    assert runtime.bus.receipt.status is TerminalStatus.COMPLETED
+    context = TerminalReadContext("team_1", "s_1", "t_1", "u_1", runtime.identity.authz_snapshot_digest)
+    rows = await runtime.store.list_protocol_events(context)
+    recorded = next(row.payload for row in rows if row.event_type == "tool_result")
+    live = next(event.payload for event in runtime.bus.snapshot() if event.event_type == "tool_result")
+    assert recorded["result_inline"] == live["result_inline"] == {"ok": True, "completion": "partial"}
+    assert next(row.payload["status"] for row in rows if row.event_type == "done") == "completed"

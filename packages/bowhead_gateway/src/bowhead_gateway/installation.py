@@ -18,6 +18,7 @@ from bowhead_core.installation import (
     preflight_installation,
     read_installation,
 )
+from bowhead_core.sqlite_upgrade import _recover_rollback_journal, migration_lock
 
 from bowhead_gateway.edition_extensions import read_build_edition
 from bowhead_gateway.settings import get_settings
@@ -39,6 +40,12 @@ def prepare_installation(*, db_url: str, migration_command: str) -> None:
     """Refuse incompatible data before migrations, then record admitted provenance."""
     edition = read_build_edition()
     path = database_path(db_url)
+    core = Path(path)
+    if core.with_name(core.name + "-journal").is_file():
+        # Provenance is read-only; recover only SQLite's interrupted transaction
+        # before that read, without bypassing edition admission or a live lease.
+        with migration_lock(core.parent):
+            _recover_rollback_journal(core)
     preflight_installation(path, edition)
     if edition == "community":
         # Validate the persistent root before any migration or directory creation.

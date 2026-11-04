@@ -13,6 +13,7 @@ from pathlib import Path
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +32,7 @@ async def purge_expired_reference_material(db_path: str | Path, *, limit: int = 
     """
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise ValueError("reference_retention_limit_invalid")
-    async with open_shared_ctx(str(db_path)) as db:
+    async with open_shared_ctx(domain_database_path(str(db_path), "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             async with db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_reference_plans'") as cur:

@@ -8,6 +8,8 @@ import unicodedata
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
 CONTEXT_KEY = "question_round"
 # Card questions as shown to the user (localized option labels included), kept
 # beside the round marker so HTTP readers can render the card; the marker itself
@@ -179,7 +181,7 @@ async def available(ctx, *, questions=None, fallback=None) -> bool:
     if store is None:
         return False
     try:
-        async with aiosqlite.connect(store.db_path) as db:
+        async with diagnostic_connect(store.db_path) as db:
             await next_round(
                 db,
                 turn_id=ctx.turn_id,

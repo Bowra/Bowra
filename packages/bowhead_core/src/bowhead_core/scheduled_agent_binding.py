@@ -18,6 +18,7 @@ from typing import Literal
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import TeamSubagentAccessResolver
 
 ScheduledAgentBindingState = Literal["ready", "needs_reconfirm", "paused"]
@@ -63,7 +64,7 @@ class ScheduledAgentBinding:
 
 class ScheduledAgentBindingStore:
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "execution"))
 
     async def release_semantics_active(self) -> bool:
         """Whether exact release pinning is mandatory on this deployment.
@@ -76,7 +77,7 @@ class ScheduledAgentBindingStore:
         """
         from bowhead_core.team_subagent_store import release_semantics_active_conn
 
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             return await release_semantics_active_conn(db)
 
     async def prepare_current_team_binding(
@@ -89,7 +90,7 @@ class ScheduledAgentBindingStore:
     ) -> ScheduledAgentBindingSeed:
         """Read the current exact Team Agent release for an atomic job write."""
 
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             row = await _current_team_binding_row(
                 db,
@@ -103,7 +104,7 @@ class ScheduledAgentBindingStore:
         return _team_seed(row, confirmed_by=confirmed_by)
 
     async def read(self, job_id: str) -> ScheduledAgentBinding | None:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scheduled_job_agent_binding WHERE job_id=?",
@@ -122,7 +123,7 @@ class ScheduledAgentBindingStore:
         if not unique_ids:
             return {}
         placeholders = ",".join("?" for _ in unique_ids)
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM scheduled_job_agent_binding WHERE job_id IN ({placeholders})",  # noqa: S608 -- placeholders only
@@ -145,7 +146,7 @@ class ScheduledAgentBindingStore:
         not the stable Team Agent ID pauses for explicit user reconfirmation.
         """
 
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -197,7 +198,7 @@ class ScheduledAgentBindingStore:
     ) -> ScheduledAgentBinding:
         """Recheck a normalized pin and atomically pause on durable drift."""
 
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:

@@ -217,47 +217,54 @@ def build_required_assignments(
                 "judge": (judge.get("primary") if isinstance(judge, dict) else None),
             },
         }
-    resolved = resolve_tiers(tier_config)
-    #: Last tuple field = declaration-source override. Tier rows use None (continue consulting provider["models"]);
-    #: KB rows supply their own capability set: KB declarations already live in `kb.models[*].capability`;
-    #: see the comment below.
-    raw: list[tuple[str, str, str, tuple[Capability, ...], bool, frozenset[str] | None]] = [
-        (
-            "tier.primary",
-            resolved.primary.provider,
-            resolved.primary.model,
-            ("chat", "tool"),
-            True,
-            None,
-        ),
-        *[
+    raw: list[tuple[str, str, str, tuple[Capability, ...], bool, frozenset[str] | None]] = []
+    if (tier_config.get("tiers") or {}).get("primary"):
+        resolved = resolve_tiers(tier_config)
+        #: Last tuple field = declaration-source override. Tier rows use None (continue consulting provider["models"]);
+        #: KB rows supply their own capability set: KB declarations already live in `kb.models[*].capability`;
+        #: see the comment below.
+        raw = [
             (
-                "tier.primary_fallback",
-                ref.provider,
-                ref.model,
+                "tier.primary",
+                resolved.primary.provider,
+                resolved.primary.model,
                 ("chat", "tool"),
                 True,
                 None,
-            )
-            for ref in resolved.primary_fallbacks
-        ],
-        (
-            "tier.fast",
-            resolved.fast.provider,
-            resolved.fast.model,
-            ("chat",),
-            True,
-            None,
-        ),
-        (
-            "tier.judge",
-            resolved.judge.provider,
-            resolved.judge.model,
-            ("chat",),
-            True,
-            None,
-        ),
-    ]
+            ),
+            *[
+                (
+                    "tier.primary_fallback",
+                    ref.provider,
+                    ref.model,
+                    ("chat", "tool"),
+                    True,
+                    None,
+                )
+                for ref in resolved.primary_fallbacks
+            ],
+            (
+                "tier.fast",
+                resolved.fast.provider,
+                resolved.fast.model,
+                ("chat",),
+                True,
+                None,
+            ),
+            (
+                "tier.judge",
+                resolved.judge.provider,
+                resolved.judge.model,
+                ("chat",),
+                True,
+                None,
+            ),
+        ]
+    else:
+        for role in ("fast", "judge"):
+            ref = (tier_config.get("tiers") or {}).get(role) or {}
+            if ref.get("provider") and ref.get("model"):
+                raw.append((f"tier.{role}", ref["provider"], ref["model"], ("chat",), True, None))
     kb = config.get("kb") or {}
     kb_models = kb.get("models") or {}
     for capability, model_name in (kb.get("active") or {}).items():
@@ -269,6 +276,8 @@ def build_required_assignments(
         required: tuple[Capability, ...]
         if capability == "row_extractor":
             required = ("chat", "tool")
+        elif capability == "source_description":
+            required = ("chat",)
         elif capability in {"embed", "rerank", "vision"}:
             required = (capability,)  # type: ignore[assignment]
         else:

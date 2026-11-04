@@ -726,8 +726,8 @@ async def test_execute_tool_exception_emits_step_done_failure_orphan_prevention(
     assert done[0].payload["state"] == "failure"
     # step_done.error.type is the classification (tool_exception per our mapping)
     assert done[0].payload["error"]["type"] == "tool_exception"
-    assert done[0].payload["error"]["is_transient"] is True
-    assert "simulated tool boom" in done[0].payload["error"]["message_zh"]
+    assert done[0].payload["error"]["is_transient"] is False
+    assert done[0].payload["error"]["code"] == "tool_execution_failed"
 
 
 @pytest.mark.asyncio
@@ -1155,7 +1155,7 @@ async def test_tool_error_text_in_events_carries_no_sandbox_path(monkeypatch) ->
         if event.event_type in {"tool_result", "step_done"}:
             dumped = json.dumps(event.payload, default=str)
             assert "/srv/acme/bh-work" not in dumped
-            assert "output.pptx" in dumped
+            assert "tool_execution_failed" in dumped
 
 
 def test_host_path_redaction_matches_whole_path_prefixes_only(monkeypatch) -> None:
@@ -1201,7 +1201,7 @@ def test_host_path_redaction_leaves_urls_and_relative_paths_alone(monkeypatch, r
         # 116 s_beffa22dce1f: both showed "failed without a specific error".
         ("render_deck", {"ok": False, "error": "deck_render_not_admitted", "message": "Needs the original assignment."}, "deck_render_not_admitted"),
         ("agent_message", {"ok": False, "error": "collaboration_coordination_reply_only"}, "collaboration_coordination_reply_only"),
-        ("agent_message", {"ok": False, "error": "some unlisted prose"}, None),
+        ("agent_message", {"ok": False, "error": "some unlisted prose"}, "tool_execution_failed"),
     ],
 )
 async def test_failed_step_carries_only_a_listed_finite_code(tool_name: str, result: dict, code: str | None) -> None:
@@ -1227,7 +1227,7 @@ async def test_failed_step_carries_only_a_listed_finite_code(tool_name: str, res
     tool_result = next(event.payload for event in captured if event.event_type == "tool_result")
     if tool_name == "agent_message":
         # The mailbox never reaches ordinary Tool events; only the finite code does.
-        assert tool_result["result_inline"] == ({"ok": False, "error": code} if code else {"ok": False})
+        assert tool_result["result_inline"] == ({"ok": False, "error": code} if code and code != "tool_execution_failed" else {"ok": False})
 
 
 def test_cap_reason_names_the_counted_failures_instead_of_guessing_datarc() -> None:
@@ -1256,3 +1256,42 @@ def test_every_public_step_code_has_localized_copy() -> None:
     trace = (Path(__file__).resolve().parents[2] / "bowhead_frontend/components/chat/step-list/AgentTrace.tsx").read_text(encoding="utf-8")
     block = trace.split("const COLLABORATION_AND_DECK_ERROR_KEYS", 1)[1].split("};", 1)[0]
     assert set(re.findall(r"^\s+([a-z_]+): \"", block, flags=re.M)) == PUBLIC_STEP_ERROR_CODES
+
+
+@pytest.mark.asyncio
+async def test_long_failed_execution_persists_same_diagnostic_for_live_and_replay(tmp_path) -> None:
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    store = TurnLogStore(tmp_path / "events.db")
+    await store.initialize()
+    live: list[OrchestratorEvent] = []
+
+    async def sink(event: OrchestratorEvent) -> None:
+        await store.record(turn_id=event.turn_id, event_type=event.event_type, payload=event.payload)
+        live.append(event)
+
+    async def failed_execution(args: dict, ctx: ToolExecutionContext) -> dict:
+        return {"ok": True, "result_json": {"ok": False, "exit_code": 1, "stdout": "retained output " * 2000, "stderr": "KeyError: 'profit'"}}
+
+    runner = _make_runner({"compute_fixture": failed_execution})
+    bus = TurnEventBus(log_sink=sink, persist_before_live=True)
+    await runner._execute_tool(
+        ToolCall(id="call_long_failure", name="compute_fixture", arguments={}),
+        _make_ctx(),
+        bus,
+        parent_turn_id="t_test",
+        subagent_id="analyst",
+        running_profile="lead",
+    )
+    await bus.emit(OrchestratorEvent(event_type="done", turn_id="t_test", payload={"status": "completed"}))
+    tool = next(event.payload for event in live if event.event_type == "tool_result")
+    step = next(event.payload for event in live if event.event_type == "step_done")
+    assert tool["ok"] is False
+    assert step["state"] == "failure"
+    assert step["result_inline"] is None
+    assert step["error"]["code"] == "tool_code_failed"
+    assert tool["diagnostics"] == step["error"]["diagnostics"]
+    assert "missing_key=profit" in tool["diagnostics"]["safe_detail"]
+    replay = await store.list_events("t_test")
+    replay_step = next(event.payload for event in replay if event.event_type == "step_done")
+    assert replay_step["error"] == step["error"]

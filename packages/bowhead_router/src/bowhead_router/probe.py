@@ -7,7 +7,7 @@ import math
 import socket
 import ssl
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 import httpx2
@@ -98,6 +98,7 @@ class ProbeResult:
     duration_ms: int
     vector_dimension: int | None = None
     actual_model_id: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
     @property
     def terminal_state(self) -> ProbeTerminalState:
@@ -143,8 +144,10 @@ def _probe_contract_version(
     if adapter_type == "azure_openai" and capability in {"chat", "vision"} and uses_max_completion_tokens(model_id):
         # Bump chat to v3 for streaming; vision shape is unchanged, so keep v2.
         return f"azure-gpt5-{capability}-{'v3' if capability == 'chat' else 'v2'}"
-    if adapter_type == "custom_http" and capability in {"chat", "vision"} and uses_max_completion_tokens(model_id):
-        return f"custom-http-gpt5-{capability}-{'v3' if capability == 'chat' else 'v2'}"
+    if adapter_type == "custom_http" and capability == "chat":
+        return "custom-http-chat-v4"
+    if adapter_type == "custom_http" and capability == "vision" and uses_max_completion_tokens(model_id):
+        return "custom-http-gpt5-vision-v2"
     return _PROBE_CONTRACTS[capability]
 
 
@@ -364,7 +367,9 @@ class CompatibleProbeRegistry:
                         "tools": body.get("tools"),
                         "tool_choice": body.get("tool_choice"),
                         "stream": probe_stream,
-                        "max_output_tokens": body.get(
+                        "max_output_tokens": 1024
+                        if capability == "chat"
+                        else body.get(
                             "max_completion_tokens",
                             (_GPT5_PROBE_MAX_OUTPUT_TOKENS if gpt5_reasoning_probe else body.get("max_tokens")),
                         ),
@@ -402,7 +407,8 @@ class CompatibleProbeRegistry:
             policy = effective_policy(model_spec(provider, model_id), capability)
             budget = policy.get("thinking_budget") or 0
             try:
-                body = compile_request_body(definition, synthetic_request(model_id, capability, max_output_tokens=max(128, budget + 128)))
+                probe_budget = 1024 if adapter_type == "custom_http" and capability == "chat" else 128
+                body = compile_request_body(definition, synthetic_request(model_id, capability, max_output_tokens=max(probe_budget, budget + 128)))
                 output = body.get("max_output_tokens", body.get("max_completion_tokens", body.get("max_tokens")))
                 thinking = body.get("thinking")
                 wire_budgets = [budget, body.get("thinking_budget"), thinking.get("budget_tokens") if isinstance(thinking, dict) else None]
@@ -595,13 +601,28 @@ class CompatibleProbeRegistry:
         # name rewriting. Machines cannot distinguish benign aliases from silent fallbacks, so record only facts: persist observations
         # (`actual_model_id` is visible throughout from 0018), and annotate name mismatches in the overview with
         # "Server returned: X", leaving judgment to people. `_classify_success` still determines actual capability failures.
-        return _classify_success(
+        classified = _classify_success(
             plan,
             payload,
             status=status,
             duration_ms=max(0, int((time.monotonic() - started) * 1000)),
             actual_model=actual_model,
         )
+        if classified.code == "empty_completion":
+            from bowhead_router.probe_diagnostics import empty_completion_diagnostics
+
+            classified = replace(
+                classified,
+                diagnostics=empty_completion_diagnostics(
+                    body=plan.body_shape,
+                    adapter_type=plan.transport.adapter_type,
+                    raw=bytes(raw),
+                    # Custom credential headers may have arbitrary names.
+                    secret_values=tuple(component.value for component in plan.transport.secret_components)
+                    + tuple(materialize_transport_headers(plan.transport).values()),
+                ),
+            )
+        return classified
 
 
 def not_testable_result() -> ProbeResult:

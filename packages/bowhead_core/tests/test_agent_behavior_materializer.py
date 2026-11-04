@@ -5,13 +5,13 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_behavior_materializer import AgentBehaviorBackfillService, AgentBehaviorMaterializer
 from bowhead_core.agent_dependency_compiler import (
     AgentDependencyCompilation,
     AgentRiskAssessment,
     ExactSkillRuntimeScope,
 )
+from core_legacy_database import upgrade
 
 _HASH_A = "sha256:" + "a" * 64
 _HASH_B = "sha256:" + "b" * 64
@@ -21,7 +21,7 @@ _TIMESTAMP = "2026-09-06T00:00:00+00:00"
 
 def _migrated_db(tmp_path: Path) -> Path:
     requested = tmp_path / "requested.db"
-    assert upgrade(f"sqlite+aiosqlite:///{requested}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
     return tmp_path / "bowhead.db"
 
 

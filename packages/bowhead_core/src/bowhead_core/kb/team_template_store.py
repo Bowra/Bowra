@@ -21,6 +21,8 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS kb_team_templates (
     entry_id             TEXT PRIMARY KEY,          -- ot_<uuid12>
@@ -71,7 +73,7 @@ class KbTeamTemplateStore:
         self._db_path = str(db_path)
 
     async def initialize(self) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             for stmt in _SCHEMA.split(";"):
                 stmt = stmt.strip()
                 if stmt:
@@ -98,7 +100,7 @@ class KbTeamTemplateStore:
         published_at**（归属=首次发布者，tech-design §3.3）。
         """
         now = _now()
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -148,7 +150,7 @@ class KbTeamTemplateStore:
 
     async def list_live(self, team_id: str) -> list[TeamTemplateRow]:
         """列出组织内所有未撤销条目（纯 team_id 过滤，IDOR-safe）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_team_templates WHERE team_id=? AND revoked_at IS NULL ORDER BY published_at DESC",
@@ -159,7 +161,7 @@ class KbTeamTemplateStore:
 
     async def get(self, entry_id: str, *, team_id: str) -> TeamTemplateRow | None:
         """team-keyed 取单条（跨组织 entry → None → 调用方统一 404，堵枚举 oracle）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM kb_team_templates WHERE entry_id=? AND team_id=?",
@@ -170,7 +172,7 @@ class KbTeamTemplateStore:
 
     async def revoke(self, entry_id: str, *, team_id: str) -> bool:
         """软撤销（team-keyed）。已撤销的 no-op（rowcount 0）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_team_templates SET revoked_at=? WHERE entry_id=? AND team_id=? AND revoked_at IS NULL",
                 (_now(), entry_id, team_id),
@@ -182,7 +184,7 @@ class KbTeamTemplateStore:
     async def revoke_by_source(self, source_doc_type_id: str) -> bool:
         """源删级联专用：撤销某源 doc_type 的库条目（best-effort，无 team 参数——
         由 `delete_doc_type` 钩子对已授权的删除调用，见 tech-design §5.3）。"""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "UPDATE kb_team_templates SET revoked_at=? WHERE source_doc_type_id=? AND revoked_at IS NULL",
                 (_now(), source_doc_type_id),

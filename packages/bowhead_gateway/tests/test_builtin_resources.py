@@ -8,7 +8,6 @@ import aiosqlite
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agents._generated.tool_kinds import USER_VISIBLE_TOOLS
 from bowhead_core.system_plugins import latest_builtin_plugin
 from bowhead_core.team_plugin_store import TeamPluginStore
@@ -17,25 +16,29 @@ from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.user_store import UserStore, _id, _now
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
+from gateway_legacy_database import upgrade
 
 _SECRET = "test_builtin_resources_secret_32b"
 
 
 def _client(app, user_id: str) -> httpx2.AsyncClient:
     token = jwt.encode({"sub": user_id, "team_id": "team_a", "iat": int(time.time()), "exp": int(time.time()) + 3600}, _SECRET, algorithm="HS256")
-    return httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw", cookies={"bowhead_jwt": token})
+    return httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://gw", cookies={"bowhead_jwt": token}, headers={"Origin": "http://gw"}
+    )
 
 
 @pytest.fixture
-async def context(tmp_path, monkeypatch):
+async def context(tmp_path, monkeypatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", _SECRET)
     monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1")
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     store = UserStore(str(path))
     await store.initialize()
+    await complete_community_http_installation(store)
     now = _now()
     async with aiosqlite.connect(store.db_path) as db:
         await db.execute("INSERT INTO teams(id,name,status,created_at) VALUES ('team_a','team_a','active',?)", (now,))
@@ -52,6 +55,7 @@ async def context(tmp_path, monkeypatch):
     app = create_app()
     app.state.settings = Settings()
     app.state.user_store = store
+    await complete_community_http_installation(store, app=app)
     app.state.team_settings_store = TeamSettingsStore(str(path))
     app.state.user_settings_store = UserSettingsStore(str(path))
     await app.state.team_settings_store.init()

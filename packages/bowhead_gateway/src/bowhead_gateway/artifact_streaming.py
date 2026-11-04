@@ -128,6 +128,11 @@ async def artifact_streaming_response(
         limits = await load_team_limits(getattr(request.app.state, "team_settings_store", None), team_id)
         headers[HTML_PREVIEW_LIMIT_HEADER] = str(limits.html_max_bytes)
         headers["Cache-Control"] = "private, no-store"
+        # Fetching bytes into the trusted preview does not inherit this policy.
+        # If navigation ever renders this response, it must have no app origin
+        # or executable content. HTTP policy does not travel with saved originals.
+        headers["Content-Security-Policy"] = "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'"
+        headers["Referrer-Policy"] = "no-referrer"
     status_code = 200
     if requested is not None:
         status_code = 206

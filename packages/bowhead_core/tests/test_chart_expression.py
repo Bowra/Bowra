@@ -32,11 +32,16 @@ from test_export_ir import _fixture_snapshot
 def _args() -> dict:
     return {
         "data_artifact_id": "art_aaaaaaaaaaaa",
-        "hint": "compare",
         "title": "Performance",
         "views": [
-            {"id": "trend", "title": "Revenue and cost", "hint": "trend", "series": ["revenue", "cost"], "force_kind": "line"},
-            {"id": "details", "title": "Exact values", "hint": "raw", "series": ["revenue", "cost"], "force_kind": "table"},
+            {
+                "id": "trend",
+                "title": "Revenue and cost",
+                "axes": {"x": "month", "y": ["revenue", "cost"], "x_scale": "category"},
+                "group_by": [],
+                "force_kind": "line",
+            },
+            {"id": "details", "title": "Exact values", "force_kind": "table"},
         ],
         "layout": {"type": "stack", "children": [{"view": "trend"}, {"view": "details"}]},
     }
@@ -64,7 +69,6 @@ async def test_chart_authoring_saves_equal_peers_by_default_and_preserves_explic
 
 async def test_explicit_child_encodings_do_not_require_redundant_root_hint() -> None:
     args = _args()
-    args.pop("hint")
     args["layout"] = "split"
     before = copy.deepcopy(args)
     canvas = _CapturingCanvasStore()
@@ -236,7 +240,7 @@ async def test_composition_uses_one_native_section_and_original_source() -> None
 @pytest.mark.asyncio
 async def test_bad_second_view_does_not_append_a_partial_chart() -> None:
     args = _args()
-    args["views"][1]["series"] = ["invented"]
+    args["views"][1]["columns"] = ["invented"]
     art = _FakeArtifact(id=args["data_artifact_id"], filename="monthly.csv", path="monthly.csv")
     store = _RichArtifactStore([art], {art.path: b"month,revenue,cost\n2026-01,120,80\n2026-02,160,90\n"})
     canvas = _CapturingCanvasStore()
@@ -277,7 +281,7 @@ async def test_one_declared_view_normalizes_to_the_existing_single_chart() -> No
     args["force_kind"] = "line"
     canvas.appended_payload = None
     result = await _add_chart(args, _StubCtx(artifact_store=store, canvas_store=canvas))
-    assert "omits the primary" in result["error"]
+    assert "does not accept" in result["error"]
     assert canvas.appended_payload is None
 
 
@@ -304,13 +308,18 @@ async def test_composition_calculates_once_and_child_transforms_do_not_mutate_si
     store.put_bytes = put
     args = {
         "data_artifact_id": art.id,
-        "hint": "compare",
         "title": "Regional results",
         "derived_columns": [{"key": "gap", "header": "Gap", "expression": "a-b", "inputs": {"a": "revenue", "b": "cost"}, "unit": "USD"}],
         "column_display": {"gap": {"decimal_places": 3, "decimal_mode": "fixed"}},
         "views": [
-            {"id": "rank", "title": "Revenue ranking", "hint": "rank", "series": ["revenue"], "sort_by": "revenue", "limit": 1, "force_kind": "bar"},
-            {"id": "detail", "title": "Original order and gap", "hint": "raw", "series": ["cost", "gap"], "force_kind": "table"},
+            {
+                "id": "rank",
+                "title": "Revenue values",
+                "axes": {"x": "region", "y": ["revenue"], "x_scale": "category"},
+                "group_by": [],
+                "force_kind": "bar",
+            },
+            {"id": "detail", "title": "Original order and gap", "force_kind": "table"},
         ],
     }
     result = await _add_chart(args, _StubCtx(artifact_store=store, canvas_store=canvas))
@@ -319,7 +328,7 @@ async def test_composition_calculates_once_and_child_transforms_do_not_mutate_si
     assert store.backend.read_paths == [art.path]
     assert len(writes) == 1
     root = canvas.appended_payload["spec"]
-    assert [row["region"] for row in root["views"][0]["spec"]["rows"]] == ["B"]
+    assert [row["region"] for row in root["views"][0]["spec"]["rows"]] == ["A", "B", "C"]
     assert [row["region"] for row in root["views"][1]["spec"]["rows"]] == ["A", "B", "C"]
     assert [row["gap"] for row in root["views"][1]["spec"]["rows"]] == [9, 25, 17]
     gap = next(c for c in root["views"][1]["spec"]["columns"] if c["key"] == "gap")
@@ -384,17 +393,16 @@ async def test_complete_root_size_is_checked_before_canvas_allocation() -> None:
     result = await _add_chart(
         {
             "data_artifact_id": art.id,
-            "hint": "raw",
             "title": "Complete size",
             "views": [
-                {"id": "first", "title": "First", "hint": "raw", "series": ["revenue"], "sort_by": "revenue", "limit": 30, "force_kind": "table"},
-                {"id": "second", "title": "Second", "hint": "raw", "series": ["cost"], "sort_by": "cost", "limit": 20, "force_kind": "table"},
+                {"id": "first", "title": "First", "force_kind": "table"},
+                {"id": "second", "title": "Second", "force_kind": "table"},
             ],
         },
         _StubCtx(artifact_store=store, canvas_store=canvas),
     )
     assert result["error_kind"] == "invalid_chart_expression"
-    assert "complete chart exceeds" in result["error"]
+    assert "exceed" in result["error"]
     assert canvas.appended_payload is None
 
 
@@ -435,9 +443,7 @@ async def test_calculation_materializes_full_dataset_for_table_completion() -> N
     args = {
         "data_artifact_id": art.id,
         "title": "Difference",
-        "hint": "raw",
         "force_kind": "table",
-        "series": ["gap"],
         "derived_columns": [
             {"key": "gap", "header": "Revenue minus cost", "expression": "a-b", "inputs": {"a": "revenue", "b": "cost"}, "unit": "USD"}
         ],

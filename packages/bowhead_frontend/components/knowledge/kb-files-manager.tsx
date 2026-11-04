@@ -45,6 +45,7 @@ import {
   fetchKbFiles,
   formatBytes,
   getKbFile,
+  prepareKbChatAttachment,
   loadKbFileScopePreference,
   reparseKbFile,
   saveKbFileScopePreference,
@@ -682,8 +683,15 @@ export function KbFilesManager({
   // qualify: composer attachment validation accepts only that user's uploads in that space, rejecting other users' files.
   const canUseInChat = (f: KbFileDTO) =>
     kbFileState(f) === "ready" && f.source_health?.state !== "paused" && me != null && f.uploaded_by === me.user_id && f.workspace_id === activeSpaceId;
-  const sendToChat = (f: KbFileDTO) =>
-    handoffAttachmentsToNewChat([{ fileId: f.artifact_id, filename: f.filename, size: f.size_bytes, mime: f.mime_type }]);
+  const sendToChat = async (f: KbFileDTO) => {
+    try {
+      const attachment = await prepareKbChatAttachment(f.file_id);
+      handoffAttachmentsToNewChat([attachment]);
+    } catch (reason) {
+      closeDrawer();
+      setError(t(kbFileError(reason, "load")));
+    }
+  };
   const drawerScopeLabel = (f: KbFileDTO) => {
     const s = (f.scope as string) === "workspace" ? "space" : f.scope;
     if (s === "personal") return undefined;

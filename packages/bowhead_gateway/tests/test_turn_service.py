@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import bowhead_gateway.routes.chat as chat_mod
 import bowhead_gateway.turn_service as ts_mod
 import pytest
-from bowhead_cli.migrate import TARGET_FILES, upgrade
 from bowhead_core.events import TerminalDurabilityAbort
 from bowhead_core.terminal_protocol import TerminalScope
 from bowhead_gateway.turn_service import (
@@ -32,6 +31,7 @@ from bowhead_gateway.turn_service import (
 from bowhead_gateway.turn_service import (
     spawn_turn as _real_spawn_turn,
 )
+from gateway_legacy_database import TARGET_FILES, upgrade
 
 
 def test_legacy_untracked_orphan_age_tracks_effective_lead_cap(
@@ -651,6 +651,7 @@ class FakeTurnReq:
         self.workspace_id = "ws1"
         self.user_id = "u1"
         self.text = "hello"
+        self.document_clarification_id = None
 
 
 async def test_admit_legacy_chat_execution_uses_injected_registry() -> None:
@@ -749,7 +750,7 @@ async def test_concurrent_cross_registry_spawn_runs_one_worker(
         return True
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     await store.ensure_session(
@@ -1584,7 +1585,7 @@ async def test_real_cancel_after_claim_recovers_before_worker_schedule(
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)
@@ -1673,7 +1674,7 @@ async def test_real_preworker_revalidation_failure_recovers_without_worker(
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)
@@ -2145,7 +2146,7 @@ async def test_real_local_stop_monitor_recovers_missing_wire_immediately(
 
     monkeypatch.setenv("BOWHEAD_SSE_FANOUT", fanout_flag)
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)
@@ -2440,7 +2441,7 @@ async def test_spawn_turn_terminal_log_failure_waits_for_expiry_recovery(
     from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     log_store = TurnLogStore(core_path)
@@ -2562,7 +2563,7 @@ async def test_spawn_failure_handoff_is_idempotent_after_recovery(tmp_path) -> N
     from bowhead_core.session_store import SessionStore
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     session_id = "s_double_spawn_failure_handoff"
@@ -2614,7 +2615,7 @@ async def _build_real_paused_resume_store(tmp_path, *, suffix: str, bounded: boo
     from bowhead_core.turn_log_store import TurnLogStore
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     session_id = f"s_resume_preworker_{suffix}"
@@ -2888,7 +2889,7 @@ async def test_real_store_idle_pause_can_spawn_and_rollback_resume(
         return True
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES)
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES)
     store = SessionStore(core_path)
     await store.initialize()
     session_id = "s_real_idle_resume"
@@ -3550,3 +3551,67 @@ def test_resume_without_a_language_snapshot_uses_the_product_default() -> None:
     assert tr is not None
     assert tr.language_context == LanguageContext.default()
     assert tr.language_context.output_language == "en-US"
+
+
+async def test_gateway_shutdown_finishes_owned_workers_and_releases_domain_leases(tmp_path, monkeypatch) -> None:
+    from bowhead_core.sqlite_domain_runtime import DomainConnection, guard_connection
+    from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
+
+    for domain in ("core", "execution", "content", "notifications", "observability"):
+        with sqlite3.connect(tmp_path / DOMAIN_TARGET_FILES[domain]) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            if domain == "core":
+                connection.execute("CREATE TABLE users(id TEXT,status TEXT)")
+                connection.execute("INSERT INTO users VALUES('u','active')")
+
+    core_path = tmp_path / "bowhead.db"
+    orchestrator = FakeSpawnOrchestrator(FakeDispatchStore())
+    orchestrator._gateway_turn_tasks = {}
+    other_orchestrator = FakeSpawnOrchestrator(FakeDispatchStore())
+    other_orchestrator._gateway_turn_tasks = {}
+    lease_acquired = asyncio.Event()
+    foreign_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def retained_worker(current_orchestrator, _request, **_kwargs):
+        if current_orchestrator is other_orchestrator:
+            foreign_started.set()
+            await release.wait()
+            return
+        connection = sqlite3.connect(tmp_path / DOMAIN_TARGET_FILES["execution"], factory=DomainConnection, uri=True)
+        try:
+            guard_connection(connection, core_path, "execution")
+            with connection.execute("SELECT status FROM users") as cursor:
+                assert cursor.fetchone() == ("active",)
+                lease_acquired.set()
+                await release.wait()
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(chat_mod, "_run_turn_and_cleanup", retained_worker)
+    worker = await spawn_turn(orchestrator, FakeTurnReq("s_owned", "t_owned"))
+    foreign = await spawn_turn(other_orchestrator, FakeTurnReq("s_other", "t_other"))
+    try:
+        await lease_acquired.wait()
+        await foreign_started.wait()
+        with sqlite3.connect(core_path, factory=DomainConnection, uri=True) as writer:
+            guard_connection(writer, core_path, "core")
+            with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+                writer.execute("UPDATE users SET status='deleted'")
+            writer.rollback()
+            await ts_mod.shutdown_turn_workers(orchestrator)
+            assert worker.done()
+            assert not foreign.done(), "Stopping one Gateway must not cancel another Gateway's worker"
+            assert not orchestrator._gateway_turn_tasks
+            writer.execute("UPDATE users SET status='deleted'").close()
+            writer.commit()
+        before = len(orchestrator.session_store.claim_calls)
+        with pytest.raises(RuntimeError, match="gateway_turn_workers_stopping"):
+            await spawn_turn(orchestrator, FakeTurnReq("s_late", "t_late"))
+        assert len(orchestrator.session_store.claim_calls) == before
+    finally:
+        release.set()
+        await asyncio.gather(worker, foreign, return_exceptions=True)
+        for task in tuple(chat_mod._inflight_tasks):
+            if task.get_name().endswith((":t_owned", ":t_other")):
+                await task

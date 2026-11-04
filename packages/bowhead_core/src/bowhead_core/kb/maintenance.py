@@ -11,6 +11,7 @@ import aiosqlite
 
 from bowhead_core.kb.files_store import _row_to_dto
 from bowhead_core.kb.generations import now_iso
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 OBSERVATION_TTL_S = 300
 
@@ -44,7 +45,7 @@ class KbMaintenanceStore:
         self.path = str(path)
 
     async def scan_page(self, *, limit: int = 20):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             row = await (await db.execute("SELECT value FROM kb_maintenance_state WHERE key='source_scan'")).fetchone()
             after = row[0] if row else ""
@@ -54,7 +55,7 @@ class KbMaintenanceStore:
             return [_row_to_dto(row) for row in rows]
 
     async def checkpoint(self, after: str):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute(
                 "INSERT INTO kb_maintenance_state VALUES ('source_scan',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (after,)
             )
@@ -71,7 +72,7 @@ class KbMaintenanceStore:
             "index_version": index_version,
         }
         item.update({key: getattr(file, key) for key in ("team_id", "workspace_id", "scope", "scope_id")})
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute(
                 "UPDATE kb_files SET source_observation_json=? WHERE file_id=? AND team_id=? AND workspace_id=? AND scope=? AND scope_id=? AND version=? AND artifact_id=? AND active_generation_id IS ? AND soft_deleted_at IS NULL",
                 (
@@ -91,7 +92,7 @@ class KbMaintenanceStore:
     async def create_job(self, *, team_id: str, workspace_id: str, user_id: str, items: list[dict]) -> str:
         job_id = "kbj_" + uuid.uuid4().hex
         stamp = now_iso()
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             count = await (
                 await db.execute("SELECT count(*) FROM kb_rebuild_jobs WHERE team_id=? AND state IN ('running','cancelling')", (team_id,))
@@ -106,7 +107,7 @@ class KbMaintenanceStore:
         return job_id
 
     async def latest_job_id(self, *, team_id: str, workspace_id: str, user_id: str) -> str | None:
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             row = await (
                 await db.execute(
                     "SELECT job_id FROM kb_rebuild_jobs WHERE team_id=? AND workspace_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
@@ -116,7 +117,7 @@ class KbMaintenanceStore:
             return row[0] if row else None
 
     async def get_job(self, job_id: str):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             row = await (await db.execute("SELECT * FROM kb_rebuild_jobs WHERE job_id=?", (job_id,))).fetchone()
         if not row:
@@ -127,7 +128,7 @@ class KbMaintenanceStore:
         return item
 
     async def progress(self, job_id: str, cursor: int, outcomes: list[dict]):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute(
                 "UPDATE kb_rebuild_jobs SET cursor=?,outcomes_json=?,updated_at=? WHERE job_id=? AND state IN ('running','cancelling')",
                 (cursor, json.dumps(outcomes), now_iso(), job_id),
@@ -135,7 +136,7 @@ class KbMaintenanceStore:
             await db.commit()
 
     async def state(self, job_id: str, state: str, *, expected: str = "running") -> bool:
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             result = await db.execute(
                 "UPDATE kb_rebuild_jobs SET state=?,updated_at=? WHERE job_id=? AND state=?", (state, now_iso(), job_id, expected)
             )
@@ -144,7 +145,7 @@ class KbMaintenanceStore:
 
     async def claim_file(self, job_id: str, position: int, file) -> bool:
         """Queue and persist the exact claimed version in the same transaction."""
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             row = await (await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=? AND state='running'", (job_id,))).fetchone()
             if not row or row[1] != position:
@@ -169,7 +170,7 @@ class KbMaintenanceStore:
             return True
 
     async def interrupt_file(self, job_id: str):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             row = await (await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE job_id=?", (job_id,))).fetchone()
             if row:
@@ -187,7 +188,7 @@ class KbMaintenanceStore:
             )
 
     async def pause_interrupted(self):
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             rows = await (
                 await db.execute("SELECT items_json,cursor FROM kb_rebuild_jobs WHERE state IN ('running','paused','cancelled','cancelling')")
@@ -199,7 +200,7 @@ class KbMaintenanceStore:
             await db.commit()
 
     async def resume(self, job_id: str) -> bool:
-        async with aiosqlite.connect(self.path) as db:
+        async with diagnostic_connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             result = await db.execute(
                 "UPDATE kb_rebuild_jobs SET state='running',updated_at=? WHERE job_id=? AND state='paused' AND NOT EXISTS(SELECT 1 FROM kb_rebuild_jobs other WHERE other.team_id=kb_rebuild_jobs.team_id AND other.state IN ('running','cancelling'))",

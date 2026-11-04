@@ -9,7 +9,6 @@ import aiosqlite
 import httpx2
 import jwt
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agents.registry import AgentRegistry
 from bowhead_core.subagent_authoring_catalog import AuthoringTool
 from bowhead_core.system_plugins import builtin_plugin
@@ -19,18 +18,20 @@ from bowhead_gateway.main import create_app
 from bowhead_gateway.routes import capability_catalog
 from bowhead_gateway.settings import Settings
 from cryptography.fernet import Fernet
+from gateway_legacy_database import upgrade
 
 
 @pytest.fixture
-async def catalog_context(tmp_path, monkeypatch):
+async def catalog_context(tmp_path, monkeypatch, complete_community_http_installation):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_navigation_catalog_secret_32")
     monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1")
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     store = UserStore(str(path))
     await store.initialize()
+    await complete_community_http_installation(store)
     now = _now()
     async with aiosqlite.connect(store.db_path) as db:
         for team_id, user_id in (("team_a", "u_member"), ("team_b", "u_other")):
@@ -47,12 +48,15 @@ async def catalog_context(tmp_path, monkeypatch):
     app = create_app()
     app.state.settings = Settings()
     app.state.user_store = store
+    await complete_community_http_installation(store, app=app)
     token = jwt.encode(
         {"sub": "u_member", "team_id": "team_a", "iat": int(time.time()), "exp": int(time.time()) + 3600},
         "test_navigation_catalog_secret_32",
         algorithm="HS256",
     )
-    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw", cookies={"bowhead_jwt": token}) as client:
+    async with httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://gw", cookies={"bowhead_jwt": token}, headers={"Origin": "http://gw"}
+    ) as client:
         yield client, store
 
 

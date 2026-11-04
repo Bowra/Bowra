@@ -36,6 +36,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_layout_active, require_domain_schema
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS access_requests (
@@ -140,6 +141,10 @@ class AccessRequestStore:
     db_path: str
 
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with open_shared_ctx(self.db_path) as db:
+                await require_domain_schema(db, "core")
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with open_shared_ctx(self.db_path) as db:
             await db.executescript(SCHEMA)

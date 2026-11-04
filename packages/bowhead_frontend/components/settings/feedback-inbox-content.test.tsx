@@ -201,8 +201,8 @@ describe("FeedbackInboxContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "采纳并预填" }));
     expect(await screen.findByText("5 段对话 · 说明当前第 1 版")).toBeTruthy();
     expect(screen.getByText("1 段对话 · 还没有说明")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: "加到空间说明" })[0]);
-    const dialog = await screen.findByRole("dialog", { name: "「销售」的空间说明" });
+    fireEvent.click(screen.getAllByRole("button", { name: "加到 AI 工作说明" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "「销售」的 AI 工作说明" });
     expect(await within(dialog).findByText("此内容由成员反馈起草，来源不可信，保存前逐行审阅")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "我已逐行审阅预填内容" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "应用到编辑器" }));
@@ -255,7 +255,7 @@ describe("FeedbackInboxContent", () => {
     expect(listFeedbackCandidates).toHaveBeenLastCalledWith("decided");
     expect(screen.getByText(/已加到第 5 版/)).toBeTruthy();
     expect(screen.getByText("已写入 1/2 个空间")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "加到空间说明" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "加到 AI 工作说明" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "采纳并预填" })).toBeNull();
   });
 

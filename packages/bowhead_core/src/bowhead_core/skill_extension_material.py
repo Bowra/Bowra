@@ -43,7 +43,7 @@ def prepare_skill_extension(prepared: PreparedReceiverSkillReads) -> PreparedSki
                 "contract": CONTRACT,
                 "receiver_digest": receiver.digest,
                 "preparation_digest": prepared.preparation_digest,
-                "extension": extension.model_dump(mode="json"),
+                "extension": extension.model_dump(mode="json", exclude_none=True),
                 "baseline": base64.b64encode(baseline.content).decode("ascii"),
                 "baseline_hash": baseline.content_hash,
                 "roots": [root.model_dump(mode="json") for root in closure.roots],

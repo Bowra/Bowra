@@ -251,11 +251,11 @@ test("模型 V4 overview preserves evidence semantics across desktop, mobile, an
   // Since 96a5eb706, resting state has no “当前配置还不能安全应用” verdict panel: actual issues show only a quiet hint
   // linking to detailed evidence below (fixture: 1 awaiting confirmation, 1 older evidence).
   const attention = page.locator(".overview-quiet.is-attention");
-  await expect(attention).toContainText(/1 项等你确认、1 条依据时间较早|1 awaiting your confirmation, 1 with older evidence/);
-  await expect(attention.getByRole("link", { name: /逐条查看|Review one by one/ })).toHaveAttribute("href", "#mset-overview-evidence");
-  await expect(page.getByText(/验证依据|Verification evidence/, { exact: true }).first()).toBeVisible();
+  await expect(attention).toContainText(/1 项还没验证、1 项模型分工建议重新验证|1 item not verified yet, 1 model assignment should be rechecked/);
+  await expect(attention.getByRole("link", { name: /前往验证|Review/ })).toHaveAttribute("href", "#mset-overview-evidence");
+  await expect(page.getByText(/验证状态|Verification status/, { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/最近尝试|Latest attempt/, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/^已验证$|^Verified$/).first()).toBeVisible();
+  await expect(page.getByText(/^验证通过$|^Passed$/).first()).toBeVisible();
   await expect(page.getByText(/本次请求出错|Latest request errored/)).toBeVisible();
   await expect(page.locator("[data-testid='model-settings-editor']")).toBeHidden();
   // f7789bf1b: page root fills the uniform settings-shell content width (the 880px form width), never narrows independently.

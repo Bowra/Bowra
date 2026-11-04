@@ -40,6 +40,7 @@ from uuid import uuid4
 from bowhead_core.kb.extracted_record_store import RecordAlreadyExistsError
 from bowhead_core.kb.telemetry import emit_audit
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -686,7 +687,6 @@ async def _select_backfill_file_ids(
     keep Sprint 2 Phase B scope contained. Sprint 3+ can promote to store
     if other callers need it.
     """
-    import aiosqlite
 
     db_path = getattr(files_store, "_db_path", None)
     if db_path is None:
@@ -713,6 +713,6 @@ async def _select_backfill_file_ids(
         params.append(cursor)
     sql += "ORDER BY file_id ASC LIMIT ?"
     params.append(limit)
-    async with aiosqlite.connect(db_path) as db, db.execute(sql, params) as cur:
+    async with diagnostic_connect(db_path) as db, db.execute(sql, params) as cur:
         rows = await cur.fetchall()
     return [r[0] for r in rows]

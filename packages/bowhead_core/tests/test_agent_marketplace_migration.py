@@ -7,25 +7,20 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_assignment_store import (
     AgentAssignmentStore,
     AgentAssignmentUnavailableError,
 )
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 
 def _chain_head() -> str:
-    """alembic 链条当前 head。
+    """The admitted legacy revision for single-file historical fixtures."""
+    from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 
-    ⚠ **别写死 revision 号**：本文件原先把 head 抄成字面量，于是**每加一条新迁移都要
-    改这几处**（0029 / 0030 各撞过一次）。它们想证的是「升到了链条顶端」，
-    不是「顶端恰好是某个号」。同 `bowhead_core.migrations.chain_head` 的理由。
-    """
-    from bowhead_core.migrations import chain_head
-
-    return chain_head()
+    return SOURCE_REVISION
 
 
 def _tables(db_path) -> set[str]:
@@ -48,14 +43,14 @@ def _upgrade_to(db_path, revision: str) -> None:
     )
     config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, revision)
+    command.upgrade(config, _chain_head() if revision == "head" else revision)
 
 
 def test_0026_creates_recoverable_marketplace_schema_without_activating_cutover(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
 
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
-    assert upgrade(f"sqlite+aiosqlite:///{db_path}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
 
     assert {
         "agent_assignment",
@@ -1308,7 +1303,7 @@ def test_0026_requires_offline_backfill_when_legacy_agents_exist(tmp_path) -> No
 @pytest.mark.asyncio
 async def test_0026_candidate_admission_fails_closed_on_schema_drift(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "ALTER TABLE agent_marketplace_schema_meta DROP COLUMN minimum_reader_version",
@@ -1988,7 +1983,7 @@ def test_0035_rejects_preexisting_primary_capability_with_wrong_semantics(
 @pytest.mark.asyncio
 async def test_initialize_rejects_drifted_single_running_index_semantics(tmp_path) -> None:
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute("DROP INDEX uq_agent_assignment_backfill_single_running")
         connection.execute(

@@ -15,7 +15,7 @@ const llmConfigMocks = vi.hoisted(() => ({
   verifyDraftProvider: vi.fn(),
   verifyProvider: vi.fn(),
 }));
-vi.mock("@/lib/llm-config-api", () => llmConfigMocks);
+vi.mock("@/lib/llm-config-api", async (original) => ({ ...await original<typeof import("@/lib/llm-config-api")>(), ...llmConfigMocks }));
 
 const llmConfigV2Mocks = vi.hoisted(() => ({
   precheckProvider: vi.fn(),
@@ -29,9 +29,9 @@ const llmConfigV2Mocks = vi.hoisted(() => ({
   cancelVerificationBatch: vi.fn(),
   listVerificationEvidence: vi.fn(),
 }));
-vi.mock("@/lib/llm-config-v2-api", () => llmConfigV2Mocks);
+vi.mock("@/lib/llm-config-v2-api", async (original) => ({ ...await original<typeof import("@/lib/llm-config-v2-api")>(), ...llmConfigV2Mocks }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 import { SettingsModels } from "@/components/settings/models";
 import messagesZh from "@/messages/zh-CN.json";

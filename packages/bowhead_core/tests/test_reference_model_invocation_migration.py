@@ -7,10 +7,10 @@ from dataclasses import replace
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.session_store import SessionStore
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
 from bowhead_router.input_admission import LLMInputAdmissionError
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _historical_fixture, _renew_dispatch_lease, _upgrade
 from test_skill_model_context import access_case as _access_case
 from test_skill_model_context import claimed_case as _claimed_case

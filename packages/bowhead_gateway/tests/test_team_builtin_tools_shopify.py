@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import httpx2
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.builtin_shopify_tool import build_builtin_shopify_specs
 from bowhead_core.shopify_client import ADMIN_API_VERSION, ShopifyClient
 from bowhead_core.tool_registry import ToolExecutionContext
@@ -19,6 +18,7 @@ from bowhead_gateway.routes import team_builtin_tools as routes
 from bowhead_gateway.routes.auth import _current_user
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
+from gateway_legacy_database import upgrade
 from test_agents_routes import _seed
 
 from bowhead_skill import default_catalog
@@ -35,7 +35,7 @@ async def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("FEATURE_SHOPIFY_PLUGIN", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     _seed(path)
     store = UserStore(path)
     app = FastAPI()

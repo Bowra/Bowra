@@ -224,10 +224,10 @@ async def test_lifespan_boot_does_not_expose_assembly_router(tmp_path, monkeypat
     # unavailable`. Empty-DB boot no longer works; test degraded from guarding an invariant to crashing at boot.
     # ⚠ `upgrade()` uses only the URL **directory**, with filename always `TARGET_FILES["core"]`; other filenames
     # succeed but migrate a newly created DB in that directory (previously boot.db here).
-    from bowhead_cli.migrate import TARGET_FILES, upgrade
+    from gateway_legacy_database import TARGET_FILES, upgrade
 
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{core_path}") == tuple(TARGET_FILES), "迁移未跑到 head"
+    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}") == tuple(TARGET_FILES), "迁移未跑到 head"
 
     monkeypatch.setenv("BOWHEAD_DB_URL", f"sqlite+aiosqlite:///{core_path}")
     monkeypatch.setenv("BOWHEAD_DEPLOYMENT_MODE", "saas")
@@ -236,7 +236,9 @@ async def test_lifespan_boot_does_not_expose_assembly_router(tmp_path, monkeypat
     monkeypatch.setenv("BOWHEAD_SANDBOX_BACKEND", "subprocess")
 
     from bowhead_gateway.main import create_app
+    from community_http_fixture import prepare_gateway_fixture
 
+    await prepare_gateway_fixture(core_path, monkeypatch)
     app = create_app()
     async with app.router.lifespan_context(app):
         assert not hasattr(app.state, "router"), (

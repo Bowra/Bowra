@@ -10,6 +10,7 @@ from typing import Protocol
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 
 CONTEXT_TTL_MINUTES = 30
 
@@ -53,7 +54,7 @@ class SubagentAuthoringContextStore:
         *,
         clock: Clock | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or SystemClock()
 
     async def initialize(self) -> None:

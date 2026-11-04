@@ -13,8 +13,9 @@ if TYPE_CHECKING:
     from bowhead_core.types import ToolInvocation
 
 ORIGINAL_REQUEST_QUOTE_GUIDANCE = (
-    "On resumed tasks, quote the decoded original_request string, not its JSON wrapper or escapes. "
-    "clarification_responses contains decisions, not original-request quotation evidence. "
+    "When an action requires quotation evidence, use the active Turn's canonical user request. "
+    "Only a native resume envelope supplies original_request: quote its decoded string, not its JSON wrapper or escapes. "
+    "A new ordinary follow-up is a new Turn, not that envelope. clarification_responses contains decisions, not quotation evidence. "
 )
 
 NATIVE_INPUT_GUIDANCE = (
@@ -22,17 +23,23 @@ NATIVE_INPUT_GUIDANCE = (
     "The server supplies retained clarification answers automatically; do not invent an answer-file artifact or repeat the template as data. "
 )
 
+TEMPLATE_REQUEST_WORKFLOW_GUIDANCE = (
+    "Start the full template-update task with action=generate even when required values are missing or the user asks to inspect first. "
+    "The document worker reads the template, asks missing decisions through its existing clarification flow, "
+    "and edits only after the answer. Admission retains the request and files without editing or publishing them. "
+    "Do not delegate template inspection to a separate helper or replace a resumable question with prose. "
+)
+
 NATIVE_DOCUMENT_GUIDANCE = (
-    "Template document workflow: when the user identifies an uploaded PPTX as a template and asks to update it, "
+    "Template document workflow: when the user identifies an uploaded PPTX or DOCX as a template and asks to update it, "
     "use template_document_submit directly; the document worker reads the template and data. "
-    "If the user explicitly requests inspection before generation, use one read-only subagent_spawn first "
-    "with delegation_role=helper (ordinary omission also returns to Lead); never use primary for inspection. "
-    "It may return Chat observations, never publish files. Use native clarification_ask for an explicitly requested decision. "
-    "After inspection or its answered clarification, return to template_document_submit, not another helper. "
+    "DOCX requires the enabled Word capability. This same Tool supports source-only requested_outputs=['source'] "
+    "as well as source plus PDF. Source-only publishes no PDF; private PDF/page rendering for Canvas review does not publish a PDF. "
+    + TEMPLATE_REQUEST_WORKFLOW_GUIDANCE
+    + "The answer resumes the same document job with its retained full request and files; do not start an answer-only generate request. "
     "Do not route this task to a BI Agent, recreate slides, or generate a generic downloadable file. "
-    "Any requested PDF must be derived from the reviewed source presentation in this same workflow, not from a separate report. "
-    "For generate, include top-level evidence.text copied exactly from the user's current request, plus inputs "
-    "with their own exact current-message role quotations and artifact IDs. The server resolves file positions. "
+    "Any requested PDF must be derived from the reviewed source presentation or Word document in this same workflow, not from a separate report. "
+    "Follow this Tool's current action-specific schema for request fields and file roles. The server resolves file positions. "
     + ORIGINAL_REQUEST_QUOTE_GUIDANCE
     + NATIVE_INPUT_GUIDANCE
     + "The server returns a private draft request, not a finished file or proof of a working review entry. "
@@ -41,7 +48,7 @@ NATIVE_DOCUMENT_GUIDANCE = (
     "If a short follow-up answers a document question, list_questions first, then answer that exact job. "
     "For an explicitly bound document revision target, use action=revise with evidence from the current request only. "
     "The server retains the selected draft and frozen inputs; do not supply a parent ID or fall back to generate. "
-    "An unrelated PowerPoint reading, analysis or new presentation request still follows its normal workflow."
+    "Unrelated file reading, analysis or a new presentation or Word document still follows its normal workflow."
 )
 
 UNAVAILABLE_DOCUMENT_GUIDANCE = (
@@ -156,7 +163,14 @@ def abandoned_generation_rejection(invocations: list[ToolInvocation], state: Doc
         and result.get("document_terminal") is not True
         and result.get("document_job_id") is None
         and result.get("error")
-        in {"document_request_invalid", "document_evidence_mismatch", "document_evidence_ambiguous", "document_reference_ambiguous"}
+        in {
+            "document_request_invalid",
+            "document_evidence_mismatch",
+            "document_evidence_ambiguous",
+            "document_reference_ambiguous",
+            "document_task_source_unavailable",
+            "document_task_source_ambiguous",
+        }
     )
 
 
@@ -200,3 +214,44 @@ def terminal_message(ctx: Any, *, accepted: bool | None, conflict: bool = False)
         ),
     }
     return messages.get(language, messages["en-US"])[3 if conflict else 2 if accepted is None else 0 if accepted else 1]
+
+
+def task_source_failure_message(ctx: Any, code: str) -> str | None:
+    """Explain source admission failures without exposing private diagnostics."""
+    messages = {
+        "document_task_source_unavailable": {
+            "en-US": "The earlier task message cannot be read in this Chat. Send the complete request here; this attempt created no new draft.",
+            "zh-CN": "无法在当前对话读取所引用的旧任务消息。请在这里重新发送完整要求；本次尝试没有新建草稿。",
+            "de-DE": "Die frühere Aufgabennachricht ist in diesem Chat nicht lesbar. Senden Sie hier die vollständige Anfrage; dieser Versuch hat keinen neuen Entwurf erstellt.",
+            "fr-FR": "Le message de tâche précédent n’est pas lisible dans ce Chat. Envoyez ici la demande complète ; cette tentative n’a créé aucun nouveau brouillon.",
+        },
+        "document_task_source_ambiguous": {
+            "en-US": "Several earlier task messages match this reference. Identify one specific request or send the complete request again; no new draft was created.",
+            "zh-CN": "这段引用匹配了多条旧任务消息。请指明具体哪次要求，或重新发送完整要求；没有新建草稿。",
+            "de-DE": "Diese Referenz passt zu mehreren früheren Aufgaben. Benennen Sie eine bestimmte Anfrage oder senden Sie die vollständige Anfrage erneut; es wurde kein neuer Entwurf erstellt.",
+            "fr-FR": "Cette référence correspond à plusieurs tâches précédentes. Précisez la demande concernée ou renvoyez la demande complète ; aucun nouveau brouillon n’a été créé.",
+        },
+        "document_task_source_disabled": {
+            "en-US": "Continuing from an earlier task message is not enabled here. Send the complete request in a new message; no new draft was created.",
+            "zh-CN": "当前尚未启用引用旧任务消息继续处理的能力。请在新消息中发送完整要求；没有新建草稿。",
+            "de-DE": "Das Fortsetzen anhand einer früheren Aufgabennachricht ist hier nicht aktiviert. Senden Sie die vollständige Anfrage in einer neuen Nachricht; es wurde kein neuer Entwurf erstellt.",
+            "fr-FR": "La reprise à partir d’un ancien message de tâche n’est pas activée ici. Envoyez la demande complète dans un nouveau message ; aucun nouveau brouillon n’a été créé.",
+        },
+        "document_task_source_limit": {
+            "en-US": "The original request and supplement exceed the 8,000-character document limit. Send a shorter complete request; no new draft was created.",
+            "zh-CN": "原要求与本轮补充合计超过文档任务的 8,000 字符限制。请发送更简短的完整要求；没有新建草稿。",
+            "de-DE": "Die ursprüngliche Anfrage und die Ergänzung überschreiten die Dokumentgrenze von 8.000 Zeichen. Senden Sie eine kürzere vollständige Anfrage; es wurde kein neuer Entwurf erstellt.",
+            "fr-FR": "La demande initiale et son complément dépassent la limite de 8 000 caractères. Envoyez une demande complète plus courte ; aucun nouveau brouillon n’a été créé.",
+        },
+        "document_task_source_changed": {
+            "en-US": "The saved earlier task no longer matches its source. Check existing results, then send the complete requirements to start a new task.",
+            "zh-CN": "保存的旧任务与其来源已不一致。请先检查已有结果，再发送完整要求以新建任务。",
+            "de-DE": "Die gespeicherte frühere Aufgabe stimmt nicht mehr mit ihrer Quelle überein. Prüfen Sie vorhandene Ergebnisse und senden Sie dann die vollständigen Anforderungen für eine neue Aufgabe.",
+            "fr-FR": "La tâche précédente enregistrée ne correspond plus à sa source. Vérifiez les résultats existants, puis envoyez les exigences complètes pour créer une nouvelle tâche.",
+        },
+    }
+    localized = messages.get(code)
+    if localized is None:
+        return None
+    language = str(getattr(getattr(ctx, "language_context", None), "output_language", "") or "en-US")
+    return localized.get(language, localized["en-US"])

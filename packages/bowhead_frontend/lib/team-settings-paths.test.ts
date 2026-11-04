@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { teamSettingsPath } from "./team-settings-paths";
+import { modelSettingsOverviewPath, teamSettingsPath } from "./team-settings-paths";
 
 describe("teamSettingsPath", () => {
   it("uses the user-facing models segment for the internal llm tab id", () => {
@@ -8,6 +8,11 @@ describe("teamSettingsPath", () => {
     expect(teamSettingsPath("llm", true)).toBe(
       "/team/settings/models/?from=setup",
     );
+  });
+
+  it("addresses the model overview presentation tab with a fragment", () => {
+    expect(modelSettingsOverviewPath("assignments")).toBe("/team/settings/models/#assignments");
+    expect(modelSettingsOverviewPath()).toBe("/team/settings/models/#connections");
   });
 
   it("uses canonical segments that match their team settings pages", () => {

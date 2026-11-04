@@ -1,9 +1,9 @@
 """Sprint ω Phase 0 — shared SQLite connection helper.
 
-Per spike Q9 audit: 17 stores opened raw `aiosqlite.connect(...)` with default
-`busy_timeout=0` against the shared `./.data/sqlite/bowhead.db`. WAL is set
-once by `_ref_audit.init_ref_audit` (persistent on file), but `busy_timeout`
-is **per-connection** — every store paid `SQLITE_BUSY` instantly on contention.
+Raw `aiosqlite.connect(...)` inherits sqlite3’s five-second default timeout
+unless explicitly overridden. WAL is persistent on the database file, while
+`busy_timeout` and other connection settings are local. These helpers set them
+explicitly so Store connections have consistent behavior.
 
 This module exposes:
 
@@ -12,7 +12,7 @@ This module exposes:
 - `open_shared_ctx(path)` — async context manager. All shared-db writers must
   route through this. Sets the full PRAGMA triple per-connection:
   `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=ON`,
-  `secure_delete=ON`. Drop-in for `async with aiosqlite.connect(path) as db:`.
+  `secure_delete=ON`. Drop-in for `async with diagnostic_connect(path) as db:`.
 - `phase0_self_test(path, store_names)` — boot-time probe that each store path
   can connect + write + delete. uvicorn exits non-zero on failure (per
   `tech-design-r2.md` §3 Phase 0 protocol).
@@ -42,10 +42,13 @@ ephemeral context-manager pattern.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import sqlite3
 import threading
 import time
+import traceback
 import weakref
 from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
@@ -54,6 +57,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import anyio
+
+from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
+from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_connection
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -63,6 +71,46 @@ if TYPE_CHECKING:
 # safe. If multi-worker is ever added, replace with file-lock (`fcntl.flock`)
 # OR check `PRAGMA journal_mode` before set.
 _bootstrap_done: dict[str, bool] = {}
+_logger = logging.getLogger(__name__)
+_TRANSACTION_WARNING_SECONDS = 5.0
+
+
+def _await_locations(task: asyncio.Task | None) -> list[str]:
+    """Return bounded code locations without inspecting arguments or locals."""
+    if task is None:
+        return []
+    if task is asyncio.current_task():
+        return [f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}" for frame in traceback.extract_stack(limit=32)]
+    return [f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}:{frame.f_code.co_name}" for frame in task.get_stack(limit=32)]
+
+
+def _watch_shared_transaction(conn: aiosqlite.Connection) -> Callable[[], None]:
+    """Attribute a long open transaction; this does not identify its lock mode."""
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    started = time.monotonic()
+    borrowed_at = _await_locations(task)
+
+    def inspect_transaction() -> None:
+        nonlocal timer
+        try:
+            active = conn.in_transaction
+        except ValueError:
+            return
+        if not active:
+            timer = loop.call_later(_TRANSACTION_WARNING_SECONDS, inspect_transaction)
+            return
+        _logger.warning(
+            "sqlite.shared_transaction_open connection=%x borrowed_ms=%d borrowed_at=%s awaiting=%s diagnostics=%s",
+            id(conn),
+            round((time.monotonic() - started) * 1000),
+            borrowed_at,
+            _await_locations(task),
+            diagnostic_snapshot(conn._conn),  # noqa: SLF001 -- Read-only Python diagnostic metadata, not SQLite calls.
+        )
+
+    timer = loop.call_later(_TRANSACTION_WARNING_SECONDS, inspect_transaction)
+    return lambda: timer.cancel()
 
 
 async def bootstrap_shared_db(path: str) -> None:
@@ -78,11 +126,11 @@ async def bootstrap_shared_db(path: str) -> None:
     """
     if _bootstrap_done.get(path):
         return
-    async with aiosqlite.connect(path) as conn:
+    async with diagnostic_connect(path) as conn:
         # WAL is persistent on the file — `_ref_audit.init_ref_audit` also
         # sets it. Setting twice is no-op.
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA secure_delete=ON")
+        await conn.execute("PRAGMA main.journal_mode=WAL")
+        await conn.execute("PRAGMA main.secure_delete=ON")
         # _phase0_probe — pre-create so self-test INSERT doesn't raise
         # `no such table` (r3.1 P0 catch CTO+SRE+Eng triple).
         await conn.execute("CREATE TABLE IF NOT EXISTS _phase0_probe (k TEXT PRIMARY KEY, ts REAL NOT NULL)")
@@ -99,12 +147,11 @@ async def bootstrap_shared_db(path: str) -> None:
 
 @asynccontextmanager
 async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
-    """Drop-in replacement for `async with aiosqlite.connect(path) as db:`.
+    """Drop-in replacement for `async with diagnostic_connect(path) as db:`.
 
     Applies per-connection PRAGMAs:
-    - `busy_timeout=5000` — wait 5s on contention before raising SQLITE_BUSY.
-      Spike Q9 finding: 17 stores had default 0, two concurrent writers
-      raced on single-writer lock with no wait.
+    - `busy_timeout=5000` — wait up to 5s for retryable SQLite contention.
+      Snapshot-upgrade and application authority conflicts can fail immediately.
     - `synchronous=NORMAL` — WAL-mode-friendly (FULL is per-write fsync).
     - `foreign_keys=ON` — artifact_store precedent; reserve for FK CASCADE.
     - `secure_delete=ON` — overwrite deleted SQLite cell content.
@@ -175,7 +222,7 @@ def _daemonize(conn: aiosqlite.Connection) -> None:
 
 
 async def _open_pooled_reader(path: str) -> aiosqlite.Connection:
-    conn = aiosqlite.connect(path)
+    conn = diagnostic_connect(path)
     _daemonize(conn)
     await conn
     try:
@@ -199,10 +246,12 @@ async def _reader_reusable(conn: aiosqlite.Connection) -> bool:
         return False
     conn.row_factory = None
     conn.text_factory = str
+    await conn._execute(reset_domain_connection, conn._conn)  # noqa: SLF001 -- Release domain snapshots before metadata reuse.
+    await conn._execute(clear_diagnostics, conn._conn)  # noqa: SLF001 -- Reset metadata on the connection worker.
     return True
 
 
-class _TrackedConnection(sqlite3.Connection):
+class _TrackedConnection(DomainConnection):
     """Remembers every cursor it hands out, so a pooled connection can close them on release.
 
     CPython's ``Connection.execute`` / ``executemany`` / ``executescript`` create their
@@ -236,9 +285,9 @@ class _TrackedConnection(sqlite3.Connection):
 # ``legacy_alter_table`` are all set by some caller in this codebase.
 _SHARED_BASELINE = (
     "PRAGMA busy_timeout=5000;"
-    "PRAGMA synchronous=NORMAL;"
+    "PRAGMA main.synchronous=NORMAL;"
     "PRAGMA foreign_keys=ON;"
-    "PRAGMA secure_delete=ON;"
+    "PRAGMA main.secure_delete=ON;"
     "PRAGMA query_only=OFF;"
     "PRAGMA legacy_alter_table=OFF;"
 )
@@ -264,6 +313,8 @@ def _scrub_raw(raw: sqlite3.Connection) -> bool:
     raw.row_factory = None
     raw.text_factory = str
     raw.isolation_level = ""
+    reset_domain_connection(raw)
+    clear_diagnostics(raw)
     return True
 
 
@@ -276,14 +327,14 @@ async def _scrub_for_reuse(conn: aiosqlite.Connection) -> bool:
 
 
 async def _open_pooled_shared(path: str) -> aiosqlite.Connection:
-    conn = aiosqlite.connect(path, factory=_TrackedConnection)
+    conn = diagnostic_connect(path, factory=_TrackedConnection)
     _daemonize(conn)
     await conn
     try:
         await conn.execute("PRAGMA busy_timeout=5000")
-        await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA main.synchronous=NORMAL")
         await conn.execute("PRAGMA foreign_keys=ON")
-        await conn.execute("PRAGMA secure_delete=ON")
+        await conn.execute("PRAGMA main.secure_delete=ON")
     except BaseException:
         await conn.close()
         raise
@@ -311,15 +362,38 @@ async def _borrow(
     if conn is None:
         conn = await opener(key)  # type: ignore[misc]
         identity = _file_identity(key)
+    stop_watch = _watch_shared_transaction(conn) if pools is _shared_pools else None
     completed = False
     try:
         yield conn
         completed = True
     finally:
-        keep = completed and identity is not None and await reusable(conn)  # type: ignore[misc]
-        to_close = _release(pools, max_idle, key, identity, conn) if keep else [conn]
-        for old in to_close:
-            await _close_quietly(old)
+        if stop_watch is not None:
+            stop_watch()
+
+        async def release() -> None:
+            try:
+                keep = completed and identity is not None and await reusable(conn)  # type: ignore[misc]
+            except BaseException:
+                await _close_quietly(conn)
+                raise
+            to_close = _release(pools, max_idle, key, identity, conn) if keep else [conn]
+            for old in to_close:
+                await _close_quietly(old)
+
+        # Drain cleanup before propagating either deadline or direct Task cancellation.
+        cleanup = asyncio.create_task(release(), name="sqlite-pool-release")
+        cancelled = None
+        with anyio.CancelScope(shield=True):
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+        cleanup.result()
+        if cancelled is not None:
+            raise cancelled
+        await anyio.lowlevel.checkpoint_if_cancelled()
 
 
 def _release(

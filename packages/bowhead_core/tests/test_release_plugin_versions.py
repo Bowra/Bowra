@@ -6,18 +6,18 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_revision_store import requires_admin_review
 from bowhead_core.release_plugin_versions import plugin_updates_conn, plugin_versions_conn
 from bowhead_core.team_plugin_store import TeamPluginStore
 from bowhead_core.user_store import UserStore
+from core_legacy_database import upgrade
 
 
 @pytest.mark.asyncio
 async def test_release_records_exact_versions_and_reports_later_updates(tmp_path):
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
     users = UserStore(path)
     await users.initialize()
     team = await users.create_team(name="Team", max_seats=2)
@@ -58,7 +58,7 @@ async def test_release_records_exact_versions_and_reports_later_updates(tmp_path
             "id": "builtin:settings-space-preferences",
             "name": "settings-space-preferences",
             "release_version": 4,
-            "current_version": 5,
+            "current_version": 6,
             "changed_at": None,
         }
     ]

@@ -468,6 +468,82 @@ class ConnectorBindingPolicy:
         return PolicyDenial(error=f"{_ctx_binding.unavailable_label}: {err_msg}")
 
 
+class TerminalDeliveryReviewPolicy:
+    """Review actual run outcomes before terminal handlers or eager composition."""
+
+    name = "terminal_delivery_review"
+    stage = PolicyStage.BEFORE_DISPATCH
+    before_spec_lookup = False
+
+    async def check(self, call: ToolCallRequest, ctx: ToolExecutionContext) -> PolicyDenial | None:
+        field = getattr(call.spec, "terminal_payload_field", None)
+        if field is None:
+            return None
+        from bowhead_core.agents._lead_context import run_invocations
+        from bowhead_core.effective_language import effective_output_language
+        from bowhead_core.tool_delivery_review import (
+            DeliveryReviewRefusal,
+            delivery_review_enabled,
+            review_evidence_availability,
+            review_terminal_payload,
+        )
+
+        if not delivery_review_enabled():
+            return None
+        if getattr(ctx, "terminal_batch_conflict", False):
+            return PolicyDenial(
+                result=DeliveryReviewRefusal(
+                    ok=False,
+                    error_kind="tool_delivery_review_required",
+                    error="Submit the terminal payload alone after the other calls in this batch settle. Review their actual outcomes before finishing; do not repeat completed writes.",
+                    retryable=False,
+                )
+            )
+        from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
+
+        def invalid_input(message: str) -> PolicyDenial:
+            return PolicyDenial(
+                result=note_ordinary_return_rejection(
+                    ctx,
+                    {
+                        "ok": False,
+                        "error_kind": "tool_arguments_invalid",
+                        "error": message + " Correct the JSON arguments and resubmit. The terminal handler was not executed.",
+                        "path": "/" + field,
+                        "retryable": False,
+                    },
+                )
+            )
+
+        if "_args_parse_error" in call.arguments:
+            return invalid_input("Terminal arguments could not be parsed as a JSON object.")
+        payload = call.arguments.get(field)
+        if isinstance(payload, str):
+            import json
+
+            try:
+                decoded = json.loads(payload)
+            except (ValueError, TypeError):
+                return invalid_input(f"The terminal field {field} is not valid JSON.")
+            payload = decoded
+            call.arguments[field] = payload
+        if not isinstance(payload, dict):
+            return invalid_input(f"The terminal field {field} must be a JSON object.")
+        if isinstance(payload, dict):
+            invocations = run_invocations(ctx)
+            human_pause = isinstance(payload.get("error"), dict) and payload["error"].get("kind") == "needs_user_input"
+            evidence_problem = None if human_pause else await review_evidence_availability(payload.get("delivery_review"), invocations, ctx)
+            failure = review_terminal_payload(
+                payload,
+                invocations,
+                language=effective_output_language(bus=getattr(ctx, "parent_bus", None), language_context=getattr(ctx, "language_context", None)),
+                evidence_problem=evidence_problem,
+            )
+            if failure is not None:
+                return PolicyDenial(result=failure)
+        return None
+
+
 TOOL_CALL_POLICIES: tuple[ToolCallPolicy, ...] = (
     SkillScopePolicy(PolicyStage.BEFORE_PRESENTATION),
     ApprovalPolicy(),
@@ -479,4 +555,5 @@ TOOL_CALL_POLICIES: tuple[ToolCallPolicy, ...] = (
     ResourceGrantsPolicy(),
     DatarcCapabilityPolicy(),
     ConnectorBindingPolicy(),
+    TerminalDeliveryReviewPolicy(),
 )

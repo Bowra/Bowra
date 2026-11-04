@@ -5,7 +5,6 @@ import sqlite3
 
 import aiosqlite
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.agent_taxonomy import (
     AgentTaxonomyConflictError,
     AgentTaxonomyError,
@@ -15,12 +14,13 @@ from bowhead_core.agent_taxonomy import (
     normalize_team_tag,
     validate_taxonomy_listing_conn,
 )
+from core_legacy_database import upgrade
 
 _TIME = "2026-09-05T08:00:00+00:00"
 
 
 def _seed(db_path) -> None:
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(

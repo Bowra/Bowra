@@ -16,6 +16,7 @@ import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.error_catalog import CodedError
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -365,7 +366,7 @@ async def list_snapshot_asset_pins(
     db_path: str,
     snapshot_id: str,
 ) -> tuple[SnapshotAssetPin, ...]:
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "content")) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM canvas_export_snapshot_assets WHERE snapshot_id=? ORDER BY section_id, role, artifact_id",
@@ -749,7 +750,7 @@ async def _mark_asset_resolved(
     content_sha256: str,
 ) -> None:
     resolved_at = datetime.now(tz=UTC).isoformat(timespec="seconds")
-    async with open_shared_ctx(db_path) as db:
+    async with open_shared_ctx(domain_database_path(db_path, "content")) as db:
         async with db.execute(
             "SELECT DISTINCT content_sha256 FROM canvas_export_snapshot_assets WHERE snapshot_id=? AND artifact_id=? AND content_sha256 IS NOT NULL",
             (snapshot_id, artifact_id),
@@ -766,7 +767,7 @@ async def _mark_asset_resolved(
 
 async def _ensure_snapshot_resolvable(db_path: str, snapshot_id: str) -> None:
     async with (
-        open_shared_ctx(db_path) as db,
+        open_shared_ctx(domain_database_path(db_path, "content")) as db,
         db.execute(
             "SELECT expires_at FROM canvas_export_snapshots WHERE id=?",
             (snapshot_id,),

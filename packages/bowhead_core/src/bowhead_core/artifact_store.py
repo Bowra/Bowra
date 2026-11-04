@@ -31,6 +31,9 @@ from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Any, ClassVar, Final, Literal, Protocol
 from uuid import uuid4
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_readable_schema import readable_table_exists
+
 logger = logging.getLogger(__name__)
 
 _STAGED_EXPORT_BLOB_MARKER = ".bowhead-export-staged-"
@@ -45,6 +48,8 @@ class ArtifactReadLimitError(ValueError):
 
 import aiosqlite
 import anyio
+
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
@@ -71,21 +76,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
     workspace_id    TEXT                      -- 产物所属空间；NULL=未归属（**不是**跨空间）
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_canvas  ON artifacts(canvas_id, created_at DESC);
-"""
-
-# Sprint ι (PRD §4.B.1): sibling table holds full sandbox stdout (≤8KB CHECK
-# guards against runaway log dumps). Joined lazily on detail expand. FK CASCADE
-# auto-deletes stdout when parent artifact hard-deleted (requires PRAGMA
-# foreign_keys=ON via _open_db() helper — see §1.3.1).
-_STDOUT_SCHEMA = """
-CREATE TABLE IF NOT EXISTS artifact_stdout (
-    artifact_id TEXT PRIMARY KEY,
-    stdout      TEXT NOT NULL CHECK (length(stdout) <= 8192),
-    created_at  TEXT NOT NULL,
-    FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_artifact_stdout_created
-    ON artifact_stdout(created_at);
 """
 
 _UPLOAD_BINDING_SCHEMA = """
@@ -207,8 +197,7 @@ def _defaults_for_kind(kind: str) -> tuple[str, str]:
 @contextlib.asynccontextmanager
 async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None) -> AsyncIterator[aiosqlite.Connection]:
     """Sprint ι (P1 #1): unified aiosqlite connect helper that:
-    - sets PRAGMA foreign_keys=ON per-connection (required for FK CASCADE on
-      artifact_stdout, see §1.3) — SQLite default is OFF and is per-connection.
+    - sets PRAGMA foreign_keys=ON per connection for local relational guards.
     - reserves single hook for future per-conn settings (busy_timeout, etc.).
 
     A supplied connection remains caller-owned; its row factory is restored
@@ -225,7 +214,7 @@ async def _open_db(db_path: str, connection: aiosqlite.Connection | None = None)
         finally:
             connection.row_factory = previous_factory
         return
-    async with aiosqlite.connect(db_path) as db:
+    async with diagnostic_connect(db_path) as db:
         await db.execute("PRAGMA foreign_keys = ON")
         yield db
 
@@ -1379,6 +1368,8 @@ def build_artifact_backend_from_env(
 class ArtifactStore:
     db_path: str
     backend: ArtifactBackend
+    _core_db_path: str = field(init=False, repr=False)
+    _execution_db_path: str = field(init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     # M1: cached presence of the asset-model columns (feature-detect once, then
     # put_bytes picks the extended vs legacy INSERT — defense-in-depth behind
@@ -1396,12 +1387,25 @@ class ArtifactStore:
     # (DEFAULTs keep them valid; this is observable via /health).
     backfill_degraded: bool = field(default=False, repr=False)
 
+    def __post_init__(self) -> None:
+        self.db_path = str(domain_database_path(self.db_path, "content"))
+        self._core_db_path = str(domain_database_path(self.db_path, "core"))
+        self._execution_db_path = str(domain_database_path(self.db_path, "execution"))
+
     async def initialize(self) -> None:
+        if domain_layout_active(self.db_path):
+            async with _open_db(self.db_path) as db:
+                await require_domain_schema(db, "content")
+            self._asset_cols_present = True
+            self._origin_col_present = True
+            self._row_count_col_present = True
+            self._workspace_col_present = True
+            self._account_deletion_schema_present = True
+            await self.cleanup_staged_export_orphans()
+            return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with _open_db(self.db_path) as db:
             await db.executescript(SCHEMA)
-            # Sprint ι: sibling table for sandbox stdout. Idempotent.
-            await db.executescript(_STDOUT_SCHEMA)
             # Space lifecycle: persist the target of pending presigned uploads.
             await db.executescript(_UPLOAD_BINDING_SCHEMA)
             # Multimodal V2A: artifact-side provenance for flattened design PNGs.
@@ -1735,7 +1739,7 @@ class ArtifactStore:
                     artifact.manifest_artifact_id,
                 ),
             )
-            if self._account_deletion_schema_present:
+            if self._account_deletion_schema_present and not domain_layout_active(self.db_path):
                 await db.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (artifact.id,))
             # Space isolation batch 3: ownership of exported deliverables. Same guarded UPDATE as put_bytes,
             # preserving this path's degradation: missing columns on legacy deployments omit ownership, never fail the whole export.
@@ -1755,7 +1759,7 @@ class ArtifactStore:
                         "UPDATE artifacts SET workspace_id=? WHERE id=?",
                         (workspace_id, artifact.id),
                     )
-            if staged.session_id:
+            if staged.session_id and not domain_layout_active(self.db_path):
                 await db.execute(
                     "INSERT INTO session_attachments("
                     "session_id, artifact_id, pinned_at, detached_at"
@@ -1786,6 +1790,39 @@ class ArtifactStore:
             except BaseException:
                 await db.rollback()
                 raise
+
+        await self.complete_staged_artifact_publication(staged_artifacts)
+
+    async def complete_staged_artifact_publication(self, staged_artifacts: tuple[StagedArtifact, ...]) -> None:
+        """Finish optional cross-domain references after content publication commits."""
+        if domain_layout_active(self.db_path):
+            await self._finish_domain_publication(
+                tuple((staged.artifact.id, staged.session_id) for staged in staged_artifacts),
+                tuple(staged.artifact.id for staged in staged_artifacts),
+            )
+
+    async def _finish_domain_publication(self, pins: tuple[tuple[str, str | None], ...], owned_ids: tuple[str, ...]) -> None:
+        live_pins = [(artifact_id, session_id) for artifact_id, session_id in pins if session_id]
+        if live_pins:
+            try:
+                async with _open_db(self._execution_db_path) as db:
+                    await db.executemany(
+                        "INSERT INTO session_attachments(session_id,artifact_id,pinned_at,detached_at) VALUES (?,?,?,NULL) "
+                        "ON CONFLICT(session_id,artifact_id) DO UPDATE SET detached_at=NULL",
+                        [(session_id, artifact_id, _now()) for artifact_id, session_id in live_pins],
+                    )
+                    await db.commit()
+            except Exception:
+                logger.warning("artifact_store.session_pin_failed_after_content_commit", exc_info=True)
+        if owned_ids:
+            try:
+                async with _open_db(self._core_db_path) as db:
+                    await db.executemany("DELETE FROM account_owned_artifact_writes WHERE write_id=?", [(identity,) for identity in owned_ids])
+                    await db.commit()
+            except Exception:
+                # Retaining a reserved locator is safe: account erasure still
+                # owns it, and successful publication remains readable.
+                logger.warning("artifact_store.ownership_cleanup_failed_after_content_commit", exc_info=True)
 
     async def discard_staged_artifacts(
         self,
@@ -1863,7 +1900,7 @@ class ArtifactStore:
         safe = _safe_filename(filename)
         owned_write = False
         if created_by:
-            async with _open_db(self.db_path) as ownership_db:
+            async with _open_db(self._core_db_path) as ownership_db:
                 await self._retired_owner_filter(ownership_db)
                 if self._account_deletion_schema_present:
                     path_builder = getattr(self.backend, "path_for_artifact", None)
@@ -1874,9 +1911,12 @@ class ArtifactStore:
                         )
                         await ownership_db.commit()
                         owned_write = True
+        if authorize_in_connection is not None and domain_layout_active(self.db_path):
+            async with _open_db(self.db_path) as authorization_db:
+                await authorize_in_connection(authorization_db)
         path = (
             ""
-            if authorize_in_connection is not None
+            if authorize_in_connection is not None and not domain_layout_active(self.db_path)
             else await self.put_account_owned_bytes(
                 created_by=created_by,
                 reserved=owned_write,
@@ -1911,9 +1951,10 @@ class ArtifactStore:
             if authorize_in_connection is not None:
                 await db.execute("BEGIN IMMEDIATE")
                 await authorize_in_connection(db)
-                art.path = await self.put_account_owned_bytes(
-                    created_by=created_by, reserved=owned_write, aid=aid, content=content, filename=safe, mime=mime
-                )
+                if not domain_layout_active(self.db_path):
+                    art.path = await self.put_account_owned_bytes(
+                        created_by=created_by, reserved=owned_write, aid=aid, content=content, filename=safe, mime=mime
+                    )
             # Feature-detect the asset-model columns once (cached). ALTER-RAISE in
             # initialize() means these are present in practice; the legacy-INSERT
             # fallback only matters for a degraded box that never migrated.
@@ -2033,7 +2074,7 @@ class ArtifactStore:
                     (art.id, art.workspace_id or "", created_by, session_id, art.created_at),
                 )
             # Sprint µ N4: pin to session if provided
-            if session_id:
+            if session_id and not domain_layout_active(self.db_path):
                 try:
                     await db.execute(
                         "INSERT INTO session_attachments(session_id, artifact_id, pinned_at, detached_at) "
@@ -2048,9 +2089,11 @@ class ArtifactStore:
                         aid,
                         _e,
                     )
-            if owned_write:
+            if owned_write and not domain_layout_active(self.db_path):
                 await db.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (aid,))
             await db.commit()
+        if domain_layout_active(self.db_path):
+            await self._finish_domain_publication(((aid, session_id),), (aid,) if owned_write else ())
         return art
 
     async def put_file(
@@ -2369,7 +2412,7 @@ class ArtifactStore:
     ) -> Any:
         if not created_by:
             return await write()
-        async with _open_db(self.db_path) as db:
+        async with _open_db(self._core_db_path) as db:
             await self._retired_owner_filter(db)
             if self._account_deletion_schema_present and not reserved and path is not None:
                 await db.execute(
@@ -2381,8 +2424,8 @@ class ArtifactStore:
             return await write()
         from bowhead_core.account_artifact_lock import account_artifact_lock
 
-        async with account_artifact_lock(self.db_path, created_by):
-            async with _open_db(self.db_path) as db, db.execute("SELECT 1 FROM account_deletions WHERE user_id=?", (created_by,)) as cur:
+        async with account_artifact_lock(self._core_db_path, created_by):
+            async with _open_db(self._core_db_path) as db, db.execute("SELECT 1 FROM account_deletions WHERE user_id=?", (created_by,)) as cur:
                 if await cur.fetchone() is not None:
                     raise aiosqlite.IntegrityError("account is deleted")
             # Keep the OS lock until the actual provider task ends, including
@@ -2404,6 +2447,8 @@ class ArtifactStore:
                 raise
 
     async def _retired_owner_filter(self, db: aiosqlite.Connection) -> str:
+        if self._account_deletion_schema_present is None and domain_layout_active(self.db_path):
+            self._account_deletion_schema_present = True
         if self._account_deletion_schema_present is None:
             async with db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_deletions'") as cur:
                 self._account_deletion_schema_present = await cur.fetchone() is not None
@@ -2484,6 +2529,38 @@ class ArtifactStore:
                         artifact = _row_to_artifact(row)
                         by_id[artifact.id] = artifact
         return [by_id[artifact_id] for artifact_id in ordered if artifact_id in by_id]
+
+    async def bind_owned_kb_upload_for_chat(self, artifact_id: str, *, user_id: str, workspace_id: str) -> Artifact | None:
+        """Admit an original KB upload to its owner's current Space composer."""
+        if not user_id or not workspace_id:
+            return None
+        async with _open_db(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM artifacts WHERE id=? AND created_by=? AND workspace_id=? "
+                "AND source='kb_upload' AND kind='user_upload' AND status='ready' AND deleted_at IS NULL",
+                (artifact_id, user_id, workspace_id),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await db.rollback()
+                return None
+            await db.execute(
+                "INSERT OR IGNORE INTO artifact_upload_bindings(artifact_id,workspace_id,user_id,session_id,created_at) VALUES (?,?,?,NULL,?)",
+                (artifact_id, workspace_id, user_id, _now()),
+            )
+            binding = await (
+                await db.execute(
+                    "SELECT 1 FROM artifact_upload_bindings WHERE artifact_id=? AND workspace_id=? AND user_id=?",
+                    (artifact_id, workspace_id, user_id),
+                )
+            ).fetchone()
+            if binding is None:
+                await db.rollback()
+                return None
+            await db.commit()
+            return _row_to_artifact(row)
 
     async def get_ready_uploads_for_chat(
         self,
@@ -2670,6 +2747,38 @@ class ArtifactStore:
                 rows = await cur.fetchall()
         items = [_row_to_artifact(r) for r in rows]
         return items, total, size_sum
+
+    async def list_presented_result_artifacts_for_turn(self, turn_id: str, *, session_id: str, user_id: str) -> list[Artifact]:
+        """Read exact durable native presentations, then recheck Results access."""
+        from bowhead_core.artifact_presentation import PRESENTATION_EVENT_SQL, project_declaration
+
+        payload = "CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END"
+        async with (
+            _open_db(self.db_path) as db,
+            db.execute(
+                f"SELECT e.payload_json FROM turn_events e JOIN turns t ON t.id=e.turn_id "
+                "JOIN sessions owner ON owner.id=t.session_id "
+                f"WHERE t.id=? AND t.session_id=? AND owner.user_id=? AND owner.deleted_at IS NULL AND {PRESENTATION_EVENT_SQL} "
+                f"AND json_extract({payload},'$.ok')=1 AND json_extract({payload},'$.tool_name')='present_artifacts' "
+                f"AND json_extract({payload},'$.result_meta.artifact_presentation_receipt.turn_id')=t.id "
+                f"AND json_extract({payload},'$.result_meta.artifact_presentation_receipt.session_id')=owner.id "
+                f"AND json_extract({payload},'$.result_meta.artifact_presentation_receipt.user_id')=owner.user_id "
+                f"AND json_extract({payload},'$.result_meta.artifact_presentation_receipt.workspace_id')=owner.workspace_id",
+                (turn_id, session_id, user_id),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        ids = {}
+        for row in rows:
+            declaration = project_declaration(json.loads(row[0])["result_meta"])
+            if declaration.origin == "explicit_tool":
+                ids.update((item.artifact_id, None) for item in declaration.items)
+        artifacts = []
+        for artifact_id in ids:
+            artifact = await self.get_result_artifact_for_scope(artifact_id=artifact_id, session_id=session_id, user_id=user_id)
+            if artifact is not None:
+                artifacts.append(artifact)
+        return artifacts
 
     # ─── Results complete read model ───────────────────────────
     @staticmethod
@@ -3713,10 +3822,7 @@ class ArtifactStore:
 
     @staticmethod
     async def _document_copy_filter(db: aiosqlite.Connection) -> str:
-        async with db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='document_input_copies'",
-        ) as cur:
-            present = await cur.fetchone() is not None
+        present = await readable_table_exists(db, "document_input_copies")
         if not present:
             return "1=1"
         return "NOT EXISTS (SELECT 1 FROM document_input_copies c WHERE c.artifact_id = artifacts.id)"
@@ -3821,18 +3927,7 @@ class ArtifactStore:
         return [_row_to_artifact(row) for row in rows]
 
     async def hard_delete_old_soft_deleted(self, *, days: int = 30) -> dict[str, int]:
-        """#54 长期修 (2026-04-29): nightly cron 清回收站 — 软删超 N 天的硬删 (db row +
-        backend 文件). 返 {"rows_removed": N, "files_removed": M, "files_failed": K,
-        "stdout_rows_removed": L}.
-
-        设计文档 (data-tab-file-preview-design.md) 提到 "30 天软删 + nightly hard delete",
-        当时未实现; 跟 artifact 404 bug 共因: GC 缺失 → 老 artifact 跨 turn 引用风险高.
-
-        Sprint ι (PRD §4.B.1 / R-γ): also runs an independent 90-day sweep on
-        artifact_stdout (audit retention TTL, decoupled from artifact 30-day
-        soft-delete window). Single-statement DELETE acceptable per project
-        memory `feedback_no_canary_small_userbase`.
-        """
+        """Purge expired soft-deleted artifacts and recover pending storage acknowledgements."""
         from datetime import datetime as _dt
         from datetime import timedelta as _td
 
@@ -3858,22 +3953,10 @@ class ArtifactStore:
                 stale_ids = [str(row[0]) for row in await cur.fetchall()]
         result = await purge_artifacts(self.db_path, self.backend, stale_ids, user_id=None, cutoff=cutoff)
 
-        # Sprint ι: independent 90-day stdout sweep (different TTL than artifact GC).
-        stdout_cutoff = (_dt.now(tz=UTC) - _td(days=90)).isoformat(timespec="microseconds")
-        stdout_removed = 0
-        async with _open_db(self.db_path) as db:
-            cur = await db.execute(
-                "DELETE FROM artifact_stdout WHERE created_at < ?",
-                (stdout_cutoff,),
-            )
-            stdout_removed = cur.rowcount
-            await db.commit()
-
         return {
             "rows_removed": result.rows_removed,
             "files_removed": result.files_removed,
             "files_failed": result.files_failed,
-            "stdout_rows_removed": stdout_removed,
             "pins_skipped": pins_skipped,
         }
 

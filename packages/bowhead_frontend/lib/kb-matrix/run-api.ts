@@ -145,7 +145,7 @@ export async function draftColumn(matrixId: string, question: string): Promise<C
 export async function updateColumn(
   matrixId: string,
   columnId: string,
-  patch: { name?: string; question?: string; extraction_hint?: string; options?: string[] | null; cross_verify?: boolean },
+  patch: { name?: string; question?: string; extraction_hint?: string; options?: string[] | null; cross_verify?: boolean; navigation_role?: "none" | "description" | "topics" },
 ): Promise<MatrixColumnVM> {
   const r = await fetch(`${mx(matrixId)}/columns/${encodeURIComponent(columnId)}`, {
     method: "PATCH",

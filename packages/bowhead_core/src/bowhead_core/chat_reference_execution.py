@@ -28,6 +28,7 @@ from bowhead_core.chat_references import (
 )
 from bowhead_core.chat_turn_source import ChatTurnUserSource
 from bowhead_core.session_store import _read_chat_turn_user_source_in_tx, _read_legacy_continuation_parent_in_tx
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_core.reference_mcp_execution import McpReferenceWorkerPreparation
@@ -105,7 +106,7 @@ async def _claim_reference_primary_for_worker(
     ):
         raise ValueError("reference_worker_claim_invalid")
     preparation = skills if skills is not None else mcp if mcp is not None else mcp_prompt
-    async with open_shared_ctx(str(bindings.db_path)) as db:
+    async with open_shared_ctx(domain_database_path(str(bindings.db_path), "execution")) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("BEGIN IMMEDIATE")
         try:

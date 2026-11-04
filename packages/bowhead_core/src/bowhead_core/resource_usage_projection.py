@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_access import TeamSubagentAccessDecision, TeamSubagentAccessResolver
 
 if TYPE_CHECKING:
@@ -113,7 +114,7 @@ class ResourceUsageView:
 
 class ResourceUsageProjectionService:
     def __init__(self, db_path: str) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def usage(
         self,

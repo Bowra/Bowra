@@ -120,7 +120,7 @@ def _eligible_view(spec: Mapping[str, Any], descriptor: Mapping[str, Any]) -> bo
     numeric = [column["key"] for column in columns if column.get("type") == "numeric"]
     if (
         spec.get("kind") not in FOCUS_KINDS
-        or dimensions != keys
+        or set(dimensions) != set(keys)
         or not 1 <= len(keys) <= 6
         or not numeric
         or not set(numeric) <= set(descriptor["measure_keys"])

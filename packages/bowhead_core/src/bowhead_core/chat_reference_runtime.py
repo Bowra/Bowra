@@ -36,6 +36,7 @@ from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope,
 from bowhead_core.events import TerminalDurabilityAbort
 from bowhead_core.session_store import _read_legacy_continuation_parent_in_tx
 from bowhead_core.skill_read_model_input import RequiredSkillModelInput
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     from bowhead_router.types import LLMRequest
@@ -136,7 +137,7 @@ class _ReferenceTaskModelInput(RequiredSkillModelInput):
         if self.checkpoint is not None:
             from bowhead_core.reference_mcp_runtime import require_saved_mcp_reads
 
-            async with open_shared_ctx(str(self.runtime.bindings.db_path)) as db:
+            async with open_shared_ctx(domain_database_path(str(self.runtime.bindings.db_path), "execution")) as db:
                 await db.execute("PRAGMA query_only=ON")
                 await db.execute("BEGIN")
                 try:
@@ -254,7 +255,7 @@ class ReferencePrimaryRuntime:
 
         if self.generation <= 1:
             raise ValueError("reference_continuation_unavailable")
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -299,7 +300,7 @@ class ReferencePrimaryRuntime:
                 raise
 
     async def validate(self, request: TurnRequest | None = None, *, allow_completed: bool = False) -> ReferencePrimaryInput:
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             # A completed Lead primary is still readable for its continuation.
@@ -403,7 +404,7 @@ class ReferencePrimaryRuntime:
             return False
         from bowhead_core.chat_reference_lead_postdispatch import read_pause, require_resume
 
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             row = await read_pause(db, self.turn_id)
@@ -417,7 +418,7 @@ class ReferencePrimaryRuntime:
         from bowhead_core.chat_reference_delegation import CONTRACT
         from bowhead_core.chat_reference_question_origin import read_question_origin_in_tx
 
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             primary = await self._read(db)
@@ -436,7 +437,7 @@ class ReferencePrimaryRuntime:
         from bowhead_core.chat_reference_lead_continuation import all_answers as predispatch_answers
         from bowhead_core.chat_reference_lead_postdispatch import all_answers as postdispatch_answers
 
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             row = await require_resume(db, turn_id=self.turn_id, generation=self.generation)
@@ -463,7 +464,9 @@ class ReferencePrimaryRuntime:
         from bowhead_core.reference_read_question import ReferenceReadQuestion
 
         bounded = card_fields.get("bounded_question") is not None
-        if (self.generation != 1 and not bounded) or Path(store.db_path).resolve() != Path(self.bindings.db_path).resolve():
+        if (self.generation != 1 and not bounded) or Path(domain_database_path(store.db_path, "core")).resolve() != Path(
+            domain_database_path(self.bindings.db_path, "core")
+        ).resolve():
             raise ValueError("reference_continuation_unavailable")
         if len(json.dumps(resume_context, ensure_ascii=False, default=str).encode()) > 65536:
             raise ValueError("reference_continuation_changed")
@@ -474,7 +477,7 @@ class ReferencePrimaryRuntime:
             not after_dispatch or type(read_question) is not ReferenceReadQuestion or model_turn_count != read_question.next_iteration
         ):
             raise ValueError("reference_continuation_changed")
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -558,7 +561,7 @@ class ReferencePrimaryRuntime:
     async def validate_lead(self) -> ReferencePrimaryInput:
         from bowhead_core.chat_reference_delegation import CONTRACT
 
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN")
             primary = await self._read(db, read_output=True)
@@ -603,7 +606,7 @@ class ReferencePrimaryRuntime:
             # A later dispatch continues the same request on the same binding.
             # This read gives Lead an actionable refusal; run() re-checks the
             # same rules in its writer, where the database owns the count.
-            async with open_shared_ctx(str(self.bindings.db_path)) as db:
+            async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                 db.row_factory = aiosqlite.Row
                 await db.execute("BEGIN")
                 try:
@@ -710,7 +713,7 @@ class ReferencePrimaryRuntime:
             result.error = result.error or "reference_continuation_failed"
         failure_code = None if ok else result.error if re.fullmatch(r"[a-z0-9_]{1,128}", str(result.error)) else "reference_continuation_failed"
         try:
-            async with open_shared_ctx(str(self.bindings.db_path)) as db:
+            async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                 db.row_factory = aiosqlite.Row
                 await db.execute("BEGIN IMMEDIATE")
                 try:
@@ -745,7 +748,7 @@ class ReferencePrimaryRuntime:
         The first dispatch already completed the primary task, so a failed
         continuation never turns the execution into a failed primary.
         """
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -771,7 +774,8 @@ class ReferencePrimaryRuntime:
 
         if (
             type(self.skill_sources) is not SkillReadSourceResolver
-            or Path(self.skill_sources.db_path).resolve() != Path(self.bindings.db_path).resolve()
+            or Path(domain_database_path(self.skill_sources.db_path, "core")).resolve()
+            != Path(domain_database_path(self.bindings.db_path, "core")).resolve()
         ):
             raise ValueError("reference_skill_source_scope_changed")
         from bowhead_core.skill_read_extensions import current_extension_scope, revalidate_extension_sources
@@ -805,8 +809,10 @@ class ReferencePrimaryRuntime:
             or (self.allow_bi_workspace_continuation and (self.mcp_prompt_fetch is None or self.skill_sources is None))
             or type(self.mcp_index) is not ReferenceMcpMetadataIndex
             or type(self.mcp_access) is not AccessControlStore
-            or Path(self.mcp_index.db_path).resolve() != Path(self.bindings.db_path).resolve()
-            or Path(self.mcp_access.db_path).resolve() != Path(self.bindings.db_path).resolve()
+            or Path(domain_database_path(self.mcp_index.db_path, "core")).resolve()
+            != Path(domain_database_path(self.bindings.db_path, "core")).resolve()
+            or Path(domain_database_path(self.mcp_access.db_path, "core")).resolve()
+            != Path(domain_database_path(self.bindings.db_path, "core")).resolve()
         ):
             raise ValueError("reference_mcp_source_scope_changed")
         if self.mcp_prompt_fetch is not None:
@@ -825,7 +831,11 @@ class ReferencePrimaryRuntime:
                 bindings=self.bindings,
                 read_output=read_output,
             )
-            if self.skill_sources is not None and Path(self.skill_sources.db_path).resolve() != Path(self.bindings.db_path).resolve():
+            if (
+                self.skill_sources is not None
+                and Path(domain_database_path(self.skill_sources.db_path, "core")).resolve()
+                != Path(domain_database_path(self.bindings.db_path, "core")).resolve()
+            ):
                 raise ValueError("reference_mcp_source_scope_changed")
             await restore_prompt_skill_baseline(db, primary=primary, scope=self.scope, sources=self.skill_sources, cipher=self.cipher)
             await require_reference_worker_in_connection(
@@ -933,10 +943,12 @@ class ReferencePrimaryRuntime:
         # Only the selected receiver's copy gains these pointers. The Lead and
         # other tasks keep their own contexts; current use is checked inside the
         # runner's real ContextVar and again at each native physical request.
-        primary_ctx.reference_skill_required = True
-        primary_ctx.reference_skill_access = access
+        if not access.context_only:
+            primary_ctx.reference_skill_required = True
+            primary_ctx.reference_skill_access = access
         primary_ctx.reference_source_db_path = str(self.bindings.db_path)
-        await primary_ctx.ensure_reference_skill_context()
+        if not access.context_only:
+            await primary_ctx.ensure_reference_skill_context()
         required = AuthorizedSkillModelInput.for_receiver(rendered, access=access, ctx=primary_ctx)
         with reference_model_invocation_scope(access=access, ctx=primary_ctx):
             return await runner.run(**runner_args, required_model_input=required)
@@ -1040,7 +1052,7 @@ class ReferencePrimaryRuntime:
 
                 preflight = await self.validate()
                 if preflight.source.attachment_ids:
-                    async with open_shared_ctx(str(self.bindings.db_path)) as db:
+                    async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                         await db.execute("BEGIN")
                         _, _, _, _, attachment_snapshot = await open_delegation(db, runtime=self, primary=preflight)
                         from bowhead_core.chat_reference_lead_postdispatch import open_read_question, read_pause
@@ -1058,7 +1070,7 @@ class ReferencePrimaryRuntime:
                 raise
         # Persist the actual invocation boundary before entering the runner. A
         # lost commit ACK becomes recovery work, never permission to invoke twice.
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -1504,7 +1516,7 @@ class ReferencePrimaryRuntime:
                 from bowhead_core.chat_reference_bi_continuation import capture_pause
                 from bowhead_core.skill_read_extensions import current_extension_scope
 
-                async with open_shared_ctx(str(self.bindings.db_path)) as db:
+                async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
                     db.row_factory = aiosqlite.Row
                     await db.execute("BEGIN IMMEDIATE")
                     try:
@@ -1548,7 +1560,7 @@ class ReferencePrimaryRuntime:
         ciphertext = self.cipher.seal(
             scope=self.scope, purpose="reference_output", identity=f"{self.turn_id}/{primary.binding.execution_id}", content=content
         )
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -1632,9 +1644,12 @@ class ReferencePrimaryRuntime:
     async def bind_bi_clarification(self, *, clarification_id: str, context: dict, db_path: str) -> bool:
         from bowhead_core.chat_reference_bi_continuation import bind_question
 
-        if not self.allow_bi_workspace_continuation or Path(db_path).resolve() != Path(self.bindings.db_path).resolve():
+        if (
+            not self.allow_bi_workspace_continuation
+            or Path(domain_database_path(db_path, "core")).resolve() != Path(domain_database_path(self.bindings.db_path, "core")).resolve()
+        ):
             raise TerminalDurabilityAbort("reference_continuation_not_supported")
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:
@@ -1671,7 +1686,7 @@ class ReferencePrimaryRuntime:
         status = status_value.lower().strip()
         if status not in ("completed", "cancelled", "aborted", "clarification_pending"):
             status = "failed"
-        async with open_shared_ctx(str(self.bindings.db_path)) as db:
+        async with open_shared_ctx(domain_database_path(str(self.bindings.db_path), "execution")) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("BEGIN IMMEDIATE")
             try:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, Stric
 
 from bowhead_core.chart.binding_catalog import typed_tuple
 from bowhead_core.chart.presentation_plan import validate_stored_notes_plan, verify_saved_plan_evidence
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 Cell = StrictStr | StrictInt | StrictFloat | None
 
@@ -199,7 +200,7 @@ async def resolve_selected_contexts(
 
     if store is None or not getattr(store, "db_path", None):
         raise ValueError("chart_selection_unavailable")
-    async with aiosqlite.connect(store.db_path) as connection:
+    async with diagnostic_connect(store.db_path) as connection:
         await connection.execute("BEGIN")
         await validate_chat_attachment_access_in_connection(
             connection, refs=refs, runtime_ids=runtime_attachment_ids(refs), user_id=user_id, workspace_id=workspace_id, session_id=session_id

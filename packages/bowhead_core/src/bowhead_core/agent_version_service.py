@@ -29,6 +29,7 @@ from bowhead_core.agent_revision_store import (
     validated_release_note,
 )
 from bowhead_core.audit_actions import AuditAction
+from bowhead_core.sqlite_domains import domain_database_path
 
 _SOFT_RISK_REASONS = frozenset(
     {
@@ -107,7 +108,7 @@ class AgentVersionService:
         revision_store: AgentRevisionStore,
         clock: _Clock | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._revision_store = revision_store
         self._clock = clock or _SystemClock()
 

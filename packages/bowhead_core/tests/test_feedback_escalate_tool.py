@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from bowhead_core.feedback_candidate_store import FeedbackCandidateStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.tool_registry import ToolRegistry
 
 from bowhead_core import feedback_escalate_tool as fet
@@ -27,7 +28,7 @@ def _migrated_db(tmp_path: Path) -> str:
     config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
     config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, "head")
+    command.upgrade(config, SOURCE_REVISION)
     return str(path)
 
 

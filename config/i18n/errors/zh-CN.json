@@ -1,4 +1,5 @@
 {
+  "content_sharing_disabled": "此部署已关闭分享。你仍可查看或撤销已有授权；如需开启分享，请联系部署管理员。",
   "coach_canvas_target_unavailable": "原资源或保存版本已不可用，请检查编辑器后重新发送；消息内容已保留。",
   "reference_input_invalid": "引用输入无效，请保留草稿并检查所选引用。",
   "reference_request_too_large": "引用输入过大，请缩短后再发送。",
@@ -304,8 +305,10 @@
   "last_team_admin_cannot_self_demote": "你是当前最后一位管理员，请先提升另一位管理员再降级自己。",
   "last_workspace_admin": "该成员是空间的唯一管理员，请先授予另一位成员管理员权限。",
   "lead_internal_error": "本轮处理时发生系统错误，请稍后重试。",
+  "tool_call_not_executed": "所需操作未执行，任务尚未完成。请发送后续消息，要求继续未完成的工作。",
   "lead_empty_answer": "模型未返回答案或操作，任务在原有限制内未能完成，尚未执行任何操作。请重试本任务；若再次出现，请复制诊断信息交给管理员。",
   "lead_output_exhausted": "模型达到响应上限，仍未产出答案或操作，尚未执行任何操作。请重试本任务；若再次出现，请复制诊断信息交给管理员。",
+  "knowledge_source_changed": "继续任务前，知识来源已变化。请新建会话，基于当前可用资料重新提问。",
   "reference_policy_changed": "团队权限已变化，本次引用未执行。请重新选择智能体和技能后发送。",
   "llm_config_encryption_required": "当前部署尚未配置模型密钥加密，暂时无法保存模型配置；请联系系统管理员。",
   "llm_provider_auth_failed": "模型服务认证失败。请联系团队管理员核对模型连接的 API 密钥和访问权限，并提供诊断信息；修正后再发送。",
@@ -717,5 +720,12 @@
   "shopify_outbound_blocked": "本部署的外部地址策略不允许访问该店铺地址。请使用店铺的 myshopify.com 域名。",
   "shopify_api_version_unverified": "该店铺不支持此处所需的 Shopify API 版本，请联系管理员。",
   "shopify_request_rejected": "Shopify 拒绝了该请求。请检查应用在该店铺的权限后重试。",
-  "shopify_response_invalid": "Shopify 返回了异常响应。请稍后重试；如持续出现，请联系管理员。"
+  "shopify_response_invalid": "Shopify 返回了异常响应。请稍后重试；如持续出现，请联系管理员。",
+  "tool_arguments_invalid": "本步骤的输入格式或数据字段不符合要求，尚未执行成功。智能体需要修正输入后再尝试。",
+  "tool_resource_unavailable": "所选数据来源当前不可用。请检查访问权限或选择可用来源后继续。",
+  "tool_code_failed": "脚本执行失败。智能体需要核对已记录的异常、本次声明的输入和实际列名，再运行修正后的代码。",
+  "tool_execution_timeout": "本次操作超时，结果尚未确认。对于会修改数据的操作，请先核对实际结果再决定是否重试。",
+  "tool_execution_unknown": "本次操作的结果尚未确认。请先核实操作是否已经生效，再决定是否再次执行。",
+  "tool_execution_failed": "工具未能完成本步骤。请查看已记录的执行结果；若原因仍不可见，可复制诊断信息交给管理员排查。",
+  "tool_delivery_review_required": "交付尚未核实。智能体需要核对失败步骤并说明未完成的要求，再结束本次任务。"
 }

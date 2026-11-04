@@ -607,6 +607,7 @@ class KbMatrixStore:
         extraction_hint: str | None = None,
         options: list[str] | None = None,
         cross_verify: bool | None = None,
+        navigation_role: str | None = None,
     ) -> dict[str, Any] | None:
         """改 name 只改 JSON；改 question/hint/**options/cross_verify**（FR-4 r5）
         → prompt_version += 1（该列已完成 cells 派生 stale，决策 3——无需 UPDATE cells）。
@@ -644,6 +645,13 @@ class KbMatrixStore:
                     raise ValueError("cross_verify_not_applicable")
                 target["cross_verify"] = cross_verify
                 prompt_changed = True
+            if navigation_role is not None:
+                if navigation_role not in {"none", "description", "topics"}:
+                    raise ValueError("Invalid navigation role")
+                if navigation_role == "none":
+                    target.pop("navigation_role", None)
+                else:
+                    target["navigation_role"] = navigation_role
             if prompt_changed:
                 target["prompt_version"] = int(target.get("prompt_version") or 1) + 1
             async with open_shared_ctx(self._db_path) as db:

@@ -4,14 +4,14 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from bowhead_cli.migrate import upgrade
 from bowhead_core.session_store import SessionStore
+from core_legacy_database import upgrade
 
 pytestmark = pytest.mark.unit
 
 
 async def _store(tmp_path) -> SessionStore:
-    assert upgrade(f"sqlite+aiosqlite:///{tmp_path / 'requested.db'}", target="core") == ("core",)
+    assert upgrade(f"sqlite+aiosqlite:///{(tmp_path / 'requested.db').with_name('bowhead.db')}", target="core") == ("core",)
     store = SessionStore(str(tmp_path / "bowhead.db"))
     await store.initialize()
     await store.ensure_session(session_id="s1", workspace_id="w", user_id="u1")

@@ -39,6 +39,7 @@ from bowhead_core.agent_behavior_materializer import AgentBehaviorMaterializer, 
 from bowhead_core.agent_listing_safety import scan_agent_listing
 from bowhead_core.agents.exceptions import ManifestSecurityError
 from bowhead_core.agents.manifest_security import lint_user_append
+from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.team_subagent_store import (
     AGENT_RELEASE_COMPATIBILITY_VERSION,
     TeamSubagentNameConflictError,
@@ -176,7 +177,7 @@ class AgentReleaseBaselineStore:
         clock: Clock | None = None,
         behavior_materializer: AgentBehaviorMaterializer | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
         self._clock = clock or SystemClock()
         self._behavior_materializer = behavior_materializer or default_agent_behavior_materializer()
 

@@ -7,8 +7,9 @@ import sqlite3
 from importlib import import_module
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION as SQLITE_LEGACY_REVISION
+from core_legacy_database import TARGET_FILES
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot
 from test_skill_invocation_migration import schema
@@ -70,12 +71,12 @@ async def test_upgrade_repairs_only_memory_links_and_preserves_notification_stat
                 "resolved" if name == "suffix" else "open",
             )
         assert db.execute("SELECT * FROM notification_recipients ORDER BY notification_id").fetchall() == recipients
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     store = NotificationStore(str(path))
     items, _ = await store.list_for_user(user_id="user_a", tab="all", limit=30)
     old = next(item for item in items if item.id == "old")
     assert old.action_url == old.actions[0]["url"] == "/settings/memory/"
     assert old.read_at == "2026-10-02"
     before = snapshot(path)
-    _upgrade(path, "head")
+    _upgrade(path, SQLITE_LEGACY_REVISION)
     assert snapshot(path) == before

@@ -5,10 +5,10 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
-from bowhead_cli.migrate import TARGET_FILES
 from bowhead_core.agent_change_proposal_store import AgentChangeProposalError, AgentChangeProposalStore
 from bowhead_core.agent_eval_case_proposals import AgentEvalCaseProposals
 from bowhead_core.agent_eval_store import AgentEvalStore, AgentEvalStoreError, EvalCaseDraft
+from core_legacy_database import TARGET_FILES
 from test_agent_revision_store import _db, _seed
 from test_chat_reference_storage import _upgrade
 from test_reference_model_context_migration import snapshot

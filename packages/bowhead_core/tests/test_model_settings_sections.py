@@ -41,8 +41,9 @@ def test_connection_can_be_saved_without_assignments_but_cannot_run() -> None:
     with pytest.raises(TeamLlmConfigError, match="primary"):
         build_router_from_v2_config(config)
     config["tiers"]["fast"] = {"provider": "corp", "model": "main"}
+    validate_v2_config(config, allow_unassigned_tiers=True)
     with pytest.raises(TeamLlmConfigError, match="primary"):
-        validate_v2_config(config, allow_unassigned_tiers=True)
+        build_router_from_v2_config(config)
 
 
 @pytest.mark.unit

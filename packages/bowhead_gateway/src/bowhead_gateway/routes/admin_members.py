@@ -25,6 +25,7 @@ import aiosqlite
 from bowhead_core._email_utils import mask_email
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.space_governance import SpaceGovernanceError
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.user_store import (
     TeamOwnerTransferError,
     User,
@@ -800,6 +801,8 @@ async def list_member_workspace_grants(
         raise HTTPException(403, {"code": "cross_team_target_not_allowed"})
     return {
         "user_id": target_user_id,
+        "display_name": target.display_name,
+        "email": target.email,
         "items": await store.list_team_workspace_grants_for_user(
             team_id=caller.team_id,
             user_id=target_user_id,
@@ -1034,7 +1037,7 @@ async def list_admin_members(
 
     Returns members in caller's team with role from team_members + owner badge.
     """
-    async with aiosqlite.connect(store.db_path) as db:
+    async with diagnostic_connect(store.db_path) as db:
         db.row_factory = aiosqlite.Row
         # Get owner id.
         async with db.execute(

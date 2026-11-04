@@ -20,7 +20,8 @@ from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRe
 from bowhead_core.documents.authoring_context import context as authoring_context
 from bowhead_core.documents.authoring_context import tools
 from bowhead_core.documents.authoring_executor import ScriptExecutionError
-from bowhead_core.documents.authoring_protocol import PROFILE, digest
+from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE
+from bowhead_core.documents.authoring_protocol import digest
 from bowhead_core.documents.authoring_review import review_result
 from bowhead_core.documents.continuation import (
     DocumentCallRef,
@@ -58,6 +59,12 @@ class ReadArguments(BaseModel):
     section_id: str | None = Field(default=None, min_length=1, max_length=128)
     view_id: str | None = Field(default=None, min_length=1, max_length=128)
     offset: int = Field(default=0, ge=0)
+
+
+class WordReadArguments(ReadArguments):
+    slides: None = None
+    detail: Literal["index", "content"] = "index"
+    limit: int = Field(default=50, ge=1, le=50)
 
 
 class ExecuteArguments(BaseModel):
@@ -116,7 +123,7 @@ async def run_authoring_turn(
             dispatch = await _one(db, "SELECT * FROM document_turn_dispatches WHERE job_id=?", (job_id,))
             creation = worker.model_copy(update={"generation": dispatch["creation_generation"], "owner_id": dispatch["owner_id"]})
             _, runtime = await _dispatch_material(db, job_id=job_id, creation_worker=creation)
-            if runtime.schema_version != 2 or runtime.planner_profile != PROFILE or attempt_no not in (1, 2):
+            if runtime.schema_version not in {2, 3} or runtime.planner_profile not in AUTHORING_PROFILES or attempt_no not in (1, 2):
                 raise DocumentRequestError("document_execution_fenced")
             execution = await _execution(db, job_id)
             if (
@@ -191,9 +198,24 @@ async def run_authoring_turn(
         if len(data) > 7:
             raise DocumentRequestError("planning_input_limit")
         aliases = {"source": source, **{f"data-{index}": item for index, item in enumerate(data)}}
+        word = runtime.planner_profile == WORD_PROFILE
         if attempt_no == 1:
+            if word:
+                await executor.inspect_source(
+                    run_id=digest((job_id + ":word-source-format").encode()),
+                    source=source.content,
+                    expected_image_id=runtime.image_id,
+                    offset=0,
+                    limit=1,
+                    detail="index",
+                )
             context = asdict(
-                authoring_context(instruction.text, inputs, api_reference="The private API reference is retained in the runtime system instructions.")
+                authoring_context(
+                    instruction.text,
+                    inputs,
+                    api_reference="The private API reference is retained in the runtime system instructions.",
+                    profile=runtime.planner_profile,
+                )
             )
             async with open_shared_ctx(delivery.path) as db:
                 await db.execute("BEGIN IMMEDIATE")
@@ -226,7 +248,7 @@ async def run_authoring_turn(
                 physical_invocation_scope(hook),
                 anyio.fail_after(timeout),
             ):
-                reply = await invoke(system, messages, tools())
+                reply = await invoke(system, messages, tools(runtime.planner_profile))
             await _observed(delivery, scope, worker, job_id, attempt_no, call_no)
             if reply.finish_reason not in {"stop", "tool_use"} or not reply.tool_calls:
                 raise DocumentRequestError("document_authoring_no_output")
@@ -247,7 +269,7 @@ async def run_authoring_turn(
                 run_id = digest(f"{job_id}:authoring:{attempt_no}:{call_no}:{index}".encode())
                 try:
                     if call.name == "document_read":
-                        args = ReadArguments.model_validate(call.arguments)
+                        args = (WordReadArguments if word else ReadArguments).model_validate(call.arguments)
                         item = aliases.get(args.source)
                         if item is None:
                             raise OfficePackageError("document_input_unavailable")
@@ -255,6 +277,17 @@ async def run_authoring_turn(
                             from bowhead_core.documents.canvas_material import read_material
 
                             value = read_material(item.content, section_id=args.section_id, view_id=args.view_id, offset=args.offset)
+                        elif word and (item.role == "template" or PurePosixPath(item.name).suffix.lower() == ".docx"):
+                            if args.section_id is not None or args.view_id is not None or args.slides is not None:
+                                raise DocumentRequestError("document_canvas_selection_invalid")
+                            value = await executor.inspect_source(
+                                run_id=run_id,
+                                source=item.content,
+                                expected_image_id=runtime.image_id,
+                                offset=args.offset,
+                                limit=args.limit,
+                                detail=args.detail,
+                            )
                         elif args.section_id is not None or args.view_id is not None or args.offset:
                             raise DocumentRequestError("document_canvas_selection_invalid")
                         elif PurePosixPath(item.name).suffix.lower() == ".pptx":
@@ -280,9 +313,19 @@ async def run_authoring_turn(
                         )
                         await delivery.transition(scope=scope, job_id=job_id, owner=worker.owner_id, state="rendering")
                         try:
-                            output = await executor.render_script_candidate(run_id=digest((run_id + ":render").encode()), candidate=candidate)
+                            if word:
+                                output = await executor.render_script_candidate(
+                                    run_id=digest((run_id + ":render").encode()), candidate=candidate, source=source.content
+                                )
+                            else:
+                                output = await executor.render_script_candidate(run_id=digest((run_id + ":render").encode()), candidate=candidate)
                         except OfficePackageError as error:
-                            if error.code != "document_pdf_text_missing_or_clipped" or script_attempts >= MAX_SCRIPT_ATTEMPTS:
+                            correctable = {"document_pdf_text_missing_or_clipped"}
+                            if word:
+                                correctable.update(
+                                    {"word_candidate_format_changed", "word_candidate_structure_changed", "word_candidate_target_unsupported"}
+                                )
+                            if error.code not in correctable or script_attempts >= MAX_SCRIPT_ATTEMPTS:
                                 raise
                             await delivery.transition(scope=scope, job_id=job_id, owner=worker.owner_id, state="planning")
                             messages.append(
@@ -296,37 +339,58 @@ async def run_authoring_turn(
                                             "outcome": "known_failed",
                                             "stage": "preview",
                                             "run_id": run_id,
-                                            "diagnostics": "The trusted preview could not verify all candidate text at its source positions. "
-                                            "Shorten replacement titles, captions and body text to fit the original geometry and fonts. "
-                                            "Use document_read if needed, then write the complete corrected script against the same original source. "
-                                            "The candidate was not accepted or published. The original remaining task budget still applies.",
+                                            "diagnostics": (
+                                                "The actual Word candidate failed source-format preservation or visible-text checks. "
+                                                "Use DocumentTemplate with actual source blocks; retain styles, tables and page settings. Allow natural reflow. "
+                                                "Write the corrected full script against the original source within the remaining budget."
+                                                if word
+                                                else "The trusted preview could not verify all candidate text at its source positions. "
+                                                "Shorten replacement titles, captions and body text to fit the original geometry and fonts. "
+                                                "Use document_read if needed, then write the complete corrected script against the same original source. "
+                                                "The candidate was not accepted or published. The original remaining task budget still applies."
+                                            ),
                                         }
                                     ),
                                 )
                             )
                             continue
-                        before = await executor.inspect_source(
-                            run_id=digest((run_id + ":before").encode()),
-                            source=source.content,
-                            expected_image_id=runtime.image_id,
-                            slides=None,
-                            detail="index",
-                        )
-                        before = await executor.inspect_source(
-                            run_id=digest((run_id + ":before-objects").encode()),
-                            source=source.content,
-                            expected_image_id=runtime.image_id,
-                            slides=list(range(1, before["slide_count"] + 1)),
-                            detail="objects",
-                        )
-                        after = await executor.inspect_source(
-                            run_id=digest((run_id + ":after-objects").encode()),
-                            source=candidate.content,
-                            expected_image_id=runtime.image_id,
-                            slides=list(range(1, output.record["preview"]["page_count"] + 1)),
-                            detail="objects",
-                        )
-                        output = review_result(output, source=before, candidate=after, execution_run_id=run_id, code_sha256=candidate.code_sha256)
+                        if word:
+                            from bowhead_core.documents.executor import WorkerResult
+
+                            output = WorkerResult(
+                                {
+                                    **output.record,
+                                    "kind": "authoring_draft",
+                                    "requires_full_review": True,
+                                    "execution_run_id": run_id,
+                                    "code_sha256": candidate.code_sha256,
+                                },
+                                output.files,
+                                output.image_id,
+                            )
+                        else:
+                            before = await executor.inspect_source(
+                                run_id=digest((run_id + ":before").encode()),
+                                source=source.content,
+                                expected_image_id=runtime.image_id,
+                                slides=None,
+                                detail="index",
+                            )
+                            before = await executor.inspect_source(
+                                run_id=digest((run_id + ":before-objects").encode()),
+                                source=source.content,
+                                expected_image_id=runtime.image_id,
+                                slides=list(range(1, before["slide_count"] + 1)),
+                                detail="objects",
+                            )
+                            after = await executor.inspect_source(
+                                run_id=digest((run_id + ":after-objects").encode()),
+                                source=candidate.content,
+                                expected_image_id=runtime.image_id,
+                                slides=list(range(1, output.record["preview"]["page_count"] + 1)),
+                                detail="objects",
+                            )
+                            output = review_result(output, source=before, candidate=after, execution_run_id=run_id, code_sha256=candidate.code_sha256)
                         if authorize_inputs is not None:
                             await authorize_inputs()
                         await delivery.save_draft(scope=scope, job_id=job_id, owner=worker.owner_id, result=output)

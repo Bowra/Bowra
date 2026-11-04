@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import aiosqlite
 import pytest
@@ -23,12 +24,12 @@ async def store(tmp_path):
     # and fails closed with 503. Same approach as test_team_llm_config_api.py's store fixture.
     import sqlite3
 
-    from bowhead_cli.migrate import upgrade
     from bowhead_core.migrations.baseline_schema import initial_schema
+    from gateway_legacy_database import upgrade
 
     with sqlite3.connect(s.db_path) as connection:
         connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{s.db_path}", target="core")
+    upgrade(f"sqlite+aiosqlite:///{Path(s.db_path).with_name('bowhead.db')}", target="core")
     await s.initialize()
     return s
 

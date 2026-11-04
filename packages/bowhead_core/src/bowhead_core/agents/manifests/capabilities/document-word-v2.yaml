@@ -1,0 +1,38 @@
+schema_version: 1
+definitions:
+  - id: cap_template_document
+    version: 2
+    compatibility_major: 1
+    lifecycle: active
+    category: documents
+    listing_revision: 1
+    listing:
+      en-US:
+        name: Request a Word template draft
+        description: Admit an exact-source private DOCX draft for review and optional PDF publication.
+        task_examples: [Fill the existing Word template from the data in this Chat.]
+      zh-CN:
+        name: 申请 Word 模板草稿
+        description: 根据原 DOCX 受理私有草稿，审阅后发布 Word 和按需生成的 PDF。
+        task_examples: [根据当前聊天的数据填写现有 Word 模板。]
+    parameters_schema: { type: object, additionalProperties: false, properties: {} }
+    inputs: [{ contract: document.request, version: 1 }]
+    outputs: [{ contract: document.admission, version: 2 }]
+    compatibility_class: private_document_admission
+    market_visible: false
+    authoring_selectable: false
+    system_only: true
+    contract_test_family: document_admission_contract
+implementations:
+  - id: capi_template_document_native
+    version: 2
+    capability: { id: cap_template_document, version: 2 }
+    lifecycle: active
+    required_tools: [template_document_submit]
+    risk_floor: internal_artifact_write
+    effect_class: internal_artifact_write
+    availability_checks: [document_runtime_ready, principal_resource_scope_ready, team_model_ready]
+    eval_suite: document-word-admission-parity-v2
+    priority: 100
+    owner: platform-documents
+    review_state: reviewed

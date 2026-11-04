@@ -31,6 +31,7 @@ class BufferedFlushLoop[T]:
         self._flush_batch = flush_batch
         self._dropped = 0
         self._written = 0
+        self._flush_failed = False
         self._task: asyncio.Task[None] | None = None
 
     @property
@@ -56,6 +57,7 @@ class BufferedFlushLoop[T]:
         """Hook run on each tick before flushing, e.g. a retention purge."""
 
     async def flush_once(self) -> int:
+        self._flush_failed = False
         if not self._buf:
             return 0
         batch: list[T] = []
@@ -64,6 +66,7 @@ class BufferedFlushLoop[T]:
         try:
             written = await self._write_batch(batch)
         except Exception as e:  # noqa: BLE001 — a write failure must not kill the flush loop.
+            self._flush_failed = True
             if self.requeue_on_failure:
                 # extendleft evicts the newest entries when the buffer filled meanwhile; count them.
                 room = self._max_buffer - len(self._buf)
@@ -79,6 +82,13 @@ class BufferedFlushLoop[T]:
         self._written += written
         return written
 
+    async def _drain(self) -> None:
+        # A successful privacy-filtered batch can consume rows without inserting any.
+        while self._buf:
+            await self.flush_once()
+            if self._flush_failed:
+                break
+
     async def run(self) -> None:
         """Flush on every tick; on cancellation flush what is buffered, then stop."""
         log.info("%s.started interval_s=%.1f cap=%d", self.log_name, self._interval_s, self._max_buffer)
@@ -87,13 +97,11 @@ class BufferedFlushLoop[T]:
                 await asyncio.sleep(self._interval_s)
                 with contextlib.suppress(Exception):
                     await self._before_flush()
-                while await self.flush_once() >= self._flush_batch:
-                    pass  # Drain a backlog without waiting for the next tick.
+                await self._drain()
         except asyncio.CancelledError:
             log.info("%s.cancelled buffered=%d", self.log_name, len(self._buf))
             with contextlib.suppress(Exception):
-                while await self.flush_once():
-                    pass
+                await self._drain()
             log.info("%s.stopped written=%d dropped=%d", self.log_name, self._written, self._dropped)
             raise
 

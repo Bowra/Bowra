@@ -23,6 +23,9 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -91,7 +94,7 @@ class RegisteredFactStore:
     """
 
     def __init__(self, db_path: str | Path) -> None:
-        self.db_path = str(db_path)
+        self.db_path = str(domain_database_path(db_path, "core"))
 
     async def upsert(
         self,
@@ -122,7 +125,7 @@ class RegisteredFactStore:
         # Bounded value_json (Sec P1-11) — prevent adversary-chosen storage.
         value_json = _cap_value_json(value_json)
         now = _now_iso()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             # δ-#8.5 round-2 backend P1: aiosqlite default busy_timeout=0
             # means the second concurrent BEGIN IMMEDIATE on the same workspace
@@ -243,7 +246,7 @@ class RegisteredFactStore:
         project_id: str | None = None,
         user_id: str | None = None,
     ) -> RegisteredFact | None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 "SELECT * FROM registered_facts WHERE workspace_id=? AND "
@@ -270,7 +273,7 @@ class RegisteredFactStore:
         that would leak preferences across tenants and let A's prompt-injected
         fact land in B's system prompt (review P0-fix).
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql, params = self._scope_filter(workspace_id, project_id, user_id)
             sql += " ORDER BY updated_at DESC LIMIT ?"
@@ -299,7 +302,7 @@ class RegisteredFactStore:
         normalized = [k.lower().strip() for k in keywords if k.strip()]
         if not normalized:
             return []
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             base_sql, params = self._scope_filter(workspace_id, project_id, user_id)
             like_clauses = " OR ".join(["LOWER(fact_key) LIKE ?"] * len(normalized))
@@ -348,7 +351,7 @@ class RegisteredFactStore:
         project_id: str | None = None,
         user_id: str | None = None,
     ) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             cur = await db.execute(
                 "DELETE FROM registered_facts WHERE workspace_id=? AND "
                 "COALESCE(project_id,'')=COALESCE(?,'') AND "
@@ -366,7 +369,7 @@ class RegisteredFactStore:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """Return audit trail for given fact_key (oldest-first)."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with diagnostic_connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 "SELECT * FROM registered_facts_history WHERE workspace_id=? AND fact_key=? ORDER BY superseded_at ASC LIMIT ?",

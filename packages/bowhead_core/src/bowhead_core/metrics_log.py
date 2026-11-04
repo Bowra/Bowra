@@ -31,6 +31,9 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
+
 logger = logging.getLogger(__name__)
 
 SCHEMA = """
@@ -56,11 +59,15 @@ class MetricsLog:
     """Async sqlite-backed best-effort metrics event log."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
+        self._db_path = str(domain_database_path(db_path, "observability"))
 
     async def initialize(self) -> None:
+        if domain_layout_active(self._db_path):
+            async with diagnostic_connect(self._db_path) as db:
+                await require_domain_schema(db, "observability")
+            return
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -75,7 +82,7 @@ class MetricsLog:
         try:
             event_id = f"evt_{uuid4().hex[:12]}"
             payload = json.dumps(attrs or {}, ensure_ascii=False, default=str)
-            async with aiosqlite.connect(self._db_path) as db:
+            async with diagnostic_connect(self._db_path) as db:
                 await db.execute(
                     "INSERT INTO metrics_event_log (id, name, user_id, attrs_json, created_at) VALUES (?, ?, ?, ?, ?)",
                     (event_id, name, user_id, payload, _now()),
@@ -110,7 +117,7 @@ class MetricsLog:
         params.append(f"-{int(hours)} hours")
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(int(limit))
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(sql, tuple(params)) as cur:
                 rows = await cur.fetchall()
@@ -133,7 +140,7 @@ class MetricsLog:
 
     async def hard_delete_old(self, *, max_age_days: int = 90) -> int:
         """Cron: trim event log older than max_age_days. Returns deleted count."""
-        async with aiosqlite.connect(self._db_path) as db:
+        async with diagnostic_connect(self._db_path) as db:
             cur = await db.execute(
                 "DELETE FROM metrics_event_log WHERE datetime(created_at) < datetime('now', ?)",
                 (f"-{int(max_age_days)} days",),
