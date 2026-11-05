@@ -45,7 +45,12 @@ def _revision(name, path, revision, *, cleanup=False):
 
 
 def _run(directory, *, fault=lambda phase: None):
-    return run_domain_upgrade(directory, lambda name, path, cleanup: _revision(name, path, SPLIT_REVISION, cleanup=cleanup), fault=fault)
+    return run_domain_upgrade(
+        directory,
+        lambda name, path, cleanup: _revision(name, path, SPLIT_REVISION, cleanup=cleanup),
+        fault=fault,
+        target_head=SPLIT_REVISION,
+    )
 
 
 def _historical_core(path):

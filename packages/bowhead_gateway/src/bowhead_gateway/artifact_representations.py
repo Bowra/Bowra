@@ -6,21 +6,30 @@ import codecs
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
+import anyio
+import httpx2
 from bowhead_core.artifact_store import mime_to_family
+from bowhead_core.documents.authoring_executor import AuthoringExecutor
+from bowhead_core.documents.authoring_protocol import MAX_FILE
+from bowhead_core.documents.package_io import OFFICE_MIMES, office_upload_mime
 from bowhead_core.results_read_model import artifact_supports_raw, derive_artifact_viewer_profile
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from bowhead_gateway.dtos import FilePreviewDTO
 
 if TYPE_CHECKING:
     from bowhead_core.artifact_store import Artifact, ArtifactStore
+    from bowhead_core.documents.executor import DocumentExecutor
 
 Representation = Literal["preview", "raw", "details"]
+RepresentationRequest = Literal[Representation, "pptx-pdf"]
 RAW_LIMIT = 512 * 1024
 PREVIEW_LIMIT = 100 * 1024 * 1024  # Same maximum as file upload, not the Raw budget.
 log = logging.getLogger(__name__)
+_presentation_view_slot = anyio.Semaphore(1)
 
 
 class ArtifactRepresentationDTO(FilePreviewDTO):
@@ -86,6 +95,37 @@ async def _read_prefix(store: ArtifactStore, art: Artifact, limit: int) -> bytes
         log.warning("artifact.representation_read_failed artifact_id=%s error_type=%s", art.id, type(exc).__name__)
         raise representation_error("unavailable") from exc
     return bytes(chunks)
+
+
+async def build_presentation_view(store: ArtifactStore, art: Artifact, executor: Callable[[], DocumentExecutor] | None) -> Response:
+    if office_upload_mime(art.filename, art.mime) != OFFICE_MIMES[".pptx"]:
+        raise representation_error("unsupported")
+    if art.size > MAX_FILE:
+        raise representation_error("too_large")
+    if executor is None:
+        raise representation_error("unavailable")
+    try:
+        _presentation_view_slot.acquire_nowait()
+    except anyio.WouldBlock as exc:
+        raise representation_error("unavailable") from exc
+    try:
+        document = executor()
+        renderer = AuthoringExecutor(root=document.root, url=document.url, token=document.token)
+        source = await _read_prefix(store, art, art.size + 1)
+        if len(source) != art.size:
+            raise representation_error("corrupt")
+        pdf = await renderer.view_presentation(source)
+    except (httpx2.HTTPError, ValueError, OSError) as exc:
+        code = getattr(exc, "code", type(exc).__name__)
+        log.warning("artifact.presentation_view_failed artifact_id=%s error_code=%s", art.id, code)
+        if code in {"document_slide_limit", "file_office_package_limit", "document_preview_limit"}:
+            raise representation_error("too_large") from exc
+        if code in {"file_office_invalid_package", "document_pdf_invalid", "document_pdf_page_mismatch"}:
+            raise representation_error("corrupt") from exc
+        raise representation_error("unavailable") from exc
+    finally:
+        _presentation_view_slot.release()
+    return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 def _raw_text(data: bytes, *, complete: bool) -> tuple[str, str, bool]:

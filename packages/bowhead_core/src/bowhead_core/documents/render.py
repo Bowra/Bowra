@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from bowhead_core.documents.authoring_protocol import MAX_VIEW_PDF
 from bowhead_core.documents.package_io import OfficePackageError
 from bowhead_core.documents.pptx_text import REL, A, P, R, _children, _parse, _parts, inventory_pptx_text
 
@@ -268,10 +269,7 @@ def validate_pdf(source: bytes, pdf: bytes) -> dict[str, object]:
     }
 
 
-def render_candidate(candidate: Path, output: Path, *, soffice: str = "soffice", pdftoppm: str = "pdftoppm") -> dict[str, object]:
-    source = candidate.read_bytes()
-    identity = runtime_identity(soffice=soffice, pdftoppm=pdftoppm)
-    fallbacks = font_fallbacks(source)
+def _convert_presentation_to_pdf(candidate: Path, output: Path, *, soffice: str) -> Path:
     with tempfile.TemporaryDirectory(prefix="document-lo-") as temporary:
         run_binary(
             [
@@ -285,11 +283,43 @@ def render_candidate(candidate: Path, output: Path, *, soffice: str = "soffice",
                 str(candidate),
             ]
         )
-    if candidate.read_bytes() != source:
-        raise OfficePackageError("source_hash_mismatch")
     pdf = output / (candidate.stem + ".pdf")
     if not pdf.is_file() or pdf.stat().st_size > MAX_PDF_BYTES:
         raise OfficePackageError("document_pdf_invalid")
+    return pdf
+
+
+def render_presentation_view(source: bytes, output: Path, *, soffice: str = "soffice") -> bytes:
+    """Render saved pages for viewing, independently of draft publication checks."""
+    import pdfplumber
+
+    slides = _slide_numbers(_parts(source))
+    if not 1 <= len(slides) <= 64:
+        raise OfficePackageError("document_slide_limit")
+    with tempfile.TemporaryDirectory(prefix="presentation-view-") as temporary:
+        candidate = Path(temporary) / "presentation.pptx"
+        candidate.write_bytes(source)
+        preview = _convert_presentation_to_pdf(candidate, output, soffice=soffice)
+        if preview.stat().st_size > MAX_VIEW_PDF:
+            raise OfficePackageError("document_preview_limit")
+        pdf = preview.read_bytes()
+        if candidate.read_bytes() != source:
+            raise OfficePackageError("source_hash_mismatch")
+    if not pdf.startswith(b"%PDF-"):
+        raise OfficePackageError("document_pdf_invalid")
+    with pdfplumber.open(io.BytesIO(pdf)) as document:
+        if len(document.pages) != len(slides) or any(not 0 < page.width <= 4096 or not 0 < page.height <= 4096 for page in document.pages):
+            raise OfficePackageError("document_pdf_page_mismatch")
+    return pdf
+
+
+def render_candidate(candidate: Path, output: Path, *, soffice: str = "soffice", pdftoppm: str = "pdftoppm") -> dict[str, object]:
+    source = candidate.read_bytes()
+    identity = runtime_identity(soffice=soffice, pdftoppm=pdftoppm)
+    fallbacks = font_fallbacks(source)
+    pdf = _convert_presentation_to_pdf(candidate, output, soffice=soffice)
+    if candidate.read_bytes() != source:
+        raise OfficePackageError("source_hash_mismatch")
     receipt = validate_pdf(source, pdf.read_bytes())
     run_binary([pdftoppm, "-png", "-r", "96", str(pdf), str(output / "page")])
     pages = sorted(output.glob("page-*.png"), key=lambda page: int(page.stem.removeprefix("page-")))

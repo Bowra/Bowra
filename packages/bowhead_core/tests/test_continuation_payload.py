@@ -65,3 +65,48 @@ async def test_payload_parts_cannot_commit_without_the_original_card(tmp_path, _
             db.commit()
         db.rollback()
         assert db.execute("SELECT count(*) FROM continuation_payload_segments").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("outcome", ["success", "missing_table", "missing_segment"])
+async def test_segmented_reader_closes_owned_connections_without_garbage_collection(tmp_path, _fernet, monkeypatch, outcome):
+    from contextlib import closing
+
+    from bowhead_core import continuation_payload
+
+    db_path = await _db(tmp_path)
+    identity = await _capture(db_path, segmented=True)
+    checkpoint = await sr.claim(db_path, checkpoint_id=identity, session_id="s_1", user_id="u_1", turn_id="t_2")
+    if outcome != "success":
+        with closing(sqlite3.connect(db_path)) as db:
+            if outcome == "missing_table":
+                db.execute("ALTER TABLE continuation_payload_segments RENAME TO unavailable_segments")
+            else:
+                db.execute("DELETE FROM continuation_payload_segments WHERE owner_id=?", (identity,))
+            db.commit()
+    connect = continuation_payload.connect_sync
+    readers = []
+
+    def retain_reader(*args, **kwargs):
+        reader = connect(*args, **kwargs)
+        readers.append(reader)
+        return reader
+
+    monkeypatch.setattr(continuation_payload, "connect_sync", retain_reader)
+    try:
+        for _ in range(10 if outcome == "success" else 1):
+            if outcome == "success":
+                restored = sr.open_material(checkpoint, db_path=db_path)
+                assert restored.messages[:-1] == TRANSCRIPT
+            else:
+                error_type = sqlite3.OperationalError if outcome == "missing_table" else sr.ResumeRefused
+                with pytest.raises(error_type) as error:
+                    sr.open_material(checkpoint, db_path=db_path)
+                if outcome == "missing_segment":
+                    assert error.value.code == "unreadable"
+        assert readers
+        for reader in readers:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+                reader.execute("SELECT 1")
+    finally:
+        for reader in readers:
+            reader.close()

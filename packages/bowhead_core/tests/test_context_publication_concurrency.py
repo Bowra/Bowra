@@ -3,7 +3,7 @@
 import asyncio
 import sqlite3
 import time
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -54,6 +54,68 @@ def independent_write(path):
         db.commit()
 
 
+@pytest.mark.parametrize("change", ["none", "revoke", "cancel"])
+async def test_knowledge_reader_opens_before_publication_writer_and_rechecks_authority(collab, context_case, tmp_path, monkeypatch, change):
+    from bowhead_core import _db, knowledge_source_runtime
+
+    ctx = source_context()
+    ctx.knowledge_source_uses = {"file_original": "generation_original"}
+    knowledge_path = tmp_path / "knowledge-reader.db"
+    with closing(sqlite3.connect(knowledge_path)):
+        pass
+    ctx.kb_files_store = SimpleNamespace(_db_path=str(knowledge_path))
+    allowed = True
+
+    async def readable(_ctx, _identity, *, generation, enforce):
+        return allowed and generation == "generation_original" and enforce
+
+    monkeypatch.setattr(knowledge_source_runtime, "readable_source", readable)
+    view = legacy_view(collab, ctx=ctx)
+    await prepare(view, context_case)
+    publication = await view.conversation_publication(context_case.request.messages)
+    async with open_shared_ctx(view.db_path) as db:
+        await db.execute("CREATE TABLE context_independent_writes(id INTEGER PRIMARY KEY)")
+        await db.commit()
+
+    opened, release = asyncio.Event(), asyncio.Event()
+    borrow = _db.open_pooled_read_ctx
+
+    @asynccontextmanager
+    async def delayed_knowledge_reader(path):
+        if str(path) == str(knowledge_path):
+            opened.set()
+            await release.wait()
+        async with borrow(path) as db:
+            yield db
+
+    monkeypatch.setattr(_db, "open_pooled_read_ctx", delayed_knowledge_reader)
+    sessions = SessionStore(view.db_path)
+    task = asyncio.create_task(sessions.mark_completed(**completion(collab, publication)))
+    try:
+        await asyncio.wait_for(opened.wait(), 5)
+        await asyncio.to_thread(independent_write, view.db_path)
+        if change == "revoke":
+            allowed = False
+        if change == "cancel":
+            assert await sessions.mark_cancelled(turn_id=collab.worker.turn_id, worker=collab.worker, error_kind="user_cancel")
+    except BaseException:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    finally:
+        release.set()
+
+    if change == "revoke":
+        with pytest.raises(KnowledgeAccessError, match="knowledge_source_changed"):
+            await task
+    else:
+        assert await task is (change == "none")
+    turn = await sessions.get_turn(collab.worker.turn_id)
+    assert turn.status == {"none": "completed", "revoke": "running", "cancel": "cancelled"}[change]
+    if change != "none":
+        assert turn.final_answer is None
+
+
 @pytest.mark.parametrize("entry", ["helper", "legacy", "reference"])
 async def test_history_decoding_allows_independent_writes_during_compaction_and_publication(collab, context_case, tmp_path, monkeypatch, entry):
     from bowhead_core import context_store, knowledge_source_runtime
@@ -79,10 +141,10 @@ async def test_history_decoding_allows_independent_writes_during_compaction_and_
     monkeypatch.setattr(context_store, "open_context_messages", checked_decode)
     validate = knowledge_source_runtime.validate_source_messages
 
-    async def checked_source_parsing(ctx, messages):
+    async def checked_source_parsing(ctx, messages, **options):
         if any(message.role == "tool" for message in messages):
             await asyncio.to_thread(independent_write, view.db_path)
-        await validate(ctx, messages)
+        await validate(ctx, messages, **options)
 
     monkeypatch.setattr(knowledge_source_runtime, "validate_source_messages", checked_source_parsing)
     if runtime is None:

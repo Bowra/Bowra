@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 
 import { renderIntl } from "@/__tests__/intl-render";
 import {
@@ -103,7 +103,7 @@ describe("TurnContainer failure history", () => {
     );
 
     seedFailedStep("t-f1", "s1");
-    renderIntl(
+    const { container } = renderIntl(
       <TurnContainer
         runner={runner({
           turnId: "t-f1",
@@ -114,6 +114,7 @@ describe("TurnContainer failure history", () => {
       />,
     );
 
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(screen.getByText(WALLCLOCK_REASON)).toBeTruthy();
     expect(screen.queryByText("查询超时")).toBeNull();
     expect(screen.queryByText(/任务仍在进行/)).toBeNull();
@@ -131,7 +132,7 @@ describe("TurnContainer failure history", () => {
 
   it("retains the original reason when the current lifecycle is unknown", () => {
     seedFailedStep("t-f1b", "s2");
-    renderIntl(
+    const { container } = renderIntl(
       <TurnContainer
         runner={runner({
           turnId: "t-f1b",
@@ -140,6 +141,7 @@ describe("TurnContainer failure history", () => {
         })}
       />,
     );
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(screen.getByText(WALLCLOCK_REASON)).toBeTruthy();
     expect(screen.queryByText("查询超时")).toBeNull();
   });

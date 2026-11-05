@@ -41,7 +41,8 @@ def outcome_message(ctx, kind: str) -> str:
             "document_authoring_script_failed": "The presentation editing script failed. No files were published. Ask in chat to correct or simplify the requested edits.",
             "document_candidate_invalid": "The presentation failed its file-structure check. No files were published. Check the original template or ask in chat for a corrected draft.",
             "history_unavailable": "Earlier clarification answers cannot be safely reused for this document. No files were published. Start a new request and state the confirmed choices explicitly.",
-            "incomplete": "The document still needs information after your answer. This task has stopped; no files were published.",
+            "input_unavailable": "The file this document task needs is no longer available. No files were published. Upload the template again and start a new request.",
+            "incomplete": "The document still needs information after your answer. This task has stopped; no files were published. Attach the values as a data file, or ask in chat to retrieve them onto the Canvas first, then request the template update again.",
         },
         "zh-CN": {
             "review": "草稿已可审阅。请检查预览和修改内容，再确认发布。",
@@ -49,7 +50,8 @@ def outcome_message(ctx, kind: str) -> str:
             "document_authoring_script_failed": "演示文稿编辑脚本执行失败，未发布文件。请在聊天中要求修正或简化本次修改。",
             "document_candidate_invalid": "演示文稿未通过文件结构检查，未发布文件。请检查原模板，或在聊天中要求修正草稿。",
             "history_unavailable": "无法安全复用此前的澄清回答，未发布文件。请发起新请求，并明确写出已确认的选择。",
-            "incomplete": "补充回答后，文档仍缺少必要信息。本次任务已停止，未发布文件。",
+            "input_unavailable": "此文档任务需要的文件已不可用，未发布文件。请重新上传模板并发起新请求。",
+            "incomplete": "补充回答后，文档仍缺少必要信息。本次任务已停止，未发布文件。请把数据作为文件附上，或先在聊天中要求取数并写到画布，再重新发起模板更新。",
         },
         "de-DE": {
             "review": "Der Entwurf ist zur Prüfung bereit. Prüfen Sie die Vorschauen und Änderungen und bestätigen Sie dann die Veröffentlichung.",
@@ -57,7 +59,8 @@ def outcome_message(ctx, kind: str) -> str:
             "document_authoring_script_failed": "Das Skript zur Bearbeitung der Präsentation ist fehlgeschlagen. Es wurden keine Dateien veröffentlicht. Bitten Sie im Chat darum, die Änderungen zu korrigieren oder zu vereinfachen.",
             "document_candidate_invalid": "Die Präsentation hat die Dateistrukturprüfung nicht bestanden. Es wurden keine Dateien veröffentlicht. Prüfen Sie die ursprüngliche Vorlage oder bitten Sie im Chat um einen korrigierten Entwurf.",
             "history_unavailable": "Frühere Klärungsantworten können für dieses Dokument nicht sicher wiederverwendet werden. Es wurden keine Dateien veröffentlicht. Starten Sie eine neue Anfrage und nennen Sie die bestätigten Entscheidungen ausdrücklich.",
-            "incomplete": "Nach Ihrer Antwort fehlen weiterhin Informationen. Die Aufgabe wurde beendet; es wurden keine Dateien veröffentlicht.",
+            "input_unavailable": "Die für diese Dokumentaufgabe benötigte Datei ist nicht mehr verfügbar. Es wurden keine Dateien veröffentlicht. Laden Sie die Vorlage erneut hoch und starten Sie eine neue Anfrage.",
+            "incomplete": "Nach Ihrer Antwort fehlen weiterhin Informationen. Die Aufgabe wurde beendet; es wurden keine Dateien veröffentlicht. Hängen Sie die Werte als Datendatei an oder lassen Sie sie im Chat zuerst in den Canvas abrufen, und fordern Sie die Vorlagenaktualisierung dann erneut an.",
         },
         "fr-FR": {
             "review": "Le brouillon est prêt à être examiné. Vérifiez les aperçus et les modifications, puis confirmez la publication.",
@@ -65,7 +68,8 @@ def outcome_message(ctx, kind: str) -> str:
             "document_authoring_script_failed": "Le script de modification de la présentation a échoué. Aucun fichier n’a été publié. Demandez dans le chat de corriger ou de simplifier les modifications.",
             "document_candidate_invalid": "La présentation n’a pas réussi la vérification de structure du fichier. Aucun fichier n’a été publié. Vérifiez le modèle d’origine ou demandez dans le chat un brouillon corrigé.",
             "history_unavailable": "Les réponses de clarification précédentes ne peuvent pas être réutilisées en toute sécurité pour ce document. Aucun fichier n’a été publié. Lancez une nouvelle demande en précisant les choix confirmés.",
-            "incomplete": "Des informations manquent encore après votre réponse. La tâche est arrêtée ; aucun fichier n’a été publié.",
+            "input_unavailable": "Le fichier nécessaire à cette tâche documentaire n’est plus disponible. Aucun fichier n’a été publié. Téléversez de nouveau le modèle et lancez une nouvelle demande.",
+            "incomplete": "Des informations manquent encore après votre réponse. La tâche est arrêtée ; aucun fichier n’a été publié. Joignez les valeurs dans un fichier de données, ou demandez dans le chat de les récupérer d’abord sur le Canvas, puis relancez la mise à jour du modèle.",
         },
     }
     language = getattr(ctx.language_context, "output_language", "en-US")
@@ -118,10 +122,12 @@ async def finish_document_planning(ctx, outcome: DocumentPlanningOutcome, *, bus
         status = TurnStatus.COMPLETED if isinstance(outcome, DocumentPlanningReview) else TurnStatus.FAILED
         reason = document_failure_reason(outcome.error_code, outcome.kind) if isinstance(outcome, DocumentPlanningFailure) else None
         message_kind = "history_unavailable" if reason == "document_history_unavailable" else reason
+        if isinstance(outcome, DocumentPlanningFailure) and outcome.error_code == "document_input_unavailable":
+            message_kind = "input_unavailable"
         answer = outcome_message(
             ctx,
             message_kind
-            if message_kind in {"history_unavailable", "document_authoring_script_failed", "document_candidate_invalid"}
+            if message_kind in {"history_unavailable", "input_unavailable", "document_authoring_script_failed", "document_candidate_invalid"}
             else outcome.kind,
         )
         error = None if status == TurnStatus.COMPLETED else outcome.error_code

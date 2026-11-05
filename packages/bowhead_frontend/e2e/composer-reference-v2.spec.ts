@@ -175,6 +175,42 @@ test("browser IME keeps toolbar sending fenced until the final text settles", as
   await cdp.detach();
 });
 
+for (const suggestion of [true, false]) {
+  test(`Pinyin can delete during composition and commit without raw text (suggestion=${suggestion})`, async ({ page, context }) => {
+    await load(page, "?blank=1");
+    const prefix = "你可以输入中文";
+    const message = `${prefix}拼音`;
+    if (suggestion) {
+      await page.evaluate((text) => window.referenceV2.configure({ sessionTexts: [text] }), message);
+    }
+    await caretAtEnd(page);
+    await page.keyboard.insertText(prefix);
+    if (suggestion) await expect(page.getByTestId("composer-autocomplete-ghost")).toBeVisible();
+
+    const editor = page.getByRole("combobox");
+    const send = page.getByRole("button", { name: "发送", exact: true });
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Input.imeSetComposition", { text: "pin tyin", selectionStart: 8, selectionEnd: 8 });
+    await expect(send).toBeDisabled();
+    // Removing a letter through the native composition range produces a DOM deletion.
+    await cdp.send("Input.imeSetComposition", { text: "pin yin", selectionStart: 7, selectionEnd: 7 });
+    await expect(editor).toHaveText(`${prefix}pin yin`);
+    await expect(send).toBeDisabled();
+    await cdp.send("Input.insertText", { text: "拼音" });
+    await expect(editor).toHaveText(message);
+    await expect(send).toBeEnabled();
+
+    await cdp.send("Input.imeSetComposition", { text: "s", selectionStart: 1, selectionEnd: 1 });
+    await expect(send).toBeDisabled();
+    await cdp.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+    await expect(editor).toHaveText(message);
+    await expect(send).toBeEnabled();
+    await expect.poll(() => page.evaluate(async () => (await window.referenceV2.read()).draft?.message)).toBe(message);
+    expect(await page.evaluate(() => window.referenceV2.calls)).toEqual([]);
+    await cdp.detach();
+  });
+}
+
 test("a scoped handoff reaches the production editor only after explicit durable acceptance", async ({ page }) => {
   await load(page, "?handoff=1");
   const editor = page.getByRole("combobox");

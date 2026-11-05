@@ -11,7 +11,12 @@ for (const locale of ["en-US", "zh-CN"] as const) {
       await page.route("**/health", (route) => route.fulfill({ json: { feature_flags: { error_diagnostics: true } } }));
       await installReferenceComponent(page, "", "_tool-outcomes-entry.tsx");
       await page.goto(`/__reference_component_test?locale=${locale}&history=${history}`);
-      await expect(page.getByText(locale === "zh-CN" ? /脚本执行失败/ : /The script failed/)).toBeVisible();
+      const failedStep = page.getByRole("button", { name: /compute_fixture/ });
+      const scriptFailure = page.getByText(locale === "zh-CN" ? /脚本执行失败/ : /The script failed/);
+      await expect(failedStep).toHaveAttribute("aria-expanded", "false");
+      await expect(scriptFailure).toBeHidden();
+      await failedStep.click();
+      await expect(scriptFailure).toBeVisible();
       await expect(page.getByTestId("step-summary")).toContainText(locale === "zh-CN" ? "执行已结束" : "Execution ended");
       await expect(page.getByRole("note")).toContainText("Store profitability metrics");
       const diagnostics = page.getByTestId("error-diagnostics").first();
@@ -23,7 +28,9 @@ for (const locale of ["en-US", "zh-CN"] as const) {
       await expect(page.getByLabel("Submitted scope")).toHaveText("Traffic");
       await expect.poll(() => page.evaluate(() => (window as unknown as { toolOutcomeChartLabels: () => unknown[] }).toolOutcomeChartLabels().length)).toBe(40);
       await page.reload();
-      await expect(page.getByText(locale === "zh-CN" ? /脚本执行失败/ : /The script failed/)).toBeVisible();
+      await expect(failedStep).toHaveAttribute("aria-expanded", "false");
+      await failedStep.click();
+      await expect(scriptFailure).toBeVisible();
       await page.getByTestId("error-diagnostics").first().locator("summary").click();
       await expect(page.getByTestId("step-summary")).toContainText(locale === "zh-CN" ? "执行已结束" : "Execution ended");
       expect(errors).toEqual([]);

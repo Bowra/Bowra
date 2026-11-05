@@ -74,6 +74,9 @@ async def test_composed_lead_document_guidance_matches_advertised_tools(monkeypa
     available = "template_document_submit" in {tool.name for tool in request.tools}
     assert available == (availability == "available")
     assert request.system.count(NATIVE_DOCUMENT_GUIDANCE) == int(available)
+    # The worker cannot query data, so its one route to live figures must stay advertised.
+    assert ("first delegate only retrieval to an available data-query Agent" in request.system) == available
+    assert ("The Lead calls the native Tool directly for template edits" in request.system) == available
     assert ("This request explicitly revises the exact saved document draft" in request.system) == revision
     assert ("Uploaded-template updates are not available in this task" in request.system) == (not available)
     assert "reference-style new presentations" in request.system

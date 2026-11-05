@@ -188,6 +188,7 @@ async def test_unsupported_ordinary_history_records_a_finite_failure(ctx: Contex
         ("pptx_shape_identity_invalid", "document_candidate_invalid", "file-structure check"),
         ("pptx_structure_unsupported", "document_candidate_invalid", "file-structure check"),
         ("document_execution_failed", "document_planning_failed", "could not finish"),
+        ("document_input_unavailable", "document_planning_failed", "Upload the template again"),
     ],
 )
 async def test_known_document_failure_survives_original_terminal_persistence(ctx, native, error_code, reason, message):

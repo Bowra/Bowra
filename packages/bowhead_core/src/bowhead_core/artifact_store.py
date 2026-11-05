@@ -1712,53 +1712,46 @@ class ArtifactStore:
             artifact = staged.artifact
             if artifact.source not in {"canvas_export", "consultant_deck"} or artifact.kind != "deliverable" or artifact.deleted_at is not None:
                 raise ValueError("invalid staged export artifact")
-            await db.execute(
-                "INSERT INTO artifacts("
-                "id, filename, mime, size, source, path, canvas_id, "
-                "created_by, created_at, kind, scope, inject, trust, "
-                "producer_kind, created_by_turn, derived_from, "
-                "manifest_artifact_id"
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    artifact.id,
-                    artifact.filename,
-                    artifact.mime,
-                    artifact.size,
-                    artifact.source,
-                    artifact.path,
-                    artifact.canvas_id,
-                    artifact.created_by,
-                    artifact.created_at,
-                    artifact.kind,
-                    artifact.scope,
-                    artifact.inject,
-                    artifact.trust,
-                    artifact.producer_kind,
-                    artifact.created_by_turn,
-                    artifact.derived_from,
-                    artifact.manifest_artifact_id,
-                ),
-            )
-            if self._account_deletion_schema_present and not domain_layout_active(self.db_path):
-                await db.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (artifact.id,))
-            # Space isolation batch 3: ownership of exported deliverables. Same guarded UPDATE as put_bytes,
-            # preserving this path's degradation: missing columns on legacy deployments omit ownership, never fail the whole export.
             workspace_id = await _resolve_write_workspace_id(
                 db,
                 session_id=staged.session_id,
                 created_by_turn=artifact.created_by_turn,
                 canvas_id=artifact.canvas_id,
             )
-            if workspace_id:
-                if self._workspace_col_present is None:
-                    _wcur = await db.execute("PRAGMA table_info(artifacts)")
-                    self._workspace_col_present = "workspace_id" in {str(r[1]) for r in await _wcur.fetchall()}
-                if self._workspace_col_present:
-                    artifact.workspace_id = workspace_id
-                    await db.execute(
-                        "UPDATE artifacts SET workspace_id=? WHERE id=?",
-                        (workspace_id, artifact.id),
-                    )
+            if self._workspace_col_present is None:
+                _wcur = await db.execute("PRAGMA table_info(artifacts)")
+                self._workspace_col_present = "workspace_id" in {str(r[1]) for r in await _wcur.fetchall()}
+            if self._workspace_col_present:
+                artifact.workspace_id = workspace_id
+            columns = "id,filename,mime,size,source,path,canvas_id,created_by,created_at,kind,scope,inject,trust,producer_kind,created_by_turn,derived_from,manifest_artifact_id"
+            values = (
+                artifact.id,
+                artifact.filename,
+                artifact.mime,
+                artifact.size,
+                artifact.source,
+                artifact.path,
+                artifact.canvas_id,
+                artifact.created_by,
+                artifact.created_at,
+                artifact.kind,
+                artifact.scope,
+                artifact.inject,
+                artifact.trust,
+                artifact.producer_kind,
+                artifact.created_by_turn,
+                artifact.derived_from,
+                artifact.manifest_artifact_id,
+            )
+            if self._workspace_col_present:
+                columns += ",workspace_id"
+                values += (artifact.workspace_id,)
+            await db.execute(
+                f"INSERT INTO artifacts({columns}) VALUES ({','.join('?' for _ in values)})",  # noqa: S608 -- Fixed schema column names.
+                values,
+            )
+            if self._account_deletion_schema_present and not domain_layout_active(self.db_path):
+                await db.execute("DELETE FROM account_owned_artifact_writes WHERE write_id=?", (artifact.id,))
             if staged.session_id and not domain_layout_active(self.db_path):
                 await db.execute(
                     "INSERT INTO session_attachments("
@@ -1948,8 +1941,8 @@ class ArtifactStore:
             row_count=row_count if isinstance(row_count, int) and row_count >= 0 else None,
         )
         async with _open_db(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
             if authorize_in_connection is not None:
-                await db.execute("BEGIN IMMEDIATE")
                 await authorize_in_connection(db)
                 if not domain_layout_active(self.db_path):
                     art.path = await self.put_account_owned_bytes(
@@ -1978,42 +1971,48 @@ class ArtifactStore:
                             aid,
                         )
                         art.derived_from = None
+            # New artifacts receive their final scope in the INSERT; a later
+            # scope UPDATE is reserved for reassignment of an existing artifact.
+            art.workspace_id = (workspace_id or "").strip() or await _resolve_write_workspace_id(
+                db, session_id=session_id, created_by_turn=art.created_by_turn, canvas_id=art.canvas_id
+            )
+            if self._workspace_col_present is None:
+                wcur = await db.execute("PRAGMA table_info(artifacts)")
+                self._workspace_col_present = "workspace_id" in {r[1] for r in await wcur.fetchall()}
+            columns = "id,filename,mime,size,source,path,canvas_id,created_by,created_at"
+            values = (
+                art.id,
+                art.filename,
+                art.mime,
+                art.size,
+                art.source,
+                art.path,
+                art.canvas_id,
+                art.created_by,
+                art.created_at,
+            )
             if self._asset_cols_present:
-                await db.execute(
-                    "INSERT INTO artifacts(id, filename, mime, size, source, path, canvas_id, created_by, created_at, "
-                    "kind, scope, inject, trust, producer_kind, created_by_turn, derived_from, manifest_artifact_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        art.id,
-                        art.filename,
-                        art.mime,
-                        art.size,
-                        art.source,
-                        art.path,
-                        art.canvas_id,
-                        art.created_by,
-                        art.created_at,
-                        art.kind,
-                        art.scope,
-                        art.inject,
-                        art.trust,
-                        art.producer_kind,
-                        art.created_by_turn,
-                        art.derived_from,
-                        art.manifest_artifact_id,
-                    ),
+                columns += ",kind,scope,inject,trust,producer_kind,created_by_turn,derived_from,manifest_artifact_id"
+                values += (
+                    art.kind,
+                    art.scope,
+                    art.inject,
+                    art.trust,
+                    art.producer_kind,
+                    art.created_by_turn,
+                    art.derived_from,
+                    art.manifest_artifact_id,
                 )
-            else:
-                # Degraded box (columns absent): legacy 9-col INSERT, don't 500.
-                await db.execute(
-                    "INSERT INTO artifacts(id, filename, mime, size, source, path, canvas_id, created_by, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (art.id, art.filename, art.mime, art.size, art.source, art.path, art.canvas_id, art.created_by, art.created_at),
-                )
-            # Batch 2a: origin_query uses an independent guarded UPDATE, outside the two INSERTs above.
-            # These are hot paths with existing legacy/extended branches; another variant would mean
-            # three column lists to synchronize. Add a statement only when origin is supplied; silently skip absent columns on legacy deployments
-            # (lost provenance must not fail the entire data delivery; same degradation direction as derived_from).
+            if self._workspace_col_present:
+                columns += ",workspace_id"
+                values += (art.workspace_id,)
+            elif art.workspace_id:
+                logger.warning("artifact_store.put_bytes: workspace_id column absent, ownership dropped for art=%s", aid)
+            await db.execute(
+                f"INSERT INTO artifacts({columns}) VALUES ({','.join('?' for _ in values)})",  # noqa: S608 -- Fixed schema column names.
+                values,
+            )
+            # Optional provenance columns remain readable on older stores.
             if art.origin_query:
                 if self._origin_col_present is None:
                     _ocur = await db.execute("PRAGMA table_info(artifacts)")
@@ -2028,8 +2027,6 @@ class ArtifactStore:
                         "artifact_store.put_bytes: origin_query column absent, provenance dropped for art=%s",
                         aid,
                     )
-            # row_count uses the same guarded UPDATE (identical rationale to origin_query: the hot-path INSERTs
-            # already have legacy/extended branches; another variant adds a third column list to synchronize).
             if art.row_count is not None:
                 if self._row_count_col_present is None:
                     _rcur = await db.execute("PRAGMA table_info(artifacts)")
@@ -2042,30 +2039,6 @@ class ArtifactStore:
                 else:
                     logger.warning(
                         "artifact_store.put_bytes: row_count column absent, dropped for art=%s",
-                        aid,
-                    )
-            # Space isolation batch 3: ownership uses the same guarded UPDATE (identical rationale to origin_query / row_count:
-            # the two INSERTs above already have legacy/extended branches; another variant adds a third
-            # column list to synchronize). Leave NULL when inference fails; do not guess. Batch 4 measures NULL,
-            # and any fallback value would erase that measurement.
-            art.workspace_id = (workspace_id or "").strip() or await _resolve_write_workspace_id(
-                db,
-                session_id=session_id,
-                created_by_turn=art.created_by_turn,
-                canvas_id=art.canvas_id,
-            )
-            if art.workspace_id:
-                if self._workspace_col_present is None:
-                    _wcur = await db.execute("PRAGMA table_info(artifacts)")
-                    self._workspace_col_present = "workspace_id" in {r[1] for r in await _wcur.fetchall()}
-                if self._workspace_col_present:
-                    await db.execute(
-                        "UPDATE artifacts SET workspace_id=? WHERE id=?",
-                        (art.workspace_id, art.id),
-                    )
-                else:
-                    logger.warning(
-                        "artifact_store.put_bytes: workspace_id column absent, ownership dropped for art=%s",
                         aid,
                     )
             if bind_chat_upload:

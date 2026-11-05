@@ -1,7 +1,7 @@
 ---
 name: analyst-sop-output-contract
 description: "Pack a bounded Chat answer or a report AnalysisPayload via subagent_return. FINAL step after any analyst-sop-* SOP."
-version: 1.2.0
+version: 1.2.1
 trigger_examples:
   - "subagent 跑完 business-review SOP，准备返 Lead 前"
   - "subagent 跑完 compute SOP，已经画完所有图"
@@ -51,7 +51,7 @@ subagent_return(payload={...AnalysisPayload schema...})
 
 1. **payload 是最后一步**：调完 `subagent_return` 即结束，**不要**再调工具
 2. **chart_section_id 必须真实**：你前面 `add_chart` 调用返过的 `section_id` 才能写进 evidence；不要编 ID
-3. **insights MECE**：3-5 个互斥穷尽的洞察，**不要**罗列 10+ 个琐碎点
+3. **Insight scope**: include supported findings needed for the question, without a target count. A confirmed authored report does not need duplicate insights.
 4. **每个 insight 必须有 evidence**：至少 1 个 chart/computation/table/callout 类 evidence；纯文字洞察不接受
 5. **narrative 30-1200 字**：低于 30 不算解读；按论点自然长度铺开，不用为省字数牺牲解读
 6. **P0 必须有 owner**：紧急事项不指派负责人就是空话；填部门 / 角色都行
@@ -96,18 +96,20 @@ subagent_return(payload={...AnalysisPayload schema...})
 
 ## 2 · Schema 速查
 
+The runtime Tool schema is authoritative. KPI cards are optional and render beyond authored prose. Explicit user exclusions take precedence over report templates. After a confirmed `write_report`, `exec_summary` and actual sources are sufficient; omit unused arrays. Final chat claims must match the actual report, including any nonempty `kpis`.
+
 完整定义见 `references/payload-schema.md`. 这里是**记忆口诀**：
 
 ```
 AnalysisPayload {
   delivery_surface   → Chat 短答必填 "chat"；Report 可省略或填 "report"
   // Chat: exec_summary 必填, kpis/insights/caveats 可选（是聊天里要说的内容, 不套报告校验）
-  title             → 报告 H1（必填，例 "EA 单据合规监控（2026年4月）"）
+  title             → Report H1; required before direct authorship, otherwise optional.
   eyebrow           → H1 之上小字（可选，例 "合规监控"）
   exec_summary      → 30-200 字结论先行（必填，金字塔顶层）
-  kpis[]            → 3-5 个核心数字卡（必填）
+  kpis[]            → Optional supported KPI cards; no target count. Omit or use [] if unnecessary or excluded.
     {label, value, delta, sentiment: "good"|"bad"|"neutral"}
-  insights[]        → 3-5 个 MECE 洞察（必填，1-7 范围）
+  insights[]        → Supported analytical insights; omit after a confirmed write_report when no additional content is requested.
     {
       title         → h2 标题
       thesis        → 1 句论点（≤50 字）

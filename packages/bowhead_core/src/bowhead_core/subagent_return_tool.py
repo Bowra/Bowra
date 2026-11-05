@@ -840,6 +840,19 @@ def _make_handler() -> Any:
                     f"payload must be a JSON object matching AnalysisPayload schema, got {type(payload).__name__}. 见 analyst-sop-output-contract."
                 ),
             }
+        from bowhead_core.report_kpis import user_excludes_report_kpis
+
+        if payload.get("kpis") and not is_short_answer_payload(payload) and user_excludes_report_kpis(getattr(ctx, "_psi_turn_user_text", "") or ""):
+            from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
+
+            return note_ordinary_return_rejection(
+                ctx,
+                {
+                    "ok": False,
+                    "error_kind": "report_kpis_excluded",
+                    "error": "The user explicitly excluded report KPI cards. Omit kpis or return kpis=[]. Keep confirmed report writes; do not repeat Tools.",
+                },
+            )
         # Existing producers use both top-level and nested question envelopes.
         # Normalize before validation/terminal storage: Lead reads error, and a
         # successful terminal return must never silently lose the user's question.
@@ -914,6 +927,17 @@ def _make_handler() -> Any:
             from bowhead_core.canvas_revise import no_document_chrome as _revision_no_chrome
 
             _revision_mode = _revision_no_chrome(getattr(ctx, "parent_bus", None) or getattr(ctx, "bus", None))
+        _authored = False
+        with contextlib.suppress(Exception):
+            from bowhead_core.agents._lead_context import get_current_subagent_invocations
+            from bowhead_core.agents.report_tools import _resolve_writer_id
+            from bowhead_core.canvas_revise import write_report_succeeded
+
+            _authored = write_report_succeeded(
+                getattr(ctx, "parent_bus", None) or getattr(ctx, "bus", None),
+                _resolve_writer_id(ctx),
+                get_current_subagent_invocations() or [],
+            )
         if _soft_gate:
             try:
                 from bowhead_core.payload_auto_fix import (
@@ -922,7 +946,7 @@ def _make_handler() -> Any:
                     log_fix_records,
                 )
 
-                _fix_res = auto_fix_payload(payload, revision=_revision_mode)
+                _fix_res = auto_fix_payload(payload, revision=_revision_mode, authored=_authored)
                 if _fix_res.fixes:
                     log_fix_records(
                         _fix_res.fixes,
@@ -953,7 +977,7 @@ def _make_handler() -> Any:
                 _auto_fix_records = []
                 # Don't return; legacy validate_payload runs as normal.
 
-        ok, errs = validate_payload(payload, revision=_revision_mode)
+        ok, errs = validate_payload(payload, revision=_revision_mode, authored=_authored)
         if not ok:
             # Give the LLM readable errors so it can repair and retry.
             from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
@@ -1865,6 +1889,12 @@ def _make_handler() -> Any:
             elif len(_auto_fix_records) >= 3:
                 # Quiet but visible signal when fix count high → peer awareness
                 _result["message"] = _result["message"] + f" (soft-gate auto-fixed {len(_auto_fix_records)} fields silently)"
+        from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, delivery_review_enabled
+
+        review = payload.get("delivery_review")
+        if delivery_review_enabled() and payload.get("completion") == "complete" and not payload.get("error") and isinstance(review, dict):
+            # The runner revalidates current evidence before using this origin.
+            return ReviewedDeliveryResult(_result)
         return _result
 
     return _handler
@@ -1893,12 +1923,14 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
             "(kpis / insights / recommendations / caveats) is appended VERBATIM below it, in that "
             "order — so a figure you already stated in exec_summary gets read twice. Put each fact "
             "in exactly one of the two places. A chart named in an insight's evidence (chart_section_id) is shown right after that insight; charts no insight names go at the end. "
-            "report: title + KPIs + insights + recommendations. "
+            "report: title and supported content matching the user's scope. KPI cards are optional, have no target count, "
+            "and appear only when kpis contains supported values. If the user excludes KPI cards, omit kpis or use []. "
             "Long text reads poorly in chat — if it needs sections, multiple dimensions, or will be "
             "re-read/exported, choose 'report'. "
             "After this tool succeeds, the subagent loop ends — DO NOT call more tools.\n"
-            "Short-answer required field: exec_summary. Report required fields: "
-            "title, exec_summary, kpis, insights, recommendations.\n"
+            "Short-answer required field: exec_summary. For a report not yet authored, provide title, exec_summary and supported insights. "
+            "After a confirmed write_report, exec_summary is sufficient; omit unused arrays instead of inventing additional report content. "
+            "Any kpis you supply are rendered as report cards in addition to authored prose.\n"
             "Each insight requires: title, thesis, evidence (1-5 blocks), narrative (30-1200 chars).\n"
             "Each evidence requires: kind ∈ {chart, computation, table, callout} + caption + matching ref field.\n"
             "P0 recommendations require owner. See analyst-sop-output-contract for schema doc."
@@ -1943,6 +1975,7 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
                         },
                         "kpis": {
                             "type": "array",
+                            "description": "Optional report KPI cards. Omit or use [] when unnecessary or explicitly excluded. Nonempty values are rendered beyond write_report prose.",
                             "items": {
                                 "type": "object",
                                 "properties": {

@@ -432,15 +432,11 @@ export function RunningBand({
           would announce twice (expressly forbidden in inventory §2.7). */}
       {expanded ? null : (
       <span className="bh-band__sr" role="status" aria-live="polite">
-        {/* ⚠Include failure count here: the chip sits inside the `.bh-band__bar` button, whose
-            `aria-label` **replaces its entire accessible name**, so screen readers never hear chip text.
-            It is the persistent half (history rows scroll away in seconds); inaudibility makes this disclosure
-            nonexistent to screen-reader users. Count changes only on peer failure, without announcement noise. */}
+        {/* The disclosure button's aria-label overrides the visible peer failure count. */}
         {[action,
           model.stepOrdinal > 0 ? t("band_step_n", { count: model.stepOrdinal }) : "",
           model.peerFailCount > 0
             ? t("band_peer_fail_n", { count: model.peerFailCount }) : "",
-          model.issueCount > 0 ? t("step_issues_n", { count: model.issueCount }) : "",
         ].filter(Boolean).join(" · ")}
       </span>
       )}
@@ -464,16 +460,10 @@ export function RunningBand({
         </span>
         {/* ★The persistent half. With only 2 history rows, an early-failing peer scrolls away after seconds,
             leaving no trace on the turn's primary surface: precisely the dismiss-it-because-it-scrolls-away
-            behavior forbidden in inventory §2.1. Keep the count here; click for the full reason.
-            Put peer outcomes before the separate recorded step-issue count. */}
+            behavior forbidden in inventory §2.1. Keep the count here; click for the full reason. */}
         {model.peerFailCount > 0 ? (
           <span className="bh-band__fail" data-testid="running-band-peer-fail">
             {t("band_peer_fail_n", { count: model.peerFailCount })}
-          </span>
-        ) : null}
-        {model.issueCount > 0 ? (
-          <span className="bh-band__retry" data-testid="running-band-issues">
-            {t("step_issues_n", { count: model.issueCount })}
           </span>
         ) : null}
         <span

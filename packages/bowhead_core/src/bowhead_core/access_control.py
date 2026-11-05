@@ -1328,6 +1328,8 @@ class AccessControlStore:
         resource_kind: str,
         resource_ids: list[str],
         permission: str,
+        *,
+        connection: aiosqlite.Connection | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Batch form of :meth:`explain_decision` for list endpoints.
 
@@ -1335,6 +1337,7 @@ class AccessControlStore:
         ``explain_decision`` for each id, but with two queries per chunk of ids
         instead of two queries per id.
         """
+        _require_read_transaction(connection)
         ids = list(dict.fromkeys(str(rid) for rid in resource_ids if rid))
         if not ids:
             return {}
@@ -1344,7 +1347,7 @@ class AccessControlStore:
         now = _now()
         matches: dict[str, list[ResourceGrantRecord]] = {rid: [] for rid in ids}
         allowlisted: set[str] = set()
-        async with self._read_connection(None) as db:
+        async with self._read_connection(connection) as db:
             for start in range(0, len(ids), _BATCH_ID_CHUNK):
                 chunk = ids[start : start + _BATCH_ID_CHUNK]
                 placeholders = ",".join("?" for _ in chunk)

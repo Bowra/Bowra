@@ -882,6 +882,7 @@ async def _read_team_role_in_tx(
         """,
         (user_id, user_id, team_id),
     ) as cursor:
+        cursor.row_factory = aiosqlite.Row
         row = await cursor.fetchone()
     if row is None:
         return None
@@ -4673,15 +4674,18 @@ class UserStore:
                 await db.rollback()
                 raise
 
-    async def get_user(self, user_id: str) -> User | None:
+    async def get_user(self, user_id: str, *, connection: aiosqlite.Connection | None = None) -> User | None:
         # Runs on every authenticated request: borrow a pooled reader.
-        async with open_pooled_read_ctx(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        _require_read_transaction(connection)
+        async with (
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db,
+            db.execute(
                 "SELECT * FROM users WHERE id = ?",
                 (user_id,),
-            ) as cur:
-                row = await cur.fetchone()
+            ) as cur,
+        ):
+            cur.row_factory = aiosqlite.Row
+            row = await cur.fetchone()
         return _row_to_user(row) if row else None
 
     async def get_user_by_email(self, email: str) -> User | None:
@@ -5093,14 +5097,19 @@ class UserStore:
         self,
         workspace_id: str,
         user_id: str,
+        *,
+        connection: aiosqlite.Connection | None = None,
     ) -> str | None:
-        async with open_pooled_read_ctx(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        _require_read_transaction(connection)
+        async with (
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db,
+            db.execute(
                 "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND status = 'active'",
                 (workspace_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
+            ) as cur,
+        ):
+            cur.row_factory = aiosqlite.Row
+            row = await cur.fetchone()
         return _canonical_workspace_member_role(row["role"]) if row else None
 
     async def has_member_record(self, workspace_id: str, user_id: str) -> bool:
@@ -5147,20 +5156,23 @@ class UserStore:
                 rows = await cur.fetchall()
         return {str(row["id"]): dict(row) for row in rows}
 
-    async def get_workspace_team_id(self, workspace_id: str) -> str | None:
+    async def get_workspace_team_id(self, workspace_id: str, *, connection: aiosqlite.Connection | None = None) -> str | None:
         """ws-datarc-decouple [review P1-c]: the owning team of a Bowhead workspace, for the
         cross-team authz leg. ``get_member_role`` keys only on (workspace_id, user_id) and does
         NOT verify the workspace belongs to the caller's team — so authorize_ws_access needs the
         real ws_team_id to reject a stale/cross-team member row under enforce. Returns None when no
         ``workspaces`` row exists (legacy datarc id / pre-migration) → caller passes ws_team_id=None,
         which skips ONLY the team-equality leg (membership is still required)."""
-        async with open_pooled_read_ctx(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        _require_read_transaction(connection)
+        async with (
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db,
+            db.execute(
                 "SELECT team_id FROM workspaces WHERE id = ?",
                 (workspace_id,),
-            ) as cur:
-                row = await cur.fetchone()
+            ) as cur,
+        ):
+            cur.row_factory = aiosqlite.Row
+            row = await cur.fetchone()
         return row["team_id"] if row else None
 
     async def list_team_directory(
@@ -5442,10 +5454,11 @@ class UserStore:
             return None
         return _row_to_team(row)
 
-    async def get_user_team_id(self, user_id: str) -> str | None:
+    async def get_user_team_id(self, user_id: str, *, connection: aiosqlite.Connection | None = None) -> str | None:
         """Sprint α G9 Sec P0-S-6: re-SELECT user.team_id from DB (不信 JWT stale claim)."""
+        _require_read_transaction(connection)
         async with (
-            open_pooled_read_ctx(self.db_path) as db,
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db,
             db.execute(
                 "SELECT team_id FROM users WHERE id = ? AND status = 'active'",
                 (user_id,),
@@ -5996,13 +6009,13 @@ class UserStore:
 
     # ─── Sprint β G5 — team_members + multi-admin helpers ──────────
 
-    async def get_team_role(self, user_id: str, team_id: str) -> str | None:
+    async def get_team_role(self, user_id: str, team_id: str, *, connection: aiosqlite.Connection | None = None) -> str | None:
         """Returns 'owner' / 'team_admin' / 'audit_admin' / 'member' / None.
 
         The team owner wins over team_members.role.
         """
-        async with open_pooled_read_ctx(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        _require_read_transaction(connection)
+        async with nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db:
             return await _read_team_role_in_tx(
                 db,
                 user_id=user_id,
@@ -6194,15 +6207,20 @@ class UserStore:
     async def get_workspace(
         self,
         workspace_id: str,
+        *,
+        connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        async with open_pooled_read_ctx(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        _require_read_transaction(connection)
+        async with (
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self.db_path) as db,
+            db.execute(
                 "SELECT id, team_id, name, name_key, description, status, revision, "
                 "datarc_workspace_id, created_at, updated_at FROM workspaces WHERE id = ?",
                 (workspace_id,),
-            ) as cur:
-                row = await cur.fetchone()
+            ) as cur,
+        ):
+            cur.row_factory = aiosqlite.Row
+            row = await cur.fetchone()
         return dict(row) if row else None
 
     async def list_workspaces_for_user(

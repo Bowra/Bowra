@@ -25,7 +25,7 @@ Choose a model in the composer before sending. Your personal selection also upda
 
 In a follow-up, state the new question and which files to use. An Agent selected with `@` receives that current request. A PPTX retained from an earlier message is available source material; it does not by itself request a new presentation. To create a presentation, ask for it explicitly.
 
-- After you send a message, the progress box above the answer shows the same information as before: the first line gives the current stage, the step number, and elapsed time; the next two lines show the steps just finished; the last line shows what's being done now. The box now has a lighter, thin border, the text uses the interface font, finished steps have a gray check, and steps with issues are marked in a warning color. Select the first line to see the full process; select it again to collapse it.
+- After you send a message, the progress box above the answer shows the current stage, step number, and elapsed time on the first line. Below it are the recent steps and the current action. Select the first line to see the full process. Select a failed step to see what went wrong. Select the first line again to collapse the process.
 - To stop an answer, select **Stop** at the bottom right of the composer (a gray button, so it's easy to tell apart from Send). The button changes to **Stopping…** until the task has actually ended.
 - When the answer is done, the progress collapses into one neutral line, "Execution ended", with the elapsed time. Select it to see the process again. If the task couldn't finish, the progress collapses into one line, "Not finished · steps done · time taken" ("3 of 5 steps" when the plan length is known); select it to see the whole process, and find the reason and any recovery action on the failure card below it.
 
@@ -33,9 +33,12 @@ Expand the existing process to see business queries, reads, computations and res
 
 Step errors distinguish invalid inputs, unavailable resources, script failures, timeouts and unknown execution outcomes. When safe details are available, expand the error to see the affected field or missing script key, then follow the suggested action. An unknown outcome requires checking the original operation before repeating a write.
 
+When the requested work is complete, the answer focuses on the results and anything that affects their use. Expand the execution details to see earlier attempts that were resolved along the way.
+
 When several data queries run together, a failure of every query marks the query
 step as failed. Mixed successful and failed queries mark it as partly completed;
 successful results remain available. An empty successful query is not a failure.
+Retained successful results can be checked without repeating the original query.
 Check which requested data is still missing before continuing; an optional query
 failure does not by itself mean the whole task failed.
 
@@ -139,6 +142,8 @@ If an upgrade leaves a clarification unavailable, keep the conversation and ask 
 When an Agent has read your attached Word or PowerPoint file and asks a question, answer on that card to continue with the retained reading. The file must still be accessible and unchanged. A question labeled **Type your answer** expects text, not multiple selections. An unconfirmed operation remains unconfirmed; it does not by itself block the assistant from continuing other work.
 
 ## Results area
+
+When you reopen a conversation, the latest answer may appear while its saved results are still loading. If you see **Loading results…** below the answer, wait for the file card to appear before opening or downloading it.
 
 - On a computer, the divider between the conversation and the results shows a handle when you hover over it; drag it to change the widths.
 - When the results area is enlarged, a narrow bar stays on the left; select it to return to the conversation. When the results area is closed, the narrow bar on the right reopens it.

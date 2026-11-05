@@ -11,12 +11,13 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import anyio
 import httpx2
 
 from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_CONTRACT, WORD_PROFILE, source_name
-from bowhead_core.documents.authoring_protocol import CONTRACT, PROFILE, control, digest, identity, read_file
+from bowhead_core.documents.authoring_protocol import CONTRACT, MAX_VIEW_PDF, PROFILE, control, digest, identity, read_file
 from bowhead_core.documents.executor import DocumentExecutor, WorkerInput, WorkerResult
 from bowhead_core.documents.package_io import OfficePackageError
 
@@ -204,6 +205,38 @@ class AuthoringExecutor(DocumentExecutor):
         ):
             raise OfficePackageError("document_runtime_unavailable")
         return record
+
+    async def view_presentation(self, source: bytes) -> bytes:
+        readiness = await self.capabilities()
+        if self.profile != PROFILE or readiness.get("results_preview_contract") != "pptx-results-preview-v1":
+            raise OfficePackageError("document_runtime_unavailable")
+        source_sha256 = digest(source)
+        encoded = control("view", (source,), parent_sha256=source_sha256)
+        directory, _ = await self._dispatch(
+            digest(uuid4().bytes),
+            (WorkerInput("presentation.pptx", "source", source),),
+            encoded,
+            expected_image_id=readiness["image_id"],
+            profile=self.profile,
+        )
+        output = directory / "output"
+
+        def read_view() -> bytes:
+            record = json.loads(read_file(output / "result.json", 8192))
+            control_sha256 = digest(encoded)
+            _raise_fixed_error(record, control_sha256=control_sha256, source_sha256=source_sha256)
+            pdf = read_file(output / "presentation.pdf", MAX_VIEW_PDF)
+            if not pdf.startswith(b"%PDF-") or record != {
+                "profile": PROFILE,
+                "kind": "presentation_view",
+                "control_sha256": control_sha256,
+                "source_sha256": source_sha256,
+                "pdf_sha256": digest(pdf),
+            }:
+                raise OfficePackageError("document_authoring_output_invalid")
+            return pdf
+
+        return await anyio.to_thread.run_sync(read_view)
 
     async def execute_script(
         self, *, run_id: str, source: bytes, code: str, parent_sha256: str, expected_image_id: str, data: tuple[WorkerInput, ...] = ()

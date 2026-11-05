@@ -48,7 +48,6 @@ import os
 import sqlite3
 import threading
 import time
-import traceback
 import weakref
 from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
@@ -57,8 +56,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
-import anyio
 
+from bowhead_core import sqlite_capacity
 from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
 from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_connection
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
@@ -77,11 +76,7 @@ _TRANSACTION_WARNING_SECONDS = 5.0
 
 def _await_locations(task: asyncio.Task | None) -> list[str]:
     """Return bounded code locations without inspecting arguments or locals."""
-    if task is None:
-        return []
-    if task is asyncio.current_task():
-        return [f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}" for frame in traceback.extract_stack(limit=32)]
-    return [f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}:{frame.f_code.co_name}" for frame in task.get_stack(limit=32)]
+    return sqlite_capacity.await_locations(task)
 
 
 def _watch_shared_transaction(conn: aiosqlite.Connection) -> Callable[[], None]:
@@ -191,6 +186,7 @@ class _ReadPool:
     idle: list[aiosqlite.Connection] = field(default_factory=list)
 
 
+_pool_generation = 0
 _read_pools: OrderedDict[str, _ReadPool] = OrderedDict()
 _shared_pools: OrderedDict[str, _ReadPool] = OrderedDict()
 _POOL_MAX_FILES = {id(_read_pools): _READ_POOL_MAX_FILES, id(_shared_pools): _SHARED_POOL_MAX_FILES}
@@ -349,6 +345,7 @@ async def _borrow(
     opener: Callable[[str], AsyncIterator[aiosqlite.Connection]] | Callable[[str], object],
     reusable: Callable[[aiosqlite.Connection], object],
 ) -> AsyncIterator[aiosqlite.Connection]:
+    generation = _pool_generation
     identity = _file_identity(key)
     stale: list[aiosqlite.Connection] = []
     pool = pools.get(key)
@@ -357,11 +354,12 @@ async def _borrow(
         del pools[key]
         pool = None
     conn = pool.idle.pop() if pool is not None and pool.idle else None
-    for old in stale:
-        await _close_quietly(old)
+    if stale:
+        await sqlite_capacity.finish_cleanup(_close_all(stale))
     if conn is None:
         conn = await opener(key)  # type: ignore[misc]
         identity = _file_identity(key)
+    conn.open_slot.track("borrowed")
     stop_watch = _watch_shared_transaction(conn) if pools is _shared_pools else None
     completed = False
     try:
@@ -373,7 +371,7 @@ async def _borrow(
 
         async def release() -> None:
             try:
-                keep = completed and identity is not None and await reusable(conn)  # type: ignore[misc]
+                keep = completed and identity is not None and await reusable(conn) and generation == _pool_generation  # type: ignore[misc]
             except BaseException:
                 await _close_quietly(conn)
                 raise
@@ -382,18 +380,7 @@ async def _borrow(
                 await _close_quietly(old)
 
         # Drain cleanup before propagating either deadline or direct Task cancellation.
-        cleanup = asyncio.create_task(release(), name="sqlite-pool-release")
-        cancelled = None
-        with anyio.CancelScope(shield=True):
-            while not cleanup.done():
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError as exc:
-                    cancelled = exc
-        cleanup.result()
-        if cancelled is not None:
-            raise cancelled
-        await anyio.lowlevel.checkpoint_if_cancelled()
+        await sqlite_capacity.finish_cleanup(release())
 
 
 def _release(
@@ -414,10 +401,13 @@ def _release(
         pool = _ReadPool(identity=identity)
         pools[key] = pool
     pools.move_to_end(key)
-    if len(pool.idle) >= max_idle:
+    combined_idle = sum(len(entry.idle) for registry in (_read_pools, _shared_pools) for entry in registry.values())
+    slot = getattr(conn, "open_slot", None)
+    if (slot and slot.reserve_only) or len(pool.idle) >= max_idle or combined_idle >= min(32, max(1, sqlite_capacity.LIMIT // 8)):
         to_close.append(conn)
     else:
         pool.idle.append(conn)
+    conn.open_slot.track("idle")
     while len(pools) > _POOL_MAX_FILES[id(pools)]:
         _evicted_key, evicted = pools.popitem(last=False)
         to_close.extend(evicted.idle)
@@ -440,12 +430,17 @@ async def open_pooled_read_ctx(path: str | Path) -> AsyncIterator[aiosqlite.Conn
 
 async def close_pooled_readers() -> None:
     """Close every idle pooled connection, read-only and read-write (app shutdown, test isolation)."""
+    global _pool_generation
+    _pool_generation += 1
     pools = [*_read_pools.values(), *_shared_pools.values()]
     _read_pools.clear()
     _shared_pools.clear()
-    for pool in pools:
-        for conn in pool.idle:
-            await _close_quietly(conn)
+    await sqlite_capacity.finish_cleanup(_close_all([conn for pool in pools for conn in pool.idle]))
+
+
+async def _close_all(connections: list[aiosqlite.Connection]) -> None:
+    for conn in connections:
+        await _close_quietly(conn)
 
 
 async def phase0_self_test(path: str, store_names: list[str]) -> None:

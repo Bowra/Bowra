@@ -464,10 +464,8 @@ function StepFromView({ s }: StepFromViewProps) {
   const recoverableFailure = isRecoverableStepFailure(s);
   const stepStatus =
     recoverableFailure && s.state === "failed" ? "part" : stepStateToStatus(s.state);
-  // Recoverable failures do not seize focus while the task runs. Nonretryable
-  // failures stay expanded; ended/archived tasks expose the original explanation.
-  const partialBatch = s.state === "partial" && !!s.subSteps?.length;
-  const forceOpen = ack || partialBatch ? !(turnRunning && recoverableFailure) : false;
+  const showPartialDetails = s.state === "partial" && (ack || s.subSteps?.length)
+    && !(turnRunning && recoverableFailure);
   return (
     <Step
       toolName={stepDisplayToolName(s.stepType, s.toolName)}
@@ -475,7 +473,8 @@ function StepFromView({ s }: StepFromViewProps) {
       summary={deriveRightSummary(s, tChat)}
       time={s.state === "done" ? s.durationText : undefined}
       status={stepStatus}
-      open={forceOpen ? true : undefined}
+      failed={s.state === "failed"}
+      open={showPartialDetails ? true : undefined}
       autoCollapseOnDone={codeLike && !ack}
     >
       {body}

@@ -1,4 +1,5 @@
 {
+  "sqlite_capacity_exhausted": "Der Speicher ist ausgelastet. Prüfen Sie vor einem erneuten Versuch den gespeicherten Status Ihres Vorgangs.",
   "content_sharing_disabled": "Die Freigabe ist für diese Bereitstellung deaktiviert. Bestehende Freigaben können Sie prüfen oder widerrufen. Wenden Sie sich zum Aktivieren an Ihre Administration.",
   "coach_canvas_target_unavailable": "Die ursprüngliche Ressource oder ihre gespeicherte Version ist nicht mehr verfügbar. Prüfen Sie den Editor und senden Sie erneut; Ihre Nachricht bleibt erhalten.",
   "reference_input_invalid": "Die Referenzeingabe ist ungültig. Behalten Sie den Entwurf bei und prüfen Sie die Referenzen.",

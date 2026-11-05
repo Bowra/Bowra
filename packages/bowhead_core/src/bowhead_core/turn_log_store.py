@@ -32,6 +32,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
@@ -157,6 +158,8 @@ class TurnLogStore:
             await db.executescript(SCHEMA)
             await db.commit()
 
+    # An admitted worker must persist its ordered events before live delivery.
+    @completion_capacity()
     async def record(
         self,
         *,

@@ -93,7 +93,8 @@ def test_correction_feedback_supplies_usable_current_run_evidence(monkeypatch: p
     review = _review()
     for item in [*review["requirements"], *review["issues"]]:
         item["evidence_call_ids"] = ["25"]
-    payload = {"exec_summary": "The equivalent ranking table was delivered.", "delivery_review": review}
+    caveats = ["The rankings are delivered as a table."]
+    payload = {"exec_summary": "The equivalent ranking table was delivered.", "delivery_review": review, "caveats": list(caveats)}
     refused = review_terminal_payload(payload, calls)
     assert refused is not None
     context = refused["review_context"]
@@ -107,7 +108,8 @@ def test_correction_feedback_supplies_usable_current_run_evidence(monkeypatch: p
         item["evidence_call_ids"] = [table_call]
     assert review_terminal_payload(payload, calls) is None
     assert payload["completion"] == "complete"
-    assert payload["caveats"] == [review["issues"][0]["explanation"]]
+    assert payload["caveats"] == caveats
+    assert payload["delivery_review"]["issues"] == review["issues"]
     guidance = review_guidance(calls)
     assert '"call_id": "table"' in guidance
     assert '"call_id": "correction"' not in guidance
@@ -147,7 +149,33 @@ def test_expected_failure_observations_do_not_become_positive_delivery_evidence(
     review["requirements"] = [final_outcome]
     assert review_terminal_payload(payload, calls) is None
     assert payload["completion"] == "complete"
-    assert payload["caveats"] == [review["issues"][0]["explanation"]]
+    assert not payload.get("caveats")
+
+
+async def test_accepted_lead_review_directs_a_quiet_reply_after_covered_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.tool_delivery_review import LeadDeliveryReview
+
+    monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
+    calls = _calls()
+    calls[-1].result = {"ok": True, "rows": [["Store 1", 1]], "columns": ["Store", "Revenue"]}
+    review = LeadDeliveryReview()
+    registry = ToolRegistry()
+    registry.register(review.tool_spec())
+    ctx = ToolExecutionContext(workspace_id="ws_test", member_uid="member", user_id="user", turn_id="turn", datarc=None, role="lead")
+    token = set_current_subagent_invocations(calls)
+    try:
+        receipt = await registry.execute("review_delivery", {"payload": {"delivery_review": _review()}}, ctx)
+        assert receipt.result["reviewed_completion"] == "complete"
+        instruction = receipt.result["instruction"]
+        assert "Omit delivery-review narration and tool failure tallies" in instruction
+        assert "'no calls failed'" in instruction
+        assert "Report actual failures when the user asks for diagnostics" in instruction
+        payload = await review.current(calls, ctx)
+        assert payload is not None
+        assert payload["delivery_review"]["issues"][0]["call_id"] == "ranking"
+        assert not payload.get("caveats")
+    finally:
+        token.var.reset(token)
 
 
 def test_partial_delivery_feedback_preserves_the_recorded_state(monkeypatch: pytest.MonkeyPatch) -> None:

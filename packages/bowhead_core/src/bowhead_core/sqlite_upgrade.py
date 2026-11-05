@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import structlog
 
+from bowhead_core.sqlite_domain_runtime import connect_unattached
 from bowhead_core.sqlite_domains import DOMAIN_LAYOUT, DOMAIN_TARGET_FILES, LEGACY_LAYOUT, ORIGINAL_TARGET_FILES
 
 if TYPE_CHECKING:
@@ -124,7 +125,7 @@ def database_head(path: Path) -> str | None:
     if not path.exists():
         return None
     try:
-        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
+        with closing(connect_unattached(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
             if connection.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='alembic_version'").fetchone() is None:
                 return None
             rows = connection.execute("SELECT version_num FROM alembic_version").fetchall()

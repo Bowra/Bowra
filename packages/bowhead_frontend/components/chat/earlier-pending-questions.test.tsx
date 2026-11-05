@@ -44,3 +44,30 @@ it("discards a stale session response", async () => {
   await act(async () => { finish([old]); });
   expect(screen.queryByText(old.question)).toBeNull();
 });
+
+it("reports an unavailable pending-question read without claiming an answer submission failed", async () => {
+  list.mockRejectedValueOnce(new Error("Store unavailable")).mockResolvedValueOnce([]);
+  renderIntl(<EarlierPendingQuestions sessionId="session" currentTurnId="current-turn" running={false} />);
+  await screen.findByText(messages.clarification.pending_load_failed);
+  expect(screen.queryByText(messages.clarification.submit_failed)).toBeNull();
+  expect(dismiss).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: messages.clarification.retry }));
+  await waitFor(() => expect(screen.queryByText(messages.clarification.pending_load_failed)).toBeNull());
+  expect(list).toHaveBeenCalledTimes(2);
+});
+
+it("keeps an unconfirmed cancellation visible and refreshes authority before another action", async () => {
+  list.mockResolvedValue([old]);
+  dismiss.mockRejectedValue(new Error("Cancellation outcome unavailable"));
+  renderIntl(<EarlierPendingQuestions sessionId="session" currentTurnId="current-turn" running={false} />);
+  await screen.findByText(old.question);
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  await screen.findByText(messages.clarification.cancel_unconfirmed);
+  expect(screen.getByText(old.question)).toBeTruthy();
+  expect(screen.queryByText(messages.clarification.submit_failed)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: messages.clarification.retry }));
+  await waitFor(() => expect(screen.queryByText(messages.clarification.cancel_unconfirmed)).toBeNull());
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(dismiss).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(old.question)).toBeTruthy();
+});

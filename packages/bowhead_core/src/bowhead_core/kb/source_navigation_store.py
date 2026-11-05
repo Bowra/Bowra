@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.kb.schemas import KbFileDTO
 from bowhead_core.kb.source_description import GENERATOR_VERSION
 
@@ -35,8 +36,9 @@ class NavigationConflict(ValueError):
 class SourceNavigationStore:
     """Use the migrated files database without runtime schema creation."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, connection: aiosqlite.Connection | None = None) -> None:
         self.path = str(path)
+        self._read_connection = connection
 
     @staticmethod
     async def _current(db: aiosqlite.Connection, file: KbFileDTO) -> None:
@@ -92,7 +94,7 @@ class SourceNavigationStore:
     async def published_generations(self, files: list[KbFileDTO]) -> set[str]:
         if len(files) > 256:
             raise ValueError("knowledge_catalog_input_invalid")
-        async with open_shared_ctx(self.path) as db:
+        async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             return await self._published(db, files)
 
     async def manual_needs_review(self, file: KbFileDTO) -> bool:
@@ -143,7 +145,7 @@ class SourceNavigationStore:
         placeholders = ",".join("?" for _ in files)
         ids = [file.file_id for file in files]
         result = {identity: {"revision": 0, "descriptions": [], "labels": [], "labels_override": False} for identity in ids}
-        async with open_shared_ctx(self.path) as db:
+        async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
             for row in await (
                 await db.execute(f"SELECT file_id,revision,labels_override FROM kb_source_navigation WHERE file_id IN ({placeholders})", ids)
@@ -188,7 +190,7 @@ class SourceNavigationStore:
         """Read only candidates whose original Matrix authority was just validated."""
         if not identities:
             return {}
-        async with open_shared_ctx(self.path) as db:
+        async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await (
                 await db.execute(
@@ -216,7 +218,7 @@ class SourceNavigationStore:
         if query:
             predicate += " AND (instr(lower(name),lower(?))>0 OR instr(lower(aliases_json),lower(?))>0)"
             params.extend([query, query])
-        async with open_shared_ctx(self.path) as db:
+        async with nullcontext(self._read_connection) if self._read_connection is not None else open_pooled_read_ctx(self.path) as db:
             db.row_factory = aiosqlite.Row
             rows = await (
                 await db.execute(

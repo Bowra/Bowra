@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import json
 import os
-import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +16,7 @@ from uuid import uuid4
 
 from bowhead_core.sqlite_diagnostics import DiagnosticConnection
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core.sqlite_domain_runtime import connect_unattached
 from bowhead_core.user_store import User, hash_password
 
 Edition = Literal["community", "business"]
@@ -41,7 +41,7 @@ def read_installation(db_path: str) -> InstallationIdentity | None:
         return None
     # Startup provenance is a fixed core-only, read-only pre-migration probe. It
     # must also work while a stopped deployment resumes an interrupted domain copy.
-    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, factory=DiagnosticConnection)) as db:
+    with closing(connect_unattached(path.resolve().as_uri() + "?mode=ro", uri=True, factory=DiagnosticConnection)) as db:
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='installation_identity'").fetchone() is None:
             return None
         row = db.execute(
@@ -64,7 +64,7 @@ def preflight_installation(db_path: str, edition: Edition) -> bool:
             if siblings:
                 raise InstallationError("Existing database files have unknown installation provenance; Community initialization is refused.")
         return True
-    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, factory=DiagnosticConnection)) as db:
+    with closing(connect_unattached(path.resolve().as_uri() + "?mode=ro", uri=True, factory=DiagnosticConnection)) as db:
         populated = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").fetchone() is not None
     if populated and edition == "community":
         raise InstallationError("Existing database has unknown installation provenance; unattended Community conversion is refused.")

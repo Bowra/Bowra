@@ -11,11 +11,11 @@ from dataclasses import asdict, dataclass
 from bowhead_router.router import UserModelPref
 from bowhead_router.types import Message, ToolCall
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_reference_storage import ReferenceCipher
 from bowhead_core.context_assembly import INCOMPLETE_TURN_MARKERS, build_turn_history
-from bowhead_core.context_dependencies import validate_context_dependencies
+from bowhead_core.context_dependencies import ContextSourceValidator, validate_context_dependencies
 from bowhead_core.context_ownership import TerminalContextOwner, context_owner, require_context_owner_in_tx
 from bowhead_core.context_segments import MAX_CONTEXT_BYTES
 from bowhead_core.context_store import ContextStoreError, read_context_graph_in_tx
@@ -115,12 +115,18 @@ async def load_conversation_context(ctx) -> ConversationContext:
     messages: list[Message] = []
     generation = None
     through = 0
+    source_validator = (
+        ContextSourceValidator(ctx) if callable(getattr(getattr(ctx, "kb_file_authorizer", None), "history_validation", None)) else None
+    )
 
     async def authorize(source):
+        if source_validator is not None:
+            await source_validator.validate(source, read_bytes=True, connection=db)
+            return
         await validate_source_messages(ctx, source)
         await validate_context_dependencies(ctx, source)
 
-    async with open_shared_ctx(store.db_path) as db:
+    async with open_pooled_read_ctx(store.db_path) as db:
         await db.execute("BEGIN")
         await require_context_owner_in_tx(db, worker=worker)
         async with db.execute("SELECT seq FROM turns WHERE id=? AND session_id=?", (worker.turn_id, worker.session_id)) as cursor:
@@ -147,6 +153,7 @@ async def load_conversation_context(ctx) -> ConversationContext:
                 projection_only=True,
             )
             messages.extend(graph[generation].messages)
+        await db.rollback()
     incomplete = sum(
         "[clarification_pending:" in message.content or any(marker in message.content for marker in INCOMPLETE_TURN_MARKERS.values())
         for message in messages

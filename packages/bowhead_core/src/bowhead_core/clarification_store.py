@@ -875,15 +875,17 @@ class ClarificationStore:
                     )
                 return ClarificationInvalidationResult(request, canonical)
             now = _now()
+            from bowhead_core.clarification_resume_context import is_legacy_ordinary_question
+
             if (
                 target_status == "dismissed"
                 and reason == "user_rephrase"
                 and isinstance(request.resume_context, dict)
-                and request.resume_context.get("__schema_version") == 4
+                and (request.resume_context.get("__schema_version") == 4 or is_legacy_ordinary_question(request))
             ):
                 from bowhead_core.ordinary_lead_continuation import cancel_ordinary_pause_in_tx
 
-                await cancel_ordinary_pause_in_tx(db, card_id=request_id, now=now)
+                await cancel_ordinary_pause_in_tx(db, card=request, now=now)
             invalidations = await invalidate_pending_in_tx(
                 db,
                 [ClarificationIdentity(request_id, request.turn_id)],

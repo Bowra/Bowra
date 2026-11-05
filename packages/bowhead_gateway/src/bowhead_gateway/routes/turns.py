@@ -16,6 +16,7 @@ from uuid import UUID, uuid5
 
 from bowhead_core.events import OrchestratorEvent, get_event_registry
 from bowhead_core.space_governance import SpaceOperation
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.terminal_protocol import is_explicit_user_cancel_receipt
 from bowhead_core.user_store import User, UserStore
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -1416,6 +1417,7 @@ async def list_events(
 
 
 @router.post("/{turn_id}/cancel", status_code=202)
+@completion_capacity()
 async def cancel_turn(
     turn_id: str,
     body: CancelTurnRequest,

@@ -355,6 +355,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // NOTE: `t` (imported as `tokens`) is the design-token object used throughout
   // this file; the translator is bound to `tr` to avoid shadowing it.
   const tr = useTranslations("chat");
+  const tResults = useTranslations("results_workspace");
   const tpc = useTranslations("plan_card");
   const tClar = useTranslations("clarification");
   const tErrors = useTranslations("errors");
@@ -1811,6 +1812,13 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
               </CitationsProvider>
             ) : null}
           </div>
+
+          {runner.restoringResults && !runner.running && runner.answer ? (
+            <div className="bh-working-indicator" role="status" data-testid="turn-results-loading">
+              <span className="bh-working-dot" aria-hidden />
+              <span className="bh-working-text">{tResults("list_loading")}</span>
+            </div>
+          ) : null}
 
           {/* UX-2 (2026-07-03): midstream silent-liveness indicator; backend emits streaming.state{paused}
               after 30s without chunks (connection healthy, keepalive feeds watchdog),

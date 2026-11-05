@@ -77,12 +77,6 @@ describe("Recorded step issues", () => {
     expect(row.textContent).toContain(key);
     expect(row.querySelector(".lucide-triangle-alert")).toBeTruthy();
     expect(container.textContent).not.toMatch(/retried_n|band_row_retried/);
-    if (state !== "cancelled") {
-      expect(container.querySelector('[data-testid="running-band-issues"]')?.textContent).toBe("step_issues_n:1");
-      expect(container.querySelector('[role="status"]')?.textContent).toContain("step_issues_n:1");
-    } else {
-      expect(container.querySelector('[data-testid="running-band-issues"]')).toBeNull();
-    }
   });
 });
 

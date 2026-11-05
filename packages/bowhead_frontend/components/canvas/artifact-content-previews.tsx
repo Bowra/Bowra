@@ -442,29 +442,6 @@ function compareCells(left: unknown, right: unknown): number {
   });
 }
 
-export function ArtifactPresentationPreview({ text }: { text: string }) {
-  const t = useTranslations("artifact_viewer");
-  const slides = parseMarkedSections(text, /^--- slide\.(\d+) ---$/gm, "slide");
-  if (slides.length === 0) {
-    return <div className="artifact-viewer-note">{t("document_no_slide_text")}</div>;
-  }
-  return (
-    <div className="artifact-presentation-preview">
-      <div className="artifact-document-status">
-        {t("presentation_outline_notice", { count: slides.length })}
-      </div>
-      <div className="artifact-slide-grid">
-        {slides.map((slide, index) => (
-          <article key={`${slide.label}:${index}`}>
-            <span>{t("presentation_slide", { number: slide.label })}</span>
-            <pre>{slide.content || t("document_no_slide_text")}</pre>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function ArtifactWorkbookPreview({ text }: { text: string }) {
   const t = useTranslations("artifact_viewer");
   const sheets = parseMarkedSections(text, /^--- sheet: (.+) ---$/gm, "sheet");

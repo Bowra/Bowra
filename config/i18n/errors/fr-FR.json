@@ -1,4 +1,5 @@
 {
+  "sqlite_capacity_exhausted": "Le stockage est occupé. Vérifiez l’état enregistré de votre opération avant de réessayer.",
   "content_sharing_disabled": "Le partage est désactivé pour ce déploiement. Vous pouvez consulter ou révoquer les partages existants. Contactez votre administrateur pour activer le partage.",
   "coach_canvas_target_unavailable": "La ressource d’origine ou sa version enregistrée n’est plus disponible. Vérifiez l’éditeur puis renvoyez le message ; son contenu est conservé.",
   "reference_input_invalid": "Les références saisies ne sont pas valides. Conservez le brouillon et vérifiez ses références.",

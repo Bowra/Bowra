@@ -467,3 +467,40 @@ async def test_required_source_contract_survives_real_checkpoint_resume(tmp_path
     )
     assert not second.ok
     assert second.error == "subagent_source_unverified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_review", [False, True])
+async def test_resume_metadata_keeps_only_the_current_review_witness(tmp_path, current_review):
+    from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, requires_delivery_review
+    from bowhead_core.types import ToolInvocation
+
+    db_path = await _db(tmp_path)
+    checkpoint_id = await _capture(db_path)
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+
+    class ReviewedRunner:
+        async def run(self, **kwargs):
+            assert kwargs["resume_grant"].checkpoint.id == checkpoint_id
+            return SubagentResult(
+                profile=kwargs["profile_name"],
+                subagent_id=kwargs["pre_minted_subagent_id"],
+                ok=True,
+                final_answer="The requested rejection was observed.",
+                payload={"delivery_surface": "chat", "exec_summary": "The requested rejection was observed."},
+                completion="complete",
+                ordinary_completion_reason="completed",
+                reviewed_delivery_complete=current_review,
+                tool_invocations=[ToolInvocation("probe", {}, call_id="known_failure", result={"ok": False, "error_kind": "invalid_input"})],
+            )
+
+    context = _ctx(db_path, "t_2", subagent_runner=ReviewedRunner(), parent_bus=_FakeBus())
+    invocation = await registry.execute(
+        "subagent_spawn", {"resume_checkpoint_id": checkpoint_id, "profile": "compute", "task": "Finish the observation."}, context
+    )
+    assert invocation.error is None
+    assert invocation.result["resumed_from"] == checkpoint_id
+    assert isinstance(invocation.result, ReviewedDeliveryResult) is current_review
+    assert requires_delivery_review([invocation]) is current_review
+    assert _state(db_path, checkpoint_id) == "superseded"

@@ -1,4 +1,5 @@
 {
+  "sqlite_capacity_exhausted": "Storage is busy. Check the saved status of your operation before retrying.",
   "content_sharing_disabled": "Sharing is disabled for this deployment. You can inspect or revoke existing shares. Contact your deployment administrator to enable sharing.",
   "coach_canvas_target_unavailable": "The original resource or its saved version is no longer available. Review the editor and send again; your message is kept.",
   "reference_input_invalid": "The reference input is invalid. Keep the draft and check its references.",

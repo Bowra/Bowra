@@ -231,3 +231,32 @@ async def test_missing_parent_reader_cannot_turn_a_child_into_an_unrestricted_ro
     ctx.session_store = None
     with pytest.raises(KnowledgeAccessError, match="lineage_unavailable"):
         await inherited_execution_scope(ctx, SimpleNamespace(parent_execution_id="aex_parent"))
+
+
+@pytest.mark.parametrize("native_origin", [False, True])
+@pytest.mark.parametrize("source_state", ["valid", "revoked", "generation_changed", "cross_space"])
+async def test_delegated_review_origin_never_bypasses_current_source_access(native_origin, source_state):
+    import json
+
+    from bowhead_core.tool_delivery_review import ReviewedDeliveryResult
+
+    ctx, files = source_context("kbf_allowed")
+    files["kbf_allowed"].active_generation_id = "generation_current"
+    ctx.knowledge_source_uses = {"kbf_allowed": "generation_current"}
+    if source_state == "revoked":
+        ctx.kb_file_authorizer.return_value = False
+    elif source_state == "generation_changed":
+        files["kbf_allowed"].active_generation_id = "generation_new"
+    elif source_state == "cross_space":
+        files["kbf_allowed"].scope_id = "ws_other"
+    value = ReviewedDeliveryResult(ok=True, final_answer="The observation was delivered.")
+    if not native_origin:
+        value = json.loads(json.dumps(value))
+    if source_state != "valid":
+        with pytest.raises(KnowledgeAccessError, match="source_changed"):
+            await finish_source_read(ctx, "subagent_spawn", value)
+        return
+    result = await finish_source_read(ctx, "subagent_spawn", value)
+    assert isinstance(result, ReviewedDeliveryResult) is native_origin
+    assert result["knowledge_provenance"]["sources"] == {"kbf_allowed": "generation_current"}
+    assert "knowledge_provenance" not in value

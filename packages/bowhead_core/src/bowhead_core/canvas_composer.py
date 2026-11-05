@@ -845,6 +845,11 @@ async def compose_canvas_from_payload(
     reject_unclassified_direct_mutation("canvas.compose_payload")
     assert canvas_store is not None
 
+    from bowhead_core.report_kpis import user_excludes_report_kpis
+
+    if payload.get("kpis") and user_excludes_report_kpis(getattr(request, "text", "") or ""):
+        payload = {**payload, "kpis": []}
+
     # chat-v4 W4-fix CTO P0-1 — _psi_skip_final_compose_only reader.
     # When Lead has emitted `lead.final.payload` (V4 path), atomic V4-or-V1
     # invariant requires the narrative-style final compose to NOT also run

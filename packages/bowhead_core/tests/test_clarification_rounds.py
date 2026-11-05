@@ -209,3 +209,25 @@ async def test_shared_store_serializes_budget_and_rejects_stale_or_repeated_ques
     # The card's questions sit beside the hash-only marker for HTTP readers.
     assert second.resume_context["card_questions"] == fields["bounded_question"]["questions"]
     assert cards[0].resume_context["card_questions"] == []
+
+
+async def test_optional_question_probe_recovers_after_connection_capacity_refusal(lead_case, monkeypatch):
+    from bowhead_core._db import close_pooled_readers
+
+    from bowhead_core import sqlite_capacity
+
+    case = lead_case
+    case.runtime = await _runtime(case)
+    ctx = _ctx(case)
+    ctx._reference_runtime = case.runtime
+    ctx.clarification_store = ClarificationStore(case.fixture.db_path)
+    await close_pooled_readers()
+    assert await available(ctx)
+    before = _rows(case, "clarification_requests")
+    with monkeypatch.context() as pressure:
+        pressure.setattr(sqlite_capacity, "LIMIT", 0)
+        assert await available(ctx)
+        await close_pooled_readers()
+        assert not await available(ctx)
+    assert await available(ctx)
+    assert _rows(case, "clarification_requests") == before

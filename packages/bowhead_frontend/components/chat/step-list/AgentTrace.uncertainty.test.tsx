@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
@@ -22,6 +22,7 @@ describe("unknown operation feedback", () => {
       error: { kind: "unknown", code: "peer_execution_uncertain", message: "subagent_execution_uncertain", retryable: false },
     };
     const view = renderIntl(<AgentTrace steps={[step]} peerNames={{}} peerProse={{}} />, { locale: "en-US" });
+    fireEvent.click(view.container.querySelector(".stp-head")!);
     expect(screen.getByText("An earlier operation is still unconfirmed. You can continue the conversation; further operations are paused.")).toBeTruthy();
     expect(view.container.textContent).not.toContain("subagent_execution_uncertain");
     expect(view.container.textContent).not.toContain("Please try again later");

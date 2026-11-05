@@ -2,6 +2,8 @@
 
 In Chat, `/` can add an accessible standalone Skill method to the current task without configuring the Agent. This provides read-only method content; script and Tool execution retain their existing permissions.
 
+If the task pauses to ask you a question, answer on that question card to continue with the same selected Agent and Skill method. Their current availability and your access are checked again before continuing.
+
 A Skill is a reusable method. Personal editing, team submission, approval, and each member's enablement are different actions.
 
 ## Use a personal Skill or configure it for an Agent

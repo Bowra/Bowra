@@ -514,3 +514,52 @@ async def test_reference_skill_scope_accepts_domain_peers_and_rejects_other_inst
                 expires_at="2099-01-01",
                 requested_session_id="s_1",
             )
+
+
+@pytest.mark.parametrize("staged", [False, True])
+async def test_new_artifact_scope_is_inserted_without_excluding_history_reader(domain_directory, staged, monkeypatch):
+    from bowhead_core._db import open_shared_ctx
+
+    core = str(domain_directory / "bowhead.db")
+    artifacts = ArtifactStore(core, LocalBackend(domain_directory / "concurrent-blobs"))
+    await artifacts.initialize()
+    from contextlib import closing
+
+    from bowhead_core.sqlite_domain_runtime import connect_sync
+
+    from bowhead_core import artifact_store
+
+    resolve = artifact_store._resolve_write_workspace_id
+
+    async def protected_scope(db, **options):
+        workspace = await resolve(db, **options)
+        with closing(connect_sync(SessionStore(core).db_path, timeout=0)) as retire:
+            with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+                retire.execute("UPDATE sessions SET deleted_at='retiring' WHERE id='s_1'")
+            retire.rollback()
+        return workspace
+
+    monkeypatch.setattr(artifact_store, "_resolve_write_workspace_id", protected_scope)
+    async with open_shared_ctx(SessionStore(core).db_path) as reader:
+        await reader.execute("BEGIN")
+        async with reader.execute("SELECT id FROM artifacts LIMIT 1") as cursor:
+            await cursor.fetchall()
+        if staged:
+            output = await artifacts.stage_export_bytes(
+                content=b"staged concurrent output",
+                filename="output.txt",
+                mime="text/plain",
+                canvas_id=None,
+                created_by="u_1",
+                session_id="s_1",
+                producer_kind="canvas_export",
+            )
+            await artifacts.commit_staged_artifacts((output,))
+            artifact = output.artifact
+        else:
+            artifact = await artifacts.put_bytes(
+                content=b"concurrent output", filename="output.txt", mime="text/plain", created_by="u_1", session_id="s_1"
+            )
+        assert artifact.workspace_id == "ws_1"
+        await reader.rollback()
+    assert (await artifacts.get(artifact.id)).workspace_id == "ws_1"

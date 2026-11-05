@@ -1,5 +1,7 @@
 # Revise an existing report
 
+KPI cards are optional. You can ask for only the chart, specify a few useful KPI cards, or say “Do not add KPI cards.” A minimal report does not need extra KPI cards or additional analytical sections. State whether existing cards should stay when revising an earlier report.
+
 A new Table shows every column of the selected result unless you name the columns to show. Named columns keep your order, including constant values. For a plot, state the horizontal field, value fields and grouping (or “no grouping”); for example, “Decile on the horizontal axis, hospital count on the vertical axis, grouped by region.” Numeric Decile values remain categories when you request a category axis. Missing fields or unsupported shapes produce an explanation instead of a guessed plot. Request sorting, aggregation or Top N in data preparation; the renderer does not silently shorten the prepared result. To change an explicit view into another chart kind, ask in Chat with the intended fields; its menu does not guess new bindings. Existing charts keep their saved behavior until you request a new revision.
 
 When requesting a new chart, you can ask to hide its legend or show or hide data labels. In a combined figure, identify the individual view when you want a different choice for one chart. A single-series chart may omit its legend automatically.

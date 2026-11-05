@@ -27,17 +27,24 @@ TEMPLATE_REQUEST_WORKFLOW_GUIDANCE = (
     "Start the full template-update task with action=generate even when required values are missing or the user asks to inspect first. "
     "The document worker reads the template, asks missing decisions through its existing clarification flow, "
     "and edits only after the answer. Admission retains the request and files without editing or publishing them. "
+    "The Lead calls the native Tool directly for template edits, including text-only changes to an earlier uploaded template. "
+    "A helper's inability to fill the template says nothing about the Lead's native Tool. Continue with that Tool and the original template ID. "
     "Do not delegate template inspection to a separate helper or replace a resumable question with prose. "
+    "The document worker cannot query data sources; it sees only the template, attached data files, Canvas content passed with canvas={} and typed answers. "
+    "The one exception to starting directly: when the user wants values from connected data or analysis that are not already in the request, attachments or this Chat's Canvas, "
+    "first delegate only retrieval to an available data-query Agent as a helper. Ask it to read the template only to identify the needed metrics and save the figures on Canvas. "
+    "Read its result, then call action=generate in a later response with canvas={}. "
+    "If no data-query Agent is available or retrieval fails, explain what is missing and ask for a data file instead of submitting. "
 )
 
 NATIVE_DOCUMENT_GUIDANCE = (
     "Template document workflow: when the user identifies an uploaded PPTX or DOCX as a template and asks to update it, "
-    "use template_document_submit directly; the document worker reads the template and data. "
+    "use template_document_submit; the document worker reads the template and supplied data. "
     "DOCX requires the enabled Word capability. This same Tool supports source-only requested_outputs=['source'] "
     "as well as source plus PDF. Source-only publishes no PDF; private PDF/page rendering for Canvas review does not publish a PDF. "
     + TEMPLATE_REQUEST_WORKFLOW_GUIDANCE
     + "The answer resumes the same document job with its retained full request and files; do not start an answer-only generate request. "
-    "Do not route this task to a BI Agent, recreate slides, or generate a generic downloadable file. "
+    "Do not route the template edit itself to a BI Agent, recreate slides, or generate a generic downloadable file. "
     "Any requested PDF must be derived from the reviewed source presentation or Word document in this same workflow, not from a separate report. "
     "Follow this Tool's current action-specific schema for request fields and file roles. The server resolves file positions. "
     + ORIGINAL_REQUEST_QUOTE_GUIDANCE

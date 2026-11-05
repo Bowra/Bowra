@@ -53,6 +53,28 @@ class CanvasInputAdmission:
     content_prepared: bool = False
 
 
+async def continuation_canvas_sections_in_tx(
+    db: aiosqlite.Connection, *, scope: DocumentScope, session_id: str, original_turn_id: str, current_turn_id: str
+) -> tuple[str, ...]:
+    """Select current visible Canvas content produced within the quoted task span."""
+    async with db.execute(
+        """SELECT c.id FROM canvas_sections c
+        JOIN canvases a ON a.id=c.canvas_id
+        JOIN turns origin ON origin.id=? AND origin.session_id=a.session_id
+        JOIN turns current_turn ON current_turn.id=? AND current_turn.session_id=a.session_id
+        JOIN turns producer ON producer.id=c.turn_id AND producer.session_id=a.session_id
+        WHERE a.session_id=? AND a.user_id=? AND a.workspace_id=?
+          AND producer.seq BETWEEN origin.seq AND current_turn.seq
+          AND c.quarantined=0 AND c.hidden_for_chat_mode=0 AND c.superseded=0
+        ORDER BY c.seq,c.id LIMIT 65""",
+        (original_turn_id, current_turn_id, session_id, scope.user_id, scope.workspace_id),
+    ) as cursor:
+        ids = tuple(row[0] for row in await cursor.fetchall())
+    if len(ids) > 64:
+        raise DocumentRequestError("document_canvas_selection_invalid")
+    return ids
+
+
 async def validate_current_canvas_in_tx(db: aiosqlite.Connection, *, scope: DocumentScope, manifest: CanvasInputManifest, section_ids) -> None:
     from bowhead_core.canvas_export_projection import build_canvas_content_projection
     from bowhead_core.canvas_store import _row_to_canvas, _row_to_section

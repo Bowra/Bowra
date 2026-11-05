@@ -22,6 +22,7 @@ from bowhead_core.published_diagnostics import (
     publish_skill_workflow_failure,
 )
 from bowhead_core.skill_upload import SkillUploadError
+from bowhead_core.sqlite_capacity import SQLiteCapacityError
 from bowhead_memory.privacy_guard import MemoryWriteBlockedError
 from fastapi import HTTPException
 from fastapi.exception_handlers import http_exception_handler
@@ -391,6 +392,16 @@ async def _unhandled_exception_error_handler(
     )
 
 
+async def _sqlite_capacity_handler(request: Request, exc: SQLiteCapacityError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {"code": "sqlite_capacity_exhausted", "message": _terminal_error_message(request.scope, code="sqlite_capacity_exhausted")}
+        },
+        headers={REQUEST_ID_HEADER: _authoritative_request_id(request.scope), "Cache-Control": "no-store"},
+    )
+
+
 async def _client_disconnect_handler(request: Request, exc: ClientDisconnect) -> Response:
     """The caller dropped its own request body mid-upload; nothing failed and no one is listening.
 
@@ -405,6 +416,7 @@ async def _client_disconnect_handler(request: Request, exc: ClientDisconnect) ->
 
 def register_error_handlers(app: FastAPI) -> None:
     """主入口：把所有 i18n 感知的异常处理器注册到 FastAPI app."""
+    app.add_exception_handler(SQLiteCapacityError, _sqlite_capacity_handler)  # type: ignore[arg-type]
     app.add_exception_handler(ClientDisconnect, _client_disconnect_handler)  # type: ignore[arg-type]
     app.add_exception_handler(HTTPException, _http_exception_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(

@@ -7,12 +7,14 @@ independent domain writers to hold shared leases concurrently.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import fcntl
 import json
 import re
 import sqlite3
+import time
 import weakref
 from collections.abc import Callable
 from pathlib import Path
@@ -21,7 +23,8 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 import structlog
 
-from bowhead_core.sqlite_diagnostics import DiagnosticAsyncConnection, DiagnosticConnection, DiagnosticCursor
+from bowhead_core.sqlite_capacity import ConnectionSlot
+from bowhead_core.sqlite_diagnostics import DiagnosticAsyncConnection, DiagnosticConnection, DiagnosticCursor, _kind
 from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES, TABLE_DOMAINS
 
 _REGISTRY = json.loads(Path(__file__).with_name("sqlite_domain_guards.json").read_text(encoding="utf-8"))
@@ -107,6 +110,8 @@ class DomainConnection(DiagnosticConnection):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._domain: str | None = None
+        self._domain_closed = False
+        self._defer_cursor_close: Callable[[DomainCursor], None] | None = None
         self._core_path: Path | None = None
         self._gates: dict[str, Any] = {}
         self._leases: dict[str, int] = {}
@@ -121,6 +126,9 @@ class DomainConnection(DiagnosticConnection):
         self._lost_lease = False
         self._cleanup_events: set[tuple[str, str]] = set()
         self._draining_cleanup = False
+        self._mutation_guards = False
+        self._query_only = False
+        self._unprotected_snapshot = False
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         if not args:
@@ -170,6 +178,7 @@ class DomainConnection(DiagnosticConnection):
             fcntl.flock(self._gates[domain].fileno(), fcntl.LOCK_UN)
         self._leases.clear()
         self._lost_lease = False
+        self._unprotected_snapshot = False
 
     def _settle(self) -> None:
         if self._operation_depth or self.in_transaction or self._active_readers:
@@ -179,6 +188,8 @@ class DomainConnection(DiagnosticConnection):
             self._drain_cleanup()
 
     def _authorize(self, action: int, first: str | None, second: str | None, database: str | None, source: str | None) -> int:
+        if self._mutation_guards and self._query_only and action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}:
+            return sqlite3.SQLITE_DENY
         required_domain = None
         required = 0
         if action == sqlite3.SQLITE_PRAGMA and second and first in {"table_info", "table_xinfo", "foreign_key_list", "index_list"}:
@@ -190,7 +201,7 @@ class DomainConnection(DiagnosticConnection):
             # including reads preceding a later security predicate in the same tx.
             required_domain = database.removeprefix("domain_")
             required = 1
-        elif database == "main" and first in _AUTHORITY.get(self._domain or "", {}):
+        elif not self._mutation_guards and database == "main" and first in _AUTHORITY.get(self._domain or "", {}):
             columns = _AUTHORITY[self._domain][first]
             if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_DELETE} or action == sqlite3.SQLITE_UPDATE and second in columns:
                 required_domain = self._domain
@@ -200,7 +211,7 @@ class DomainConnection(DiagnosticConnection):
                 profile = self._profiles.setdefault(self._preparing[-1], {})
                 profile[required_domain] = max(required, profile.get(required_domain, 0))
             try:
-                self._acquire(required_domain, required)
+                self._protect_statement(required_domain, required)
             except sqlite3.OperationalError:
                 self._gate_failed = True
                 return sqlite3.SQLITE_DENY
@@ -208,31 +219,69 @@ class DomainConnection(DiagnosticConnection):
             return int(self._external_authorizer(action, first, second, database, source))
         return sqlite3.SQLITE_OK
 
+    def _protect_statement(self, domain: str, mode: int) -> None:
+        if self._mutation_guards and self._query_only and mode == 1:
+            self._unprotected_snapshot = True
+        else:
+            self._acquire(domain, mode)
+
     def _operation(self, function: Any, phase: str, sql: str | None = None) -> Any:
         if self._domain is None:
             return super()._operation(function, phase, sql)
+        retry_preparation = (
+            phase == "execute"
+            and not self.in_transaction
+            and not self._active_readers
+            and not self._leases
+            and not self._lost_lease
+            and not self._preparing
+        )
+        deadline = time.monotonic() + self.bowhead_busy_timeout_ms / 1000
         self._operation_depth += 1
         if sql is not None:
             self._preparing.append(sql)
         try:
 
             def guarded() -> Any:
-                if self._lost_lease and phase != "rollback":
-                    raise _busy()
-                for domain, mode in self._profiles.get(sql or "", {}).items():
-                    self._acquire(domain, mode)
-                try:
-                    return function()
-                except sqlite3.DatabaseError:
-                    if self._callback_busy is not None:
-                        error, self._callback_busy = self._callback_busy, None
-                        raise error from None
-                    if self._gate_failed:
-                        self._gate_failed = False
-                        raise _busy() from None
-                    raise
+                while True:
+                    preparing = True
+                    try:
+                        if self._lost_lease and phase != "rollback":
+                            raise _busy()
+                        for domain, mode in self._profiles.get(sql or "", {}).items():
+                            # Cached SQLite statements skip the authorizer.
+                            self._protect_statement(domain, mode)
+                        preparing = False
+                        try:
+                            return function()
+                        except sqlite3.DatabaseError:
+                            if self._callback_busy is not None:
+                                error, self._callback_busy = self._callback_busy, None
+                                raise error from None
+                            if self._gate_failed:
+                                self._gate_failed = False
+                                preparing = True
+                                raise _busy() from None
+                            raise
+                    except sqlite3.OperationalError:
+                        delay = min(0.01, deadline - time.monotonic())
+                        if not retry_preparation or not preparing or delay <= 0:
+                            raise
+                        # Only preparation can restart; release every lease before waiting.
+                        self._release()
+                        time.sleep(delay)
 
             result = super()._operation(guarded, phase, sql)
+            if self._mutation_guards and sql is not None and (phase == "script" or _kind(sql) == "pragma"):
+                # Read SQLite's actual flag, including parenthesized and quoted
+                # PRAGMA spellings; a read snapshot can never become a writer.
+                cursor = sqlite3.Connection.execute(self, "PRAGMA query_only")
+                query_only = bool(cursor.fetchone()[0])
+                cursor.close()
+                if not query_only and self._unprotected_snapshot:
+                    self._lost_lease = True
+                    raise _busy()
+                self._query_only = query_only
             if phase == "rollback" and not self.in_transaction:
                 self._cleanup_events.clear()
             return result
@@ -283,6 +332,11 @@ class DomainConnection(DiagnosticConnection):
             self._callback_busy = error
             raise
         return 1
+
+    def _mutation(self, table: str, operation: str) -> int:
+        if operation not in {"insert", "update", "delete"}:
+            raise sqlite3.OperationalError("Unknown SQLite protected mutation")
+        return self._authority(table)
 
     def _scalar(self, sql: str, values: Any) -> Any:
         try:
@@ -354,7 +408,7 @@ class DomainConnection(DiagnosticConnection):
             return
         assert self._core_path is not None
         path = self._core_path.with_name(DOMAIN_TARGET_FILES[target])
-        other = sqlite3.connect(path.as_uri() + "?mode=rw", factory=DomainConnection, uri=True)
+        other = connect_unattached(path.as_uri() + "?mode=rw", factory=DomainConnection, uri=True)
         try:
             guard_connection(other, self._core_path, target)
             if target == "core":
@@ -391,14 +445,17 @@ class DomainConnection(DiagnosticConnection):
             self.rollback()
         return False
 
-    def close(self) -> None:
-        try:
-            super().close()
-        finally:
-            self._release()
-            for gate in self._gates.values():
-                gate.close()
-            self._gates.clear()
+    def _close_native(self) -> None:
+        for cursor in list(self._domain_cursors):
+            if not getattr(cursor, "_domain_closed", False):
+                cursor.close()
+        super()._close_native()
+        self._domain_closed = True
+        self._defer_cursor_close = None
+        self._release()
+        for gate in self._gates.values():
+            gate.close()
+        self._gates.clear()
 
 
 class DomainCursor(DiagnosticCursor):
@@ -439,19 +496,96 @@ class DomainCursor(DiagnosticCursor):
         return result
 
     def close(self) -> None:
+        super().close()
+        self._domain_closed = True
+        connection = self.connection
+        if isinstance(connection, DomainConnection):
+            connection._active_readers.discard(self)
+            connection._settle()
+
+    def __del__(self) -> None:
+        # Native weakref callbacks run before SQLite resets the abandoned statement.
+        # Finish it first; collection must never release an observable old snapshot.
         try:
-            super().close()
-        finally:
             connection = self.connection
-            if isinstance(connection, DomainConnection):
-                connection._active_readers.discard(self)
-                connection._settle()
+            if (
+                getattr(self, "_domain_closed", False)
+                or not isinstance(connection, DomainConnection)
+                or connection._domain is None
+                or connection._domain_closed
+            ):
+                return
+            if connection._defer_cursor_close is None:
+                self.close()
+            else:
+                # A GC cycle may already have removed the original weakrefs.
+                # Retain the reader fence until its worker finishes native close.
+                connection._active_readers.add(self)
+                connection._domain_cursors.add(self)
+                connection._defer_cursor_close(self)
+        except Exception:  # noqa: S110 -- Finalization cannot raise; failed close retains its fences.
+            pass
 
     def __enter__(self) -> DomainCursor:
         return self
 
     def __exit__(self, *_args: Any) -> None:
         self.close()
+
+
+class DomainAsyncConnection(DiagnosticAsyncConnection):
+    """Return abandoned cursors to their owning SQLite worker before releasing leases."""
+
+    open_slot: ConnectionSlot
+
+    def __await__(self):
+        if self._thread.ident is not None:
+            raise RuntimeError("A SQLite worker can only start once")
+        return self._start().__await__()
+
+    async def _start(self) -> DomainAsyncConnection:
+        await self.open_slot.acquire_async()
+        try:
+            self._thread.start()
+            return await self._connect()
+        except BaseException:
+            self.open_slot.release()
+            raise
+
+    async def _connect(self) -> DomainAsyncConnection:
+        await super()._connect()
+        self.open_slot.track("borrowed")
+        loop = asyncio.get_running_loop()
+        if isinstance(self._conn, DomainConnection):
+            self._conn._defer_cursor_close = lambda cursor: self._defer_close(loop, cursor)
+        return self
+
+    async def close(self) -> None:
+        self.open_slot.track("closing")
+        await super().close()
+
+    def _defer_close(self, loop: asyncio.AbstractEventLoop, cursor: DomainCursor) -> None:
+        cleanup = self._close_abandoned_cursor(cursor)
+        try:
+            asyncio.run_coroutine_threadsafe(cleanup, loop)
+        except BaseException:
+            cleanup.close()
+            raise
+
+    async def _close_abandoned_cursor(self, cursor: DomainCursor) -> None:
+        if self._connection is None or getattr(self._conn, "_domain_closed", False):
+            return
+        try:
+            await self._execute(cursor.close)
+        except Exception as error:
+            # Shutdown or a failed close leaves the lease with the connection.
+            with contextlib.suppress(Exception):
+                contextvars.Context().run(
+                    _LOG.warning,
+                    "sqlite.cursor_cleanup_deferred",
+                    exception_type=type(error).__name__,
+                    diagnostic_id=getattr(error, "bowhead_diagnostic_id", None),
+                )
 
 
 def guard_connection(connection: DomainConnection, core_path: Path, domain: str) -> None:
@@ -483,10 +617,20 @@ def guard_connection(connection: DomainConnection, core_path: Path, domain: str)
         connection.execute(f'ATTACH DATABASE ? AS "domain_{other}"', (path.as_uri() + "?mode=ro",)).close()
     connection._core_path = core_path
     connection._domain = domain
+    with connection.execute("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' AND name GLOB 'trg_domain_mutation_*' LIMIT 1") as cursor:
+        connection._mutation_guards = cursor.fetchone() is not None
+    if domain not in {"core", "execution", "content"}:
+        # These domains have no authority triggers of their own. Resolve the
+        # protocol before enabling the authorizer or fixing any read snapshot.
+        with connection.execute(
+            "SELECT 1 FROM domain_core.sqlite_schema WHERE type='trigger' AND name GLOB 'trg_domain_mutation_*' LIMIT 1"
+        ) as cursor:
+            connection._mutation_guards = cursor.fetchone() is not None
     connection.create_function("bowhead_domain_request_scope_v1", 5, connection._request_scope)
     connection.create_function("bowhead_domain_request_turn_scope_v1", 1, lambda key: connection._request_child_scope(key, record=False))
     connection.create_function("bowhead_domain_request_record_scope_v1", 1, lambda key: connection._request_child_scope(key, record=True))
     connection.create_function("bowhead_domain_authority_v1", 1, connection._authority)
+    connection.create_function("bowhead_domain_mutation_v2", 2, connection._mutation)
     connection.create_function("bowhead_domain_predicate_v1", -1, connection._predicate)
     connection.create_function("bowhead_workspace_team_v1", 1, connection._workspace_team)
     connection.create_function("bowhead_retention_days_v1", 2, connection._retention_days)
@@ -494,7 +638,7 @@ def guard_connection(connection: DomainConnection, core_path: Path, domain: str)
     connection.set_authorizer(connection._external_authorizer)
 
 
-def _connection_connector(database: str | Path, kwargs: dict[str, Any]) -> tuple[Path, Callable[[], sqlite3.Connection]]:
+def _connection_connector(database: str | Path, kwargs: dict[str, Any], slot: ConnectionSlot) -> tuple[Path, Callable[[], sqlite3.Connection]]:
     """Resolve admission once; opening itself runs on the caller or async worker."""
     from bowhead_core import sqlite_domains
 
@@ -521,7 +665,7 @@ def _connection_connector(database: str | Path, kwargs: dict[str, Any]) -> tuple
         value = path.resolve().as_uri() + "?" + urlencode(parameters)
 
     def connector() -> sqlite3.Connection:
-        connection = sqlite3.connect(value, factory=factory, **kwargs)
+        connection = _open_reserved(slot, value, factory=factory, **kwargs)
         if active:
             if not isinstance(connection, DomainConnection):
                 connection.close()
@@ -540,16 +684,42 @@ def _connection_connector(database: str | Path, kwargs: dict[str, Any]) -> tuple
     return path, connector
 
 
+def _open_reserved(slot: ConnectionSlot, database: str | Path, *, factory: type[DiagnosticConnection], **kwargs: Any) -> DiagnosticConnection:
+    try:
+        connection = sqlite3.connect(database, factory=factory, **kwargs)
+    except BaseException:
+        slot.release()
+        raise
+    if not isinstance(connection, DiagnosticConnection):
+        connection.close()
+        slot.release()
+        raise TypeError("Managed SQLite connections require DiagnosticConnection")
+    connection._slot = slot
+    return connection
+
+
+def connect_unattached(database: str | Path, *, factory: type[DiagnosticConnection] = DiagnosticConnection, **kwargs: Any) -> DiagnosticConnection:
+    """Open an explicitly standalone database, preserving its caller's URI policy."""
+    slot = ConnectionSlot()
+    slot.acquire()
+    return _open_reserved(slot, database, factory=factory, **kwargs)
+
+
 def connect_sync(database: str | Path, **kwargs: Any) -> sqlite3.Connection:
     """Open a sync business connection with the same admission and guards as async."""
-    _path, connector = _connection_connector(database, kwargs)
+    slot = ConnectionSlot()
+    _path, connector = _connection_connector(database, kwargs, slot)
+    slot.acquire()
     return connector()
 
 
 def connect(database: str | Path, *, iter_chunk_size: int = 64, **kwargs: Any) -> DiagnosticAsyncConnection:
     """Async factory with legacy compatibility and ready-state domain admission."""
-    path, connector = _connection_connector(database, kwargs)
-    return DiagnosticAsyncConnection(connector, iter_chunk_size, database=path.name if path.name in DOMAIN_TARGET_FILES.values() else "unavailable")
+    slot = ConnectionSlot()
+    path, connector = _connection_connector(database, kwargs, slot)
+    connection = DomainAsyncConnection(connector, iter_chunk_size, database=path.name if path.name in DOMAIN_TARGET_FILES.values() else "unavailable")
+    connection.open_slot = slot
+    return connection
 
 
 def release_domain_snapshots(connection: sqlite3.Connection) -> None:

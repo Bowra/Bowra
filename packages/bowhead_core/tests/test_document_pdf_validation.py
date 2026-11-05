@@ -4,18 +4,42 @@ from __future__ import annotations
 
 import hashlib
 import io
+import shutil
 
 import pdfplumber
 import pytest
 from bowhead_core.documents.package_io import OfficePackageError
-from bowhead_core.documents.render import validate_pdf
+from bowhead_core.documents.render import render_presentation_view, validate_pdf
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE
 from pptx.enum.text import MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Pt
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.skipif(not shutil.which("soffice"), reason="LibreOffice is required for real slide rendering")
+def test_saved_presentation_view_renders_nine_pages_and_a_native_chart(tmp_path):
+    deck = Presentation()
+    chart_data = CategoryChartData()
+    chart_data.categories = ["West", "East"]
+    chart_data.add_series("Retail", (31, 26))
+    for number in range(1, 10):
+        slide = deck.slides.add_slide(deck.slide_layouts[6])
+        slide.shapes.add_textbox(Pt(36), Pt(24), Pt(300), Pt(60)).text = f"Retail review page {number}"
+        if number == 9:
+            slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Pt(36), Pt(120), Pt(360), Pt(220), chart_data)
+    source = io.BytesIO()
+    deck.save(source)
+    pdf = render_presentation_view(source.getvalue(), tmp_path)
+    with pdfplumber.open(io.BytesIO(pdf)) as view:
+        assert len(view.pages) == 9
+        assert "Retail review page 9" in view.pages[-1].extract_text()
+        assert "West" in view.pages[-1].extract_text()
+        assert "East" in view.pages[-1].extract_text()
 
 
 def _source(*, width=150, height=18, horizontal=None, vertical=None, table=False, left=36, autofit=False, alignment=None, anchor=None):

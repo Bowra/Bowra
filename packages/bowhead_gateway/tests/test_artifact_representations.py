@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend, S3Backend
 from bowhead_core.session_store import SessionStore
-from bowhead_gateway.artifact_representations import RAW_LIMIT, build_representation
+from bowhead_gateway.artifact_representations import RAW_LIMIT, AuthoringExecutor, build_representation
 from bowhead_gateway.routes import files
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -144,6 +144,45 @@ async def test_unauthenticated_representation_does_not_query_object(stored, monk
 
     monkeypatch.setattr(ArtifactStore, "get", forbidden)
     assert TestClient(app).get(f"/api/v1/files/{art.id}/representations/raw").status_code == 401
+
+
+async def test_pptx_visual_representation_reads_exact_bytes_and_rechecks_visibility(stored, monkeypatch):
+    store, _ = stored
+    source = b"exact source bytes"
+    art = await store.put_bytes(
+        content=source,
+        filename="review.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        source="sandbox_output",
+        created_by="owner",
+    )
+    inputs = []
+    revoke = False
+
+    async def render(self, content):
+        inputs.append(content)
+        if revoke:
+            await store.soft_delete(art.id, user_id="owner")
+        return b"%PDF-1.7\npreview only"
+
+    monkeypatch.setattr(AuthoringExecutor, "view_presentation", render)
+    app = FastAPI()
+    app.include_router(files.router, prefix="/api/v1/files")
+    app.state.artifact_store = store
+    app.state.settings = SimpleNamespace(dev_default_user="owner", auth_mode="dev")
+    app.state.document_service = SimpleNamespace(executor=lambda: SimpleNamespace(root=store.backend.root_dir, url="http://executor", token="test"))
+    client = TestClient(app)
+    path = f"/api/v1/files/{art.id}/representations/pptx-pdf"
+    assert client.get(path, headers={"X-Bowhead-User-Id": "other"}).status_code == 404
+    assert inputs == []
+    reply = client.get(path)
+    assert reply.status_code == 200
+    assert reply.headers["content-type"] == "application/pdf"
+    assert reply.headers["cache-control"] == "no-store"
+    assert reply.content == b"%PDF-1.7\npreview only"
+    assert inputs == [source]
+    revoke = True
+    assert client.get(path).status_code == 404
 
 
 async def test_raw_s3_uses_range_and_closes_body(stored):

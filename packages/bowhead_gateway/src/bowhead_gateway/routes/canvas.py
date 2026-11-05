@@ -73,7 +73,13 @@ from bowhead_gateway.access_context import (
     require_space_lifecycle_without_authorization,
     space_denial_code,
 )
-from bowhead_gateway.artifact_representations import ArtifactRepresentationDTO, Representation, build_representation, representation_error
+from bowhead_gateway.artifact_representations import (
+    ArtifactRepresentationDTO,
+    RepresentationRequest,
+    build_presentation_view,
+    build_representation,
+    representation_error,
+)
 from bowhead_gateway.artifact_streaming import artifact_streaming_response
 from bowhead_gateway.bounded_fanout import run_bounded
 from bowhead_gateway.chart_style_resolution import (
@@ -1151,14 +1157,21 @@ async def get_report_artifact(
 async def get_report_artifact_representation(
     session_id: str,
     artifact_id: str,
-    representation: Representation,
+    representation: RepresentationRequest,
     request: Request,
     response: Response,
     store: CanvasStore = Depends(_store),
-) -> ArtifactRepresentationDTO:
+) -> ArtifactRepresentationDTO | Response:
     _user_id(request)  # Authenticate before reading report/closure/object existence.
     try:
         art = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
+        if representation == "pptx-pdf":
+            service = getattr(request.app.state, "document_service", None)
+            view = await build_presentation_view(_artifact_store(request), art, getattr(service, "executor", None))
+            current = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
+            if (current.path, current.size) != (art.path, art.size):
+                raise representation_error("unavailable")
+            return view
     except HTTPException as exc:
         if exc.status_code in {403, 404, 410}:
             raise representation_error("scope_unavailable") from exc

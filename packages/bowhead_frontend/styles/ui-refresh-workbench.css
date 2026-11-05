@@ -88,7 +88,7 @@
   border-color: var(--c-fill-3);
   border-top-color: var(--c-accent);
 }
-:root:root :is(.bh-band__retry, .bh-band__fail) {
+:root:root .bh-band__fail {
   font-family: var(--font-control);
   font-size: var(--fs-xs);
   font-weight: 600;

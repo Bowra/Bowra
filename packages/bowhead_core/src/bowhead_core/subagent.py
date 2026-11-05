@@ -2150,7 +2150,7 @@ def demote_chat_direct(invocations: list[Any], messages: list[Any], serialize: C
         if getattr(inv, "tool_name", "") != "subagent_spawn" or not is_chat_direct_delivery_sentinel(getattr(inv, "result", None))[0]:
             continue
         before = serialize(inv)
-        result = dict(inv.result)
+        result = copy.copy(inv.result)
         result.pop("_chat_direct_delivery", None)
         result["directive"] = CHAT_DIRECT_DEMOTED_DIRECTIVE
         inv.result = result
@@ -4054,6 +4054,7 @@ class SubagentRunner:
         tokens_cached = 0  # perf WP-1 P1-b: accumulate cache-hit tokens
         final_answer = ""
         _chat_direct_delivered = False  # Batch 5: final_answer from direct peer short-answer promotion
+        _chat_direct_reviewed_complete = False
         t0 = time.perf_counter()
 
         # Sprint ν1.5 — per-turn ref allowlist (simple-int IDs to peer LLM,
@@ -6007,12 +6008,12 @@ class SubagentRunner:
                         except Exception:  # noqa: BLE001 — gate itself must never fail a turn
                             logger.warning("subagent.final_answer_gate_failed profile=%s", profile.name, exc_info=True)
                             _bounce = None
-                    from bowhead_core.tool_delivery_review import delivery_review_enabled, failed_calls, review_guidance
+                    from bowhead_core.tool_delivery_review import delivery_review_enabled, requires_delivery_review, review_guidance
 
                     if (
                         _bounce is None
                         and delivery_review_enabled()
-                        and failed_calls(invocations)
+                        and requires_delivery_review(invocations)
                         and not _delivery_text_reviewed
                         and can_decide(iteration)
                         and (profile.name != "lead" or delivery_review_carrier is not None or terminal_review_advertised)
@@ -6824,17 +6825,22 @@ class SubagentRunner:
             # run Lead's finalization iteration for integration.
             _cd_single_spawn = int(getattr(parent_ctx, "_chat_direct_spawn_count", 0) or 0) <= 1
             if profile.name == "lead" and _cd_single_spawn:
-                _cd_hit, _cd_text = next(
+                from bowhead_core.tool_delivery_review import ReviewedDeliveryResult
+
+                _cd_hit, _cd_text, _cd_reviewed = next(
                     (
-                        (h, t)
-                        for h, t in (
-                            is_chat_direct_delivery_sentinel(getattr(_inv, "result", None))
-                            for _inv in invocations
-                            if getattr(_inv, "tool_name", "") == "subagent_spawn"
+                        (
+                            hit,
+                            text,
+                            isinstance(invocation_result(_inv), ReviewedDeliveryResult)
+                            and classify_tool_outcome(invocation_result(_inv), _inv.error).state == "success",
                         )
-                        if h
+                        for _inv in invocations
+                        if getattr(_inv, "tool_name", "") == "subagent_spawn"
+                        for hit, text in (is_chat_direct_delivery_sentinel(getattr(_inv, "result", None)),)
+                        if hit
                     ),
-                    (False, ""),
+                    (False, "", False),
                 )
                 _cd_blockers = chat_direct_blockers(invocations) if _cd_hit else []
                 if _cd_blockers:
@@ -6864,6 +6870,7 @@ class SubagentRunner:
                         pass
                     final_answer = _cd_text
                     _chat_direct_delivered = True
+                    _chat_direct_reviewed_complete = _cd_reviewed
                     break
 
             # M137 #142 + ξ A5c: terminal-return detection (batch-level fallback).
@@ -7415,6 +7422,32 @@ class SubagentRunner:
                 allowlist=_ν15_allowlist,
                 knowledge_read=_kb_search_budget.snapshot() if _shared_kb else None,
             )
+        from bowhead_core.tool_delivery_review import (
+            ReviewedDeliveryResult,
+            delivery_review_enabled,
+            review_evidence_availability,
+            validate_delivery_review,
+        )
+
+        _native_reviewed_complete = False
+        if (
+            delivery_review_enabled()
+            and not collaboration_paused
+            and isinstance(returned_payload, dict)
+            and returned_payload.get("completion") == "complete"
+            and not returned_payload.get("error")
+            and isinstance(returned_payload.get("delivery_review"), dict)
+            and any(
+                inv.tool_name == "subagent_return" and inv.error is None and isinstance(invocation_result(inv), ReviewedDeliveryResult)
+                for inv in invocations
+            )
+        ):
+            _native_review = validate_delivery_review(returned_payload["delivery_review"], invocations)
+            _native_reviewed_complete = (
+                _native_review.valid
+                and _native_review.complete
+                and await review_evidence_availability(returned_payload["delivery_review"], invocations, parent_ctx) is None
+            )
         if not collaboration_paused and not collaboration_empty and not collaboration_plan_handoff:
             await parent_bus.emit(
                 OrchestratorEvent(
@@ -7506,7 +7539,7 @@ class SubagentRunner:
             if balanced_boundaries(messages)[-1] == len(messages):
                 parent_bus._context_publication = await context_view.conversation_publication(messages)
 
-        from bowhead_core.tool_delivery_review import delivery_review_enabled, failed_calls
+        from bowhead_core.tool_delivery_review import delivery_review_enabled, requires_delivery_review
 
         accepted_delivery_review = await delivery_review_carrier.current(invocations, parent_ctx) if delivery_review_carrier else None
         _delivery_partial = delivery_review_enabled() and (
@@ -7514,7 +7547,8 @@ class SubagentRunner:
             and returned_payload.get("completion") == "partial"
             or returned_payload is None
             and not collaboration_paused
-            and (bool(failed_calls(invocations)) or accepted_delivery_review is not None)
+            and not _chat_direct_reviewed_complete
+            and (requires_delivery_review(invocations) or accepted_delivery_review is not None)
             and (accepted_delivery_review is None or accepted_delivery_review.get("completion") != "complete")
         )
         if accepted_delivery_review is not None and final_answer.strip():
@@ -7545,8 +7579,12 @@ class SubagentRunner:
             payload=returned_payload,
             completion="partial" if _delivery_partial else "complete",
             reviewed_delivery_complete=not collaboration_paused
-            and accepted_delivery_review is not None
-            and accepted_delivery_review.get("completion") == "complete",
+            and (
+                _native_reviewed_complete
+                or _chat_direct_reviewed_complete
+                or accepted_delivery_review is not None
+                and accepted_delivery_review.get("completion") == "complete"
+            ),
             chat_direct_delivered=_chat_direct_delivered,
             bi_workspace_continuation=_bi_continuation,
             # Return the Lead's child checkpoint through the existing result.
@@ -12499,6 +12537,17 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "just to reconstruct a failed closeout."
                     )
                 ).strip()
+            from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, failed_calls
+
+            if (
+                result.ok
+                and payload.get("ok") is True
+                and result.completion == "complete"
+                and result.ordinary_completion_reason not in {"model_unknown", "tool_unknown"}
+                and result.reviewed_delivery_complete
+                and failed_calls(result.tool_invocations)
+            ):
+                return ReviewedDeliveryResult(payload)
             return payload
 
         # Hallucination defense: subagent finished with empty/whitespace-only final_answer; ok=true would lead Lead to
@@ -13123,7 +13172,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
 
             _m.inc("bowhead_subagent_resume_total", labels={"outcome": "resumed" if grant.refused is None else f"fresh_{grant.refused}"})
         if isinstance(result, dict):
-            result = {**result, **({"resumed_from": grant.checkpoint.id} if grant.refused is None else {"resume_refused": grant.refused})}
+            result = copy.copy(result)
+            result.update({"resumed_from": grant.checkpoint.id} if grant.refused is None else {"resume_refused": grant.refused})
         return result
 
     async def _spawn_or_resume(args: dict[str, Any], ctx: Any) -> Any:
@@ -13172,14 +13222,11 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "task": {
                             "type": "string",
                             "description": (
-                                "要委派的子任务描述，**完整承载用户这次的诉求**：范围、口径、时间和实体照用户说的写。"
-                                "**不要替 peer 决定它该看哪些维度、用哪个字段名、分析到多深**——那是它的专业判断，"
-                                "它自己的 SOP 比你更清楚该拆几刀；你不确定的口径原样转达，别自行收窄成一次取数。"
-                                "要限定范围只限定用户**明说过**的（某个部门/某个品牌/某段时间）。"
-                                "**计算方法也别替用户选**：用户没说增长/增速怎么算（同比还是环比、比哪两段），"
-                                "task 里就只写「找出增长最快的」，别补「如首末月对比」「月均复合增速」这类口径——"
-                                "季节性数据换一种算法结论会反过来，该用哪种由 peer 按可比口径定；"
-                                "也别把用户说的年份写成「只看这一年内」，比增长时 peer 可能要取上一年同期。"
+                                "Describe the delegated subtask with all relevant user requirements: scope, metric definitions, time and entities. "
+                                "If delegating data retrieval for a native template edit, assign retrieval only and leave the template edit with the Lead. "
+                                "For a delegated analysis, leave field names, analysis depth and comparable calculation methods to the specialist "
+                                "unless the user specified them. Forward ambiguous metric definitions as given. For example, 'find the fastest growth' "
+                                "does not specify first-to-last month change or compound growth, and a requested year can still require a prior-year baseline."
                             ),
                         },
                         "extra_instructions": {

@@ -22,13 +22,13 @@ from bowhead_core.documents.authoring_executor import AuthoringExecutor
 from bowhead_core.documents.authoring_formats import WORD_PROFILE
 from bowhead_core.documents.authoring_protocol import PROFILE as AUTHORING_PROFILE
 from bowhead_core.documents.authoring_runner import run_authoring_turn
-from bowhead_core.documents.canvas_inputs import CanvasInputStore, inherit_canvas_input_in_tx
+from bowhead_core.documents.canvas_inputs import CanvasInputStore, continuation_canvas_sections_in_tx, inherit_canvas_input_in_tx
 from bowhead_core.documents.continuation import DocumentPlanningOutcome, DocumentRuntimeSnapshot
 from bowhead_core.documents.delivery import DocumentDeliveryStore
 from bowhead_core.documents.executor import PROFILE, DocumentExecutor
 from bowhead_core.documents.package_io import OFFICE_MIMES, OfficePackageError
 from bowhead_core.documents.pptx_plan import CURRENT_PROFILE
-from bowhead_core.documents.request import DocumentModelSelection, DocumentRequestError, DocumentScope
+from bowhead_core.documents.request import CanvasInputSelection, DocumentModelSelection, DocumentRequestError, DocumentScope
 from bowhead_core.documents.runner import run_document
 from bowhead_core.documents.store import DocumentReceipt, DocumentRuntimeAdmission, DocumentStore
 from bowhead_core.documents.turn_runner import fail_document_turn, run_document_turn
@@ -211,6 +211,19 @@ class DocumentService:
             if not authoring:
                 raise DocumentRequestError("document_canvas_unavailable")
             canvas_input = await self.canvas_sources.prepare(scope=scope, session_id=ctx.session_id, selection=prepared.proposal.canvas)
+        elif authoring and prepared.task_source is not None:
+            async with open_shared_ctx(self.delivery.path) as db:
+                section_ids = await continuation_canvas_sections_in_tx(
+                    db,
+                    scope=scope,
+                    session_id=ctx.session_id,
+                    original_turn_id=prepared.task_source.turn_id,
+                    current_turn_id=ctx.turn_id,
+                )
+            if section_ids:
+                canvas_input = await self.canvas_sources.prepare(
+                    scope=scope, session_id=ctx.session_id, selection=CanvasInputSelection(section_ids=section_ids)
+                )
         binding = None
         owns_binding = False
         try:

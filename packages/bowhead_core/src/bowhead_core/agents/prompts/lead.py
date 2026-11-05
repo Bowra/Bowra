@@ -209,7 +209,7 @@ The very first line MUST be `<headline>a lead-in of ≤30 Chinese characters (ab
 # slot-optional rule kept — it's universal (composer / fabrication detection
 # semantics), not v4-emit-specific.
 _V4_SLOT_OPTIONAL_RULE = """<slot_optional_rule>
-**slot-optional rule (chat-v4)** — not enough real data → `kpis: []`, `actions: []`, `insights: []` are all valid. **Never** fabricate to fill. Counter-example (chat-truth 0.18.0 lesson): the user's query has no data → emit empty arrays + an exec_summary saying the data was not retrieved. Example: `{"kpis": [], "actions": [], "insights": [], "exec_summary": "<the requested data was not retrieved from the selected source, see caveats — in the output language>"}`. The composer accepts empty arrays without error — the backend fabrication check turns numbers without a back-reference into caveats.
+**Optional report content** — KPI cards have no required count. Include them only when useful and supported; if the user excludes KPIs, delegate that exclusion explicitly and omit `kpis` or use `[]`. A confirmed `write_report` can be finalized without extra insights or cards. Supplied nonempty `kpis` render as report cards beyond authored prose. Before describing the report, check actual Tool receipts and payload counts: never say "no KPI" or "only the requested chart" when the returned result includes KPI cards or other content. Do not turn the user's requested format into an unverified completion claim. Preserve the requested minimal scope and report any discrepancy honestly.
 </slot_optional_rule>"""
 
 # ws-datarc-decouple P3 → bi-absent-turn R1.2 — injected (before tool guidance) ONLY when the

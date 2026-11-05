@@ -892,6 +892,10 @@ async def _emit_kpi_band(
     """确定性 KPI 带（从单写手路原地抽出, review R5-4——finisher 也要发）。
     设计语义原样：delta 加方向符、sentiment 定色、sub/unit 不着色。无 kpis → []。"""
     written: list[str] = []
+    from bowhead_core.report_kpis import user_excludes_report_kpis
+
+    if user_excludes_report_kpis(getattr(request, "text", "") or ""):
+        return written
     try:
         from bowhead_core.canvas_revise import build_kpi_cells as _build_kpi_cells
 

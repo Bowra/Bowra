@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 from pathlib import Path
 from typing import Literal
 
@@ -92,7 +93,7 @@ def open_payload(
     if reference.kind != kind or reference.turn_id != turn_id or sum(part.byte_count for part in reference.segments) != reference.byte_count:
         raise ValueError("continuation_payload_scope_invalid")
     uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-    with connect_sync(uri, uri=True) as db:
+    with closing(connect_sync(uri, uri=True)) as db:
         rows = db.execute(
             "SELECT ordinal,digest,byte_count,ciphertext FROM continuation_payload_segments "
             "WHERE kind=? AND owner_id=? AND session_id=? AND turn_id=? ORDER BY ordinal",

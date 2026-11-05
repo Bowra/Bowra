@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,10 +14,34 @@ from bowhead_core.events import (
     TurnEventBus,
 )
 
-from bowhead_core import OrderedTurnLogSink, TurnLogStore
+from bowhead_core import OrderedTurnLogSink, TurnLogStore, sqlite_capacity
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+async def test_admitted_event_persists_when_ordinary_connections_are_full(tmp_path: Path, monkeypatch) -> None:
+    from bowhead_core._db import close_pooled_readers
+    from bowhead_core.sqlite_domain_runtime import connect
+
+    store = TurnLogStore(db_path=str(tmp_path / "events.db"))
+    await store.initialize()
+    await close_pooled_readers()
+    baseline = sqlite_capacity._used
+    monkeypatch.setattr(sqlite_capacity, "LIMIT", baseline + 3)
+    monkeypatch.setattr(sqlite_capacity, "RESERVE", 1)
+    bus = TurnEventBus(log_sink=OrderedTurnLogSink(store), persist_before_live=True)
+    async with AsyncExitStack() as readers:
+        for index in range(2):
+            await readers.enter_async_context(connect(tmp_path / f"reader_{index}.db"))
+        with pytest.raises(sqlite_capacity.SQLiteCapacityError):
+            async with connect(tmp_path / "ordinary_refused.db"):
+                pytest.fail("The ordinary capacity was not saturated")
+        assert await bus.emit(OrchestratorEvent("narrative.delta", "t_admitted", {"text": "Verified delta"}))
+    rows = await store.list_events("t_admitted")
+    assert [(row.seq, row.event_type, row.payload["text"]) for row in rows] == [(1, "narrative.delta", "Verified delta")]
+    await close_pooled_readers()
+    assert sqlite_capacity._used == baseline
 
 
 async def test_store_records_and_lists(tmp_path: Path) -> None:

@@ -6,9 +6,13 @@ This article covers drag and drop, shortcuts, and hints on the conversation page
 
 Ask Bowhead to present files it generated earlier in the conversation when you need them again. The original file names and download controls identify each file. Reusing a retained file does not generate another copy.
 
+Opening a conversation or its results may wait briefly while another update finishes. If it still cannot load, reopen the conversation and follow the displayed error. Do not resend the original task merely to retrieve an existing file.
+
 ## Cancel an unanswered question
 
-Select **Cancel** on an unanswered question to close it without continuing that task. **Skip** asks the Agent to continue using its own judgment. An older unanswered question remains visible when you send another message or reload the conversation. You can also explicitly ask the Agent to cancel it; if several questions are pending, identify which one. Cancellation succeeds only after the service confirms it. If it fails, the question remains available with an error. You can cancel only your own questions in an accessible, writable Space.
+Select **Cancel** on an unanswered question to close it and its paused task, including questions in older conversations. Any newer work continues. **Skip** asks the Agent to continue using its own judgment. An older unanswered question remains visible when you send another message or reload the conversation. You can also explicitly ask the Agent to cancel it; if several questions are pending, identify which one. Cancellation succeeds only after the service confirms it. If it fails, the question remains available with an error. You can cancel only your own questions in an accessible, writable Space.
+
+If earlier questions cannot be checked, select **Retry** to refresh their status. If cancellation cannot be confirmed, refresh the question status before trying to cancel again.
 
 ## Compact a long conversation
 
@@ -87,7 +91,6 @@ Answers from a team Agent have a thumbs-down button next to **Copy**. Use it whe
 - When Send can't be used yet, a line of small text under the composer says why, for example **You can send once the attachments finish uploading**. You can send as soon as the reason goes away.
 - Screen readers also read the reason on the Send button.
 - Only one notice shows below the composer at a time: errors such as a failed send come first, then conflicts that block sending, then general guidance. The rest wait behind **N more notices**, which lists each one with its fix, such as **Remove attachments** or **Send as new request**, **Remove N extra attachments** when there are too many, **Connect** (opens My Connections) when Google Drive isn't connected, and **Retry saving** when the draft couldn't be saved yet. When one is resolved, the next appears.
-- After **Revise in Chat** from the canvas, a bar above the text shows **Revising** with the draft's file name and number (for example, **Revising Q2 Review.pptx draft 2**); select the file name to open that draft in the canvas, or select × to stop revising and ask an ordinary question instead.
 - Opening or closing Canvas may briefly pause the input while its draft finishes saving. If draft recovery stays paused, keep the page open and select **Retry draft recovery** once local storage is available. This preserves the final edit, completed attachments and selected references; retrying recovery does not send the message. An unsaved edit may be lost if the page is closed or reloaded before storage recovers.
 
 - An attachment refused before your task starts stays in the composer so you can remove or upload it again. Keep the original Agent and methods selected when correcting the attachment. A rejected tool attempt may appear as failed even if a later corrected attempt completes the task.
@@ -96,27 +99,13 @@ If another window changes the draft while a file is uploading, the upload can st
 
 The input draft contains your message, attachments and selected references. **Draft saved** in the Agent editor refers to that Agent configuration, not the message you are preparing. Background availability updates do not merge another window's draft for you; review any draft conflict before sending.
 
-## Waiting for a question or document result
+## Waiting for a question or result
 
-If a question is not ready to continue yet, keep your answer and try its original control again shortly. The waiting notice does not mean your answer has been saved. If document planning ends without a complete result, read the known reason and usage status in the document editor. A stopped task may have no open question to answer. No files have been published; editing and sending a new request is a separate action.
+If a question is not ready to continue yet, keep your answer and try its original control again shortly. The waiting notice does not mean your answer has been saved.
 
 Answer a task's question using its original card. When the task can retain completed subtask work, your answer continues the same task without rerunning that saved work. If the original files or access are no longer available, continuation can be refused; check the message before starting another request. Repeated clicks do not replace an answer that has already been saved.
 
 For tasks that retain completed subtask work, if your answer was saved but the task cannot safely continue, reopening the conversation still shows that limitation. Review the work already completed and restore access to required files when possible. Start a new request only after checking the original result; refreshing does not repeat the task or replace your saved answer.
-
-For an available PowerPoint template workflow, attach the template once and identify it in your message. You can give replacement values directly in the message or clarification answer; a separate data file is optional. Review all proposed changes before publishing, especially which title, footer or table value will change.
-
-To create a new presentation instead, say that the attachment is only a style or content reference; this does not preserve its existing slides. If template updating is unavailable, the assistant should explain that limitation, not silently deliver a rebuilt deck. A template draft's PDF comes from its corresponding reviewed presentation, not a separate report.
-
-If you want inspection or a question before editing an uploaded template, say so in your message. Answer any clarification using its original question card, then review the draft in Canvas and confirm it before publishing the editable PPT and corresponding PDF. Check that the assistant followed your requested steps and preserved the template; a generic file or a completed chat reply is not the same as a reviewed template draft. If you only want a summary or a new reference-based presentation, state that instead.
-
-Selecting fewer pages does not remove all undisplayed template content from the editable file. Use a template suitable for sharing.
-
-If the preview reports font substitutions, opening the PPTX on another computer or in another presentation app can change fonts and line breaks. Check the editable file in the app where you intend to use it. The published PDF preserves the layout used in the reviewed preview.
-
-The assistant may automatically correct a failed template edit once. If it still fails, the task stops without publishing. Narrow the requested changes or specify the pages and values in a new request.
-
-If a draft says its changes could not be compared reliably, review every preview page. This does not mean the document has no changes. You can still request a revision in chat before confirming publication.
 
 ## Report rewrite drafts and retry
 

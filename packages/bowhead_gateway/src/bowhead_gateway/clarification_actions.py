@@ -37,6 +37,8 @@ class GatewayClarificationActions:
             }
 
     async def _dismiss(self, request_id: str | None, ctx: ToolExecutionContext) -> dict[str, Any]:
+        from bowhead_core.clarification_resume_context import is_legacy_ordinary_question
+
         from bowhead_gateway.routes.clarifications import dismiss_legacy_clarification
 
         if any(not isinstance(value, str) or not value for value in (ctx.user_id, ctx.team_id, ctx.workspace_id, ctx.session_id)):
@@ -79,7 +81,9 @@ class GatewayClarificationActions:
             raise HTTPException(404, "clarification_not_found")
         context = pre.resume_context if isinstance(pre.resume_context, dict) else {}
         continuation = context.get("continuation")
-        if context.get("__schema_version") != 4 or not isinstance(continuation, dict) or continuation.get("kind") != "ordinary_lead":
+        if not is_legacy_ordinary_question(pre) and (
+            context.get("__schema_version") != 4 or not isinstance(continuation, dict) or continuation.get("kind") != "ordinary_lead"
+        ):
             raise HTTPException(409, "clarification_dismiss_not_supported")
         result = await dismiss_legacy_clarification(self.app, store, pre)
         dismissed = result is not None and result.status == "dismissed"

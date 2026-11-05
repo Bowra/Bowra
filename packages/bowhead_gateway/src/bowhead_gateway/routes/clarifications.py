@@ -1912,6 +1912,8 @@ async def pending_session_questions(
     clarify: ClarificationStore = Depends(_clarify_store),
 ) -> list[dict[str, Any]]:
     """Keep older ordinary questions visible without replacing the active Turn."""
+    from bowhead_core.clarification_resume_context import is_legacy_ordinary_question
+
     user_id = _current_user_id(request)
     sessions = getattr(request.app.state, "session_store", None)
     if sessions is None:
@@ -1931,7 +1933,9 @@ async def pending_session_questions(
     for item in pending:
         context = item.resume_context if isinstance(item.resume_context, dict) else {}
         continuation = context.get("continuation")
-        if context.get("__schema_version") != 4 or not isinstance(continuation, dict) or continuation.get("kind") != "ordinary_lead":
+        if not is_legacy_ordinary_question(item) and (
+            context.get("__schema_version") != 4 or not isinstance(continuation, dict) or continuation.get("kind") != "ordinary_lead"
+        ):
             continue
         questions = context.get("questions")
         texts = (

@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 from bowhead_core.agents.clarification_dismiss_tool import register_clarification_dismiss_tool
+from bowhead_core.clarification_store import ClarificationStore
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry
+from bowhead_core.turn_log_store import TurnLogStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.clarification_actions import GatewayClarificationActions
 from bowhead_gateway.routes import clarifications
@@ -21,8 +23,29 @@ from test_ordinary_lead_continuation import migrated_db as migrated_db
 pytestmark = pytest.mark.integration
 
 
-async def action_case(ctx, monkeypatch):
-    store, card, worker, _ = await prepare(ctx, monkeypatch)
+async def action_case(ctx, monkeypatch, *, legacy_version=None):
+    if legacy_version is None:
+        store, card, worker, _ = await prepare(ctx, monkeypatch)
+    else:
+        worker = SimpleNamespace(user_id="u_doc", team_id="team_doc", workspace_id="ws_doc", session_id="s_doc")
+        store = ClarificationStore(ctx.path)
+        assert await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_doc", owner_id="legacy-producer", lease_seconds=600) == "claimed"
+        card = await store.put(
+            turn_id="t_doc",
+            user_id=worker.user_id,
+            workspace_id=worker.workspace_id,
+            session_id=worker.session_id,
+            token="",
+            rationale="Choose a training audience",
+            candidates=[],
+            kind="ambiguous_turn",
+            resume_context={"__schema_version": legacy_version, "user_text": "Choose a training audience", "session_id": worker.session_id},
+        )
+        await _sql(ctx, "UPDATE turns SET status='clarification_pending' WHERE id='t_doc'")
+        await TurnLogStore(ctx.path).record(
+            turn_id="t_doc", event_type="done", payload={"status": "clarification_pending", "execution_generation": 1}
+        )
+        assert await ctx.sessions.mark_chat_spawn_dispatch_terminal(turn_id="t_doc", owner_id="legacy-producer")
     app = FastAPI()
     app.include_router(clarifications.router, prefix="/api/v1/clarifications")
     app.state.clarification_store = store
@@ -48,8 +71,9 @@ async def action_case(ctx, monkeypatch):
 
 
 @pytest.mark.parametrize("surface", ["native", "web"])
-async def test_cancellation_closes_original_pause_and_commits_one_invalidation(ctx, monkeypatch, surface):
-    app, store, card, tool_ctx = await action_case(ctx, monkeypatch)
+@pytest.mark.parametrize("legacy_version", [None, 0, 1, 2])
+async def test_cancellation_closes_original_pause_and_commits_one_invalidation(ctx, monkeypatch, surface, legacy_version):
+    app, store, card, tool_ctx = await action_case(ctx, monkeypatch, legacy_version=legacy_version)
     # Delivery is tested by the existing invalidation suite; a durable intent must
     # survive even when immediate delivery fails after the state transaction.
     monkeypatch.setattr(
@@ -110,6 +134,16 @@ async def test_native_dismiss_does_not_overwrite_an_answer(ctx, monkeypatch):
     assert (await store.get(card.request_id)).answers == [ANSWER]
 
 
+@pytest.mark.parametrize("owner_key", ["plan_reapprove_plan_id", "plan_midrun_plan_id", "reference_continuation"])
+async def test_native_dismiss_does_not_claim_other_legacy_continuations(ctx, monkeypatch, owner_key):
+    app, store, card, tool_ctx = await action_case(ctx, monkeypatch, legacy_version=2)
+    await store.set_resume_context(card.request_id, {**card.resume_context, owner_key: "owned-elsewhere"})
+    result = await GatewayClarificationActions(app).dismiss(card.request_id, tool_ctx)
+    assert result["ok"] is False
+    assert (await store.get(card.request_id)).status == "pending"
+    assert (await ctx.sessions.get_turn("t_doc")).status == "clarification_pending"
+
+
 async def test_native_dismiss_observes_readonly_entitlements(ctx, monkeypatch):
     from bowhead_core.entitlements import EntitlementDenied
 
@@ -120,8 +154,9 @@ async def test_native_dismiss_observes_readonly_entitlements(ctx, monkeypatch):
     assert (await store.get(card.request_id)).status == "pending"
 
 
-async def test_native_cancellation_preserves_a_new_running_turn(ctx, monkeypatch):
-    app, store, card, tool_ctx = await action_case(ctx, monkeypatch)
+@pytest.mark.parametrize("legacy_version", [None, 2])
+async def test_native_cancellation_preserves_a_new_running_turn(ctx, monkeypatch, legacy_version):
+    app, store, card, tool_ctx = await action_case(ctx, monkeypatch, legacy_version=legacy_version)
     await _sql(ctx, "UPDATE sessions SET active_turn_id=NULL WHERE id='s_doc'")
     await ctx.sessions.record_turn(turn_id="t_new", session_id="s_doc", user_text="Cancel the earlier question")
     await _sql(ctx, "UPDATE sessions SET active_turn_id='t_new' WHERE id='s_doc'")
@@ -132,16 +167,18 @@ async def test_native_cancellation_preserves_a_new_running_turn(ctx, monkeypatch
     assert (await ctx.sessions.get_turn("t_doc")).status == "cancelled"
 
 
-async def test_cancel_rejects_an_unsettled_producer(ctx, monkeypatch):
-    app, store, card, tool_ctx = await action_case(ctx, monkeypatch)
+@pytest.mark.parametrize("legacy_version", [None, 2])
+async def test_cancel_rejects_an_unsettled_producer(ctx, monkeypatch, legacy_version):
+    app, store, card, tool_ctx = await action_case(ctx, monkeypatch, legacy_version=legacy_version)
     await _sql(ctx, "UPDATE chat_turn_spawn_dispatch SET state='spawned' WHERE turn_id='t_doc'")
     result = await GatewayClarificationActions(app).dismiss(card.request_id, tool_ctx)
     assert result["ok"] is False
     assert (await store.get(card.request_id)).status == "pending"
 
 
-async def test_invalidation_write_failure_rolls_back_the_turn_and_card(ctx, monkeypatch):
-    app, store, card, tool_ctx = await action_case(ctx, monkeypatch)
+@pytest.mark.parametrize("legacy_version", [None, 2])
+async def test_invalidation_write_failure_rolls_back_the_turn_and_card(ctx, monkeypatch, legacy_version):
+    app, store, card, tool_ctx = await action_case(ctx, monkeypatch, legacy_version=legacy_version)
     await _sql(
         ctx,
         "CREATE TRIGGER fail_dismiss BEFORE INSERT ON clarification_invalidation_outbox BEGIN SELECT RAISE(ABORT,'controlled write failure'); END",
@@ -165,8 +202,9 @@ async def test_ambiguous_question_targets_are_not_guessed(ctx, monkeypatch):
     assert (await store.get(card.request_id)).status == "pending"
 
 
-async def test_pending_session_questions_remain_readable_and_scoped(ctx, monkeypatch):
-    app, store, card, _ = await action_case(ctx, monkeypatch)
+@pytest.mark.parametrize("legacy_version", [None, 2])
+async def test_pending_session_questions_remain_readable_and_scoped(ctx, monkeypatch, legacy_version):
+    app, store, card, _ = await action_case(ctx, monkeypatch, legacy_version=legacy_version)
     async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/v1/clarifications/session/s_doc/pending")
         assert response.status_code == 200, response.text

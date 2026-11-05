@@ -33,6 +33,7 @@ from bowhead_core.skill_read_receiver import (
 )
 from bowhead_core.skill_read_resolution import ResolvedSkillPackage, SkillReadSourceResolver
 from bowhead_core.skill_reference_execution import ReferenceSkillPrimaryComposition, restore_skill_primary_composition_in_connection
+from bowhead_core.sqlite_domains import domain_database_path
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -171,7 +172,7 @@ async def _load_current(
     # Acquire the writer reservation before reading mutable authority, so a long
     # lived read transaction cannot silently authorize against an old snapshot.
     # All filesystem preparation was completed before the original claim.
-    async with open_shared_ctx(sources.db_path) as db:
+    async with open_shared_ctx(domain_database_path(sources.db_path, "execution")) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
             return await _load_current_in_connection(

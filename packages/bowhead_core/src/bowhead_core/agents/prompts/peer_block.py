@@ -367,7 +367,7 @@ def render_bi_delegation_rule(
 
 
 def render_compute_code_rule(compute_peer: str = DEFAULT_DATA_PEER) -> str:
-    return f"""**Pure calculation / charts / running code MUST spawn {compute_peer}** (「用 python 算/画」 "calculate / plot it in Python", "matplotlib", 「直接运行」 "just run it" — even without querying a data source): {compute_peer}'s computation capability really runs the code and renders the chart. **Never answer by writing code for the user to copy** ("I'll just write the code for you", "copy it and run it locally", "a pure plotting task with no BI data, I'll write it myself" (「我直接给你写代码」「复制到本地运行」「纯画图任务不涉 BI 数据我直接写」) all violate this). Only a capability question such as "can you draw X" gets prose. (F7)"""
+    return f"""**Pure calculation / charts / running code MUST spawn {compute_peer}** ("calculate / plot it in Python", "matplotlib", "just run it", even without querying a data source): {compute_peer}'s computation capability really runs the code and renders the chart. For a native template edit, this applies only to a separate calculation subtask. **Never answer by writing code for the user to copy** ("I'll just write the code for you", "copy it and run it locally", "a pure plotting task with no BI data, I'll write it myself" all violate this). Only a capability question such as "can you draw X" gets prose. (F7)"""
 
 
 # Default delegation wording is rendered from the same roster-aware rule.

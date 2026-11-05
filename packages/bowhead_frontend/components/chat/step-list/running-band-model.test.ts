@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { PRODUCT_NAME } from "@/lib/product-identity";
+
 import {
   HISTORY_ROWS,
   buildBandModel,
@@ -116,7 +118,7 @@ describe("三行结构 — 高度恒定的前提", () => {
     expect(m.stepOrdinal).toBe(0);
     expect(m.history).toHaveLength(HISTORY_ROWS);
     expect(m.history.every((r) => r.kind === "skeleton")).toBe(true);
-    expect(m.current?.agentName).toBe("Bowhead");
+    expect(m.current?.agentName).toBe(PRODUCT_NAME);
   });
 
   it("一步：仍是两条历史（一条骨架 + 一条真步）", () => {
@@ -237,7 +239,7 @@ describe("★ 交棒判定用 peer id，不用 AgentKey（交接 §5 第 8 条�
       peerNames,
       peerDisplayNames,
     });
-    expect(m.current?.handoffFrom).toBe("Bowhead");
+    expect(m.current?.handoffFrom).toBe(PRODUCT_NAME);
   });
 
   it("徽章拿的是后端 agent_name 原值，不是 AgentKey", () => {
@@ -251,7 +253,7 @@ describe("★ 交棒判定用 peer id，不用 AgentKey（交接 §5 第 8 条�
 });
 
 describe("tone — 失败要留在账上", () => {
-  it("preserves warning severity and counts the original failed step", () => {
+  it("preserves warning severity for the original failed step", () => {
     const m = buildBandModel({
       steps: [
         step({ stepId: "a", state: "failed", summary: "超时", error: { kind: "transient" } as never }),
@@ -261,7 +263,6 @@ describe("tone — 失败要留在账上", () => {
     const row = m.history.find((r) => r.key === "a")!;
     expect(row.tone).toBe("warn");
     expect(row.meta).toBe("");
-    expect(m.issueCount).toBe(1);
   });
 
   it("★ 硬失败进历史仍是红，不因为「Lead 绕开了」就报成绿 ✓", () => {
@@ -272,7 +273,6 @@ describe("tone — 失败要留在账上", () => {
       ],
     });
     expect(m.history.find((r) => r.key === "a")!.tone).toBe("fail");
-    expect(m.issueCount).toBe(1);
   });
 });
 
@@ -373,8 +373,6 @@ describe("★ peer 终态进带（运行态账本关掉后，这是它唯一的�
     const rows = m.history.filter((r) => r.kind !== "skeleton");
     expect(rows.some((r) => r.key === "spawn")).toBe(false);
     expect(rows.some((r) => r.kind === "peer" && r.peerOutcome === "fail")).toBe(true);
-    // The failed spawn remains a recorded step issue; it is not a retry receipt.
-    expect(m.issueCount).toBe(1);
   });
 
   it("★★ 排序按 evtSeq —— 早挂的 peer 会被后来的步骤挤出历史行", () => {
@@ -565,7 +563,7 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerNames, peerDisplayNames,
       peerProse: { p1: "我早就说完了" },
     });
-    expect(m.current?.agentName).toBe("Bowhead");
+    expect(m.current?.agentName).toBe(PRODUCT_NAME);
     expect(m.current?.prose).toBe("");
   });
 
@@ -619,7 +617,7 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerNames: {},
       peerProse: { "sub_未知": "还没登记就说话" },
     });
-    expect(m.current?.agentName).toBe("Bowhead");
+    expect(m.current?.agentName).toBe(PRODUCT_NAME);
     expect(m.current?.prose).toBe("");
   });
 
@@ -642,7 +640,7 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
   it("回落但那个 peer 还没登记名字 → 仍回落 Lead（不编造）", () => {
     const m = buildBandModel({ steps: [], peerProse: { pX: "无名氏说话" } });
     expect(m.current?.prose).toBe("无名氏说话");
-    expect(m.current?.agentName).toBe("Bowhead");
+    expect(m.current?.agentName).toBe(PRODUCT_NAME);
   });
 
   it("★★ 散文里的 `[` / `{` 不能让整条散文闪没", () => {
@@ -723,27 +721,6 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
     expect(rows[0].peerOutcome).toBe("fail");
     expect(rows[0].tone).toBe("fail");        // Red, not amber
     expect(rows[0].peerName).toBe("主分析");
-  });
-
-  it("★★★ 「已重试」的计数也不能跟着谎报", () => {
-    // `1 个未完成 · 已重试 1 次` contradicts itself: this peer never retried; it failed.
-    // ⚠ Correction **moved up to projection** (`step-view.ts`'s `correctSpawnFailureKind`,
-    //   benefiting band/collapsed strip/expanded ledger together); this guards that correct projected input
-    //   is not counted as a retry by the band. Projection's own guard is in `step-view.correction.test.ts`.
-    const m = spawnOnlyPeer("failed");
-    expect(m.peerFailCount).toBe(1);
-    expect(m.issueCount).toBe(1);
-  });
-
-  it("retains recorded transient failures in the issue count", () => {
-    // The previous test alone also passes with issueCount always 0.
-    const m = buildBandModel({
-      steps: [
-        step({ stepId: "r", state: "failed", error: { kind: "transient" } as never }),
-        step({ stepId: "b", state: "active" }),
-      ],
-    });
-    expect(m.issueCount).toBe(1);
   });
 
   it("★★★ **有**子步骤的 peer：spawn 行不许抢先宣布「已完成」", () => {

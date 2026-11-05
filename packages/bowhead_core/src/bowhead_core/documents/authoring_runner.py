@@ -49,6 +49,7 @@ from bowhead_core.documents.turn_runner import _read_inputs, fail_document_turn
 from bowhead_core.documents.usage import DocumentModelHook
 
 MAX_SCRIPT_ATTEMPTS = 2
+MAX_UNKNOWN_SOURCES = 2
 
 
 class ReadArguments(BaseModel):
@@ -231,6 +232,7 @@ async def run_authoring_turn(
             message.role == "tool" and message.name == "document_execute" and json.loads(message.content).get("outcome") == "known_failed"
             for message in messages
         )
+        unknown_sources = 0
         system = runtime.authoring_system + "\nUse " + runtime.language.output_language + " for questions and explanations."
         call_no = 0
         while used_tools < limits.tool_call_limit and (limits.step_limit is None or used_steps < limits.step_limit):
@@ -272,7 +274,27 @@ async def run_authoring_turn(
                         args = (WordReadArguments if word else ReadArguments).model_validate(call.arguments)
                         item = aliases.get(args.source)
                         if item is None:
-                            raise OfficePackageError("document_input_unavailable")
+                            # A model-chosen name is not a lost input: the frozen copies are intact.
+                            unknown_sources += 1
+                            if unknown_sources >= MAX_UNKNOWN_SOURCES:
+                                await fail_document_turn(delivery, worker, job_id, "document_information_incomplete")
+                                return DocumentPlanningFailure("incomplete", job_id, "document_information_incomplete")
+                            messages.append(
+                                Message(
+                                    role="tool",
+                                    name=call.name,
+                                    tool_call_id=call.id,
+                                    content=_json(
+                                        {
+                                            "error": "document_source_unknown",
+                                            "available_sources": sorted(aliases),
+                                            "hint": "Only these inputs exist, and this task cannot query data systems. "
+                                            "If required values are not in them, ask for the values or a data file; do not invent them.",
+                                        }
+                                    ),
+                                )
+                            )
+                            continue
                         if item.role == "canvas":
                             from bowhead_core.documents.canvas_material import read_material
 

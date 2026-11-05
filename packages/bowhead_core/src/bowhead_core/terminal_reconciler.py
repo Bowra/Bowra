@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from bowhead_core.context_activity import ContextActivity
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.terminal_approval_contract import (
     build_approval_required_events,
 )
@@ -291,6 +292,7 @@ class TerminalRecoveryProcessor:
         if self._fault_injector is not None:
             self._fault_injector(point)
 
+    @completion_capacity()
     async def run_bounded(
         self,
         *,

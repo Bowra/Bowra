@@ -26,7 +26,9 @@ export interface StepProps {
   status?: StepStatus;
   /** small kind chip before the tool name; `"skill"` gets the accent treatment. */
   kind?: string;
-  /** start expanded; defaults to expanded while running / failed. */
+  /** Recorded failure, including failed steps displayed with a warning glyph. */
+  failed?: boolean;
+  /** Start expanded. Failed steps start collapsed. */
   open?: boolean;
   /** UX-1 (2026-07-03): auto-collapse detail on run→done (respect manual user toggles).
    *  Pass true only for code detail (python/sql/stdout); tables/hits are user-requested results
@@ -42,6 +44,7 @@ export function Step({
   summary,
   time,
   status = "done",
+  failed = status === "fail",
   kind,
   open: openProp,
   autoCollapseOnDone = false,
@@ -49,53 +52,35 @@ export function Step({
 }: StepProps) {
   const meta = getToolMeta(toolName ?? null);
   const expandable = children != null && children !== false;
-  const [open, setOpen] = useState(openProp ?? (status === "run" || status === "fail"));
-  // UX-1: useState initializer evaluates once; steps mounted during run remain open forever after done
-  // (cause of finished code not collapsing). Handle transitions with effects; never auto-toggle after manual user toggles.
+  const [open, setOpen] = useState(!failed && (openProp ?? status === "run"));
   const userToggledRef = useRef(false);
-  const prevStatusRef = useRef(status);
+  const previousRef = useRef({ status, failed });
   useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (prev === status) return;
-    // Failure is a new critical state; body FailureAckCard is the sole error explanation
-    // after O5 removed retry/skip buttons + toast. Force open **even after manual collapse**:
-    // users collapsed running code; failure is unexpected new information (code-review 2026-07-04).
-    //
-    // chat-ux-2026-08 batch B attempted to exempt self-healing failures here (no forced expansion),
-    // blocked by two existing tests and **reverted**: TurnContainer.f1-retry-skip and AgentBlock
-    // pin failed steps without buttons but with visible honest guidance; collapse would hide that sentence too.
-    // Real lesson: the issue is not transient expansion but expansion **while running**;
-    // after completion expansion is harmless. Fix requires whether the turn is still running, never failure type.
-    // See docs/sprints/chat-interaction-ux-2026-08-07/tech-design.md §3.1.
-    if (status === "fail" || status === "part") {
+    const previous = previousRef.current;
+    previousRef.current = { status, failed };
+    if (previous.status === status && previous.failed === failed) return;
+    if (failed) {
+      if (!userToggledRef.current) setOpen(false);
+      return;
+    }
+    // A partial step can contain successful results and remains open as before.
+    if (status === "part") {
       setOpen(true);
       return;
     }
-    // Auto-collapse only before user takeover; afterward respect their choice, never compete.
-    if (userToggledRef.current) return;
-    if (autoCollapseOnDone && prev === "run" && status === "done") {
+    if (!userToggledRef.current && autoCollapseOnDone && previous.status === "run" && status === "done") {
       setOpen(false);
     }
-  }, [status, autoCollapseOnDone]);
+  }, [status, failed, autoCollapseOnDone]);
 
-  // chat-ux-2026-08 batch B extraction: late forced-expansion signal.
-  //
-  // openProp previously served **only** as useState initializer, read once at mount.
-  // Batch B extraction requires postponing self-healing failure expansion until the turn completes;
-  // then openProp changes undefined→true, long after component mount,
-  // and without this effect it **never opens**, permanently hiding the self-healing explanation.
-  //
-  // Only undefined/false → true; reverse true → undefined never collapses,
-  // usually meaning the caller stopped specifying a preference, not requesting collapse.
-  // Never compete after manual user toggles, matching autoCollapseOnDone above.
+  // A caller can request late expansion of a partial result when the turn ends.
   const prevOpenPropRef = useRef(openProp);
   useEffect(() => {
     const prev = prevOpenPropRef.current;
     prevOpenPropRef.current = openProp;
     if (prev === openProp) return;
-    if (openProp === true && !userToggledRef.current) setOpen(true);
-  }, [openProp]);
+    if (openProp === true && !failed && !userToggledRef.current) setOpen(true);
+  }, [openProp, failed]);
   const isOpen = expandable && open;
   const bodyId = useId();
 

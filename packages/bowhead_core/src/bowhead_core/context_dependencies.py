@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from copy import copy, deepcopy
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from bowhead_router.types import Message
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    import aiosqlite
 
 
 @asynccontextmanager
@@ -118,6 +122,7 @@ async def validate_context_dependencies(
     validated_materials: set[str] | None = None,
     connection=None,
     prepared_dependencies: dict[tuple[str, str], BaseModel] | None = None,
+    defer_knowledge: bool = False,
 ) -> None:
     from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
     from bowhead_core.knowledge_source_runtime import record_source_uses, validate_retained_sources
@@ -196,7 +201,8 @@ async def validate_context_dependencies(
                 raise KnowledgeAccessError("knowledge_source_provenance_unavailable")
             try:
                 retained_navigation = NavigationContextDependencies.model_validate_json(message.content)
-                await validate_navigation_dependencies(ctx, retained_navigation.knowledge_navigation)
+                if not defer_knowledge:
+                    await validate_navigation_dependencies(ctx, retained_navigation.knowledge_navigation)
             except ValueError as exc:
                 raise KnowledgeAccessError("knowledge_source_provenance_unavailable") from exc
             record_navigation_uses(ctx, retained_navigation.knowledge_navigation)
@@ -209,7 +215,8 @@ async def validate_context_dependencies(
             retained = KnowledgeContextDependencies.model_validate(json.loads(message.content))
         except ValueError:
             raise KnowledgeAccessError("knowledge_source_provenance_unavailable") from None
-        await validate_retained_sources(ctx, retained.knowledge_sources)
+        if not defer_knowledge:
+            await validate_retained_sources(ctx, retained.knowledge_sources)
         record_source_uses(ctx, retained.knowledge_sources)
 
 
@@ -221,8 +228,9 @@ _CONTEXT_DEPENDENCY_NAMES = frozenset(
 class ContextSourceValidator:
     """Revalidate bytes before writing, then current authority during adoption."""
 
-    def __init__(self, ctx):
+    def __init__(self, ctx: Any, *, knowledge_connection: aiosqlite.Connection | None = None) -> None:
         self.ctx = ctx
+        self.knowledge_connection = knowledge_connection
 
     async def __call__(self, messages: list[Message]) -> None:
         await self.validate(messages, read_bytes=True)
@@ -241,38 +249,61 @@ class ContextSourceValidator:
         from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
         from bowhead_core.knowledge_source_runtime import record_source_uses, validate_retained_sources, validate_source_messages
 
-        await validate_source_messages(self.ctx, messages)
+        boundary = getattr(getattr(self.ctx, "kb_file_authorizer", None), "history_validation", None)
+        ctx = self.ctx
+        if callable(boundary):
+            # Keep unverified proofs private until the shared current check passes.
+            ctx = copy(self.ctx)
+            ctx.knowledge_source_uses = dict(self.ctx.knowledge_source_uses)
+            ctx.knowledge_source_ancestors = ()
+            ctx.knowledge_navigation_uses = dict(getattr(self.ctx, "knowledge_navigation_uses", None) or {})
+            ctx.knowledge_navigation_ancestors = ()
+            if ctx.ordinary_lead_state is not None:
+                ctx.ordinary_lead_state = copy(ctx.ordinary_lead_state)
+                ctx.ordinary_lead_state.knowledge_sources = dict(ctx.ordinary_lead_state.knowledge_sources)
+            await validate_source_messages(ctx, messages, defer_authorization=True)
+        else:
+            await validate_source_messages(ctx, messages)
         await validate_context_dependencies(
-            self.ctx,
+            ctx,
             messages,
             read_bytes=read_bytes,
             validated_materials=validated_materials,
             connection=connection,
             prepared_dependencies=prepared_dependencies,
+            defer_knowledge=callable(boundary),
         )
-        sources = dict(self.ctx.knowledge_source_uses)
-        state = self.ctx.ordinary_lead_state
+        sources = dict(ctx.knowledge_source_uses)
+        state = ctx.ordinary_lead_state
         for values in (state.knowledge_sources if state is not None else {}, retained_sources or {}):
             for identity, generation in values.items():
                 if identity in sources and sources[identity] != generation:
                     raise KnowledgeAccessError("knowledge_source_changed")
                 sources[identity] = generation
-        navigation = dict(getattr(self.ctx, "knowledge_navigation_uses", None) or {})
+        navigation = dict(getattr(ctx, "knowledge_navigation_uses", None) or {})
         for identity, proof in (retained_navigation or {}).items():
             if identity in navigation and navigation[identity] != proof:
                 raise KnowledgeAccessError("knowledge_source_changed")
             navigation[identity] = proof
-        source_ctx = copy(self.ctx)
+        source_ctx = copy(ctx)
         source_ctx.knowledge_navigation_uses = navigation
         # One current-authority read per boundary, including every retained map.
         # This is not a cache: a later boundary rechecks sources and navigation.
-        await validate_retained_sources(source_ctx, sources)
-        if retained_sources:
-            record_source_uses(self.ctx, retained_sources)
-        if retained_navigation:
+        read_options = {"knowledge_connection": self.knowledge_connection} if self.knowledge_connection is not None else {}
+        if callable(boundary) and (sources or navigation):
+            async with boundary(self.ctx.user_id, self.ctx.team_id, self.ctx.workspace_id, connection=connection) as authorizer:
+                source_ctx.kb_file_authorizer = authorizer
+                await validate_retained_sources(source_ctx, sources, **read_options)
+        else:
+            await validate_retained_sources(source_ctx, sources, **read_options)
+        checked_sources = sources if callable(boundary) else retained_sources
+        checked_navigation = navigation if callable(boundary) else retained_navigation
+        if checked_sources:
+            record_source_uses(self.ctx, checked_sources)
+        if checked_navigation:
             from bowhead_core.kb.source_navigation import record_navigation_uses
 
-            record_navigation_uses(self.ctx, retained_navigation)
+            record_navigation_uses(self.ctx, checked_navigation)
 
 
 class PreparedContextSourceValidator:
@@ -287,6 +318,30 @@ class PreparedContextSourceValidator:
         self.retained_sources: dict[str, str | None] = {}
         self.retained_navigation: dict[str, dict] = {}
         self.prepared_dependencies: dict[tuple[str, str], BaseModel] = {}
+
+    @asynccontextmanager
+    async def open_adoption_readers(self) -> AsyncIterator[PreparedContextSourceValidator]:
+        """Open this database's reader before acquiring the execution writer.
+
+        KB metadata stays in autocommit so every repeated version check remains
+        fresh. The caller's execution transaction supplies current core authority.
+        """
+        from bowhead_core._db import open_pooled_read_ctx
+
+        ctx = self.original.ctx
+        path = getattr(getattr(ctx, "kb_files_store", None), "_db_path", None)
+        if (
+            not path
+            or self.original.knowledge_connection is not None
+            or not (self.retained_sources or self.retained_navigation or ctx.knowledge_source_uses or getattr(ctx, "knowledge_navigation_uses", None))
+        ):
+            yield self
+            return
+        async with open_pooled_read_ctx(path) as reader:
+            prepared = copy(self)
+            prepared.original = copy(self.original)
+            prepared.original.knowledge_connection = reader
+            yield prepared
 
     @staticmethod
     def _source_messages(messages: list[Message]) -> set[str]:
@@ -304,10 +359,10 @@ class PreparedContextSourceValidator:
 
         return {message_digest([message]) for message in messages if message.name in _CONTEXT_DEPENDENCY_NAMES}
 
-    async def collect(self, messages: list[Message]) -> None:
+    async def collect(self, messages: list[Message], *, connection: aiosqlite.Connection | None = None) -> None:
         from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 
-        await self.original.validate(messages, read_bytes=True, validated_materials=self.collected_materials)
+        await self.original.validate(messages, read_bytes=True, validated_materials=self.collected_materials, connection=connection)
         self.verified.update(self._dependencies(messages))
         self.verified_messages.update(self._source_messages(messages))
         state = self.original.ctx.ordinary_lead_state

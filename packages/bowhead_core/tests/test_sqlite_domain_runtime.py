@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -75,6 +78,141 @@ def managed(core_path: Path, domain: str) -> DomainConnection:
     db = sqlite3.connect(core_path.with_name(DOMAIN_TARGET_FILES[domain]), factory=DomainConnection, uri=True, timeout=0)
     guard_connection(db, core_path, domain)
     return db
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_initial_statement_retries_authority_preparation_with_fresh_scope(
+    domain_files: Path, monkeypatch: pytest.MonkeyPatch, cached: bool, mixed: bool
+) -> None:
+    import fcntl
+
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','before')").close()
+    execution.commit()
+    execution.close()
+    if mixed:
+        content = managed(domain_files, "content")
+        content.execute("INSERT INTO artifacts(id) VALUES('before')").close()
+        content.commit()
+        content.close()
+    sql = "SELECT s.user_id,a.id FROM sessions s CROSS JOIN artifacts a" if mixed else "SELECT user_id FROM sessions"
+    if cached:
+        with core.execute(sql) as cursor:
+            assert cursor.fetchall() == ([("before", "before")] if mixed else [("before",)])
+    core.execute("PRAGMA busy_timeout=1000").close()
+    ready, blocked = threading.Event(), threading.Event()
+    errors = []
+    flock = fcntl.flock
+
+    def observe_conflict(fd: int, operation: int) -> None:
+        try:
+            flock(fd, operation)
+        except BlockingIOError:
+            blocked.set()
+            raise
+
+    def revoke() -> None:
+        writer = managed(domain_files, "content" if mixed else "execution")
+        try:
+            writer.execute(
+                "UPDATE artifacts SET id='after' WHERE id='before'" if mixed else "UPDATE sessions SET user_id='after' WHERE id='s'"
+            ).close()
+            ready.set()
+            assert blocked.wait(5), "Reader did not reach the held authority lease"
+            if mixed:
+                followup = managed(domain_files, "execution")
+                try:
+                    followup.execute("UPDATE sessions SET user_id='after' WHERE id='s'").close()
+                    followup.commit()
+                finally:
+                    followup.close()
+            writer.commit()
+        except BaseException as error:
+            errors.append(error)
+            ready.set()
+        finally:
+            writer.close()
+
+    monkeypatch.setattr(fcntl, "flock", observe_conflict)
+    worker = threading.Thread(target=revoke)
+    worker.start()
+    try:
+        assert ready.wait(5)
+        with core.execute(sql) as cursor:
+            assert cursor.fetchall() == ([("after", "after")] if mixed else [("after",)])
+        assert blocked.is_set()
+        assert not core._leases
+    finally:
+        blocked.set()
+        worker.join(timeout=5)
+        core.close()
+    assert not worker.is_alive()
+    assert not errors
+
+
+@pytest.mark.parametrize("boundary", ["transaction", "cursor", "callback"])
+def test_preparation_retry_never_restarts_an_existing_snapshot_or_callback(
+    domain_files: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    from bowhead_core import sqlite_domain_runtime
+
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    calls = []
+
+    def no_wait(_: float) -> None:
+        pytest.fail("An established snapshot or executing callback must fail without retry")
+
+    def read_scope() -> object:
+        calls.append("called")
+        return core._scalar("SELECT user_id FROM sessions", ())
+
+    monkeypatch.setattr(sqlite_domain_runtime.time, "sleep", no_wait)
+    core.execute("PRAGMA busy_timeout=1000").close()
+    execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+    try:
+        if boundary == "transaction":
+            core.execute("BEGIN").close()
+        elif boundary == "cursor":
+            cursor = core.execute("SELECT 1")
+        else:
+            core.create_function("read_scope", 0, read_scope)
+        with pytest.raises(sqlite3.OperationalError, match="authority lease"):
+            core.execute("SELECT read_scope()" if boundary == "callback" else "SELECT user_id FROM sessions")
+        assert calls == (["called"] if boundary == "callback" else [])
+        if boundary == "cursor":
+            cursor.close()
+    finally:
+        core.close()
+        execution.close()
+
+
+def test_preparation_retry_obeys_busy_timeout_and_keeps_diagnostics(domain_files: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core import sqlite_domain_runtime
+
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    core.execute("PRAGMA busy_timeout=25").close()
+    execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+    elapsed = [0.0]
+
+    def advance(delay: float) -> None:
+        assert not core._leases
+        elapsed[0] += delay
+
+    monkeypatch.setattr(sqlite_domain_runtime.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(sqlite_domain_runtime.time, "sleep", advance)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="authority lease") as caught:
+            core.execute("SELECT user_id FROM sessions")
+        assert elapsed[0] == pytest.approx(0.025)
+        assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        assert caught.value.bowhead_diagnostic_id
+    finally:
+        core.close()
+        execution.close()
 
 
 def test_unmanaged_writer_fails_closed(domain_files: Path) -> None:
@@ -696,3 +834,169 @@ def test_deferred_cleanup_cannot_recreate_missing_target(domain_files: Path, tar
     finally:
         execution.close()
         core.close()
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_collected_foreign_cursor_releases_its_native_snapshot(domain_files: Path, pending: bool) -> None:
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    try:
+        execution.executemany("INSERT INTO sessions(id,user_id) VALUES(?,?)", [("s1", "u"), ("s2", "u")]).close()
+        execution.commit()
+        cursor = core.execute("SELECT id FROM sessions ORDER BY id" if pending else "SELECT id FROM sessions WHERE id='s1'")
+        assert cursor.fetchone() == ("s1",)
+        del cursor
+        gc.collect()
+        execution.execute("UPDATE sessions SET user_id='other'").close()
+        execution.commit()
+        with sqlite3.connect(domain_files.with_name(DOMAIN_TARGET_FILES["execution"])) as raw:
+            assert raw.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
+    finally:
+        core.close()
+        execution.close()
+
+
+@pytest.mark.parametrize("boundary", ["transaction", "other_cursor"])
+def test_collected_cursor_preserves_other_live_authority_boundaries(domain_files: Path, boundary: str) -> None:
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    try:
+        execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+        execution.commit()
+        if boundary == "transaction":
+            core.execute("BEGIN").close()
+        else:
+            retained = core.execute("SELECT id FROM sessions")
+        abandoned = core.execute("SELECT id FROM sessions")
+        del abandoned
+        gc.collect()
+        with pytest.raises(sqlite3.OperationalError) as caught:
+            execution.execute("UPDATE sessions SET user_id='other'")
+        assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        execution.rollback()
+        if boundary == "transaction":
+            core.rollback()
+        else:
+            retained.close()
+        execution.execute("UPDATE sessions SET user_id='other'").close()
+        execution.commit()
+    finally:
+        core.close()
+        execution.close()
+
+
+@pytest.mark.parametrize("target", ["cursor", "connection"])
+def test_failed_foreign_thread_close_preserves_live_authority_lease(domain_files: Path, target: str) -> None:
+    core = managed(domain_files, "core")
+    execution = managed(domain_files, "execution")
+    errors: list[BaseException] = []
+    try:
+        execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+        execution.commit()
+        cursor = core.execute("SELECT id FROM sessions")
+
+        def close() -> None:
+            try:
+                (cursor if target == "cursor" else core).close()
+            except BaseException as error:
+                errors.append(error)
+
+        worker = threading.Thread(target=close)
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert len(errors) == 1 and isinstance(errors[0], sqlite3.ProgrammingError)
+        with pytest.raises(sqlite3.OperationalError):
+            execution.execute("UPDATE sessions SET user_id='other'")
+        execution.rollback()
+        assert cursor.fetchall() == [("s",)]
+        cursor.close()
+        execution.execute("UPDATE sessions SET user_id='other'").close()
+        execution.commit()
+    finally:
+        core.close()
+        execution.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("collection", ["loop", "worker", "cycle"])
+async def test_async_collected_cursor_closes_on_its_owner_worker(domain_files: Path, monkeypatch: pytest.MonkeyPatch, collection: str) -> None:
+    from bowhead_core.sqlite_domain_runtime import connect
+
+    from bowhead_core import sqlite_domains
+
+    monkeypatch.setattr(sqlite_domains, "domain_layout_active", lambda _path: True)
+    execution = managed(domain_files, "execution")
+    execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+    execution.commit()
+    released = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    owner_threads: list[int] = []
+    original_settle = DomainConnection._settle
+    try:
+        async with connect(domain_files) as connection:
+            raw = await connection._execute(lambda: connection._conn)
+            owner_thread = await connection._execute(threading.get_ident)
+            cursor = await connection._execute(raw.execute, "SELECT id FROM sessions")
+            # Drop the aiosqlite worker's last result reference before collecting on the loop.
+            await connection._execute(lambda: None)
+
+            def observe_settle(self: DomainConnection) -> None:
+                original_settle(self)
+                if self is raw and not self._leases:
+                    owner_threads.append(threading.get_ident())
+                    loop.call_soon_threadsafe(released.set)
+
+            monkeypatch.setattr(DomainConnection, "_settle", observe_settle)
+            if collection == "worker":
+                holder = [cursor]
+                del cursor
+                await connection._execute(holder.clear)
+            else:
+                if collection == "cycle":
+                    cursor.review_cycle = cursor
+                del cursor
+                gc.collect()
+            await asyncio.wait_for(released.wait(), timeout=2)
+            assert owner_threads and all(identity == owner_thread for identity in owner_threads)
+            execution.execute("UPDATE sessions SET user_id='other'").close()
+            execution.commit()
+    finally:
+        execution.close()
+
+
+@pytest.mark.asyncio
+async def test_collected_cycle_keeps_its_fence_until_deferred_native_close(domain_files: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bowhead_core.sqlite_domain_runtime import connect
+
+    from bowhead_core import sqlite_domains
+
+    monkeypatch.setattr(sqlite_domains, "domain_layout_active", lambda _path: True)
+    execution = managed(domain_files, "execution")
+    pending: list[sqlite3.Cursor] = []
+    try:
+        execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+        execution.commit()
+        async with connect(domain_files) as connection:
+            raw = await connection._execute(lambda: connection._conn)
+            raw._defer_cursor_close = pending.append
+            cursor = await connection._execute(raw.execute, "SELECT id FROM sessions")
+            await connection._execute(lambda: None)
+            cursor.review_cycle = cursor
+            del cursor
+            gc.collect()
+            assert len(pending) == 1
+
+            def probe() -> None:
+                with raw.execute("SELECT 1") as local:
+                    local.fetchall()
+
+            await connection._execute(probe)
+            with pytest.raises(sqlite3.OperationalError):
+                execution.execute("UPDATE sessions SET user_id='other'")
+            execution.rollback()
+            await connection._execute(pending.pop().close)
+            execution.execute("UPDATE sessions SET user_id='other'").close()
+            execution.commit()
+    finally:
+        execution.close()

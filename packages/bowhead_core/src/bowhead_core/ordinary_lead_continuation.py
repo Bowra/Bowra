@@ -443,35 +443,43 @@ async def read_ordinary_card_in_tx(db: aiosqlite.Connection, *, card_id: str, do
     return OrdinaryContinuationCard(card, snapshot, generation, owner, source_db_path)
 
 
-async def cancel_ordinary_pause_in_tx(db: aiosqlite.Connection, *, card_id: str, now: str) -> None:
+async def cancel_ordinary_pause_in_tx(db: aiosqlite.Connection, *, card: ClarificationRequest, now: str) -> None:
     """Close an unconsumed settled pause without touching another active Turn.
 
     The caller commits the card CAS and invalidation outbox in this transaction.
     Common dispatch recovery writes the terminal stream after a crash as well.
     """
-    record = await read_ordinary_card_in_tx(db, card_id=card_id)
-    if record.card.status != "pending" or record.consumed_generation is not None:
+    from bowhead_core.clarification_resume_context import is_legacy_ordinary_question
+
+    legacy = is_legacy_ordinary_question(card)
+    record = None if legacy else await read_ordinary_card_in_tx(db, card_id=card.request_id)
+    if card.status != "pending" or record is not None and record.consumed_generation is not None:
         raise OrdinaryContinuationUnavailable()
-    worker = record.creation_worker()
+    worker = record.creation_worker() if record is not None else None
     row = await _row(
         db,
         """SELECT t.execution_generation,d.owner_id,d.lease_kind
-        FROM turns t JOIN chat_turn_spawn_dispatch d ON d.turn_id=t.id AND d.session_id=t.session_id
-        WHERE t.id=? AND t.status='clarification_pending' AND d.state IN ('terminal','failed')
+        FROM turns t JOIN sessions s ON s.id=t.session_id
+        JOIN chat_turn_spawn_dispatch d ON d.turn_id=t.id AND d.session_id=t.session_id
+        WHERE t.id=? AND s.id=? AND s.user_id=? AND s.workspace_id=? AND s.deleted_at IS NULL
+          AND t.status='clarification_pending' AND COALESCE(t.terminal_protocol_version,0)=0 AND d.state IN ('terminal','failed')
           AND d.lease_execution_generation=t.execution_generation AND d.cancel_requested_at IS NULL""",
-        (worker.turn_id,),
+        (card.turn_id, card.session_id, card.user_id, card.workspace_id),
     )
-    if row is None or row["execution_generation"] < worker.generation:
+    if row is None:
         raise OrdinaryContinuationUnavailable()
-    if row["execution_generation"] == worker.generation:
-        if row["owner_id"] not in (None, worker.owner_id):
+    if worker is not None:
+        if row["execution_generation"] < worker.generation:
             raise OrdinaryContinuationUnavailable()
-    elif row["lease_kind"] != "resume" or row["owner_id"] is not None:
-        raise OrdinaryContinuationUnavailable()
-    await db.execute("UPDATE turns SET status='cancelled',ended_at=?,error_kind='user_cancel',error=NULL WHERE id=?", (now, worker.turn_id))
+        if row["execution_generation"] == worker.generation:
+            if row["owner_id"] not in (None, worker.owner_id):
+                raise OrdinaryContinuationUnavailable()
+        elif row["lease_kind"] != "resume" or row["owner_id"] is not None:
+            raise OrdinaryContinuationUnavailable()
+    await db.execute("UPDATE turns SET status='cancelled',ended_at=?,error_kind='user_cancel',error=NULL WHERE id=?", (now, card.turn_id))
     await db.execute(
         "UPDATE chat_turn_spawn_dispatch SET state='drain_pending',owner_id=NULL,lease_expires_at=?,updated_at=? WHERE turn_id=?",
-        (now, now, worker.turn_id),
+        (now, now, card.turn_id),
     )
 
 

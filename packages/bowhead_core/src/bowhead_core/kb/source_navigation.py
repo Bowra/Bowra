@@ -10,13 +10,17 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from pydantic import BaseModel, ConfigDict, Field
 
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 from bowhead_core.kb.source_navigation_store import SourceNavigationStore
+
+if TYPE_CHECKING:
+    import aiosqlite
 
 
 def _text(value: str, limit: int) -> str:
@@ -119,7 +123,13 @@ async def visible_categories(ctx: Any, store: SourceNavigationStore, definitions
 
 
 async def _project(
-    ctx: Any, files: list[Any], categories: list[dict[str, Any]], store: SourceNavigationStore, *, include_automatic: bool = True
+    ctx: Any,
+    files: list[Any],
+    categories: list[dict[str, Any]],
+    store: SourceNavigationStore,
+    *,
+    include_automatic: bool = True,
+    connection: aiosqlite.Connection | None = None,
 ) -> SourcePage:
     scope = _scope(ctx)
     categories = await visible_categories(ctx, store, categories)
@@ -157,7 +167,8 @@ async def _project(
     origin_check = getattr(ctx.kb_file_authorizer, "navigation", None)
     allowed_origins = await origin_check(origins, ctx.user_id, ctx.team_id, ctx.workspace_id) if origins and callable(origin_check) else set()
     bodies = await store.matrix_bodies([row["id"] for row in origins if row["id"] in allowed_origins])
-    fresh = {file.file_id: file for file in await ctx.kb_files_store.get_many([file.file_id for file in files])}
+    read_options = {"connection": connection} if connection is not None else {}
+    fresh = {file.file_id: file for file in await ctx.kb_files_store.get_many([file.file_id for file in files], **read_options)}
     final = await _allowed(ctx, list(fresh.values()))
     if allowed_origins:
         allowed_origins &= await origin_check(origins, ctx.user_id, ctx.team_id, ctx.workspace_id)
@@ -295,20 +306,45 @@ def record_navigation_uses(ctx: Any, dependencies: dict[str, dict[str, Any]]) ->
         retained.update(dependencies)
 
 
-async def validate_navigation_dependencies(ctx: Any, dependencies: dict[str, dict[str, Any]]) -> None:
+async def validate_navigation_dependencies(
+    ctx: Any, dependencies: dict[str, dict[str, Any]], *, connection: aiosqlite.Connection | None = None
+) -> None:
     if not dependencies:
         return
     _scope(ctx)
-    store = SourceNavigationStore(ctx.kb_files_store._db_path)
-    categories = await visible_categories(ctx, store)
+    if connection is not None:
+        await _validate_navigation_in_connection(ctx, dependencies, connection)
+    else:
+        async with open_pooled_read_ctx(ctx.kb_files_store._db_path) as connection:
+            await _validate_navigation_in_connection(ctx, dependencies, connection)
+
+
+async def _validate_navigation_in_connection(ctx: Any, dependencies: dict[str, dict[str, Any]], connection: aiosqlite.Connection) -> None:
+    """Keep fresh autocommit reads while reusing this database's physical handle."""
+    store = SourceNavigationStore(ctx.kb_files_store._db_path, connection=connection)
+    # Projection applies the current category authorization once per batch.
+    categories = await store.categories(ctx.team_id, ctx.user_id, ctx.workspace_id)
     for offset in range(0, len(dependencies), 256):
         ids = list(dependencies)[offset : offset + 256]
         expected = {identity: NavigationDependency.model_validate(dependencies[identity]).model_dump() for identity in ids}
-        current = await _project(ctx, await ctx.kb_files_store.get_many(ids), categories, store)
+        current = await _project(
+            ctx,
+            await ctx.kb_files_store.get_many(ids, connection=connection),
+            categories,
+            store,
+            connection=connection,
+        )
         changed = [identity for identity in ids if current.dependencies.get(identity) != expected[identity]]
         if changed:
             # A newly available automatic description does not invalidate a still-current
             # basic snapshot. Existing text/category edits and revoked Matrix origins do.
-            basic = await _project(ctx, await ctx.kb_files_store.get_many(changed), categories, store, include_automatic=False)
+            basic = await _project(
+                ctx,
+                await ctx.kb_files_store.get_many(changed, connection=connection),
+                categories,
+                store,
+                include_automatic=False,
+                connection=connection,
+            )
             if any(basic.dependencies.get(identity) != expected[identity] for identity in changed):
                 raise KnowledgeAccessError("knowledge_source_changed")

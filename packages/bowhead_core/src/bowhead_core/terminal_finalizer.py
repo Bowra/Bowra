@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import anyio
 
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.terminal_effect_contract import EffectIntentDisposition
 from bowhead_core.terminal_protocol import (
     CommitConfirmationDisposition,
@@ -97,6 +98,7 @@ class TerminalFinalizer:
         self._store = store
         self._fault_injector = _fault_injector
 
+    @completion_capacity()
     async def finalize(self, request: FinalizeRequest) -> CommittedReceipt:
         if not isinstance(request, FinalizeRequest):
             raise TypeError("finalize request is invalid")
@@ -126,6 +128,7 @@ class TerminalFinalizer:
         )
         return await self._commit_finalization(request, finalization)
 
+    @completion_capacity()
     async def finalize_cancelled(
         self,
         request: FinalizeRequest,

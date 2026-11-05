@@ -2,30 +2,82 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, nullcontext
+from typing import TYPE_CHECKING, Any
 
-from bowhead_core.access_control import resource_grants_enforce_enabled
+from bowhead_core._db import open_pooled_read_ctx
+from bowhead_core.access_control import AccessContext, resource_grants_enforce_enabled
+from bowhead_core.agent_knowledge_policy import KnowledgeAccessError
 from bowhead_core.kb.permission import KbPermission, ScopeContext
 from bowhead_core.kb.schemas import KbFileDTO
 
-from bowhead_gateway.access_context import SpaceOperation, access_context_to_dict, build_access_context
+from bowhead_gateway.access_context import AccessContextError, SpaceOperation, access_context_to_dict, build_access_context
+
+if TYPE_CHECKING:
+    import aiosqlite
 
 
-def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = None):
+def kb_file_authorizer(
+    user_store: Any,
+    access_store: Any,
+    matrix_store: Any = None,
+    *,
+    _connection: aiosqlite.Connection | None = None,
+    _history_context: AccessContext | None = None,
+) -> Any:
+    read_options = {"connection": _connection} if _connection is not None else {}
+
+    async def access_context(user_id: str, team_id: str, workspace_id: str, *, execute: bool = False, write: bool = False) -> AccessContext:
+        if _history_context is not None and not execute and not write:
+            if (_history_context.user_id, _history_context.team_id, _history_context.workspace_id) != (user_id, team_id, workspace_id):
+                raise ValueError("Knowledge authorization scope changed")
+            return _history_context
+        return await build_access_context(
+            user_store=user_store,
+            access_store=access_store,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            allow_missing_workspace=True,
+            operation=SpaceOperation.WRITE if write else SpaceOperation.EXECUTE if execute else SpaceOperation.READ_HISTORY,
+            expected_team_id=team_id,
+            **read_options,
+        )
+
+    @asynccontextmanager
+    async def history_validation(
+        user_id: str, team_id: str, workspace_id: str, *, connection: aiosqlite.Connection | None = None
+    ) -> AsyncIterator[Any]:
+        """Share one current authority snapshot for one metadata validation only."""
+        async with nullcontext(connection) if connection is not None else open_pooled_read_ctx(user_store.db_path) as db:
+            if connection is None:
+                await db.execute("BEGIN")
+            try:
+                try:
+                    context = await build_access_context(
+                        user_store=user_store,
+                        access_store=access_store,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        allow_missing_workspace=True,
+                        operation=SpaceOperation.READ_HISTORY,
+                        expected_team_id=team_id,
+                        connection=db,
+                    )
+                except AccessContextError as exc:
+                    code = "knowledge_source_authorization_unavailable" if exc.status_code >= 500 else "knowledge_source_changed"
+                    raise KnowledgeAccessError(code) from None
+                yield kb_file_authorizer(user_store, access_store, matrix_store, _connection=db, _history_context=context)
+            finally:
+                if connection is None:
+                    await db.rollback()
+
     async def batch(
         files: list[KbFileDTO], user_id: str, team_id: str, workspace_id: str, *, execute: bool = False, write: bool = False
     ) -> dict[str, bool] | None:
         decisions = {file.file_id: False for file in files}
         try:
-            ctx = await build_access_context(
-                user_store=user_store,
-                access_store=access_store,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                allow_missing_workspace=True,
-                operation=SpaceOperation.WRITE if write else SpaceOperation.EXECUTE if execute else SpaceOperation.READ_HISTORY,
-                expected_team_id=team_id,
-            )
+            ctx = await access_context(user_id, team_id, workspace_id, execute=execute, write=write)
             scope = ScopeContext(
                 user_id=user_id,
                 team_id=team_id,
@@ -56,9 +108,9 @@ def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = N
             }
             permission = "write" if write else "read"
             raw = access_context_to_dict(ctx)
-            file_decisions = await access_store.explain_decisions(raw, "kb_file", list(resources), permission)
+            file_decisions = await access_store.explain_decisions(raw, "kb_file", list(resources), permission, **read_options)
             scope_decisions = await access_store.explain_decisions(
-                raw, "kb_scope", list(dict.fromkeys(value for value in resources.values() if value)), permission
+                raw, "kb_scope", list(dict.fromkeys(value for value in resources.values() if value)), permission, **read_options
             )
             for identity, resource in resources.items():
                 decisions[identity] = bool(
@@ -76,14 +128,7 @@ def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = N
         if matrix_store is None or not workspace_id:
             return set()
         try:
-            await build_access_context(
-                user_store=user_store,
-                access_store=access_store,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                operation=SpaceOperation.READ_HISTORY,
-                expected_team_id=team_id,
-            )
+            await access_context(user_id, team_id, workspace_id)
             allowed = set()
             matrices = {}
             for origin in origins:
@@ -120,15 +165,7 @@ def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = N
 
     async def categories(definitions: list[dict], user_id: str, team_id: str, workspace_id: str) -> list[dict] | None:
         try:
-            ctx = await build_access_context(
-                user_store=user_store,
-                access_store=access_store,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                allow_missing_workspace=True,
-                operation=SpaceOperation.READ_HISTORY,
-                expected_team_id=team_id,
-            )
+            ctx = await access_context(user_id, team_id, workspace_id)
             if not resource_grants_enforce_enabled():
                 return definitions
             if access_store is None:
@@ -142,7 +179,7 @@ def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = N
                 for row in definitions
             }
             decisions = await access_store.explain_decisions(
-                access_context_to_dict(ctx), "kb_scope", list(dict.fromkeys(value for value in resources.values() if value)), "read"
+                access_context_to_dict(ctx), "kb_scope", list(dict.fromkeys(value for value in resources.values() if value)), "read", **read_options
             )
             return [row for row in definitions if resources[row["id"]] is None or decisions.get(resources[row["id"]], {}).get("allowed")]
         except Exception:
@@ -151,4 +188,5 @@ def kb_file_authorizer(user_store: Any, access_store: Any, matrix_store: Any = N
     authorize.categories = categories
     authorize.batch = batch
     authorize.navigation = navigation
+    authorize.history_validation = history_validation
     return authorize

@@ -117,7 +117,7 @@ PRIORITY_COERCE_MAP = {
 }
 
 
-def auto_fix_payload(payload: dict[str, Any], *, revision: bool = False) -> AutoFixResult:
+def auto_fix_payload(payload: dict[str, Any], *, revision: bool = False, authored: bool = False) -> AutoFixResult:
     """Apply 21 soft-degrade fixes in deterministic order.
 
     Single pass; if all insights drop during R9 cleanup, sets hard_reject=True
@@ -211,7 +211,7 @@ def auto_fix_payload(payload: dict[str, Any], *, revision: bool = False) -> Auto
     insight_section_ids = payload.get("insight_section_ids") or []
     is_thin = bool(insight_section_ids)
     insights_remaining = payload.get("insights") or []
-    if not is_thin and not insights_remaining and not revision:
+    if not is_thin and not insights_remaining and not (revision or authored):
         return AutoFixResult(
             payload=payload,
             fixes=fixes,

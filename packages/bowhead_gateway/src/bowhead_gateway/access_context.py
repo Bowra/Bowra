@@ -18,6 +18,7 @@ from fastapi import HTTPException, Request, status
 from bowhead_gateway.ws_authz import authorize_ws_access
 
 if TYPE_CHECKING:
+    import aiosqlite
     from bowhead_core.user_store import User, UserStore
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ async def require_space_lifecycle_without_authorization(
     user_store: UserStore,
     workspace_id: str,
     operation: SpaceOperation,
+    connection: aiosqlite.Connection | None = None,
 ) -> None:
     """Check space lifecycle after the caller has authorized membership.
 
@@ -122,7 +124,7 @@ async def require_space_lifecycle_without_authorization(
             status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     try:
-        workspace = await get_workspace(workspace_id)
+        workspace = await get_workspace(workspace_id, **({"connection": connection} if connection is not None else {}))
     except Exception as exc:
         raise AccessContextError(
             "authz_lookup_failed",
@@ -160,6 +162,7 @@ async def build_access_context(
     operation: SpaceOperation = SpaceOperation.WRITE,
     allow_team_admin_override: bool = False,
     expected_team_id: str | None = None,
+    connection: aiosqlite.Connection | None = None,
 ) -> AccessContext:
     """Build a fail-closed access snapshot —— 授权 + 生命周期的**唯一入口**.
 
@@ -173,6 +176,7 @@ async def build_access_context(
     只对 ``not_a_member`` 生效: ``no_team`` / ``cross_team`` 仍然 fail-closed,
     生命周期闸也照常执行。
     """
+    read_options = {"connection": connection} if connection is not None else {}
     if not workspace_id and not allow_missing_workspace:
         raise AccessContextError("workspace_required", status.HTTP_400_BAD_REQUEST)
     if expected_team_id is not None:
@@ -181,10 +185,11 @@ async def build_access_context(
                 "team_required",
                 status.HTTP_400_BAD_REQUEST,
             )
-        user = await user_store.get_user(user_id)
+        user = await user_store.get_user(user_id, **read_options)
         expected_role = await user_store.get_team_role(
             user_id,
             expected_team_id,
+            **read_options,
         )
         if user is None or getattr(user, "status", None) != "active":
             raise AccessContextError(
@@ -199,14 +204,14 @@ async def build_access_context(
         fresh_team_id = expected_team_id
     else:
         expected_role = None
-        fresh_team_id = await user_store.get_user_team_id(user_id)
+        fresh_team_id = await user_store.get_user_team_id(user_id, **read_options)
     if not fresh_team_id:
         raise AccessContextError("user_not_active", status.HTTP_401_UNAUTHORIZED)
 
     normalized_role = ""
     if workspace_id:
-        ws_team_id = await user_store.get_workspace_team_id(workspace_id)
-        role = await user_store.get_member_role(workspace_id, user_id)
+        ws_team_id = await user_store.get_workspace_team_id(workspace_id, **read_options)
+        role = await user_store.get_member_role(workspace_id, user_id, **read_options)
         deny = authorize_ws_access(
             enforce=True,
             existing_role=role,
@@ -217,7 +222,7 @@ async def build_access_context(
         if deny == "not_a_member" and allow_team_admin_override:
             # PRD §5.5-A: admit this team's owner / team_admin through the space-membership gate.
             # Override only not_a_member; no_team / cross_team retain the 403 denial above.
-            override_role = await user_store.get_team_role(user_id, ws_team_id or fresh_team_id)
+            override_role = await user_store.get_team_role(user_id, ws_team_id or fresh_team_id, **read_options)
             if override_role in {"owner", "team_admin"}:
                 team_admin_admitted = True
                 deny = None
@@ -230,6 +235,7 @@ async def build_access_context(
             user_store=user_store,
             workspace_id=workspace_id,
             operation=operation,
+            **read_options,
         )
 
     team_role: str | None = None
@@ -238,6 +244,7 @@ async def build_access_context(
         team_role = expected_role or await user_store.get_team_role(
             user_id,
             fresh_team_id,
+            **read_options,
         )
         # SP-AUTH-3: recognize roles only within this ctx's team; no teamless is_team_admin() fallback
         # (it checks users.team_id's primary team and would import another team's admin identity into this ctx).
@@ -248,8 +255,8 @@ async def build_access_context(
     group_ids: tuple[str, ...] = ()
     policy_epoch = 0
     if access_store is not None:
-        group_ids = await access_store.principal_group_ids(fresh_team_id, user_id, workspace_id)
-        policy_epoch = await access_store.get_policy_epoch(fresh_team_id)
+        group_ids = await access_store.principal_group_ids(fresh_team_id, user_id, workspace_id, **read_options)
+        policy_epoch = await access_store.get_policy_epoch(fresh_team_id, **read_options)
 
     return AccessContext(
         user_id=user_id,

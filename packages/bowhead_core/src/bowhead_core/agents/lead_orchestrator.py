@@ -580,6 +580,15 @@ def _evidence_canvas_write(invocations: Any) -> bool:
     return False
 
 
+async def _validate_final_report_payload(parent_ctx: Any, bus: Any, turn_id: str, payload: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Apply the same confirmed-authorship contract at final publication as at peer return."""
+    from bowhead_core.analysis_payload import validate_payload
+    from bowhead_core.canvas_revise import no_document_chrome
+
+    authored = await _peer_authored_narrative_exists(parent_ctx, turn_id)
+    return await asyncio.to_thread(validate_payload, payload, revision=no_document_chrome(bus), authored=authored)
+
+
 async def _peer_authored_narrative_exists(parent_ctx: Any, turn_id: str | None) -> bool:
     """本轮是否已有 peer 亲笔 narrative（owner=sub_*, 服务端盖章）。best-effort False。
 
@@ -4650,6 +4659,19 @@ async def _compose_turn_output(
     if notice:
         await annotate_turn_report(runtime.parent_ctx, notice, paused=not allowed)
         text = notice if not allowed else f"{notice}\n\n{text}" if notice not in text else text
+    report_delivery = bool(kinds) or (getattr(runtime.parent_bus, "_delivery_decision", None) or {}).get("surface") == "canvas"
+    if allowed and report_delivery and getattr(runtime.parent_ctx, "canvas_store", None) is not None:
+        try:
+            from bowhead_core.report_kpis import reconcile_saved_report_kpis
+
+            reconciled = await reconcile_saved_report_kpis(
+                runtime.parent_ctx.canvas_store, sctx.session_id, text, getattr(runtime.parent_ctx, "language_context", None)
+            )
+            if reconciled != text:
+                text = reconciled
+                runtime.parent_ctx._lead_narrative_superseded = True
+        except Exception:
+            logger.warning("report.kpi_claim_reconciliation_unavailable turn=%s", sctx.turn_id, exc_info=True)
     if getattr(result, "chat_direct_delivered", False) and text.strip():
         if getattr(runtime.parent_ctx, "_lead_narrative_text", ""):
             runtime.parent_ctx._lead_narrative_superseded = True
@@ -7984,22 +8006,11 @@ async def _lead_loop(
                     build_observed_numbers,
                     check_fabrication_back_reference,
                     coerce_verdict_confidence,
-                    validate_payload,
                 )
 
                 payload_dict = dict(aggregated_payload)
-                # canvas-update-turn batch B0 (116 s_f2c1700cd1d3 follow-up): revise/append payload thin evidence
-                # (title/insights deliberately absent), V4 rejects as new report ⇒worked_but_produced_nothing;
-                # same criterion as subagent_return validate_payload(revision=).
-                from bowhead_core.canvas_revise import no_document_chrome as _v4_no_chrome
-
-                _v4_revision = _v4_no_chrome(runtime.parent_bus)
-
-                def _v4_validate_blocking() -> tuple[bool, list[str]]:
-                    return validate_payload(payload_dict, revision=_v4_revision)
-
                 _ok, _errs = await asyncio.wait_for(
-                    asyncio.to_thread(_v4_validate_blocking),
+                    _validate_final_report_payload(runtime.parent_ctx, runtime.parent_bus, sctx.turn_id, payload_dict),
                     timeout=_timeout_sec,
                 )
                 if not _ok:

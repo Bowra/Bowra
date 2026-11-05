@@ -112,6 +112,7 @@ describe("AgentTrace partial outcomes", () => {
   it.each([undefined, "pending", "active", "done"] as const)("retains aggregate failure feedback when child facts do not explain it: %s", (status) => {
     const children = status === "done" ? outcomes.map((child) => ({ ...child, status })) : [outcomes[0], { ...outcomes[1], status }];
     const { container } = trace(partial({ state: "failed", error: genericError, subSteps: children }));
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(container.querySelector(".bh-step-failure")).toBeTruthy();
   });
 
@@ -122,17 +123,20 @@ describe("AgentTrace partial outcomes", () => {
     { ...genericError, diagnostics: { ...genericError.diagnostics!, code: "source_access_denied" } },
   ])("keeps actionable or uncertain batch feedback: %j", (error) => {
     const { container } = trace(partial({ state: "failed", error, subSteps: outcomes }));
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(container.querySelector(".bh-step-failure")).toBeTruthy();
     expect(screen.getByText("查看技术详情")).toBeTruthy();
   });
 
   it("retains single-operation failure feedback even when nested rows exist", () => {
     const { container } = trace(partial({ toolName: "python_sandbox", state: "failed", error: genericError, subSteps: outcomes }));
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(container.querySelector(".bh-step-failure")).toBeTruthy();
   });
 
   it("keeps a missing-query explanation factual after the task ends", () => {
-    trace(partial({ state: "failed", error: { kind: "transient", code: "pbi_query_input_required", message: "" } }));
+    const { container } = trace(partial({ state: "failed", error: { kind: "transient", code: "pbi_query_input_required", message: "" } }));
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(screen.getByText("本次 Power BI 查询缺少 DAX 内容。")).toBeTruthy();
     expect(screen.queryByText(/任务仍在进行|将调整后重试/)).toBeNull();
   });

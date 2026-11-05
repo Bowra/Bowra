@@ -6,7 +6,11 @@ from dataclasses import replace
 import aiosqlite
 import pytest
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.canvas_export_projection import build_canvas_content_projection
+from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
+from bowhead_core.clarification_store import ClarificationStore
+from bowhead_core.documents.canvas_inputs import CanvasInputAdmission, CanvasInputManifest, CanvasSectionIdentity, continuation_canvas_sections_in_tx
 from bowhead_core.documents.delivery import DocumentDeliveryStore
 from bowhead_core.documents.request import (
     DocumentRequestError,
@@ -88,6 +92,76 @@ async def test_ambiguous_source_requires_a_unique_user_quotation_before_admissio
     with pytest.raises(DocumentRequestError, match="document_task_source_ambiguous"):
         await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=current.turn_id, proposal=proposal_for(ctx, current))
     await _assert_empty(ctx)
+
+
+async def test_quoted_continuation_retains_confirmed_answers_supplement_and_canvas(ctx):
+    card_store = ClarificationStore(ctx.path)
+    question = "What period should the report cover?"
+    card = await card_store.put(
+        turn_id=ctx.source.turn_id,
+        user_id=SCOPE.user_id,
+        workspace_id=SCOPE.workspace_id,
+        session_id=ctx.source.session_id,
+        token="period",
+        rationale=question,
+        candidates=[],
+        kind="options",
+    )
+    _, resolved = await card_store.resolve_once(
+        card.request_id,
+        chosen_value="FY2026 Q1",
+        answers=[
+            {"question": question, "source": "custom", "answer": "FY2026 Q1", "skipped": False},
+            {"question": "Unanswered?", "source": "skip", "skipped": True},
+        ],
+    )
+    assert resolved
+    supplement = await follow_up(ctx, text="Use demo stores and rank the top 20.", turn_id="t_scope")
+    await _sql(ctx, "UPDATE turns SET final_answer='Use all medical organizations' WHERE id=?", (supplement.turn_id,))
+    canvas_store = CanvasStore(ctx.path)
+    canvas = await canvas_store.ensure_canvas(session_id=ctx.source.session_id, workspace_id=SCOPE.workspace_id, user_id=SCOPE.user_id)
+    await canvas_store.append_section(canvas_id=canvas.id, kind="text", payload={"text": "Unlinked data"})
+    section = await canvas_store.append_section(
+        canvas_id=canvas.id, kind="text", payload={"text": "Demo store revenue"}, by_turn_id=supplement.turn_id
+    )
+    current = await follow_up(ctx, text="Please apply that to the same template now.", turn_id="t_apply")
+    proposal = proposal_for(ctx, current)
+    prepared = await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=current.turn_id, proposal=proposal)
+    assert prepared.task_source.continuation.through_turn_id == current.turn_id
+    async with open_shared_ctx(ctx.path) as db:
+        assert await continuation_canvas_sections_in_tx(
+            db, scope=SCOPE, session_id=current.session_id, original_turn_id=ctx.source.turn_id, current_turn_id=current.turn_id
+        ) == (section.id,)
+    projection = build_canvas_content_projection(title=canvas.title, sections=await canvas_store.list_sections(canvas.id))
+    manifest = CanvasInputManifest(
+        canvas_id=canvas.id,
+        session_id=current.session_id,
+        projection_token=projection.projection_token,
+        sections=(CanvasSectionIdentity(section_id=section.id, rev=section.rev),),
+        source_refs=(),
+        artifact_closure=(),
+        accessible_sources=(),
+        sha256="a" * 64,
+        size_bytes=1,
+    )
+    receipt = await ctx.store.submit_from_turn(
+        scope=SCOPE,
+        turn_id=current.turn_id,
+        command_id="task-source",
+        proposal=prepared.proposal,
+        _task_source=prepared.task_source,
+        _canvas=CanvasInputAdmission(manifest, "art_frozen_canvas", "canvas-data.json"),
+    )
+    await follow_up(ctx, text="Future request text", turn_id="t_future")
+    async with open_shared_ctx(ctx.path) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute("SELECT * FROM document_jobs WHERE id=?", (receipt.job_id,))).fetchone()
+        instruction = await task_instruction_in_tx(db, job=row, fallback="")
+    assert instruction.index("FY2026 Q1") < instruction.index(supplement.user_text) < instruction.index(current.user_text)
+    assert all(text not in instruction for text in ("Unanswered?", "medical organizations", "Future request text"))
+    assert json.loads(row["request_json"])["canvas_input"] == manifest.model_dump(mode="json")
+    assert prepared.proposal.inputs[0].artifact_id == ctx.artifact.id
+    assert await ctx.store.recover_from_turn(scope=SCOPE, turn_id=current.turn_id, command_id="task-source", proposal=proposal) == receipt
 
 
 @pytest.mark.parametrize("boundary", ["session", "space", "user", "future", "assistant"])

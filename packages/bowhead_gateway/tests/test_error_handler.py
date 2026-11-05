@@ -1494,3 +1494,24 @@ async def test_native_resume_preflight_explanation_preserves_wire_identity(app_w
     assert expected in error["message"]
     assert error["diagnostics"]["safe_detail"] == "phase=clarification_resume_preflight; failure_class=state"
     assert error["diagnostics"]["retryable"] is False
+
+
+async def test_storage_capacity_error_is_localized_without_another_connection(app_with_handler, monkeypatch, tmp_path):
+    from bowhead_core.sqlite_domain_runtime import connect
+
+    from bowhead_core import sqlite_capacity
+
+    @app_with_handler.get("/capacity")
+    async def capacity():
+        async with connect(tmp_path / "capacity.db"):
+            pytest.fail("No physical slot is available")
+
+    monkeypatch.setattr(sqlite_capacity, "LIMIT", 0)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app_with_handler), base_url="http://test") as client:
+        response = await client.get("/capacity", headers={"Accept-Language": "zh-CN"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "sqlite_capacity_exhausted",
+        "message": app_with_handler.state.error_catalog.render("sqlite_capacity_exhausted", "zh-CN"),
+    }
+    assert response.headers["x-request-id"]

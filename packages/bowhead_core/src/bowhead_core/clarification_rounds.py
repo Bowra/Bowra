@@ -8,7 +8,8 @@ import unicodedata
 
 import aiosqlite
 
-from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
+from bowhead_core._db import open_pooled_read_ctx
+from bowhead_core.sqlite_capacity import SQLiteCapacityError
 
 CONTEXT_KEY = "question_round"
 # Card questions as shown to the user (localized option labels included), kept
@@ -181,7 +182,7 @@ async def available(ctx, *, questions=None, fallback=None) -> bool:
     if store is None:
         return False
     try:
-        async with diagnostic_connect(store.db_path) as db:
+        async with open_pooled_read_ctx(store.db_path) as db:
             await next_round(
                 db,
                 turn_id=ctx.turn_id,
@@ -193,7 +194,7 @@ async def available(ctx, *, questions=None, fallback=None) -> bool:
                 **worker_identity(ctx),
             )
         return True
-    except (AttributeError, ValueError, aiosqlite.Error):
+    except (AttributeError, ValueError, aiosqlite.Error, SQLiteCapacityError):
         return False
 
 

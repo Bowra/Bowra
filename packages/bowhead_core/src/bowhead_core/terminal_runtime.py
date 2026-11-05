@@ -25,6 +25,7 @@ from bowhead_core.events import (
 )
 from bowhead_core.llm_failure import LLM_REASON_CODES
 from bowhead_core.published_diagnostics import republish_chat_llm_diagnostics
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.terminal_effect_contract import (
     EffectExecutionContract,
     EffectIntentDisposition,
@@ -949,6 +950,7 @@ class TerminalProtocolBusAdapter:
         if cancellation is not None:
             raise cancellation
 
+    @completion_capacity()
     async def _finalize(self, event: OrchestratorEvent) -> bool:
         self._terminal_snapshot = self._merged_terminal_payload(event.payload)
         maintenance = await self._store.read_context_maintenance_action(self._execution)

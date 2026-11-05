@@ -22,17 +22,19 @@
 
 ### Report
 
-| 字段               | 类型             | 必填 | 说明                                            |
-| ------------------ | ---------------- | ---- | ----------------------------------------------- |
-| `delivery_surface` | `"report"`       | —    | 可省略；显式写时只能为 `"report"`               |
-| `title`            | string           | ✅   | 报告 H1 标题. 例 "EA 单据合规监控（2026年4月）" |
-| `eyebrow`          | string \| null   | —    | H1 之上的小字. 例 "合规监控" / "经营复盘"       |
-| `exec_summary`     | string           | ✅   | 30-200 字结论先行. 含核心数字 + 主因 + 行动方向 |
-| `kpis`             | Kpi[]            | ✅   | 顶部 3-5 个数字卡                               |
-| `insights`         | Insight[]        | ✅   | 3-5 个 MECE 洞察（schema 限制 1-7）             |
-| `recommendations`  | Recommendation[] | ✅   | 行动建议列表                                    |
-| `caveats`          | string[]         | —    | 全局数据局限. 强烈建议非空                      |
-| `sources`          | Source[]         | —    | 数据源条目                                      |
+| 字段               | 类型             | 必填        | 说明                                                                                    |
+| ------------------ | ---------------- | ----------- | --------------------------------------------------------------------------------------- |
+| `delivery_surface` | `"report"`       | —           | 可省略；显式写时只能为 `"report"`                                                       |
+| `title`            | string           | ✅          | 报告 H1 标题. 例 "EA 单据合规监控（2026年4月）"                                         |
+| `eyebrow`          | string \| null   | —           | H1 之上的小字. 例 "合规监控" / "经营复盘"                                               |
+| `exec_summary`     | string           | ✅          | 30-200 字结论先行. 含核心数字 + 主因 + 行动方向                                         |
+| `kpis`             | Kpi[]            | —           | Optional supported cards; no target count. Omit or use [] if unnecessary or excluded.   |
+| `insights`         | Insight[]        | Conditional | Supported insights when the report body has not already been authored; no target count. |
+| `recommendations`  | Recommendation[] | —           | Optional supported recommendations.                                                     |
+| `caveats`          | string[]         | —           | 全局数据局限. 强烈建议非空                                                              |
+| `sources`          | Source[]         | —           | 数据源条目                                                                              |
+
+After a confirmed `write_report`, `exec_summary` is sufficient and unused arrays may be omitted. Nonempty `kpis` render as report cards beyond authored prose. Respect explicit user exclusions and describe the actual report in the final chat answer.
 
 ## Kpi
 

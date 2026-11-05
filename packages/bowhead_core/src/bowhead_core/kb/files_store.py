@@ -10,6 +10,7 @@ P1-S3: idx_kb_files_workspace 加 workspace_id != '' partial index
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from uuid import uuid4
 
 import aiosqlite
 
+from bowhead_core._db import open_pooled_read_ctx
 from bowhead_core.kb.ingestion import KnowledgeAction
 from bowhead_core.kb.parse_recovery import (
     UNFINISHED_PARSE_STATUSES,
@@ -843,15 +845,18 @@ class KbFilesStore:
                 rows = await cur.fetchall()
         return [_row_to_dto(r) for r in rows]
 
-    async def get_many(self, file_ids: list[str]) -> list[KbFileDTO]:
+    async def get_many(self, file_ids: list[str], *, connection: aiosqlite.Connection | None = None) -> list[KbFileDTO]:
         """Read one bounded authority snapshot without repeated connections."""
         if not file_ids:
             return []
         if len(file_ids) > 256:
             raise ValueError("Too many source identities")
-        async with diagnostic_connect(self._db_path) as db:
-            db.row_factory = aiosqlite.Row
-            rows = await (await db.execute("SELECT * FROM kb_files WHERE file_id IN (" + ",".join("?" for _ in file_ids) + ")", file_ids)).fetchall()
+        async with (
+            nullcontext(connection) if connection is not None else open_pooled_read_ctx(self._db_path) as db,
+            db.execute("SELECT * FROM kb_files WHERE file_id IN (" + ",".join("?" for _ in file_ids) + ")", file_ids) as cursor,
+        ):
+            cursor.row_factory = aiosqlite.Row
+            rows = await cursor.fetchall()
         return [_row_to_dto(row) for row in rows]
 
     async def list_active_for_team_all_scopes(self, team_id: str) -> list[KbFileDTO]:

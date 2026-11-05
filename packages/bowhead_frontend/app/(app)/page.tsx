@@ -134,6 +134,7 @@ import {
   SessionDetailError,
   type SessionDetailDTO,
   type TurnEventDTO,
+  type TurnEventsEnvelopeDTO,
   unpinSession,
 } from "@/lib/api";
 import { terminalErrorDiagnostics } from "@/lib/chat-failure-diagnostics";
@@ -568,7 +569,7 @@ async function _fetchLastFromTurn(
 
 async function _hydrateTurnEventsOnce(
   turnId: string,
-  { replayRows = true }: { replayRows?: boolean } = {},
+  { replayRows = true, envelope }: { replayRows?: boolean; envelope?: TurnEventsEnvelopeDTO } = {},
 ): Promise<{
   replay: ReplayTurnEventsResult;
   projection: HydratedTurnProjection;
@@ -576,18 +577,18 @@ async function _hydrateTurnEventsOnce(
   terminalProtocolVersion: number | null;
   currentGeneration: number | null;
 }> {
-  const envelope = await fetchTurnEventsEnvelope(turnId);
-  const events = envelope.events;
+  const history = envelope ?? await fetchTurnEventsEnvelope(turnId);
+  const events = history.events;
   return {
     replay: replayRows
       ? replayTurnEventRows(turnId, events)
       : { turnId, eventCount: 0, claimed: 0 },
     projection: replayRows
-      ? await _fetchLastFromTurn(turnId, events, envelope.current_generation)
+      ? await _fetchLastFromTurn(turnId, events, history.current_generation)
       : _blankHydratedTurnProjection(),
-    effectDisclosure: envelope.current_effect_disclosure ?? null,
-    terminalProtocolVersion: envelope.terminal_protocol_version ?? null,
-    currentGeneration: envelope.current_generation ?? null,
+    effectDisclosure: history.current_effect_disclosure ?? null,
+    terminalProtocolVersion: history.terminal_protocol_version ?? null,
+    currentGeneration: history.current_generation ?? null,
   };
 }
 
@@ -2061,6 +2062,7 @@ function CanvasHomeInner() {
     useState<ArchivedTurnsHydrationPatch | null>(null);
   const [currentTurnHydrationPatch, setCurrentTurnHydrationPatch] =
     useState<CurrentTurnHydrationPatch | null>(null);
+  const [restoringResultsTurnId, setRestoringResultsTurnId] = useState<string | null>(null);
   const sessionHydrationEpochRef = useRef(0);
   const requestedSessionIdRef = useRef<string | null>(null);
 
@@ -2108,13 +2110,18 @@ function CanvasHomeInner() {
     turn,
     hydrationEpoch,
     logPrefix,
+    prefetchedEvents,
   }: {
     sessionId: string;
     turn: _BETurn;
     hydrationEpoch: number;
     logPrefix: string;
+    prefetchedEvents?: Promise<TurnEventsEnvelopeDTO | null>;
   }) => {
-    const hydrated = await _hydrateTurnEventsOnce(turn.id, {
+    const envelope = await prefetchedEvents;
+    if (!isCurrentHydration(hydrationEpoch, sessionId)) return;
+    const hydrated = envelope === null ? null : await _hydrateTurnEventsOnce(turn.id, {
+      envelope,
       // The running Turn already attaches the SSE replay stream. Dispatching
       // this independently fetched HTTP prefix into the same store lets a late
       // old step_started overwrite a newer SSE step_done.
@@ -2123,7 +2130,9 @@ function CanvasHomeInner() {
       console.warn(`${logPrefix} last turn events failed`, turn.id, error);
       return null;
     });
-    if (!hydrated || !isCurrentHydration(hydrationEpoch, sessionId)) return;
+    if (!isCurrentHydration(hydrationEpoch, sessionId)) return;
+    setRestoringResultsTurnId(null);
+    if (!hydrated) return;
     const projection = hydrated.projection;
     setCurrentTurnHydrationPatch({
       sessionId,
@@ -2416,7 +2425,16 @@ function CanvasHomeInner() {
       setReportLinkSessionId(null);
       setReportOnlySessionId(null);
       const detailResultPromise = fetchSessionDetail(sid)
-        .then((detail) => ({ ok: true as const, detail }))
+        .then((detail) => {
+          const turn = detail.turns.at(-1);
+          const prefetchedEvents = !expectReport && turn?.status === "completed" && isCurrentHydration(hydrationEpoch, sid)
+            ? fetchTurnEventsEnvelope(turn.id).catch((error) => {
+                console.warn(`${logPrefix} last turn events failed`, turn.id, error);
+                return null;
+              })
+            : undefined;
+          return { ok: true as const, detail, prefetchedEvents };
+        })
         .catch((err) => ({ ok: false as const, err }));
       const canvasDto = await fetchCanvasBySession(
         sid,
@@ -2477,6 +2495,11 @@ function CanvasHomeInner() {
       setPendingReferenceDocument(null);
       setLastSentReferenceDocument(null);
       setPendingReferenceSourceRevision(null);
+      setRestoringResultsTurnId(
+        !expectReport && lastTurn?.status === "completed" && (lastTurn.summary?.tools_count ?? 0) > 0
+          ? lastTurn.id
+          : null,
+      );
       setHydrate({
         ...payload,
         openMaximized: expectReport,
@@ -2488,6 +2511,7 @@ function CanvasHomeInner() {
           turn: lastTurn,
           hydrationEpoch,
           logPrefix,
+          prefetchedEvents: detailResult.prefetchedEvents,
         });
       }
       void hydrateHistoricalTurns({
@@ -5483,7 +5507,9 @@ function CanvasHomeInner() {
         <SessionLoadingSkeleton />
       ) : runner.started || showingReportOnly || editorCanvas !== null ? (
         <ChatWorkbench
-          runner={runner}
+          runner={restoringResultsTurnId && runner.turnId === restoringResultsTurnId
+            ? { ...runner, restoringResults: true }
+            : runner}
           onContinue={handleContinue}
           // Report-only and editor views keep the report (canvas) title in the tab.
           documentTitle={runner.sessionId && !showingReportOnly && editorCanvas === null ? displaySessionTitle ?? null : null}

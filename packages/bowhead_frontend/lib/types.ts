@@ -565,6 +565,8 @@ export interface TurnRunnerState {
   complexity: number | null;
   chips: ToolChipState[];
   answer: string;
+  /** The reopened answer is visible while its saved result details are loading. */
+  restoringResults?: boolean;
   /** Chat turn feedback D3: `answer` came from a legacy system failure fallback
    *  (`final_answer.reason_code` ∈ public failure reasons ∪ `silent_done_fallback`). It is
    *  cleared when the turn's failure terminal arrives; the failure card states the failure. */

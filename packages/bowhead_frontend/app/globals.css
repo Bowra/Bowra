@@ -11071,7 +11071,6 @@ textarea {
 }
 .artifact-document-preview,
 .artifact-docx-preview,
-.artifact-presentation-preview,
 .artifact-workbook-preview {
   min-height: 320px;
 }
@@ -11092,6 +11091,9 @@ textarea {
 .artifact-pdf-page {
   margin: 0;
   text-align: center;
+}
+.artifact-pptx-thumbnails {
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
 }
 .artifact-pdf-page canvas {
   width: auto;
@@ -11143,39 +11145,6 @@ textarea {
 .artifact-docx-preview th {
   padding: 5px 7px;
   border: 1px solid var(--c-line);
-}
-.artifact-slide-grid {
-  padding: 14px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
-  gap: 12px;
-}
-.artifact-slide-grid article {
-  aspect-ratio: 16 / 9;
-  min-height: 180px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-1);
-  background: var(--c-surface);
-  box-shadow: var(--shadow-sm);
-}
-.artifact-slide-grid article > span {
-  margin-bottom: 9px;
-  color: var(--c-ink-3);
-  font: 0.625rem var(--font-v2-mono);
-}
-.artifact-slide-grid article > pre {
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--c-ink);
-  font: 0.75rem/1.5 var(--font-v2-sans);
-  white-space: pre-wrap;
 }
 .artifact-sheet-tabs {
   padding: 6px 8px 0;
@@ -11743,9 +11712,6 @@ textarea {
   .artifact-docx-preview > div:first-child {
     min-height: 0;
     padding: 24px 18px;
-  }
-  .artifact-slide-grid {
-    grid-template-columns: 1fr;
   }
   .artifact-row-detail dl > div {
     grid-template-columns: 1fr;
@@ -22516,16 +22482,15 @@ textarea {
 
 /* ★ Behavior depends on **shrinkable + single-line ellipsis** in `__txt` / `__meta` (two rules below), not
    `flex-wrap:nowrap` here — already flex default, written only to clarify intent.
-   Disclosure chips (`__retry` / `__fail`) and `__chev` all `flex:none`; if text will not shrink,
-   one extra chip cannot fit.
+   The peer failure chip and chevron use `flex: none` so they stay visible while text shrinks.
    ⚠ **Measured failure is horizontal overflow, not extra height** (real-browser positive control at completion:
    remove those two rules →315px /360px `scrollWidth > clientWidth`, while bar remains 42px,
    since flex row never wraps, content simply overflows). Criterion must check **overflow** and **height**,
    height-only checks miss it.
    ⚠ Fixed columns: chat only 395px at viewport 1440, 315px at viewport 360; English much wider than Chinese
    (`1 unfinished` / `3 retried` / `Step 6 · 3m 35s`), stressing English narrow tier most.
-   📏 `/spike/running-band` real-browser measured (zh+en each):315/360/395, two chips
-   visible together, bar constant 42px, no horizontal overflow, band 162–164px (range 2px, PRD A3 limit ≤24px). */
+   The original two-chip layout was measured in `/spike/running-band` at 315/360/395px
+   in Chinese and English: bar 42px, no horizontal overflow, band 162–164px. */
 .bh-band__bar {
   display: flex;
   align-items: center;
@@ -22557,21 +22522,7 @@ textarea {
   display: flex;
   flex: none;
 }
-.bh-band__retry {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-  font-size: 0.65625rem;
-  font-weight: 600;
-  color: var(--c-warn);
-  background: var(--c-warn-soft);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-/* Terminal failed-peer count. Same structure as __retry (dimensions/radius), only error color —
-   ★ The **persistent** half: history only two rows, early failed peers roll out seconds later,
-   without chip effectively pretending rolled-out failures never happened (explicitly prohibited by invariant inventory §2.1). */
+/* Keep terminal peer failures visible after they leave the two recent history rows. */
 .bh-band__fail {
   display: inline-flex;
   align-items: center;

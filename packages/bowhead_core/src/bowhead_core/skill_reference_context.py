@@ -1,6 +1,6 @@
 """Recognize durable reference turns without granting or reconstructing a lease.
 
-Only a server-supplied core database is consulted. Missing/corrupt source state is
+Only the server-supplied installation is consulted. Missing/corrupt source state is
 not permission to run a legacy Skill handler, and probing never creates a file.
 """
 
@@ -199,17 +199,23 @@ async def refresh_reference_skill_context(ctx: Any) -> None:
             return
         if any(not isinstance(path, (str, Path)) or not str(path) for path in paths):
             raise ValueError()
-        resolved = {Path(path).resolve() for path in paths}
+        resolved = {Path(domain_database_path(path, "core")).resolve() for path in paths}
         if len(resolved) != 1:
             raise ValueError()
         access = getattr(ctx, "reference_skill_access", None)
         if access is not None:
             access_path = getattr(access, "source_db_path", None)
-            if not isinstance(access_path, (str, Path)) or not str(access_path) or Path(access_path).resolve() not in resolved:
+            if (
+                not isinstance(access_path, (str, Path))
+                or not str(access_path)
+                or Path(domain_database_path(access_path, "core")).resolve() not in resolved
+            ):
                 raise ValueError()
         from bowhead_core.agents._lead_context import get_current_subagent_id
 
-        required = await reference_turn_requires_context(resolved.pop(), turn_id=getattr(ctx, "turn_id", None), subagent_id=get_current_subagent_id())
+        required = await reference_turn_requires_context(
+            domain_database_path(resolved.pop(), "execution"), turn_id=getattr(ctx, "turn_id", None), subagent_id=get_current_subagent_id()
+        )
         if helper is not None:
             if not required or type(helper) is not ReferenceHelperSkillScope:
                 raise ValueError()

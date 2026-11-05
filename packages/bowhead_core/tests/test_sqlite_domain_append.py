@@ -18,7 +18,11 @@ from bowhead_core.sqlite_upgrade import LAYOUT_FILE, SQLiteUpgradeError, databas
 @pytest.fixture(scope="module")
 def baseline(tmp_path_factory):
     directory = tmp_path_factory.mktemp("append-baseline") / "sqlite"
-    upgrade(f"sqlite:///{directory / 'bowhead.db'}")
+    from alembic.script import ScriptDirectory
+
+    with pytest.MonkeyPatch.context() as historical:
+        historical.setattr(ScriptDirectory, "get_heads", lambda _: [SPLIT_REVISION])
+        upgrade(f"sqlite:///{directory / 'bowhead.db'}")
     return directory
 
 

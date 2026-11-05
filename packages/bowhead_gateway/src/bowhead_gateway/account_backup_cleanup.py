@@ -13,6 +13,7 @@ from pathlib import Path
 
 from bowhead_core.account_deletion import AccountDeletionError
 from bowhead_core.account_erasure import _POLICY, _q
+from bowhead_core.sqlite_domain_runtime import connect_unattached
 from bowhead_core.sqlite_domains import DOMAIN_LAYOUT, DOMAIN_TARGET_FILES, LEGACY_LAYOUT, ORIGINAL_TARGET_FILES
 from bowhead_core.sqlite_upgrade import SQLiteUpgradeError, database_head
 
@@ -173,7 +174,7 @@ def verify_backup_bundle(bundle: Path) -> tuple[str, tuple[Path, ...]]:
     paths = tuple(database_root / filename for filename in databases.values())
     for path in (*paths, *(privacy_root / filename for filename in ledgers)):
         try:
-            with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as connection:
+            with closing(connect_unattached(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as connection:
                 if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
                     raise AccountDeletionError("account_backup_unreadable")
         except sqlite3.DatabaseError as error:
@@ -190,7 +191,7 @@ def verify_backup_bundle(bundle: Path) -> tuple[str, tuple[Path, ...]]:
 def snapshot_contains_account(path: Path, user_id: str, *, thorough: bool = False) -> bool:
     """Recognize private owner rows while preserving completed minimal stubs."""
     try:
-        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+        with closing(connect_unattached(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
             contains = False
             anonymous = False

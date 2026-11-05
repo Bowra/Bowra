@@ -57,7 +57,6 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
     const current = { ...accepted, stepId: "packing", state: "active" as const };
     const records = [query, calculation, correction(), current];
     const band = buildBandModel({ steps: records });
-    expect(band.issueCount).toBe(0);
     expect(band.history.map((row) => row.key)).toEqual(["query", "calculation"]);
     expect(band.current).toBeTruthy();
     const original = records.map((record) => record.state);
@@ -91,6 +90,7 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
   it("does not hide a business failure carrying the control-error code", () => {
     const business = { ...correction(), toolName: "python_sandbox" as const };
     const { container } = renderIntl(trace([business, accepted]));
+    fireEvent.click(container.querySelector(".stp.is-fail .stp-head")!);
     expect(container.querySelector(".stp.is-fail .stp-detail")).toBeTruthy();
     expect(screen.getByText(/交付尚未核实/)).toBeVisible();
   });
@@ -98,6 +98,7 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
   it.each(["tool_execution_unknown", "source_access_denied", "provider_unavailable"])("retains exceptional return outcome %s", (code) => {
     const failure = correction(); failure.error = { ...failure.error!, code };
     const { container } = renderIntl(trace([failure, accepted]));
+    fireEvent.click(container.querySelector(".stp.is-fail .stp-head")!);
     expect(container.querySelector(".stp.is-fail .stp-detail")).toBeTruthy();
     expect(container.querySelector(".agb-head .g-part")).toBeTruthy();
     expect(container.querySelector(".stp-tool")?.textContent).toContain("整理结果");
@@ -109,10 +110,9 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
     const business = { ...native, stepId: "business", toolName: "python_sandbox" as const };
     const { container } = renderIntl(trace([native, business, accepted]));
     expect(container.querySelectorAll(".stp")).toHaveLength(1);
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(container.querySelector(".bh-step-failure")).toBeTruthy();
     expect(container.textContent).not.toContain("Private repair");
-    const band = buildBandModel({ steps: [native, query] });
-    expect(band.issueCount).toBe(0);
   });
 
   it("keeps unknown and cancelled return records visible", () => {

@@ -239,7 +239,7 @@ def register_document_tool(registry, *, service):
                     "Data may be JSON, CSV, XLSX values, or UTF-8 text. "
                     "For content from this Chat's Canvas, add canvas={} for its current visible content, or use section_ids only when exact IDs are already available; "
                     "the server passes saved data directly to the worker. Do not transcribe Canvas rows into the request or upload a replacement data file. "
-                    "For a requested draft, submit the original request and admitted files directly. The private worker reads the template and data itself; "
+                    "For a requested draft, submit the original request and admitted files directly. The private worker reads the template and supplied data itself; "
                     "a preparatory inspection or edit plan from another Agent is unnecessary. "
                     + (
                         ("For PPTX, the" if os.environ.get("FEATURE_TEMPLATE_DOCX_AUTHORING", "0") == "1" else "The")

@@ -121,7 +121,7 @@ def test_populated_layout_migrates_exactly_and_normal_restart_keeps_live_changes
 
     from bowhead_core import sqlite_domain_upgrade
 
-    assert run_domain_upgrade(directory, _advance) == tuple(DOMAIN_TARGET_FILES)
+    assert run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION) == tuple(DOMAIN_TARGET_FILES)
     state = _state(directory)
     assert state["layout"] == DOMAIN_LAYOUT
     assert state["status"] == "ready"
@@ -156,22 +156,24 @@ def test_populated_layout_migrates_exactly_and_normal_restart_keeps_live_changes
             connection.execute("UPDATE terminal_authority_scope_epochs SET epoch=1")
     original = (directory / LAYOUT_FILE).read_bytes()
     monkeypatch.setattr(sqlite_domain_upgrade, "backup_before_upgrade", lambda *_: pytest.fail("A ready layout must not create another backup"))
-    assert run_domain_upgrade(directory, lambda *_: pytest.fail("A ready restart must not replay schema revisions")) == tuple(DOMAIN_TARGET_FILES)
+    assert run_domain_upgrade(
+        directory, lambda *_: pytest.fail("A ready restart must not replay schema revisions"), target_head=SPLIT_REVISION
+    ) == tuple(DOMAIN_TARGET_FILES)
     assert (directory / LAYOUT_FILE).read_bytes() == original
-    with runtime_shared_lease(directory):
+    with runtime_shared_lease(directory, expected_head=SPLIT_REVISION):
         pass
 
 
 @pytest.mark.parametrize("phase", ["before_commit:execution", "after_commit:content", "all_domains_verified", "after_cleanup:core", "after_vacuum"])
 def test_interrupted_stages_resume_forward_without_losing_data(directory, phase) -> None:
     with pytest.raises(RuntimeError, match="injected interruption"):
-        run_domain_upgrade(directory, _advance, fault=_fail_at(phase))
+        run_domain_upgrade(directory, _advance, fault=_fail_at(phase), target_head=SPLIT_REVISION)
     checkpoint = _state(directory)
     assert checkpoint["status"] == "in_progress"
     if phase.startswith(("before_commit", "after_commit")) or phase == "all_domains_verified":
         with sqlite3.connect(directory / "bowhead.db") as source:
             assert source.execute("SELECT COUNT(*) FROM notification_items").fetchone() == (1,)
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert _state(directory)["status"] == "ready"
     with sqlite3.connect(directory / "bowhead_notifications.db") as target:
         assert target.execute("SELECT notification_id,user_id,read_at FROM notification_recipients").fetchall() == [
@@ -182,7 +184,7 @@ def test_interrupted_stages_resume_forward_without_losing_data(directory, phase)
 
 def test_killed_domain_copy_recovers_its_hot_journal_and_reimports(directory) -> None:
     with pytest.raises(RuntimeError, match="injected interruption"):
-        run_domain_upgrade(directory, _advance, fault=_fail_at("before_commit:execution"))
+        run_domain_upgrade(directory, _advance, fault=_fail_at("before_commit:execution"), target_head=SPLIT_REVISION)
     path = directory / DOMAIN_TARGET_FILES["execution"]
     path.unlink()
     subprocess.run(
@@ -206,7 +208,7 @@ def test_killed_domain_copy_recovers_its_hot_journal_and_reimports(directory) ->
     assert path.with_name(path.name + "-journal").is_file()
     with pytest.raises(SQLiteUpgradeError, match="Cannot read migration ledger"):
         database_head(path)
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert _state(directory)["status"] == "ready"
     with sqlite3.connect(directory / DOMAIN_TARGET_FILES["notifications"]) as connection:
         assert connection.execute("SELECT id FROM notification_items").fetchall() == [("n-retained",)]
@@ -214,11 +216,11 @@ def test_killed_domain_copy_recovers_its_hot_journal_and_reimports(directory) ->
 
 def test_corrupt_committed_copy_is_rejected_before_source_cleanup(directory) -> None:
     with pytest.raises(RuntimeError):
-        run_domain_upgrade(directory, _advance, fault=_fail_at("after_commit:notifications"))
+        run_domain_upgrade(directory, _advance, fault=_fail_at("after_commit:notifications"), target_head=SPLIT_REVISION)
     with sqlite3.connect(directory / "bowhead_notifications.db") as target:
         target.execute("DELETE FROM notification_recipients")
     with pytest.raises(SQLiteUpgradeError, match="data changed"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     with sqlite3.connect(directory / "bowhead.db") as source:
         assert source.execute("SELECT COUNT(*) FROM notification_recipients").fetchone() == (1,)
         assert database_head(directory / "bowhead.db") == SOURCE_REVISION
@@ -228,17 +230,17 @@ def test_unknown_source_schema_is_rejected_before_creating_domain_files(director
     with sqlite3.connect(directory / "bowhead.db") as source:
         source.execute("CREATE TABLE unreviewed_extension(value)")
     with pytest.raises(SQLiteUpgradeError, match="schema differs"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert not (directory / "bowhead_execution.db").exists()
 
 
 def test_missing_committed_target_stops_recovery_without_empty_replacement(directory) -> None:
     with pytest.raises(RuntimeError):
-        run_domain_upgrade(directory, _advance, fault=_fail_at("all_domains_verified"))
+        run_domain_upgrade(directory, _advance, fault=_fail_at("all_domains_verified"), target_head=SPLIT_REVISION)
     missing = directory / "bowhead_notifications.db"
     missing.unlink()
     with pytest.raises(SQLiteUpgradeError, match="missing"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert not missing.exists()
 
 
@@ -253,14 +255,14 @@ def test_cleanup_failure_rolls_back_source_ddl_data_and_ledger(directory, monkey
 
     monkeypatch.setattr(sqlite_domain_upgrade, "cleanup_core", interrupted)
     with pytest.raises(RuntimeError, match="before cleanup revision commit"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert database_head(directory / "bowhead.db") == SOURCE_REVISION
     with sqlite3.connect(directory / "bowhead.db") as source:
         assert source.execute("SELECT COUNT(*) FROM notification_items").fetchone() == (1,)
         assert source.execute("SELECT COUNT(*) FROM terminal_auth_scope_epochs").fetchone() == (3,)
         assert source.execute("SELECT 1 FROM sqlite_schema WHERE name='terminal_authority_scope_epochs'").fetchone() is None
     monkeypatch.setattr(sqlite_domain_upgrade, "cleanup_core", original)
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert _state(directory)["status"] == "ready"
 
 
@@ -273,7 +275,7 @@ def test_fresh_cli_initialization_and_restart_keep_domain_layout(tmp_path) -> No
     state = _state(directory)
     assert state["layout"] == DOMAIN_LAYOUT
     assert state["phase"] == "complete"
-    assert all(database_head(directory / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    assert all(database_head(directory / filename) == state["target_head"] for filename in DOMAIN_TARGET_FILES.values())
     assert upgrade(url) == tuple(DOMAIN_TARGET_FILES)
     assert _state(directory) == state
     with runtime_shared_lease(directory), pytest.raises(SQLiteUpgradeError, match="already owns this data directory"):
@@ -282,19 +284,19 @@ def test_fresh_cli_initialization_and_restart_keep_domain_layout(tmp_path) -> No
 
 def test_incomplete_import_evidence_cannot_admit_source_cleanup(directory) -> None:
     with pytest.raises(RuntimeError):
-        run_domain_upgrade(directory, _advance, fault=_fail_at("all_domains_verified"))
+        run_domain_upgrade(directory, _advance, fault=_fail_at("all_domains_verified"), target_head=SPLIT_REVISION)
     state = _state(directory)
     del state["targets"]["notifications"]["evidence"]["notification_recipients"]
     (directory / LAYOUT_FILE).write_text(json.dumps(state))
     with pytest.raises(SQLiteUpgradeError, match="complete import evidence"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     assert database_head(directory / "bowhead.db") == SOURCE_REVISION
     with sqlite3.connect(directory / "bowhead.db") as source:
         assert source.execute("SELECT COUNT(*) FROM notification_recipients").fetchone() == (1,)
 
 
 def test_final_wal_files_allow_execution_and_content_writes_while_read_snapshots_remain_open(directory):
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     for domain in ("core", "execution", "content", "notifications", "observability"):
         with sqlite3.connect(directory / DOMAIN_TARGET_FILES[domain]) as connection:
             assert connection.execute("PRAGMA main.journal_mode").fetchone() == ("wal",)
@@ -325,12 +327,12 @@ def test_final_wal_files_allow_execution_and_content_writes_while_read_snapshots
 
 
 def test_ready_archive_restore_reenables_wal_without_reimport_or_layout_changes(directory):
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     recorded = (directory / LAYOUT_FILE).read_bytes()
     for domain in ("core", "execution", "content", "notifications", "observability"):
         with closing(sqlite3.connect(directory / DOMAIN_TARGET_FILES[domain])) as connection:
             assert connection.execute("PRAGMA main.journal_mode=DELETE").fetchone() == ("delete",)
-    run_domain_upgrade(directory, lambda *_: pytest.fail("A valid archive restore must not reimport data"))
+    run_domain_upgrade(directory, lambda *_: pytest.fail("A valid archive restore must not reimport data"), target_head=SPLIT_REVISION)
     assert (directory / LAYOUT_FILE).read_bytes() == recorded
     for domain in ("core", "execution", "content", "notifications", "observability"):
         with closing(sqlite3.connect(directory / DOMAIN_TARGET_FILES[domain])) as connection:
@@ -338,11 +340,11 @@ def test_ready_archive_restore_reenables_wal_without_reimport_or_layout_changes(
 
 
 def test_ready_schema_drift_is_rejected_before_repairing_archive_journal_mode(directory):
-    run_domain_upgrade(directory, _advance)
+    run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     with closing(sqlite3.connect(directory / "bowhead_content.db")) as connection:
         connection.execute("PRAGMA main.journal_mode=DELETE")
         connection.execute("CREATE TABLE unknown_drift(value)")
     with pytest.raises(SQLiteUpgradeError, match="schema verification failed"):
-        run_domain_upgrade(directory, _advance)
+        run_domain_upgrade(directory, _advance, target_head=SPLIT_REVISION)
     with closing(sqlite3.connect(directory / "bowhead_content.db")) as connection:
         assert connection.execute("PRAGMA main.journal_mode").fetchone() == ("delete",)

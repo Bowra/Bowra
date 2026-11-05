@@ -404,7 +404,7 @@ def is_short_answer_payload(p: Any) -> bool:
     return isinstance(summary, str) and bool(summary.strip())
 
 
-def validate_payload(p: dict[str, Any] | AnalysisPayload, *, revision: bool = False) -> tuple[bool, list[str]]:
+def validate_payload(p: dict[str, Any] | AnalysisPayload, *, revision: bool = False, authored: bool = False) -> tuple[bool, list[str]]:
     """校 dict 或 AnalysisPayload —— 返 (ok, errors).
 
     用于：
@@ -422,6 +422,7 @@ def validate_payload(p: dict[str, Any] | AnalysisPayload, *, revision: bool = Fa
     硬要就是让 compute 编 KPI（review 修：修订说明叫「薄修订别填」，校验却按新报告拒收）。
     形状检查照留：给了就得是对的。
     """
+    # authored=True is supplied only from the server-confirmed write_report ledger.
     if isinstance(p, AnalysisPayload):
         d = asdict(p)
     elif isinstance(p, dict):
@@ -527,7 +528,8 @@ def validate_payload(p: dict[str, Any] | AnalysisPayload, *, revision: bool = Fa
     # in 312 authored-report turns, 50% did so themselves; 40 turns (12.8%) had both sets of recommendations.
     # Keep title / exec_summary / insights: titles identify documents; summaries and insights evidence what this turn analyzed,
     # consistent with this criterion. Preserve every shape check (recommendations/kpis fields below).
-    _relaxed_doc = bool(revision) and not is_short_answer and not _chat_autonomy
+    # Confirmed direct authorship supplies the report body; do not require duplicate insights.
+    _relaxed_doc = bool(revision or authored) and not is_short_answer and not _chat_autonomy
     if is_short_answer or _chat_autonomy or _relaxed_doc:
         required_keys = ("exec_summary",)
     elif is_thin:

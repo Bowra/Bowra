@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef
+
+if TYPE_CHECKING:
+    from bowhead_core.clarification_store import ClarificationRequest
 
 RESUME_CONTEXT_VERSION_KEY = "__schema_version"
 LEGACY_RESUME_CONTEXT_MAX_VERSION = 2
@@ -155,3 +158,17 @@ def decode_clarification_context(card: Any) -> ResumeContext:
     if isinstance(decoded, OrdinaryLeadResumeContext) and decoded.continuation.card_id != card.request_id:
         raise UnsupportedResumeContext()
     return decoded
+
+
+def is_legacy_ordinary_question(card: ClarificationRequest) -> bool:
+    """Legacy Lead questions exclude continuations owned by other domains."""
+    context = card.resume_context
+    return (
+        isinstance(context, dict)
+        and resume_context_version(context) in (0, 1, 2)
+        and card.kind == "ambiguous_turn"
+        and bool(card.session_id)
+        and not card.token
+        and not card.tool
+        and not any(key in context for key in ("continuation", "reference_continuation", "plan_reapprove_plan_id", "plan_midrun_plan_id"))
+    )

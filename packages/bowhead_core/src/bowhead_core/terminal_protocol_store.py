@@ -36,6 +36,7 @@ from bowhead_core.session_store import (
     _insert_chat_turn_user_source_in_tx,
     _read_chat_turn_user_source_in_tx,
 )
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.terminal_auth_epochs import terminal_auth_epoch_table
@@ -2584,6 +2585,7 @@ class TerminalProtocolStore:
                 raise
         return result
 
+    @completion_capacity()
     async def heartbeat_recovery_writer_fence(
         self,
         fence: RecoveryWriterFence,
@@ -2759,6 +2761,7 @@ class TerminalProtocolStore:
             admission_state="open",
         )
 
+    @completion_capacity()
     async def heartbeat_terminal_writer_lease(
         self,
         lease: TerminalWriterLease,
@@ -3989,6 +3992,7 @@ class TerminalProtocolStore:
                 raise
         return update.rowcount == 1
 
+    @completion_capacity()
     async def heartbeat_execution(
         self,
         context: ExecutionGenerationContext,

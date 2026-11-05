@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bowhead_core.agent_knowledge_policy import KnowledgeAccessError, KnowledgeScope
 from bowhead_core.kb.permission import KbPermission, ScopeContext
+
+if TYPE_CHECKING:
+    import aiosqlite
 
 KNOWLEDGE_TOOLS = frozenset({"kb_search", "kb_list_tables", "kb_query_records", "kb_get_record", "kb_list_sources"})
 
@@ -80,20 +83,23 @@ async def finish_source_read(ctx, tool_name: str, result):
     if tool_name == "subagent_spawn" and isinstance(result, dict) and (ctx.knowledge_source_uses or ctx.knowledge_navigation_uses):
         sources = dict(ctx.knowledge_source_uses)
         await validate_retained_sources(ctx, sources)
-        return {
-            **result,
-            "knowledge_provenance": {
-                "schema_version": 1,
-                "policy_fingerprint": (
-                    retained_knowledge_scope(ctx)
-                    or KnowledgeScope(
-                        schema_version=1, user_id=ctx.user_id, team_id=ctx.team_id, workspace_id=ctx.workspace_id, file_ids=None, bindings=()
-                    )
-                ).fingerprint,
-                "sources": sources,
-            },
-            **({"knowledge_navigation_provenance": dict(ctx.knowledge_navigation_uses)} if ctx.knowledge_navigation_uses else {}),
-        }
+        decorated = copy.copy(result)
+        decorated.update(
+            {
+                "knowledge_provenance": {
+                    "schema_version": 1,
+                    "policy_fingerprint": (
+                        retained_knowledge_scope(ctx)
+                        or KnowledgeScope(
+                            schema_version=1, user_id=ctx.user_id, team_id=ctx.team_id, workspace_id=ctx.workspace_id, file_ids=None, bindings=()
+                        )
+                    ).fingerprint,
+                    "sources": sources,
+                },
+                **({"knowledge_navigation_provenance": dict(ctx.knowledge_navigation_uses)} if ctx.knowledge_navigation_uses else {}),
+            }
+        )
+        return decorated
     if (ctx.knowledge_scope is None and tool_name != "kb_list_sources") or tool_name not in KNOWLEDGE_TOOLS or not isinstance(result, dict):
         return result
     sources: dict[str, Any] = {}
@@ -149,10 +155,14 @@ def record_source_uses(ctx, sources: dict) -> None:
         retained.update(sources)
 
 
-async def require_evidence(ctx, evidence: dict) -> None:
+def _evidence_sources(evidence: dict) -> dict:
     if not isinstance(evidence, dict) or evidence.get("schema_version") != 1 or not isinstance(evidence.get("sources"), dict):
         raise KnowledgeAccessError("knowledge_source_provenance_unavailable")
-    for file_id, generation in evidence["sources"].items():
+    return evidence["sources"]
+
+
+async def require_evidence(ctx, evidence: dict) -> None:
+    for file_id, generation in _evidence_sources(evidence).items():
         if not await readable_source(ctx, file_id, generation=generation, enforce=True):
             raise KnowledgeAccessError("knowledge_source_changed")
 
@@ -186,7 +196,7 @@ async def filter_inherited_knowledge(ctx, invocations: list) -> list:
     return output
 
 
-async def validate_retained_sources(ctx, sources: dict) -> None:
+async def validate_retained_sources(ctx: Any, sources: dict, *, knowledge_connection: aiosqlite.Connection | None = None) -> None:
     if (
         sources
         and callable(getattr(getattr(ctx, "kb_file_authorizer", None), "batch", None))
@@ -197,7 +207,7 @@ async def validate_retained_sources(ctx, sources: dict) -> None:
             scope.require_context(ctx)
         for offset in range(0, len(sources), 256):
             ids = list(sources)[offset : offset + 256]
-            files = await ctx.kb_files_store.get_many(ids)
+            files = await ctx.kb_files_store.get_many(ids, **({"connection": knowledge_connection} if knowledge_connection is not None else {}))
             decisions = await ctx.kb_file_authorizer.batch(files, ctx.user_id, ctx.team_id, ctx.workspace_id)
             if (
                 decisions is None
@@ -217,7 +227,9 @@ async def validate_retained_sources(ctx, sources: dict) -> None:
     if getattr(ctx, "knowledge_navigation_uses", None):
         from bowhead_core.kb.source_navigation import validate_navigation_dependencies
 
-        await validate_navigation_dependencies(ctx, ctx.knowledge_navigation_uses)
+        await validate_navigation_dependencies(
+            ctx, ctx.knowledge_navigation_uses, **({"connection": knowledge_connection} if knowledge_connection is not None else {})
+        )
 
 
 async def inherited_execution_scope(ctx, binding):
@@ -269,7 +281,7 @@ async def inherited_execution_scope(ctx, binding):
     return projected.knowledge_scope
 
 
-async def validate_source_messages(ctx, messages) -> None:
+async def validate_source_messages(ctx, messages, *, defer_authorization: bool = False) -> None:
     import json
 
     from bowhead_core.subagent_resume import _CLEARED
@@ -296,11 +308,14 @@ async def validate_source_messages(ctx, messages) -> None:
 
             if not isinstance(navigation, dict):
                 raise KnowledgeAccessError("knowledge_source_provenance_unavailable")
-            await validate_navigation_dependencies(ctx, navigation)
+            if not defer_authorization:
+                await validate_navigation_dependencies(ctx, navigation)
             record_navigation_uses(ctx, navigation)
         evidence = result.get("knowledge_provenance")
         if evidence is not None:
-            await require_evidence(ctx, evidence)
-            record_source_uses(ctx, evidence["sources"])
+            sources = _evidence_sources(evidence)
+            if not defer_authorization:
+                await require_evidence(ctx, evidence)
+            record_source_uses(ctx, sources)
         elif ctx.knowledge_scope is not None and names.get(message.tool_call_id) in KNOWLEDGE_TOOLS and not result.get("error"):
             raise KnowledgeAccessError("knowledge_source_provenance_unavailable")

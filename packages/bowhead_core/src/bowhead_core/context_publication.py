@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -57,6 +59,14 @@ class ContextPublication:
     append_answer: bool = True
     prepared_messages: tuple[PreparedContextMessages, ...] = ()
     prepared_ancestry: PreparedContextAncestry | None = None
+
+    @asynccontextmanager
+    async def open_adoption_readers(self) -> AsyncIterator[ContextPublication]:
+        if isinstance(self.validate_sources, PreparedContextSourceValidator):
+            async with self.validate_sources.open_adoption_readers() as validator:
+                yield replace(self, validate_sources=validator)
+        else:
+            yield self
 
     async def prepare_for_answer(self, final_answer: str) -> ContextPublication:
         messages, dependencies = deepcopy(self.messages), deepcopy(self.dependencies)
@@ -145,10 +155,10 @@ class ContextPublication:
         if not isinstance(self.worker, TerminalContextOwner):
             raise ContextStoreError("context_terminal_owner_required")
         prepared = await self.prepare_for_answer(final_answer)
-        async with open_shared_ctx(self.db_path) as db:
+        async with prepared.open_adoption_readers() as adoption, open_shared_ctx(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
             working = replace(
-                prepared,
+                adoption,
                 validate_sources=adoption_source_validator(prepared.validate_sources, db),
                 prepared_ancestry=prepared.prepared_ancestry.for_transaction() if prepared.prepared_ancestry is not None else None,
             )

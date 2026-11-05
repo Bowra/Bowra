@@ -31,16 +31,16 @@ export function EarlierPendingQuestions({ sessionId, currentTurnId, running }: {
       setLoaded({ sessionId, items });
       setFailure(null);
     }).catch((error) => {
-      if (token === generation.current) setFailure({ sessionId, error: presentError(error) });
+      if (token === generation.current) setFailure({ sessionId, error: presentError(error, "load") });
     });
     return () => { generation.current++; };
     // Refresh when a Turn starts or settles, including a native cancellation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, currentTurnId, running, refresh]);
 
-  function presentError(error: unknown) {
+  function presentError(error: unknown, operation: "load" | "cancel") {
     return ruleClarificationErrorPresentation(error, { surface: "chat", copy: {
-      generic: t("submit_failed"), entitlementDenied: reasons("entitlement_denied"),
+      generic: t(operation === "load" ? "pending_load_failed" : "cancel_unconfirmed"), entitlementDenied: reasons("entitlement_denied"),
       transport: { requestTimedOut: errors("transport.requestTimedOut"), serviceUnreachable: errors("transport.serviceUnreachable"), retry: errors("transport.retry") },
     } });
   }
@@ -57,7 +57,7 @@ export function EarlierPendingQuestions({ sessionId, currentTurnId, running }: {
       setLoaded((value) => value?.sessionId === sessionId ? { ...value, items: value.items.filter((item) => item.request_id !== requestId) } : value);
       setFailure(null);
     } catch (error) {
-      if (token === generation.current) setFailure({ sessionId, error: presentError(error) });
+      if (token === generation.current) setFailure({ sessionId, error: presentError(error, "cancel") });
     } finally {
       setActingId((value) => value === requestId ? null : value);
     }

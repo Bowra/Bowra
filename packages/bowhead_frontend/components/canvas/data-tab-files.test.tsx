@@ -22,8 +22,13 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+const { getDocument } = vi.hoisted(() => ({ getDocument: vi.fn() }));
+vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: { workerSrc: "" }, getDocument }));
+vi.mock("@/lib/html-preview-client", () => ({ prepareHtmlInWorker: vi.fn().mockResolvedValue(null) }));
+
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.__BOWHEAD_PUBLIC_CONTEXT__ = undefined;
 });
@@ -516,7 +521,7 @@ describe("DataTabFiles runtime path prefix", () => {
     expect(fetchMock.mock.calls.every(([input]) => String(input).endsWith("/representations/details"))).toBe(true);
   });
 
-  it("renders the bounded PPTX slide outline without exposing raw mode", async () => {
+  it("renders all PPTX pages and keeps the same page canvases when expanded", async () => {
     const artifact: ArtifactItem = {
       id: "art_deck",
       filename: "board.pptx",
@@ -526,13 +531,18 @@ describe("DataTabFiles runtime path prefix", () => {
       created_at: "2026-07-30T00:00:00Z",
       preview_available: true,
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).endsWith("/details")
-      ? detailsResponse(artifact.id) : new Response(JSON.stringify({
-      family: "presentation",
-      representation: "preview", revision: "pptx-1",
-      mode: "text",
-      text: "--- slide.1 ---\nExecutive summary\n\n--- slide.2 ---\nNext step",
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const getPage = vi.fn().mockResolvedValue({
+      getViewport: () => ({ width: 480, height: 270 }),
+      render: () => ({ promise: Promise.resolve() }),
+    });
+    getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 9, getPage }), destroy: vi.fn().mockResolvedValue(undefined) });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/details")) return Promise.resolve(detailsResponse(artifact.id));
+      expect(path).toBe("/api/v1/files/art_deck/representations/pptx-pdf");
+      return Promise.resolve(new Response(new Uint8Array([1]), { headers: { "content-type": "application/pdf" } }));
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -544,12 +554,18 @@ describe("DataTabFiles runtime path prefix", () => {
       />,
     );
 
-    expect(await screen.findByText("Executive summary")).toBeInTheDocument();
-    expect(screen.getByText("Next step")).toBeInTheDocument();
+    const lastPage = await screen.findByLabelText("board.pptx · 9");
+    expect(lastPage.tagName).toBe("CANVAS");
+    expect(lastPage.closest(".artifact-pptx-thumbnails")).not.toBeNull();
+    expect(getPage).toHaveBeenCalledTimes(9);
+    fireEvent.click(screen.getByRole("button", { name: "open_full" }));
+    expect(screen.getByRole("dialog", { name: "board.pptx" })).toContainElement(lastPage);
+    expect(lastPage.closest(".artifact-pptx-thumbnails")).toBeNull();
     expect(screen.queryByRole("tab", { name: "mode_raw" })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/files/art_deck/representations/preview", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      "/api/v1/files/art_deck/representations/pptx-pdf", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(fetchMock.mock.calls.filter(([path]) => String(path).endsWith("/pptx-pdf"))).toHaveLength(1);
   });
 
   it("loads safe HTML by default through the session content proxy while keeping the download URL", async () => {

@@ -9,7 +9,7 @@ import zh from "@/messages/zh-CN.json";
 import { AgentTrace, stepErrorMessage } from "./AgentTrace";
 import { normalizeStepError } from "@/lib/sse-events";
 import { StepSummary } from "./StepSummary";
-import { isRecoverableStepFailure, countStepIssues } from "./self-healing";
+import { isRecoverableStepFailure } from "./self-healing";
 import type { StepView } from "./types";
 
 afterEach(() => cleanup());
@@ -79,16 +79,6 @@ describe("Recoverable step severity", () => {
       ),
     ).toBe(true);
   });
-  it("counts failed and partial steps, not attempts", () => {
-    expect(
-      countStepIssues([
-        step({ state: "failed", error: { kind: "transient" } as never }),
-        step({ state: "done" }),
-        step({ state: "partial" }),
-        step({ state: "failed", error: { kind: "permanent" } as never }),
-      ]),
-    ).toBe(3);
-  });
 });
 
 describe("StepSummary recorded issues", () => {
@@ -137,7 +127,8 @@ describe("AgentTrace failure severity", () => {
   }
 
   it("keeps unclassified exception prose out of a rendered persisted step", () => {
-    trace({ kind: "permanent", message: "tool_exception: secret provider response" });
+    const { container } = trace({ kind: "permanent", message: "tool_exception: secret provider response" });
+    fireEvent.click(container.querySelector(".stp-head")!);
     expect(screen.queryByText(/secret provider response/)).toBeNull();
     expect(screen.getByText(zh.step_list.step_failed_generic)).toBeTruthy();
   });

@@ -21,10 +21,10 @@ const PDF_PAGES_PER_BATCH = 10;
 const MAX_PDF_PREVIEW_BYTES = 25 * 1024 * 1024;
 const MAX_DOCX_PREVIEW_BYTES = 15 * 1024 * 1024;
 
-async function fetchDocumentBytes(href: string, maxBytes: number): Promise<ArrayBuffer> {
+async function fetchDocumentBytes(href: string, maxBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
   let response: Response;
   try {
-    response = await appFetch(href, { cache: "no-store" });
+    response = await appFetch(href, { cache: "no-store", ...(signal ? { signal } : {}) });
   } catch (cause) {
     const errorClass = classifyResultsError(cause);
     throw new ResultsWorkspaceError(errorClass);
@@ -49,7 +49,7 @@ async function fetchDocumentBytes(href: string, maxBytes: number): Promise<Array
   return data;
 }
 
-type DocumentProfile = "pdf" | "docx";
+type DocumentProfile = "pdf" | "docx" | "pptx";
 
 export type DocumentPreviewCache = {
   pdfData?: ArrayBuffer;
@@ -65,6 +65,7 @@ export function ArtifactDocumentPreview({
   sizeBytes,
   onError,
   cacheRef,
+  thumbnails = false,
 }: {
   profile: DocumentProfile;
   href: string;
@@ -72,8 +73,9 @@ export function ArtifactDocumentPreview({
   sizeBytes?: number | null;
   onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
   cacheRef: MutableRefObject<DocumentPreviewCache>;
+  thumbnails?: boolean;
 }) {
-  if (profile === "pdf") {
+  if (profile !== "docx") {
     return (
       <PdfArtifactPreview
         href={href}
@@ -81,6 +83,8 @@ export function ArtifactDocumentPreview({
         sizeBytes={sizeBytes}
         onError={onError}
         cacheRef={cacheRef}
+        presentation={profile === "pptx"}
+        thumbnails={thumbnails}
       />
     );
   }
@@ -100,12 +104,16 @@ function PdfArtifactPreview({
   sizeBytes,
   onError,
   cacheRef,
+  presentation,
+  thumbnails,
 }: {
   href: string;
   title: string;
   sizeBytes?: number | null;
   onError?: (errorClass: ResultsWorkspaceErrorClass) => void;
   cacheRef: MutableRefObject<DocumentPreviewCache>;
+  presentation: boolean;
+  thumbnails: boolean;
 }) {
   const t = useTranslations("artifact_viewer");
   const pagesRef = useRef<HTMLDivElement>(null);
@@ -116,8 +124,11 @@ function PdfArtifactPreview({
   const [pageCount, setPageCount] = useState(0);
   const [renderedThru, setRenderedThru] = useState(0);
   const [error, setError] = useState<"too_large" | "load_failed" | null>(null);
+  const [retry, setRetry] = useState(0);
+  const loadingMessage = t(presentation ? "presentation_loading" : "document_loading_pdf");
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | undefined;
     cancelledRef.current = false;
@@ -143,7 +154,8 @@ function PdfArtifactPreview({
       try {
         const pdfjs = await import("pdfjs-dist");
         if (!cacheRef.current.pdfData) {
-          const fetched = await fetchDocumentBytes(href, MAX_PDF_PREVIEW_BYTES);
+          const fetched = await fetchDocumentBytes(href, MAX_PDF_PREVIEW_BYTES, controller.signal);
+          if (cancelled) return;
           cacheRef.current.pdfData = fetched.slice(0);
         }
         if (cancelled) return;
@@ -164,7 +176,7 @@ function PdfArtifactPreview({
           Math.max(PDF_PAGES_PER_BATCH, cacheRef.current.pdfRenderedThru ?? 0),
           pdf.numPages,
         );
-        await renderPdfPages(pdf, 1, end, pagesRef.current, () => cancelled, title);
+        await renderPdfPages(pdf, 1, end, pagesRef.current, () => cancelled, title, presentation);
         if (!cancelled) {
           cacheRef.current.pdfRenderedThru = end;
           setRenderedThru(end);
@@ -178,12 +190,13 @@ function PdfArtifactPreview({
 
     return () => {
       cancelled = true;
+      controller.abort();
       cancelledRef.current = true;
       pdfRef.current = null;
       // PDF.js 6 owns worker teardown on the loading task, including pending loads.
       void loadingTask?.destroy().catch(() => undefined);
     };
-  }, [cacheRef, href, onError, sizeBytes, title]);
+  }, [cacheRef, href, onError, presentation, retry, sizeBytes, title]);
 
   const loadMore = async () => {
     const pdf = pdfRef.current;
@@ -198,6 +211,7 @@ function PdfArtifactPreview({
         pagesRef.current,
         () => cancelledRef.current,
         title,
+        presentation,
       );
       if (!cancelledRef.current) {
         cacheRef.current.pdfRenderedThru = end;
@@ -214,7 +228,16 @@ function PdfArtifactPreview({
   if (error) {
     return (
       <div className="artifact-viewer-note error" role="alert">
-        {t(error === "too_large" ? "document_too_large" : "document_load_failed")}
+        {t(error === "too_large" ? "document_too_large" : presentation ? "presentation_preview_failed" : "document_load_failed")}
+        {presentation && error === "load_failed" ? <button type="button" onClick={() => {
+          cacheRef.current.pdfData = undefined;
+          cacheRef.current.pdfRenderedThru = undefined;
+          setError(null);
+          setLoading(true);
+          setPageCount(0);
+          setRenderedThru(0);
+          setRetry((value) => value + 1);
+        }}>{t("retry")}</button> : null}
       </div>
     );
   }
@@ -223,10 +246,10 @@ function PdfArtifactPreview({
     <div className="artifact-document-preview" data-testid="artifact-preview-pdf">
       <div className="artifact-document-status" aria-live="polite">
         {loading
-          ? t("document_loading_pdf")
+          ? loadingMessage
           : t("document_pages_shown", { shown: renderedThru, total: pageCount })}
       </div>
-      <div className="artifact-pdf-pages" ref={pagesRef} />
+      <div className={thumbnails ? "artifact-pdf-pages artifact-pptx-thumbnails" : "artifact-pdf-pages"} ref={pagesRef} />
       {!loading && renderedThru < pageCount ? (
         <button
           type="button"
@@ -234,7 +257,7 @@ function PdfArtifactPreview({
           onClick={() => void loadMore()}
           disabled={loadingMore}
         >
-          {loadingMore ? t("document_loading_pdf") : t("document_load_more")}
+          {loadingMore ? loadingMessage : t("document_load_more")}
         </button>
       ) : null}
     </div>
@@ -260,13 +283,16 @@ async function renderPdfPages(
   container: HTMLDivElement | null,
   isCancelled: () => boolean,
   title: string,
+  presentation: boolean,
 ): Promise<void> {
   if (!container) return;
   for (let pageNumber = start; pageNumber <= end; pageNumber += 1) {
     if (isCancelled()) return;
     const page = await pdf.getPage(pageNumber);
     if (isCancelled()) return;
-    const viewport = page.getViewport({ scale: 1.4 });
+    const base = page.getViewport({ scale: 1 });
+    const scale = presentation ? Math.min(1.4, 1600 / Math.max(base.width, base.height)) : 1.4;
+    const viewport = page.getViewport({ scale });
     const figure = document.createElement("figure");
     figure.className = "artifact-pdf-page";
     const canvas = document.createElement("canvas");

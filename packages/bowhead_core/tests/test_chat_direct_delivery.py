@@ -439,7 +439,7 @@ async def _run_lead_with_spawn_result(spawn_result: dict, router: Router) -> Sub
     async def _stub_exec(tc: Any, *args: Any, **kwargs: Any) -> Any:
         from bowhead_core.subagent import ToolInvocation
 
-        return ToolInvocation(tool_name=tc.name, arguments=tc.arguments, result=spawn_result, error=None)
+        return ToolInvocation(tool_name=tc.name, arguments=tc.arguments, call_id=tc.id, result=spawn_result, error=None)
 
     runner._execute_tool = _stub_exec  # type: ignore[method-assign]
     return await runner.run(
@@ -704,3 +704,59 @@ async def test_neutral_lead_tool_keeps_direct_delivery(_lead_profile: Any, monke
     assert len(seen) == 1
     assert result.chat_direct_delivered is True
     assert result.final_answer == SHORT_ANSWER
+
+
+@pytest.mark.parametrize("origin", ["native", "json_copy", "unknown"])
+async def test_direct_delivery_keeps_only_current_native_review_witness(_lead_profile, origin):
+    from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, delivery_summary_input
+
+    body = {"ok": True, "final_answer": SHORT_ANSWER, "_chat_direct_delivery": {"text": SHORT_ANSWER}}
+    native = ReviewedDeliveryResult(body)
+    if origin == "unknown":
+        native.update(ok=False, error_kind="tool_outcome_unknown")
+    value = dict(native) if origin == "json_copy" else native
+    router, calls = _counting_router(
+        LLMResponse(
+            content="", tool_calls=[ToolCall(id="current", name="subagent_spawn", arguments={"profile": "compute", "task": "Observe rejection"})]
+        )
+    )
+    result = await _run_lead_with_spawn_result(value, router)
+    assert calls[0] == 1 and result.chat_direct_delivered
+    assert result.reviewed_delivery_complete is (origin == "native")
+    if origin == "native":
+        assert result.completion == "complete"
+        assert delivery_summary_input(result) == {"_delivery_completion": "reviewed_complete"}
+    elif origin == "json_copy":
+        assert delivery_summary_input(result) == {}
+    else:
+        assert result.completion == "partial"
+        assert delivery_summary_input(result) == {"_delivery_completion": "partial"}
+
+
+@pytest.mark.parametrize("retained_full", [False, True])
+@pytest.mark.parametrize("native_origin", [False, True])
+def test_direct_demotion_keeps_current_review_admission(retained_full, native_origin):
+    import json
+    from types import SimpleNamespace
+
+    from bowhead_core.subagent import demote_chat_direct
+    from bowhead_core.tool_delivery_review import ReviewedDeliveryResult, failed_calls, requires_delivery_review
+    from bowhead_core.tool_outcome import classify_tool_outcome
+    from bowhead_core.types import ToolInvocation
+
+    original = ReviewedDeliveryResult(ok=True, final_answer="Observed rejection.", _chat_direct_delivery={"text": "Observed rejection."})
+    value = original if native_origin else json.loads(json.dumps(original))
+    invocation = ToolInvocation("subagent_spawn", {}, call_id="dispatch", result=value)
+    if retained_full:
+        invocation.result_full = value
+
+    def serialize(item):
+        return json.dumps(item.result, sort_keys=True)
+
+    message = SimpleNamespace(role="tool", name="subagent_spawn", tool_call_id="dispatch", content=serialize(invocation))
+    assert demote_chat_direct([invocation], [message], serialize) == 1
+    assert "_chat_direct_delivery" not in invocation.result
+    assert "_chat_direct_delivery" not in json.loads(message.content)
+    assert requires_delivery_review([invocation]) is native_origin
+    assert not failed_calls([invocation])
+    assert classify_tool_outcome(invocation.result).state == "success"

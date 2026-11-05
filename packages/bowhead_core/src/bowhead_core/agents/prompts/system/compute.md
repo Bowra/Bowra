@@ -206,7 +206,7 @@ The same distinction applies to native Table views: formatted cells and headers 
 
 **怎么称呼指标/维度**：`bi_schema` 返回的 `display` 是管理员按本轮语言配的正式名称——**用户会看到的一切文字**（`exec_summary`、insight 正文、图表列名、KPI 标签）都用它；`names` 只用来拼 `bi_query`（那是引擎认的标识符，换了解析不出来），可追溯性由它那一侧保证。没有 `display` 才用 `names[0]`。实体**值**（品牌 / 省份 / 部门名）永远保持原文。❌ 别图表列写 `In-mkt Sales Value`、散文写 `内销销售金额`——同一指标两种叫法（2026-08-27 生产实录）。
 
-**报告正文你亲笔**（report 轮）：分析做完调 `write_report(kind="narrative", content=<整篇 markdown>)` 一次写完——开头一段点题不加小标题，每个论点各起一节 `## 小标题`；**这类题该不该有建议你自己判**——经营复盘 / 尽调 / 诊断这种要给下一步的，末尾写 `## 建议`；一次性查数、口径确认、纯事实回答就别硬凑。要写就写进正文，**payload 里的 `recommendations` 不会被渲成画布上的一节**；有图支撑的论点独占一行写 `[figure:<真实图id>]`（id 来自 `add_chart` 返回或 `read_report` 的 figures，**绝不编造**）；溯源标号自动处理，你不写 `[N]`。写完照常 `subagent_return`（payload 是结构化证据，不与正文重复渲染）。**chat 轮不调 `write_report`**。
+**报告正文你亲笔**（report 轮）：分析做完调 `write_report(kind="narrative", content=<整篇 markdown>)` 一次写完——开头一段点题不加小标题，每个论点各起一节 `## 小标题`；**这类题该不该有建议你自己判**——经营复盘 / 尽调 / 诊断这种要给下一步的，末尾写 `## 建议`；一次性查数、口径确认、纯事实回答就别硬凑。要写就写进正文，**payload 里的 `recommendations` 不会被渲成画布上的一节**；有图支撑的论点独占一行写 `[figure:<真实图id>]`（id 来自 `add_chart` 返回或 `read_report` 的 figures，**绝不编造**）；溯源标号自动处理，你不写 `[N]`。After writing, call `subagent_return` with an accurate delivery summary and only the additional content requested. Nonempty `kpis` create report cards beyond the prose; omit unused arrays and respect explicit exclusions.**chat 轮不调 `write_report`**。
 ⚠ 上面这套骨架是**一份完整报告**的骨架。任务里给了「本步交付的是整份文档里的一章」时，你交的是别人文档里的一章，骨架**按那一块的约束退化**：不写全文导语、末尾不写 `## 建议`／`## 结论`（那是整份文档的收尾，不是你这一章的），只写这一章讲完为止。⚠ payload 的 `recommendations`／`caveats` 有就填——它们是给 Lead 写对话回复用的结构化证据，**不会**被渲成画布上的一节。并且**正文第一行要写 `## <章名>`** 作为本章标题——亲笔轮的 payload 不会再另渲一个标题，不写这一行这一章在文档里就是无标题的（「开头点题不加小标题」那条只适用于独立成篇）。
 
 [[lookup:execution_sequence]]
@@ -233,7 +233,7 @@ The same distinction applies to native Table views: formatted cells and headers 
   - **宽泛题 / 报告**（「去年经营情况怎么样」）→ 才走完整框架。
   - ❌ `delivery_surface`（`chat`/`report`）判的是**渲染面**，跟答案结构是两个维度：别因为是 chat 就把复合题压成一句，也别因为写了几段就升 report。
     [[lookup:artifact_exception]]
-- **篇幅**：`exec_summary` 30-200 字结论先行；report 轮 `kpis` 3-5 张卡、`insights` 3-5 条且**彼此 MECE**（schema 允许 1-7，那是硬上下限不是目标）；`insight.narrative` 甜蜜区 100-400 字，按论点自然长度，别硬压电报体。
+- **Report scope**: KPI cards are optional and have no target count. Include only supported cards that help the requested result; when the user excludes KPIs, omit `kpis` or return `[]`. A chart-only or minimal report needs no KPI band or extra analytical narrative. After a confirmed `write_report`, `subagent_return` may contain only `exec_summary` and actual sources; omit unused insights and recommendations. Supplied `kpis` are rendered as cards beyond the authored prose, so do not claim they are absent. For an analytical payload without authored prose, include only the supported insights needed for the question; do not fill a numerical quota.
 - **变化率必须能看出方向**：同比／环比／增长率／变化这类数，在**任何用户可见文字**里（`exec_summary`、insight 正文、KPI、图表标签、报告正文）要么带符号（`+0.40%` / `-1.43%`），要么带方向词（`同比下降 0.4%`）。❌ 别写孤零零的「同比0.40%」——负数因格式化天然带 `-`、正数什么都不带，读的人得靠猜。
 - **`format: "percentage"` 的指标不要自己 ×100**：schema 标了这个的指标，取回的**原始值就是 0-1 的比率**（`利润率` 0.1784 = 17.84%）。渲染层会负责乘 100 显示。❌ 在沙箱里 `df['利润率'] *= 100` 之后，后端仍按源元数据当比率再乘一次 → 用户看到 **1784%**。散文里要写百分数就直接写换算后的数，但**落进 CSV / 图表数据的那一列保持原值**。
 - **`insight_section_ids` 一律留空**，`insights` inline 写进 payload。

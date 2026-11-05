@@ -25,20 +25,34 @@ _REQUIRED_GAP_GUIDANCE = (
     "Keep the original requested outcome as the requirement; never replace it with explaining why it is missing. "
     "Reporting that required work was not delivered is not delivery of that work. "
 )
+_DELIVERY_REPLY_GUIDANCE = (
+    "Describe the delivered results and any limitations that affect their use. State unmet requirements and needed user action when delivery is incomplete. "
+    "Keep recovered, covered and optional failed attempts with no remaining impact in the internal execution record. "
+    "Omit delivery-review narration and tool failure tallies or claims such as 'no calls failed' from ordinary replies. "
+    "Report actual failures when the user asks for diagnostics or a negative-test observation. "
+)
 _DELIVERY_SCOPE_GUIDANCE = (
-    "Requirements describe the user's required final outcomes, not a transcript of Tool calls. "
-    "Record operational attempts and error observations in issues. "
-    "An expected diagnostic failure or an optional presentation failure is not itself a missing deliverable "
-    "when the required final outcome was delivered. Never remove or downgrade a genuinely required outcome. "
-    "For an explicitly user-requested negative test, set the requirement's expected_outcome to failure, "
-    "cite its actual failure call IDs, and account for that issue with resolution expected. "
-    "This proves the requested failure observation, never successful business delivery. "
-    "Otherwise expected_outcome defaults to success and fulfilled requirements require successful call IDs. "
-    "A partial delivery result is not proof that the operation or dispatch failed; report its recorded state. "
-    "A partial call is not positive evidence for its successful subset. If that subset delivers the required outcome, "
-    "use an already granted artifact reader, when the user permits reading, to verify the retained successful output. "
-    "Then cite that actual successful read's current-run call ID with resolution covered and explain the optional failure. "
-    "Do not repeat the original query, invent child call IDs, or bypass source access. If verification is unavailable, keep delivery partial. "
+    "Delivery review is internal control feedback. Apply this reply policy to user-facing progress, answers and caveats. "
+    + _DELIVERY_REPLY_GUIDANCE
+    + "Keep evidence bookkeeping and raw protocol fields internal unless technical diagnostics were requested. A rejected review is not failed business work and does not erase "
+    "retained files. Requirements describe required final outcomes, not Tool-call transcripts. Do not add separate fulfilled success "
+    "requirements merely for reporting an observation or proving no retry, write or file creation occurred. Those constraints still "
+    "apply: an actual violation remains an unmet requirement. Record operational attempts in issues. For an explicitly user-requested "
+    "negative test, expected_outcome=failure cites actual known failed call IDs from this run, with that issue resolved as expected using "
+    "the same receipt. The observed refusal and accurate account of whether business work ran are one diagnostic outcome, not additional "
+    "positive-data requirements. Return that observation as normal chat delivery, not an error/bail envelope; do not fabricate report "
+    "evidence. This proves the requested failure observation, never successful business delivery. Other fulfilled success requirements "
+    "must cite exact IDs from review_context.successful_calls. A partial call is not positive evidence for its successful subset or proof "
+    "that dispatch failed. For mixed BI, verify the required retained value with an already granted artifact reader when the user permits "
+    'reading. If python_exec is granted, read the original BI _ref_artifact_id through inputs={"rows":{"artifact_id":"<original '
+    "reference>\"}} and INPUTS['rows']['path']; print retained values without querying BI again or creating files. Cite that successful "
+    "read's exact current-run call ID for the business requirement and resolution covered. Keep a merely optional refusal in that issue's "
+    "explanation, not an extra required negative test. Never cite the partial BI call as positive evidence, even if its sample is "
+    "accurate. If reading is unavailable, keep delivery partial. A caller reviewing a successful delegation of a negative observation "
+    "cites its own successful delegation receipt with expected_outcome=success for delivery of that observation; the rejected underlying "
+    "operation did not succeed. Never cite child call IDs. A helper's review does not replace the caller's scope assessment. Never repeat "
+    "queries, invent evidence or bypass source access. Optional failure alone does not make required delivery incomplete; never remove or "
+    "downgrade genuine required outcomes. "
 ) + _REQUIRED_GAP_GUIDANCE
 
 
@@ -48,6 +62,10 @@ class TerminalCorrectionRefusal(dict):
 
 class DeliveryReviewRefusal(TerminalCorrectionRefusal):
     """Native policy provenance which JSON returned by a Tool cannot forge."""
+
+
+class ReviewedDeliveryResult(dict):
+    """Current native review provenance, never reconstructed from ordinary JSON."""
 
 
 def delivery_review_enabled() -> bool:
@@ -63,6 +81,13 @@ def failed_calls(invocations: Sequence[Any]) -> dict[str, Any]:
         and classify_tool_outcome(invocation_result(inv), inv.error).state in {"failure", "partial"}
         and (inv.error is not None or not isinstance(invocation_result(inv), TerminalCorrectionRefusal))
     }
+
+
+def requires_delivery_review(invocations: Sequence[Any]) -> bool:
+    """Include reviewed child failures without making a successful delegation fail."""
+    return bool(failed_calls(invocations)) or any(
+        inv.tool_name == "subagent_spawn" and isinstance(invocation_result(inv), ReviewedDeliveryResult) for inv in invocations
+    )
 
 
 def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
@@ -130,10 +155,10 @@ class DeliveryReview:
 def validate_delivery_review(review: Any, invocations: Sequence[Any]) -> DeliveryReview:
     """Verify reference identity and ordering, without pretending to prove semantics."""
     failures = failed_calls(invocations)
-    if not failures and review is None:
+    if not requires_delivery_review(invocations) and review is None:
         return DeliveryReview(True, True)
     if not isinstance(review, dict):
-        return DeliveryReview(False, False, ("delivery_review is required for unresolved failed calls",))
+        return DeliveryReview(False, False, ("delivery_review is required to verify current delivery",))
     positions = {inv.call_id: index for index, inv in enumerate(invocations)}
     successes = {
         inv.call_id: inv
@@ -250,7 +275,7 @@ def review_terminal_payload(
         return None
     if isinstance(payload.get("error"), dict) and payload["error"].get("kind") == "needs_user_input":
         return None
-    if not failed_calls(invocations) and payload.get("delivery_review") is None:
+    if not requires_delivery_review(invocations) and payload.get("delivery_review") is None:
         return None
     review = validate_delivery_review(payload.get("delivery_review"), invocations)
     if evidence_problem:
@@ -267,10 +292,10 @@ def review_terminal_payload(
             )
     payload["completion"] = "complete" if review.complete and payload.get("completion") != "partial" else "partial"
     if review.valid:
-        # Equivalent outputs keep the task complete while disclosing the changed form.
+        # Requested negative observations are deliverables. Coverage explanations are internal evidence.
         caveats = list(payload.get("caveats") or []) if isinstance(payload.get("caveats"), list) else []
         for issue in payload["delivery_review"]["issues"]:
-            if issue.get("resolution") in {"covered", "expected"} and issue["explanation"].strip() not in caveats:
+            if issue.get("resolution") == "expected" and issue["explanation"].strip() not in caveats:
                 caveats.append(issue["explanation"].strip())
         if caveats:
             payload["caveats"] = caveats
@@ -308,14 +333,21 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
     item = {
         "type": "object",
         "properties": {
-            "requirement": {"type": "string"},
+            "requirement": {
+                "type": "string",
+                "description": "A required final outcome. Do not split one requested negative observation into extra successful reporting or no-action requirements. Actual constraint violations remain unfulfilled.",
+            },
             "status": {"type": "string", "enum": ["fulfilled", "unfulfilled"], "description": _REQUIRED_GAP_GUIDANCE},
             "expected_outcome": {
                 "type": "string",
                 "enum": ["success", "failure"],
-                "description": "Defaults to success. Use failure only for a negative test explicitly requested by the user, never for missing business delivery.",
+                "description": "Defaults to success. Use failure only when citing the actual known failed operation in this run for an explicitly requested negative test. Delivery of a delegated negative observation cites the caller's successful delegation receipt with success. Never use failure for missing business delivery or cite child call IDs.",
             },
-            "evidence_call_ids": {"type": "array", "items": {"type": "string"}},
+            "evidence_call_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "For fulfilled success, copy exact IDs from review_context.successful_calls, never a partial receipt. For an explicitly requested negative test, cite its actual known failed ID with expected_outcome failure. Unfulfilled requirements may use an empty list.",
+            },
         },
         "required": ["requirement", "status", "evidence_call_ids"],
     }
@@ -328,8 +360,15 @@ def terminal_review_schema(schema: Any, payload_field: str) -> Any:
                 "enum": ["recovered", "covered", "expected", "unfulfilled"],
                 "description": "Recovered requires the same Tool and identical arguments; use covered for a changed alternative with successful evidence and an explanation.",
             },
-            "evidence_call_ids": {"type": "array", "items": {"type": "string"}},
-            "explanation": {"type": "string"},
+            "evidence_call_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Covered/recovered cite exact successful_calls IDs; expected cites only the same failed call ID as the explicit negative-test requirement. A partial BI receipt is never successful evidence.",
+            },
+            "explanation": {
+                "type": "string",
+                "description": "Internal reason the cited evidence resolves the issue. State material limitations of the delivered result separately in the user-facing answer or caveats. For an explicitly requested negative test, describe the observed result.",
+            },
         },
         "required": ["call_id", "resolution", "evidence_call_ids", "explanation"],
     }
@@ -507,7 +546,9 @@ class LeadDeliveryReview:
             return {
                 "ok": True,
                 "reviewed_completion": payload.get("completion", "complete"),
-                "instruction": "Answer the user in ordinary prose. Do not output protocol JSON or repeat confirmed writes. Review again if you execute more work.",
+                "instruction": "Answer the user in ordinary prose. "
+                + _DELIVERY_REPLY_GUIDANCE
+                + "Do not output protocol JSON or repeat confirmed writes. Review again if you execute more work.",
             }
 
         schema = terminal_review_schema(

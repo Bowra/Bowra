@@ -6,6 +6,7 @@ result rows and exception messages never enter a diagnostic event.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
@@ -22,6 +23,8 @@ from uuid import uuid4
 
 import aiosqlite
 import structlog
+
+from bowhead_core.sqlite_capacity import ConnectionSlot, copy_completion_capacity, finish_cleanup
 
 log = structlog.get_logger(__name__)
 _MAX_SQL_BYTES = 16_384
@@ -191,15 +194,15 @@ def _operation_context() -> _OperationContext:
 
 
 def _kind(sql: str) -> str:
-    remaining = sql.lstrip()
+    remaining = sql.lstrip(" \t\r\n\f\v;")
     while remaining.startswith(("--", "/*")):
         if remaining.startswith("--"):
-            remaining = remaining.partition("\n")[2].lstrip()
+            remaining = remaining.partition("\n")[2].lstrip(" \t\r\n\f\v;")
         else:
             _, end, remaining = remaining.partition("*/")
             if not end:
                 return "unknown"
-            remaining = remaining.lstrip()
+            remaining = remaining.lstrip(" \t\r\n\f\v;")
     match = re.match(r"[A-Za-z]+", remaining)
     word = match[0].lower() if match else "unknown"
     return word if word in _SQL_WORDS else "unknown"
@@ -224,6 +227,20 @@ class DiagnosticConnection(sqlite3.Connection):
         self.bowhead_recent_sql: str | None = None
         self.bowhead_recent_phase = "unavailable"
         self.bowhead_recent_completed = False
+
+    _slot: ConnectionSlot | None = None
+
+    def close(self) -> None:
+        try:
+            self._close_native()
+        except BaseException:
+            log.error("sqlite.connection_close_failed", connection_id=self.bowhead_connection_id)
+            raise
+        if self._slot is not None:
+            self._slot.release()
+
+    def _close_native(self) -> None:
+        super().close()
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         if not args:
@@ -390,7 +407,21 @@ class DiagnosticAsyncConnection(aiosqlite.Connection):
     async def _connect(self) -> DiagnosticAsyncConnection:
         started = time.monotonic()
         try:
-            return await super()._connect()
+            opening = asyncio.create_task(super()._connect())
+            try:
+                return await asyncio.shield(opening)
+            except asyncio.CancelledError:
+
+                async def discard() -> None:
+                    try:
+                        await opening
+                    except Exception:
+                        # The connector cleaned its partial handle and the driver stopped the worker.
+                        return
+                    await self.close()
+
+                await finish_cleanup(discard())
+                raise
         except sqlite3.Error as error:
             try:
                 identifier = uuid4().hex
@@ -420,8 +451,12 @@ class DiagnosticAsyncConnection(aiosqlite.Connection):
                 pass
             raise
 
+    async def close(self) -> None:
+        await finish_cleanup(super().close())
+
     async def _execute(self, fn: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
         context = contextvars.Context()
+        copy_completion_capacity(context)
         context.run(_CONTEXT.set, _operation_context())
         return await super()._execute(context.run, fn, *args, **kwargs)
 

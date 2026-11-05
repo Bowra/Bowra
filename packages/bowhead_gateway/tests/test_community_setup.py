@@ -159,7 +159,6 @@ def test_preparation_rejects_unknown_data_before_creating_admission_lock(tmp_pat
 
 
 def test_prepare_recovers_killed_core_transaction_before_provenance_and_migrates_normally(tmp_path, monkeypatch):
-    from bowhead_core.sqlite_domain_upgrade import SPLIT_REVISION
     from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
     from bowhead_core.sqlite_upgrade import SQLiteUpgradeError, database_head, runtime_shared_lease
 
@@ -192,7 +191,8 @@ def test_prepare_recovers_killed_core_transaction_before_provenance_and_migrates
     assert journal.is_file()
     installation.prepare_installation(db_url=url, migration_command=command)
     assert read_installation(str(path)).current_edition == "business"
-    assert all(database_head(path.parent / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    current_head = json.loads((path.parent / "sqlite-layout.json").read_text())["target_head"]
+    assert all(database_head(path.parent / filename) == current_head for filename in DOMAIN_TARGET_FILES.values())
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT ts FROM _phase0_probe WHERE k='retained-before-crash'").fetchone() == (1.0,)
         assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='interrupted_startup'").fetchone() is None
@@ -256,9 +256,12 @@ def test_prepare_subprocess_finishes_existing_wal_migration_without_garbage_coll
         gc.collect()
     complete = json.loads((directory / LAYOUT_FILE).read_text())
     assert complete["status"] == "ready" and complete["phase"] == "complete"
-    assert all(database_head(directory / filename) == SPLIT_REVISION for filename in DOMAIN_TARGET_FILES.values())
+    assert all(database_head(directory / filename) == complete["target_head"] for filename in DOMAIN_TARGET_FILES.values())
     if checkpoint is not None:
-        assert complete["backup"] == checkpoint["backup"]
+        assert Path(checkpoint["backup"]).is_dir()
+        append_backup = Path(complete["backup"])
+        assert json.loads((append_backup / "backup-manifest.json").read_text())["heads"] == dict.fromkeys(DOMAIN_TARGET_FILES, SPLIT_REVISION)
+        assert json.loads((append_backup / LAYOUT_FILE).read_text())["backup"] == checkpoint["backup"]
         for domain in ("execution", "content", "notifications", "observability"):
             assert complete["targets"][domain]["evidence"] == checkpoint["targets"][domain]["evidence"]
     with closing(sqlite3.connect(path)) as db:

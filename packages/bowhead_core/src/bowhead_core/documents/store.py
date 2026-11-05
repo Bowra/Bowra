@@ -21,6 +21,7 @@ from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_execution_binding import ExactAgentExecutionBinding
 from bowhead_core.chat_turn_source import ChatTurnUserSource, chat_turn_user_source_projection
 from bowhead_core.documents.request import (
+    CanvasInputSelection,
     DocumentModelSelection,
     DocumentProposal,
     DocumentRequestError,
@@ -351,6 +352,11 @@ class DocumentStore:
                 candidate = resolve_proposal_positions(
                     DocumentProposal.model_validate_json(proposal.model_dump_json()), source, task_source=material[2] if material else None
                 )
+                if request.get("canvas_selection_inferred"):
+                    if candidate.canvas is not None or material is None:
+                        raise DocumentRequestError("document_command_conflict")
+                    selection = CanvasInputSelection.model_validate_json(_json(request["proposal"]["canvas"]))
+                    candidate = candidate.model_copy(update={"canvas": selection})
                 request["proposal"] = candidate.model_dump(mode="json")
             else:
                 if not isinstance(proposal, UserQuote) or request.get("answer", {}).get("parent_job_id") != parent_job_id:
@@ -418,7 +424,7 @@ class DocumentStore:
                     if material is None:
                         raise DocumentRequestError("document_task_source_unavailable", field="task_source")
                     snapshot = material[0]
-                    original = await read_task_source_in_tx(db, current=source, snapshot=snapshot, quote=proposal.task_source)
+                    original, _ = await read_task_source_in_tx(db, current=source, snapshot=snapshot, quote=proposal.task_source)
                 else:
                     snapshot, original = await resolve_task_source_in_tx(db, current=source, quote=proposal.task_source)
             proposal = resolve_proposal_positions(DocumentProposal.model_validate_json(proposal.model_dump_json()), source, task_source=original)
@@ -448,7 +454,13 @@ class DocumentStore:
         # Revalidate/detach before any await (model_construct/model_copy are not
         # validation APIs). Only the typed bounded proposal enters the hash.
         proposal = DocumentProposal.model_validate_json(proposal.model_dump_json())
+        inferred_canvas = _canvas is not None and proposal.canvas is None and _task_source is not None and _answer is None and _revision is None
+        if inferred_canvas:
+            selection = CanvasInputSelection(section_ids=tuple(item.section_id for item in _canvas.manifest.sections))
+            proposal = proposal.model_copy(update={"canvas": selection})
         request_data = {"command_kind": "submit", "turn_id": turn_id, "proposal": proposal.model_dump(mode="json")}
+        if inferred_canvas:
+            request_data["canvas_selection_inferred"] = True
         if (proposal.task_source is None) != (_task_source is None):
             raise DocumentRequestError("document_task_source_unavailable", field="task_source")
         if _task_source is not None:
@@ -488,7 +500,7 @@ class DocumentStore:
                 )
                 if current is None:
                     raise DocumentRequestError("document_source_unavailable")
-                original = await read_task_source_in_tx(db, current=current, snapshot=_task_source, quote=proposal.task_source)
+                original, _ = await read_task_source_in_tx(db, current=current, snapshot=_task_source, quote=proposal.task_source)
             previous = await _receipt(db, scope, command_id, request_hash)
             if previous is not None:
                 if runtime is not None:
@@ -513,16 +525,28 @@ class DocumentStore:
             else:
                 await _validate_inputs(db, scope, source, proposal, answer=_answer, task_source=original)
             if _canvas is not None:
-                from bowhead_core.documents.canvas_inputs import inherit_canvas_input_in_tx, validate_current_canvas_in_tx
+                from bowhead_core.documents.canvas_inputs import (
+                    continuation_canvas_sections_in_tx,
+                    inherit_canvas_input_in_tx,
+                    validate_current_canvas_in_tx,
+                )
 
+                if _canvas.manifest.session_id != source.session_id:
+                    raise DocumentRequestError("document_canvas_selection_invalid")
                 if _revision is not None or _answer is not None:
                     parent_id = _revision.target.job_id if _revision is not None else _answer.parent_job_id
                     inherited = await inherit_canvas_input_in_tx(db, scope=scope, job_id=parent_id)
                     if inherited != _canvas:
                         raise DocumentRequestError("document_canvas_input_unavailable")
-                elif proposal.canvas is None or _canvas.source_job_id is not None:
-                    raise DocumentRequestError("document_canvas_selection_invalid")
                 else:
+                    if proposal.canvas is None or _canvas.source_job_id is not None:
+                        raise DocumentRequestError("document_canvas_selection_invalid")
+                    if inferred_canvas:
+                        section_ids = await continuation_canvas_sections_in_tx(
+                            db, scope=scope, session_id=source.session_id, original_turn_id=original.turn_id, current_turn_id=source.turn_id
+                        )
+                        if section_ids != proposal.canvas.section_ids:
+                            raise DocumentRequestError("document_canvas_changed")
                     await validate_current_canvas_in_tx(db, scope=scope, manifest=_canvas.manifest, section_ids=proposal.canvas.section_ids)
             elif proposal.canvas is not None:
                 raise DocumentRequestError("document_canvas_unavailable")

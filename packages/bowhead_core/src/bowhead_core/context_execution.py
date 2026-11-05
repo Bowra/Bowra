@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import replace
+from functools import partial
 from inspect import isawaitable
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from bowhead_router.context_policy import TargetContextBudget
 from bowhead_router.runtime_notes import OUTPUT_RECOVERY_STATE_NAME
 from bowhead_router.types import LLMRequest, LLMResponse, Message
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.context_capacity import capacity_message_groups
 from bowhead_core.context_compaction import CompactionPreparationError, balanced_boundaries, message_digest
@@ -111,7 +112,7 @@ class ExecutionContextView:
         # Reading under WAL does not hold the shared writer lock. The write
         # transaction checks immutable presence and fresh current authority.
         for identity in dict.fromkeys(value for value in (self.generation, self.inherited_generation) if value):
-            async with open_shared_ctx(self.db_path) as db:
+            async with open_pooled_read_ctx(self.db_path) as db:
                 await db.execute("BEGIN")
                 await read_context_graph_in_tx(
                     db,
@@ -120,7 +121,7 @@ class ExecutionContextView:
                     lane=self.lane,
                     generation_id=identity,
                     cipher=self.cipher,
-                    validate_sources=prepared.collect,
+                    validate_sources=partial(prepared.collect, connection=db),
                     projection_only=True,
                     for_publication=for_publication,
                     preparation=ancestry,

@@ -15,6 +15,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from uuid import uuid4
 import aiosqlite
 
 from bowhead_core._db import open_shared_ctx
+from bowhead_core.sqlite_capacity import completion_capacity
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 from bowhead_core.sqlite_readable_schema import readable_table_exists
 
@@ -2536,6 +2538,7 @@ class SessionStore:
                 await db.execute("ROLLBACK")
                 raise
 
+    @completion_capacity()
     async def finalize_turn(
         self,
         *,
@@ -3654,6 +3657,7 @@ class SessionStore:
                 await db.execute("ROLLBACK")
                 raise
 
+    @completion_capacity()
     async def heartbeat_chat_spawn_dispatch(
         self,
         *,
@@ -3669,6 +3673,11 @@ class SessionStore:
         still a Turn fact, but must not let maintenance declare this live owner
         lost before persistence becomes quiescent.
         """
+
+        def lost(reason: str) -> Literal["lost"]:
+            logging.getLogger(__name__).warning("chat.dispatch_lease_lost turn_id=%s reason=%s settling=%s", turn_id, reason, settling)
+            return "lost"
+
         now = _now()
         lease_expires_at = (datetime.now(tz=UTC) + timedelta(seconds=lease_seconds)).isoformat()
         async with open_shared_ctx(self._db_path) as db:
@@ -3687,13 +3696,13 @@ class SessionStore:
                     row = await cursor.fetchone()
                 if row is None:
                     await db.execute("ROLLBACK")
-                    return "lost"
+                    return lost("dispatch_missing")
                 try:
                     lease_generation = int(row["lease_execution_generation"])
                     turn_generation = int(row["execution_generation"])
                 except (TypeError, ValueError):
                     await db.execute("ROLLBACK")
-                    return "lost"
+                    return lost("generation_invalid")
                 lease_kind = str(row["lease_kind"] or "")
                 if (
                     str(row["state"]) != "spawned"
@@ -3703,7 +3712,7 @@ class SessionStore:
                     or lease_generation != turn_generation
                 ):
                     await db.execute("ROLLBACK")
-                    return "lost"
+                    return lost("owner_or_generation_changed")
                 if not settling and (row["cancel_requested_at"] is not None or str(row["status"]) == "cancelled"):
                     await db.execute("ROLLBACK")
                     return "cancel_requested"
@@ -3716,19 +3725,18 @@ class SessionStore:
                     native_resume = await document_reference_resume_heartbeat_in_tx(
                         db, turn_id=turn_id, generation=turn_generation, owner_id=owner_id, settling=settling
                     )
-                    if (
-                        native_resume is False
-                        or native_resume is not None
-                        and lease_kind != "resume"
-                        or native_resume is None
-                        and not await is_reference_runtime_in_connection(db, turn_id=turn_id)
-                        or _time(row["lease_expires_at"]) <= datetime.now(UTC)
-                    ):
+                    if native_resume is False or native_resume is not None and lease_kind != "resume":
                         await db.rollback()
-                        return "lost"
+                        return lost("reference_execution_invalid")
+                    if native_resume is None and not await is_reference_runtime_in_connection(db, turn_id=turn_id):
+                        await db.rollback()
+                        return lost("reference_runtime_unavailable")
+                    if _time(row["lease_expires_at"]) <= datetime.now(UTC):
+                        await db.rollback()
+                        return lost("reference_lease_expired")
                     if not settling and native_resume is None and not await reference_material_available_in_connection(db, turn_id=turn_id):
                         await db.rollback()
-                        return "lost"
+                        return lost("reference_material_unavailable")
                 # Compute deadlines under the writer lock, after validation.
                 now = _now()
                 lease_expires_at = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat()
@@ -3754,13 +3762,14 @@ class SessionStore:
                 )
                 if cursor.rowcount != 1:
                     await db.execute("ROLLBACK")
-                    return "lost"
+                    return lost("renewal_compare_and_swap_lost")
                 await db.commit()
                 return "renewed"
             except BaseException:
                 await db.execute("ROLLBACK")
                 raise
 
+    @completion_capacity()
     async def mark_chat_spawn_dispatch_terminal(
         self,
         *,
@@ -4117,6 +4126,7 @@ class SessionStore:
                 await db.execute("ROLLBACK")
                 raise
 
+    @completion_capacity()
     async def recover_expired_chat_spawn_dispatches(
         self,
         *,
@@ -6605,6 +6615,7 @@ class SessionStore:
     # All 5 write `ended_at = now`; `mark_failed` / `mark_clarification_pending`
     # additionally persist `error_kind` when present so the row carries enough
     # context for /sessions UI to render reason chips without re-derivation.
+    @completion_capacity()
     async def mark_completed(
         self,
         *,
@@ -6622,7 +6633,10 @@ class SessionStore:
 
         if isinstance(context_publication, ContextPublication):
             context_publication = await context_publication.prepare_for_answer(final_answer)
-        async with open_shared_ctx(self._db_path) as db:
+            adoption_readers = context_publication.open_adoption_readers()
+        else:
+            adoption_readers = nullcontext(context_publication)
+        async with adoption_readers as context_publication, open_shared_ctx(self._db_path) as db:
             if not await _begin_worker_transition(db, turn_id=turn_id, worker=worker):
                 return False
             if context_publication is not None:
@@ -6664,6 +6678,7 @@ class SessionStore:
             await db.commit()
         return transitioned
 
+    @completion_capacity()
     async def mark_cancelled(
         self,
         *,
@@ -6716,6 +6731,7 @@ class SessionStore:
             await db.commit()
         return transitioned
 
+    @completion_capacity()
     async def finalize_cancelled_usage(
         self,
         *,
@@ -6800,6 +6816,7 @@ class SessionStore:
                     await db.execute("ROLLBACK")
                 raise
 
+    @completion_capacity()
     async def request_cancel_turn(
         self,
         *,
@@ -7064,6 +7081,7 @@ class SessionStore:
                 raise
         return outcome
 
+    @completion_capacity()
     async def mark_failed(
         self,
         *,

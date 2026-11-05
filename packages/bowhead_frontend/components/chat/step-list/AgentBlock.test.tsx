@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 
 import { renderIntl } from "@/__tests__/intl-render";
+import { PRODUCT_NAME } from "@/lib/product-identity";
 import { AgentBlock } from "./AgentBlock";
 import { AgentTrace } from "./AgentTrace";
 import { Step } from "./Step";
@@ -207,7 +208,7 @@ describe("AgentBlock", () => {
     ],
     [
       "en-US" as const,
-      "Power BI returned an incomplete result. Bowhead stopped using it to avoid an incorrect conclusion. Narrow the query and try again.",
+      `Power BI returned an incomplete result. ${PRODUCT_NAME} stopped using it to avoid an incorrect conclusion. Narrow the query and try again.`,
       "View technical details",
     ],
   ])(
@@ -248,6 +249,7 @@ describe("AgentBlock", () => {
         { locale },
       );
 
+      fireEvent.click(container.querySelector(".stp-head")!);
       expect(screen.getByText(friendlyMessage)).toBeTruthy();
       expect(screen.getByText(disclosureLabel)).toBeTruthy();
       expect(

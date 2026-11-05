@@ -21,7 +21,7 @@ import type { PeerTerminal } from "@/lib/turn-store";
 import { deriveTerminalStatus, formatPeerDuration } from "./agent-grouping";
 import type { StepStatus } from "./block-primitives";
 import { LEAD_BRAND_NAME, agentDisplayName, agentKeyFor, type AgentKey } from "./agent-meta";
-import { countStepIssues, isRecoverableStepFailure } from "./self-healing";
+import { isRecoverableStepFailure } from "./self-healing";
 import { getCurrentLocale } from "@/lib/locale";
 import { TOOL_CATALOG_KEYS, getToolMeta, writingDisplayKey } from "./tool-catalog";
 import type { StepView } from "./types";
@@ -272,7 +272,6 @@ export interface BandModel {
   /** Step ordinal (= number of steps seen); 0 if none.
    *  ⚠ Count only **tool steps**, excluding peer terminal rows; `第 N 步` refers to tool-step granularity. */
   stepOrdinal: number;
-  issueCount: number;
   /**
    * Number of terminal-failed peers this turn (including those **with** child steps).
    *
@@ -834,8 +833,6 @@ export function buildBandModel({
       && peerTerminalById[id] !== undefined),
   );
 
-  // Count observed failed/partial steps, including hard failures; no retry receipt is inferred.
-  const issueCount = countStepIssues(steps.filter((step) => !isInternalCloseoutStep(step)));
   // Independent terminal rows are **omitted** for successful peers with child steps (already represented by green steps),
   // or success carried by rewritten spawn. Failures always receive rows.
   const ownedPeerIds = new Set(
@@ -978,7 +975,6 @@ export function buildBandModel({
       phase: "preparing",
       density,
       stepOrdinal: steps.length,
-      issueCount,
       peerFailCount,
       history,
       current: last
@@ -1061,7 +1057,6 @@ export function buildBandModel({
     phase: "running",
     density,
     stepOrdinal: steps.length,
-    issueCount,
     peerFailCount,
     history,
     current: {

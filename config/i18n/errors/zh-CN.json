@@ -1,4 +1,5 @@
 {
+  "sqlite_capacity_exhausted": "存储连接已满。请先查看这次操作的保存状态，再决定是否重试。",
   "content_sharing_disabled": "此部署已关闭分享。你仍可查看或撤销已有授权；如需开启分享，请联系部署管理员。",
   "coach_canvas_target_unavailable": "原资源或保存版本已不可用，请检查编辑器后重新发送；消息内容已保留。",
   "reference_input_invalid": "引用输入无效，请保留草稿并检查所选引用。",

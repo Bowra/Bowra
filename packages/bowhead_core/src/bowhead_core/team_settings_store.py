@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
@@ -46,7 +46,7 @@ class TeamSettingsStore:
 
     async def get(self, team_id: str, key: str) -> str | None:
         async with (
-            diagnostic_connect(self._path) as db,
+            open_pooled_read_ctx(self._path) as db,
             db.execute(
                 "SELECT value FROM team_settings WHERE team_id=? AND key=?",
                 (team_id, key),
@@ -146,7 +146,7 @@ class TeamSettingsStore:
 
     async def list_for_team(self, team_id: str) -> dict[str, str]:
         async with (
-            diagnostic_connect(self._path) as db,
+            open_pooled_read_ctx(self._path) as db,
             db.execute(
                 "SELECT key, value FROM team_settings WHERE team_id=?",
                 (team_id,),

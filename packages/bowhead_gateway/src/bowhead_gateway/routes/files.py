@@ -49,7 +49,13 @@ from bowhead_gateway.access_context import (
     build_access_context,
     has_workspace_access_source,
 )
-from bowhead_gateway.artifact_representations import ArtifactRepresentationDTO, Representation, build_representation, representation_error
+from bowhead_gateway.artifact_representations import (
+    ArtifactRepresentationDTO,
+    RepresentationRequest,
+    build_presentation_view,
+    build_representation,
+    representation_error,
+)
 from bowhead_gateway.dtos import (
     FileKbStatusDTO,
     FileListDTO,
@@ -1738,12 +1744,10 @@ async def build_file_preview(store: ArtifactStore, art: Any, *, mode: str, max_r
     )
 
 
-@router.get("/{artifact_id}/representations/{representation}", response_model=ArtifactRepresentationDTO)
-async def file_representation(artifact_id: str, representation: Representation, request: Request, response: Response) -> ArtifactRepresentationDTO:
+async def _read_representation_artifact(request: Request, store: ArtifactStore, artifact_id: str):
     from bowhead_gateway.files_sharing import can_read_shared
 
     user_id = _user_id(request)  # Authentication before object lookup.
-    store = _store(request)
     art = await store.get(artifact_id)
     if art is None or art.deleted_at is not None:
         raise representation_error("scope_unavailable")
@@ -1764,6 +1768,22 @@ async def file_representation(artifact_id: str, representation: Representation, 
         if exc.status_code in {403, 404, 410}:
             raise representation_error("scope_unavailable") from exc
         raise
+    return art
+
+
+@router.get("/{artifact_id}/representations/{representation}", response_model=ArtifactRepresentationDTO)
+async def file_representation(
+    artifact_id: str, representation: RepresentationRequest, request: Request, response: Response
+) -> ArtifactRepresentationDTO | Response:
+    store = _store(request)
+    art = await _read_representation_artifact(request, store, artifact_id)
+    if representation == "pptx-pdf":
+        service = getattr(request.app.state, "document_service", None)
+        view = await build_presentation_view(store, art, getattr(service, "executor", None))
+        current = await _read_representation_artifact(request, store, artifact_id)
+        if (current.path, current.size) != (art.path, art.size):
+            raise representation_error("unavailable")
+        return view
     response.headers["Cache-Control"] = "no-store"
     return await build_representation(store, art, representation)
 

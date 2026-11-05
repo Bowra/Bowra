@@ -21,7 +21,6 @@ import type {
 
 import {
   ArtifactImagePreview,
-  ArtifactPresentationPreview,
   ArtifactRowsPreview,
   ArtifactTextPreview,
   ArtifactWorkbookPreview,
@@ -124,6 +123,8 @@ export function ArtifactPreview({
     started: false,
   });
   const safeHtmlActive = mode === "preview" && isSafeHtmlMime(mime) && !loading && !error;
+  const pptxPreview = mode === "preview" && profile === "pptx";
+  const inPlaceFullView = safeHtmlActive || pptxPreview;
   const videoActive = mode === "preview" && isVideoPreviewMime(mime) && !loading && !error;
   const inlineHref = withInlineDisposition(href);
   const htmlMode = useHtmlPreviewMode(fileId);
@@ -193,7 +194,7 @@ export function ArtifactPreview({
       <ArtifactRecoveryActions mode={mode} profile={profile} capabilities={capabilities}
         downloadHref={href} onDownload={onDownload} onModeChange={onViewerModeChange} />
     ) : null,
-    href: rendererHref,
+    href: pptxPreview ? `${href.split(/[?#]/, 1)[0]}/representations/pptx-pdf` : rendererHref,
     inlineHref,
     alt: filename,
     sizeBytes,
@@ -219,7 +220,7 @@ export function ArtifactPreview({
 
   return (
     <>
-      <InPlaceFullView active={safeHtmlActive && expanded} label={filename}
+      <InPlaceFullView active={inPlaceFullView && expanded} label={filename}
         onClose={() => setExpanded(false)} returnFocusRef={returnFocusRef}>
         <ArtifactPreviewHeader
           artifactId={fileId}
@@ -230,8 +231,8 @@ export function ArtifactPreview({
             returnFocusRef.current = trigger;
             setExpanded((value) => !value);
           }}
-          fullViewActive={safeHtmlActive && expanded}
-          onReference={onReference && safeHtmlActive && expanded ? () => { setExpanded(false); onReference(); } : onReference}
+          fullViewActive={inPlaceFullView && expanded}
+          onReference={onReference && inPlaceFullView && expanded ? () => { setExpanded(false); onReference(); } : onReference}
           onDownload={onDownload}
           capabilities={capabilities}
           resultRole={resultRole}
@@ -241,12 +242,12 @@ export function ArtifactPreview({
           onViewerModeChange={onViewerModeChange}
           onOpenHistory={onOpenHistory}
           onFeedbackUnsupported={onFeedbackUnsupported}
-          onClose={safeHtmlActive && expanded ? undefined : onClose}
+          onClose={inPlaceFullView && expanded ? undefined : onClose}
           showTitle={showHeaderTitle}
         />
-        {!expanded || safeHtmlActive ? <ArtifactPreviewBody {...bodyProps} expanded={safeHtmlActive && expanded} /> : null}
+        {!expanded || inPlaceFullView ? <ArtifactPreviewBody {...bodyProps} expanded={inPlaceFullView && expanded} /> : null}
       </InPlaceFullView>
-      {expanded && !safeHtmlActive ? (
+      {expanded && !inPlaceFullView ? (
         <DialogShell
           presentation="center"
           onClose={() => setExpanded(false)}
@@ -499,7 +500,7 @@ function ArtifactPreviewBody({
       </div>
     );
   }
-  if (mode === "preview" && (profile === "pdf" || profile === "docx")) {
+  if (mode === "preview" && (profile === "pdf" || profile === "docx" || profile === "pptx")) {
     if (!preview && loading) {
       return <div className="artifact-viewer-note loading">{t("loading")}</div>;
     }
@@ -509,9 +510,10 @@ function ArtifactPreviewBody({
           profile={profile}
           href={href}
           title={alt}
-          sizeBytes={sizeBytes}
+          sizeBytes={profile === "pptx" ? undefined : sizeBytes}
           onError={onOpenFailed}
           cacheRef={documentPreviewCacheRef}
+          thumbnails={profile === "pptx" && !expanded}
         />
       </div>
     );
@@ -523,8 +525,6 @@ function ArtifactPreviewBody({
     <div className={bodyClass}>
       {mode === "preview" && profile === "table" && preview.columns && preview.rows ? (
         <ArtifactRowsPreview preview={preview} />
-      ) : mode === "preview" && profile === "pptx" && preview.text ? (
-        <ArtifactPresentationPreview text={preview.text} />
       ) : mode === "preview" && profile === "xlsx" && preview.text ? (
         <ArtifactWorkbookPreview text={preview.text} />
       ) : preview.text != null ? (
@@ -539,7 +539,6 @@ function ArtifactPreviewBody({
       ) : (
         <div className="artifact-viewer-note">{t("no_preview")}</div>
       )}
-      {profile === "pptx" ? <div className="artifact-viewer-footnote">{t("presentation_fidelity_hint")}</div> : null}
       {profile === "xlsx" ? <div className="artifact-viewer-footnote">{t("workbook_fidelity_hint")}</div> : null}
     </div>
   );

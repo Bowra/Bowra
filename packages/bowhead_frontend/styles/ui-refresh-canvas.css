@@ -1916,7 +1916,6 @@
     .result-file-viewer .artifact-image-stage,
     .result-file-viewer .artifact-document-preview,
     .result-file-viewer .artifact-docx-preview,
-    .result-file-viewer .artifact-presentation-preview,
     .result-file-viewer .artifact-workbook-preview
   ) {
   overflow: hidden;

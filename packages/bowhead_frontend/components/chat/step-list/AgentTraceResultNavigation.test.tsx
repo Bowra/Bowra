@@ -49,7 +49,7 @@ describe("AgentTrace Results navigation", () => {
       />,
     );
 
-    if (state === "done") fireEvent.click(screen.getByRole("button", { name: /运行代码/ }));
+    fireEvent.click(screen.getByRole("button", { name: /运行代码/ }));
     const log = screen.getByRole("link", { name: "下载 sandbox-stdout.txt" });
     expect(log).toHaveAttribute("href", "/api/v1/files/art_stdout");
     expect(log).toHaveAttribute("download", "sandbox-stdout.txt");

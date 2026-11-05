@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl";
 
 import { ArtifactPreview } from "@/components/canvas/artifact-preview";
 import { CategoryBadge } from "@/components/files/category-badge";
+import { deriveArtifactViewerProfile } from "@/lib/artifact-viewer-profile";
 import { appPath } from "@/lib/base-path";
 import { formatDateTime, getCurrentLocale } from "@/lib/locale";
 import { assetClassOf, fmtSize, humanSource, type FilesTab } from "@/lib/files-taxonomy";
@@ -68,9 +69,11 @@ export function FileDrawer({
   const [usagesError, setUsagesError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [savingCat, setSavingCat] = useState(false);
+  const presentation = deriveArtifactViewerProfile(file.mime, file.filename) === "pptx";
 
   useEffect(() => {
     setPreview(null);
+    if (presentation) return;
     void (async () => {
       try {
         const next = await fetchFilePreview(file.file_id);
@@ -88,7 +91,7 @@ export function FileDrawer({
         });
       }
     })();
-  }, [file.file_id, file.mime_family, t]);
+  }, [file.file_id, file.mime_family, presentation, t]);
 
   useEffect(() => {
     setUsages(null);
@@ -197,9 +200,9 @@ export function FileDrawer({
             filename={file.filename}
             mime={file.mime}
             sizeLabel={fmtSize(file.size)}
-            preview={preview}
-            loading={preview === null}
-            error={preview?.error ?? null}
+            preview={presentation ? null : preview}
+            loading={!presentation && preview === null}
+            error={presentation ? null : preview?.error ?? null}
           />
         </div>
 

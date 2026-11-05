@@ -1,5 +1,6 @@
 import {
   Extension,
+  extensions,
   Node,
   type EditorOptions,
   type JSONContent,
@@ -268,6 +269,21 @@ const Reference = Node.create({
   renderText: ({ node }) => referenceText(node.attrs.reference),
 });
 
+const ReferenceEditorKeymap = extensions.Keymap.extend({
+  addKeyboardShortcuts() {
+    const shortcuts = this.parent?.();
+    return {
+      ...shortcuts,
+      Backspace: (props) => {
+        // The default command dispatches even when it handles nothing. A
+        // redraw here would interrupt the browser's unfinished composition.
+        if (this.editor.view.composing) return false;
+        return shortcuts?.Backspace?.(props) ?? false;
+      },
+    };
+  },
+});
+
 /** Minimal Tiptap options, intentionally independent of HTTP, storage and authorization.
  * Callers must remount on persistence-scope changes and retain pending snapshots separately.
  */
@@ -344,10 +360,11 @@ export function referenceEditorOptions(
               );
             },
             handleKeyDown(view, event) {
-              // PM also synthesizes keys from DOM changes (including mobile Enter).
-              // Those bypass handleDOMEvents and can arrive during native composition.
-              if (view.composing || event.isComposing || event.keyCode === 229)
-                return true;
+              if (view.composing || event.isComposing || event.keyCode === 229) {
+                // ProseMirror asks its keymap about Backspace while reading a
+                // native deletion. Claiming it drops the IME's DOM change.
+                return event.key !== "Backspace";
+              }
               // A held selection key must not become a send after the popup closes.
               if (event.repeat && !event.shiftKey && (event.key === "Enter" || event.key === "Tab")) return true;
               const menuOpen = hooks.isMenuOpen?.() ?? false;
@@ -439,10 +456,12 @@ export function referenceEditorOptions(
       HardBreak,
       Reference,
       behavior,
+      ReferenceEditorKeymap,
       ...(hooks.onQueryChange
         ? [referenceTriggerExtension(hooks.onQueryChange)]
         : []),
     ],
+    enableCoreExtensions: { keymap: false },
     enableInputRules: false,
     enablePasteRules: false,
     editorProps: {

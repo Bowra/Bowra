@@ -364,11 +364,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
       .toContain("先看退款率的分布……");
   });
 
-  it("★ 运行期间的硬失败：带上显红，且完整错误说明一键可达", () => {
-    // Inventory §2.1 correction: after the band suppresses stepViews, a step-level hard failure's
-    // FailureAckCard is absent from the main surface **while running** (turn end unmounts the band and restores forceOpen trace).
-    // Thus the band must satisfy two requirements: ① make that step prominent; ② one-click access to the full card.
-    // Mutation: make toneOf check only isRecoverableStepFailure (hard failures also get green ✓) → the first assertion must fail.
+  it("keeps a running failure visible and opens its details when the step is selected", () => {
     const turnId = "t-band-hard-fail";
     applyCardCreated({ turnId });
     startStep(turnId, "s1");
@@ -392,14 +388,15 @@ describe("1e 带 · 与既有披露面的边界", () => {
     expect(container.textContent).not.toContain("plan_execution_failed");
     expect(container.textContent).not.toContain("口径不存在");
 
-    // ② Click the band = expand the running process → the full FailureAckCard returns.
     fireEvent.click(
       container.querySelector('[data-testid="running-band-bar"]') as HTMLElement,
     );
-    // Yielding = **three rows** give way to full trace; the disclosure strip remains as the collapse control (one control, two states).
-    // 2026-08-15: expansion was a one-way door; users could never return to the band afterward (user-reported).
     expect(container.querySelector(".bh-band__now")).toBeNull();
     expect(container.querySelector('[data-testid="running-band-bar"]')).toBeTruthy();
+    const failedStep = container.querySelector<HTMLButtonElement>(".stp.is-fail .stp-head")!;
+    expect(failedStep.getAttribute("aria-expanded")).toBe("false");
+    expect(container.textContent).not.toContain("plan_execution_failed");
+    fireEvent.click(failedStep);
     expect(container.textContent).toContain("plan_execution_failed");
     expect(container.textContent).not.toContain("口径不存在");
   });

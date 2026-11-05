@@ -103,5 +103,5 @@ export function normalizeViewerMode(
 export function previewUsesTextDto(profile: ArtifactViewerProfile): boolean {
   // PDF/DOCX use the bounded server extractor as an immutable-artifact
   // validation gate before the browser loads a heavyweight binary renderer.
-  return ["table", "json", "markdown", "text", "pdf", "docx", "pptx", "xlsx"].includes(profile);
+  return ["table", "json", "markdown", "text", "pdf", "docx", "xlsx"].includes(profile);
 }
