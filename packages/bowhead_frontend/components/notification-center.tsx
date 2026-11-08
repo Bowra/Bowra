@@ -27,9 +27,13 @@ import {
   type NotificationTab,
 } from "@/lib/api";
 import { HttpStatusError } from "@/lib/api-client";
-import { normalizeAppActionUrl } from "@/lib/legacy-app-links";
+import { subscribeNotificationCount } from "@/lib/attention-loop";
 import { localizeNotification, notificationTypeLabel } from "@/lib/notification-copy";
+import { openNotificationTarget, opensInAnotherTeam } from "@/lib/notification-open";
 import { useAppRouter } from "@/lib/use-app-router";
+import { useNotificationReachCapability } from "@/lib/use-notification-reach-capability";
+
+const HELP_PATH = "/help/?article=notification-center";
 
 const TABS: { id: NotificationTab; labelKey: string }[] = [
   { id: "action", labelKey: "tab_action" },
@@ -44,6 +48,7 @@ function hasStatus(error: unknown, status: number): boolean {
 export function NotificationCenter() {
   const t = useTranslations("notifications");
   const router = useAppRouter();
+  const reach = useNotificationReachCapability();
   const [disabled, setDisabled] = useState(
     process.env.NEXT_PUBLIC_BOWHEAD_NOTIFICATION_CENTER === "0",
   );
@@ -140,6 +145,19 @@ export function NotificationCenter() {
   }, [disabled, disableCenter, t]);
 
   useEffect(() => {
+    if (disabled) return;
+    if (reach) {
+      // FEATURE_NOTIFICATION_REACH: the attention loop polls; the bell only reads its counts.
+      return subscribeNotificationCount((result) => {
+        if (!mounted.current) return;
+        countGeneration.current += 1;
+        if (result.ok) {
+          setCounts(result.counts);
+          setCountErr(null);
+        } else if (hasStatus(result.error, 404)) disableCenter();
+        else setCountErr(shownError(t("count_failed_notice"), result.error));
+      });
+    }
     void refreshCount();
     const id = window.setInterval(() => void refreshCount(), 45000);
     const onFocus = () => void refreshCount();
@@ -148,7 +166,7 @@ export function NotificationCenter() {
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshCount]);
+  }, [disabled, disableCenter, reach, refreshCount, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -208,10 +226,11 @@ export function NotificationCenter() {
 
   const ownsView = (generation: number) => mounted.current && view.current.open && listGeneration.current === generation;
 
-  const handleAction = async (item: NotificationItemDTO) => {
+  const handleAction = async (item: NotificationItemDTO, url: string | null = item.actionUrl) => {
     if (inFlightRef.current.has(item.id)) return;
     const generation = listGeneration.current;
     markBusy(item.id);
+    let switching = false;
     try {
       if (!item.readAt) await markNotificationRead(item.id);
       void refreshCount();
@@ -219,14 +238,20 @@ export function NotificationCenter() {
         if (mounted.current && view.current.open) void load(view.current.tab);
         return;
       }
-      if (item.actionUrl) {
+      if (url) {
+        // An item from another Team opens after switching to that Team (FEATURE_NOTIFICATION_REACH).
+        switching = opensInAnotherTeam(item);
+        await openNotificationTarget(item, url, router);
         close();
-        router.push(normalizeAppActionUrl(item.actionUrl));
       } else {
         void load(view.current.tab);
       }
     } catch (e: unknown) {
       if (!ownsView(generation)) return;
+      if (switching) {
+        setErr(shownError(t("team_switch_failed_notice", { team: item.teamName ?? "" }), e));
+        return;
+      }
       setErr(shownError(t(hasStatus(e, 404) ? "item_unavailable_notice" : "mark_read_failed_notice"), e));
       if (hasStatus(e, 404)) {
         setItems((current) => current.filter((x) => x.id !== item.id));
@@ -335,6 +360,18 @@ export function NotificationCenter() {
                   {counts ? t("panel_meta", { action: actionCount, updates: pendingUpdates }) : t(countErr ? "count_unavailable" : "loading")}
                 </div>
               </div>
+              {reach ? (
+                <button
+                  type="button"
+                  className="notification-ghost-btn notification-panel__help"
+                  onClick={() => {
+                    close();
+                    router.push(HELP_PATH);
+                  }}
+                >
+                  {t("help_link")}
+                </button>
+              ) : null}
               {tab !== "action" && items.some((x) => !x.readAt) ? (
                 <button type="button" className="notification-ghost-btn" disabled={readingAll} onClick={() => void handleReadAll()}>
                   <Check size={12} />
@@ -381,7 +418,8 @@ export function NotificationCenter() {
                     key={item.id}
                     item={item}
                     busy={busyIds.has(item.id)}
-                    onOpen={() => void handleAction(item)}
+                    reach={reach}
+                    onOpen={(url) => void handleAction(item, url)}
                     onArchive={() => void handleArchive(item.id)}
                   />
                 ))}
@@ -404,15 +442,34 @@ export function NotificationCenter() {
   );
 }
 
+/** Stored action labels are fixed snapshots; known action ids render in the interface language. */
+const ACTION_LABEL_KEYS: Record<string, string> = {
+  review: "action_review",
+  view: "action_view",
+  answer: "action_answer",
+  configure: "action_configure",
+  open: "action_open",
+};
+
+/**
+ * Action buttons worth showing: every link on something that needs you, and otherwise only links
+ * that go somewhere the row itself does not (the row already opens `actionUrl`).
+ */
+export function rowActions(item: NotificationItemDTO): NotificationItemDTO["actions"] {
+  return item.actions.filter((action) => action.url && (item.actionRequired || action.url !== item.actionUrl));
+}
+
 function NotificationRow({
   item,
   busy = false,
+  reach = false,
   onOpen,
   onArchive,
 }: {
   item: NotificationItemDTO;
   busy?: boolean;
-  onOpen: () => void;
+  reach?: boolean;
+  onOpen: (url?: string | null) => void;
   onArchive: () => void;
 }) {
   const t = useTranslations("notifications");
@@ -420,15 +477,17 @@ function NotificationRow({
   const copy = localizeNotification(item, t, locale);
   const unread = !item.readAt;
   const actionRequired = item.actionRequired;
+  const actions = reach ? rowActions(item) : [];
+  const teamName = reach ? item.teamName : null;
   return (
     <article
-      className={clsx("notification-row", { unread, action: actionRequired, "is-busy": busy })}
+      className={clsx("notification-row", { unread, action: actionRequired, "is-busy": busy, "has-actions": actions.length > 0 })}
       aria-busy={busy || undefined}
     >
       <button
         type="button"
         className="notification-row__main"
-        onClick={onOpen}
+        onClick={() => onOpen(item.actionUrl)}
         disabled={busy}
       >
         <span className="notification-row__dot" aria-hidden="true" />
@@ -440,10 +499,34 @@ function NotificationRow({
             </span>
           </span>
           {copy.body ? <span className="notification-row__text">{copy.body}</span> : null}
-          <ListTime className="notification-row__time" value={item.createdAt} empty="" />
+          {teamName ? (
+            <span className="notification-row__meta">
+              <ListTime className="notification-row__time" value={item.createdAt} empty="" />
+              <span className="notification-row__team" title={t("team_label_title", { team: teamName })}>
+                {teamName}
+              </span>
+            </span>
+          ) : (
+            <ListTime className="notification-row__time" value={item.createdAt} empty="" />
+          )}
         </span>
         {item.actionUrl ? <Arrow size={12} /> : null}
       </button>
+      {actions.length > 0 ? (
+        <div className="notification-row__actions">
+          {actions.map((action, index) => (
+            <button
+              key={action.id}
+              type="button"
+              className={clsx("notification-row__action", { primary: index === 0 })}
+              disabled={busy}
+              onClick={() => onOpen(action.url)}
+            >
+              {ACTION_LABEL_KEYS[action.id] ? t(ACTION_LABEL_KEYS[action.id]) : action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <button
         type="button"
         className="notification-row__archive"

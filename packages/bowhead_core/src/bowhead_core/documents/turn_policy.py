@@ -13,9 +13,10 @@ if TYPE_CHECKING:
     from bowhead_core.types import ToolInvocation
 
 ORIGINAL_REQUEST_QUOTE_GUIDANCE = (
-    "When an action requires quotation evidence, use the active Turn's canonical user request. "
+    "For fields named evidence, use the active Turn's canonical user request. "
     "Only a native resume envelope supplies original_request: quote its decoded string, not its JSON wrapper or escapes. "
     "A new ordinary follow-up is a new Turn, not that envelope. clarification_responses contains decisions, not quotation evidence. "
+    "The generate field original_request_quote has its own source-selection rules in the action schema. "
 )
 
 NATIVE_INPUT_GUIDANCE = (

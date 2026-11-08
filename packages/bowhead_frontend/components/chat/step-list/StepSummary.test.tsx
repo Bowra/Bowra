@@ -4,7 +4,7 @@
  * Pins the rendering + click contract per v8 `variant-a.jsx:204-230`:
  *   · Renders "{N} 步完成" with the steps' length
  *   · Renders the total duration when steps carry durationText
- *   · Renders "展开运行过程" call-to-action
+ *   · Renders "查看运行过程" call-to-action
  *   · Click fires onExpand
  *   · Single-step case still renders correctly
  */
@@ -105,11 +105,34 @@ describe("StepSummary", () => {
     const summary = screen.getByTestId("step-summary");
     const cta = summary.querySelector(".ui-card__trailing-label");
     expect(cta).toBeTruthy();
-    // Text and arrow are inside one trailing item.
-    expect(cta!.textContent).toBe("展开运行过程");
+    // Text and arrow are inside one trailing item; a screen-reader-only separator keeps the outcome and action apart.
+    expect(cta!.textContent).toBe(", 查看运行过程");
+    expect(cta!.querySelector(".sr-only")?.textContent).toBe(", ");
     expect(cta!.querySelector("svg")).toBeTruthy();
     // The arrow is no longer a direct button child (otherwise it can wrap independently).
     expect(summary.querySelector(":scope > svg")).toBeNull();
+  });
+
+  it("acts as a persistent disclosure: named by its outcome, expanded state exposed, folds again when open", () => {
+    const onExpand = vi.fn();
+    const onCollapse = vi.fn();
+    const { unmount } = renderIntl(
+      <StepSummary steps={[]} totalDurationMs={2_000} onExpand={onExpand} onCollapse={onCollapse} />,
+    );
+    const closed = screen.getByTestId("step-summary");
+    expect(closed.getAttribute("aria-expanded")).toBe("false");
+    expect(closed.getAttribute("aria-label")).toBeNull();
+    closed.click();
+    expect(onExpand).toHaveBeenCalledTimes(1);
+
+    unmount();
+    renderIntl(<StepSummary steps={[]} totalDurationMs={2_000} onExpand={onExpand} onCollapse={onCollapse} expanded />);
+    const open = screen.getByTestId("step-summary");
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+    expect(open.querySelector(".ui-card__trailing-label")?.textContent).toBe(", 收起运行过程");
+    open.click();
+    expect(onCollapse).toHaveBeenCalledTimes(1);
+    expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
   it("拿不到墙钟时才退回求和（兜底仍在）", () => {
@@ -128,10 +151,10 @@ describe("StepSummary", () => {
     expect(screen.getByText(/· 不到 1 秒/)).toBeTruthy();
   });
 
-  it("renders '展开运行过程' call-to-action", () => {
+  it("renders '查看运行过程' call-to-action", () => {
     const steps = [step({ stepId: "a" })];
     renderIntl(<StepSummary steps={steps} onExpand={() => {}} />);
-    expect(screen.getByText(/展开运行过程/)).toBeTruthy();
+    expect(screen.getByText(/查看运行过程/)).toBeTruthy();
   });
 
   it("fires onExpand when clicked", () => {
@@ -154,7 +177,7 @@ describe("StepSummary", () => {
     expect(summary.querySelector(".ui-card__icon svg")?.getAttribute("class")).toContain("lucide-list-tree");
     expect(summary.querySelector(".ui-card__line")?.textContent).toContain("执行已结束");
     expect(summary.querySelector('[data-testid="step-summary-duration"]')?.textContent).toContain("不到 1 秒");
-    expect(summary.querySelector(".ui-card__trailing-label")?.textContent).toContain("展开运行过程");
+    expect(summary.querySelector(".ui-card__trailing-label")?.textContent).toContain("查看运行过程");
   });
 
   it("renders without duration when no step carries one", () => {

@@ -52,6 +52,8 @@ class ChartColumn:
     currency_code: str | None = None
     display: NumericDisplay | None = None
     date_pattern: str | None = None
+    # A slot in the current server-validated chart palette; absent inherits the series default.
+    color_index: int | None = None
     # Percentage shape must come from source facts or a producer declaration.
     # Unknown shape is an ordinary number; names and ranges never establish it.
     percent_scale: str | None = None

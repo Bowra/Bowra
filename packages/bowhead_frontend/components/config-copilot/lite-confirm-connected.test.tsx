@@ -177,6 +177,20 @@ describe("LiteConfirmConnected", () => {
     expect(apiMock.mock.calls.some((c) => c[0] === "/api/v1/config-proposals/ccd_p1/ignore")).toBe(true);
   });
 
+  it("renders an agent-saved appearance as saved with Undo, then follows the server receipt", async () => {
+    let resolveHydrate: (value: ReturnType<typeof dto>) => void = () => undefined;
+    apiMock.mockReturnValueOnce(new Promise((resolve) => { resolveHydrate = resolve; }));
+    applyLiteProposal({ ...PROPOSAL, form_id: "personal_appearance", status: "applied" });
+    renderIntl(<LiteConfirmConnected proposalId="ccd_p1" />);
+    // Before the receipt loads, the card never offers to apply a change that is already saved.
+    expect(screen.queryByTestId("lite-applied")).toBeTruthy();
+    expect(screen.queryByText("应用")).toBeNull();
+    expect(screen.getByText("撤销")).toBeTruthy();
+    // Undone on another device: the authoritative receipt replaces the payload hint.
+    resolveHydrate(dto("reverted"));
+    await waitFor(() => expect(screen.queryByText("已恢复原设置")).toBeTruthy());
+  });
+
   it("重挂载（模拟 F5）重新 hydrate 恢复服务端终态", async () => {
     mockHydrate("applied");
     applyLiteProposal(PROPOSAL);

@@ -1492,6 +1492,7 @@ async def withdraw_team_skill_route(
         if leg == "candidate":
             _safe_rmtree(user.team_id, sk.candidate_path)  # Clean candidate directory (row slot already cleared).
     await _audit(store, user, AuditAction.TEAM_SKILL_UPDATED, sk, extra={"withdrawn": leg})
+    await _close_submission_notice(request, team_id=user.team_id, skill_id=skill_id, reason="withdrawn")
     got = await store.get_team_skill(user.team_id, skill_id)
     return _public(got or sk, include_review=True)
 
@@ -1786,6 +1787,7 @@ async def _protected_delete_team_skill(
         raise
     if committed:
         await finalize_cleanup(store.db_path, moved)
+        await _close_submission_notice(request, team_id=user.team_id, skill_id=skill_id, reason="deleted")
     elif replayed:
         with contextlib.suppress(Exception):
             await retry_pending_cleanup(store.db_path)
@@ -1841,6 +1843,7 @@ async def delete_team_skill_route(
     except Exception:  # noqa: S110
         pass
     await _audit(store, user, AuditAction.TEAM_SKILL_DELETED, existing)
+    await _close_submission_notice(request, team_id=user.team_id, skill_id=skill_id, reason="deleted")
     return None
 
 
@@ -1892,60 +1895,47 @@ async def _notify_approval(
     decision: str | None = None,  # approved | rejected (when event=decided).
     reason: str | None = None,
 ) -> None:
-    """审批通知（沿 shares._notify_share 先例：upsert_item + add_recipients 定向机制）.
+    """Skill approval notifications through `NotificationService` (best effort, like the audit).
 
-    dedupe_key 按事件类分键（review P1-3：单键会让裁决 upsert 改写 admin 手里的待审 item）：
-    提交=``skill_approval:submitted:<id>:<ts>``（→admins）；裁决=``skill_approval:decided:
-    <id>:<ts>``（→作者）。best-effort，失败吞掉（与审计同策略）；作者退团/查无收件人则
-    静默跳过（PRD §2.4）。文案 zh 硬编码同 _notify_share 先例，i18n 随 P3（§3.7）。"""
+    A submission is an action item for the Team's administrators until it is decided; a decision
+    closes it and tells the author (skipped when the author decided it or is no longer in the
+    Team). Withdrawal and deletion close it through `_close_submission_notice`."""
+    del store
     try:
-        ns = getattr(request.app.state, "notification_store", None)
-        if ns is None:
+        service = getattr(request.app.state, "notification_service", None)
+        if service is None:
             return
         label = sk.display_name or sk.name
+        actor_name = actor.display_name or actor.email
         if event == "submitted":
-            recipients = await store.list_team_users_by_roles(sk.team_id, {"owner", "team_admin"})
-            recipients = [r for r in recipients if r != actor.id]
-            title = f"{actor.display_name or actor.email} 提交了 skill「{label}」待审批"
-            action_url = "/team/settings/workflows"
-            ts = sk.candidate_submitted_at or sk.updated_at or _now()
-            dedupe_key = f"skill_approval:submitted:{sk.id}:{ts}"
-            ntype = "skill_approval_submitted"
+            await service.emit_skill_approval_submitted(
+                team_id=sk.team_id,
+                skill_id=sk.id,
+                skill_label=label,
+                submission_key=sk.candidate_submitted_at or sk.updated_at or _now(),
+                actor_user_id=actor.id,
+                actor_name=actor_name,
+            )
         else:
-            author = sk.submitted_by or sk.created_by
-            recipients = [author] if author and author != actor.id else []
-            if decision == "approved":
-                title = f"你的 skill「{label}」已通过审批"
-            else:
-                title = f"你的 skill「{label}」被拒绝：{(reason or '').strip()[:80]}"
-            action_url = "/skills/"
-            dedupe_key = f"skill_approval:decided:{sk.id}:{_now()}"
-            ntype = "skill_approval_decided"
-        if not recipients:
-            return
-        item = await ns.upsert_item(
-            team_id=sk.team_id,
-            category="share",
-            type=ntype,
-            priority="normal",
-            title=title,
-            body=None,
-            subject_type="team_skill",
-            subject_id=sk.id,
-            actor_user_id=actor.id,
-            action_url=action_url,
-            actions=None,
-            metadata={
-                "kind": "team_skill",
-                "resource_id": sk.id,
-                "event": event,
-                "decision": decision,
-                "actorName": actor.display_name or actor.email,
-                "skillLabel": label,
-                "reason": (reason or "").strip()[:80],
-            },
-            dedupe_key=dedupe_key,
-        )
-        await ns.add_recipients(item.id, [(r, None) for r in recipients])
+            await service.emit_skill_approval_decided(
+                team_id=sk.team_id,
+                skill_id=sk.id,
+                skill_label=label,
+                author_user_id=sk.submitted_by or sk.created_by,
+                actor_user_id=actor.id,
+                actor_name=actor_name,
+                decision=decision or "rejected",
+                reason=reason,
+            )
     except Exception:  # Notification failures do not block approval operations.
-        return
+        logger.warning("team_skill.approval_notice_failed id=%s event=%s", sk.id, event, exc_info=True)
+
+
+async def _close_submission_notice(request: Request, *, team_id: str, skill_id: str, reason: str) -> None:
+    """Close the administrators' open review item once nothing is waiting for review (best effort)."""
+    try:
+        service = getattr(request.app.state, "notification_service", None)
+        if service is not None:
+            await service.resolve_skill_approval_submitted(team_id=team_id, skill_id=skill_id, reason=reason)
+    except Exception:
+        logger.warning("team_skill.approval_notice_close_failed id=%s", skill_id, exc_info=True)

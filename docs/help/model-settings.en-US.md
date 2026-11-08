@@ -70,9 +70,9 @@ On **Model assignments**, expand **Show verification details** to view the verif
 
 ## Automatic retries on failure
 
-On **Model assignments**, **Model behavior** has one setting: **Automatic retries on failure**. When a model call fails before the model has replied at all, for example because it timed out, the connection failed, or the service had a temporary error, Bowra tries the call again up to this many times. The default is 3 and the allowed range is 0 to 5; enter 0 to turn retries off. Choose **Save retry settings** next to the field; the setting saves on its own and does not change model assignments.
+On **Model assignments**, **Model behavior** has one setting: **Automatic retries on failure**. When a model call fails, for example because it timed out, the connection failed or dropped partway through a reply, or the service had a temporary error, Bowra tries the call again up to this many times. The default is 3 and the allowed range is 0 to 5; enter 0 to turn retries off. Choose **Save retry settings** next to the field; the setting saves on its own and does not change model assignments.
 
-Retries only happen while the model has not started replying, so an answer is never sent twice. Every retry counts against the turn's time limit; when too little time is left, Bowra stops retrying and reports the failure. While a retry is pending, the conversation's running status shows, for example, "Model reply timed out, retrying (1/3)". If the page says the configuration changed since it loaded, reload the page and set the value again.
+If the connection drops after the model has started replying, the partial reply disappears and the model answers again from the start, so an answer is never shown twice. An interrupted call is not charged to your credits. Every retry counts against the turn's time limit; when too little time is left, Bowra stops retrying and reports the failure. While a retry is pending, the conversation's running status shows, for example, "Model reply timed out, retrying (1/3)". If the page says the configuration changed since it loaded, reload the page and set the value again.
 
 ## External capabilities
 

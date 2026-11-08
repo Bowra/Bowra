@@ -14,7 +14,7 @@
  * Native narrative markers share the chart Card profile and current output locale.
  */
 
-import { getCurrentLocale } from "@/lib/locale";
+import { staticTranslator } from "@/lib/locale-messages";
 import { formatDisplayValue, resolveDisplayMagnitude, formatObservedPercentCell, isUnsafeIntegerCell, formatObservedValue } from "@/lib/chart/format";
 
 // Compat: with/without unit, with/without src, sprint γ adds #highlight=.
@@ -39,8 +39,7 @@ export const CHART_RE = /\[chart:[^\]]+\]/g;
  * CNY identity stays explicit; magnitude and separators follow the surface locale.
  */
 export function formatCnyAmount(n: number): string {
-  const locale = getCurrentLocale();
-  const unit = locale.startsWith("zh") ? "元" : "CNY";
+  const unit = staticTranslator("cny_format")("unit");
   return formatDisplayValue(n, resolveDisplayMagnitude([n], unit));
 }
 

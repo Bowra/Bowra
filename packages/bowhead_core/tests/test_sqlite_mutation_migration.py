@@ -9,8 +9,8 @@ from contextlib import closing
 import pytest
 from bowhead_cli.migrate import upgrade
 from bowhead_core.migrations import chain_head
-from bowhead_core.sqlite_domain_upgrade import SPLIT_REVISION, run_domain_upgrade, table_evidence
-from bowhead_core.sqlite_domains import DOMAIN_TABLES, DOMAIN_TARGET_FILES
+from bowhead_core.sqlite_domain_upgrade import SPLIT_REVISION, SPLIT_TABLES, run_domain_upgrade, table_evidence
+from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
 from bowhead_core.sqlite_upgrade import database_head
 from test_sqlite_domain_upgrade import _advance
 from test_sqlite_domain_upgrade import directory as directory
@@ -21,7 +21,8 @@ def evidence(directory):
     result = {}
     for domain, filename in DOMAIN_TARGET_FILES.items():
         with closing(sqlite3.connect(directory / filename)) as db:
-            result[domain] = {table: table_evidence(db, table) for table in DOMAIN_TABLES[domain]}
+            # Rows the split copied must survive; tables later revisions append start empty.
+            result[domain] = {table: table_evidence(db, table) for table in SPLIT_TABLES[domain]}
     return result
 
 

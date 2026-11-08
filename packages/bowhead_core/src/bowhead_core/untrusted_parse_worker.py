@@ -76,6 +76,7 @@ def _run_attachment(control: dict[str, Any]) -> dict[str, Any]:
         artifact_id=control.get("artifact_id", ""),
         size=int(control.get("size", 0) or 0),
         data=data,
+        pptx_query=control.get("pptx_query"),
     )
 
 

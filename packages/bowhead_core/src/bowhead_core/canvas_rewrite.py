@@ -226,7 +226,13 @@ async def stream_rewrite(
     accumulated = ""
     response = LLMResponse(content="")
     try:
-        async for chunk in router.stream(_REWRITE_AGENT, req):
+        async for chunk in router.stream(_REWRITE_AGENT, req, allow_restart=True):
+            if chunk.stream_restart:
+                # The Router retries an interrupted attempt: discard its text. `done`
+                # carries the final text, which replaces the streamed preview.
+                accumulated = ""
+                response = LLMResponse(content="")
+                continue
             if chunk.finish_reason is not None:
                 response.finish_reason = chunk.finish_reason
             if chunk.diagnostics is not None:

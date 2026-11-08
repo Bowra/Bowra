@@ -5,7 +5,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 UV ?= uv
 FRONTEND_DIR := packages/bowhead_frontend
-PY_GUARDS := scripts/check_theme_surface_coverage.py scripts/check_chart_style_registry.py scripts/check_third_party_notices.py scripts/check_configuration_coverage.py scripts/check_configuration_field_guidance.py
+PY_GUARDS := scripts/check_notification_types.py scripts/check_theme_surface_coverage.py scripts/check_chart_style_registry.py scripts/check_third_party_notices.py scripts/check_configuration_coverage.py scripts/check_configuration_field_guidance.py
 
 .PHONY: help install install-frontend frontend-assemble run-gateway run-frontend fmt lint test typecheck-frontend build-frontend third-party-notices
 
@@ -31,6 +31,7 @@ run-frontend: ## Start frontend development against the gateway
 fmt: frontend-assemble ## Format source and documentation
 	$(UV) run python scripts/check_theme_surface_coverage.py --write
 	$(UV) run python scripts/check_chart_style_registry.py --write
+	$(UV) run python scripts/check_notification_types.py --write
 	@npx prettier --write --print-width 150 "*.{md,yml,yaml}" "**/*.{md,yml,yaml}" --no-error-on-unmatched-pattern
 	uvx ruff check packages $(PY_GUARDS) --fix
 	uvx ruff format packages $(PY_GUARDS)
@@ -40,6 +41,7 @@ lint: frontend-assemble ## Verify shared contracts, notices and Python formattin
 	$(UV) run python scripts/check_configuration_field_guidance.py
 	$(UV) run python scripts/check_theme_surface_coverage.py --check
 	$(UV) run python scripts/check_chart_style_registry.py --check
+	$(UV) run python scripts/check_notification_types.py --check
 	$(UV) run python scripts/check_third_party_notices.py --check
 	uvx ruff check packages $(PY_GUARDS)
 	uvx ruff format --check packages $(PY_GUARDS)

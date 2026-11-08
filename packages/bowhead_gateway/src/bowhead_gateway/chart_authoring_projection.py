@@ -7,17 +7,43 @@ from typing import Any
 from bowhead_core.source_access_projection import canonical_source_identity, collect_source_identities
 
 
-async def project_chart_for_authoring(request: Any, session_id: str, section: Any) -> dict[str, Any] | None:
+async def project_chart_for_authoring(request: Any, session_id: str, section: Any, *, access: Any = None) -> dict[str, Any] | None:
     from bowhead_gateway.routes.canvas import _build_source_refs_for_session, _viewer_safe_projector
 
     store = getattr(request.app.state, "canvas_store", None)
-    canvas = await store.get_canvas_by_session(session_id) if store else None
+    canvas = await access._canvas() if access is not None else await store.get_canvas_by_session(session_id) if store else None
     if canvas is None or section.canvas_id != canvas.id:
         return None
     sections = await store.list_sections(canvas.id, include_hidden=True)
     if not any(item.id == section.id and item.rev == section.rev for item in sections):
         return None
     canonical = section.to_report_section()
+    try:
+        identities, related_sources, derived_section = await chart_source_requirements(request.app.state.artifact_store, canonical)
+    except ValueError:
+        return None
+    if not identities:
+        return None
+    refs = await _build_source_refs_for_session(request, session_id, strict=True)
+    related_refs = [ref for ref in refs if canonical_source_identity(ref) in identities]
+    if derived_section is not None:
+        # The server-owned derivation links this report's data artifact to the
+        # original, even when the report has no separate source-ref row for it.
+        related_refs.extend(related_sources)
+    if access is not None:
+        projector = await access._sources(canvas, [canonical, *([derived_section] if derived_section else [])], related_refs)
+    else:
+        projector = await _viewer_safe_projector(
+            request, canvas, [section], related_refs, additional_sections=[derived_section] if derived_section else None
+        )
+    if any(not projector.access_by_identity.get(identity, False) for identity in identities):
+        return None
+    projected, _ = projector.project([canonical])
+    return projected[0] if len(projected) == 1 else None
+
+
+async def chart_source_requirements(artifact_store: Any, canonical: dict[str, Any]) -> tuple[list[str], list[dict], dict | None]:
+    """Resolve the original chart source requirements, including verified derivation."""
     # add_chart records the active Datarc workspace on every new chart, even
     # when the actual input is a Python artifact. This context is not an
     # additional data source in that specific shape. Keep it in the viewer
@@ -40,18 +66,17 @@ async def project_chart_for_authoring(request: Any, session_id: str, section: An
         and artifact_id.startswith("art_")
         and artifact_id != original_id
     ):
-        artifact_store = getattr(request.app.state, "artifact_store", None)
         try:
             derived = await artifact_store.get_many([artifact_id]) if artifact_store else []
         except Exception:
-            return None
+            raise ValueError("Chart provenance unavailable")
         if (
             len(derived) != 1
             or getattr(derived[0], "id", None) != artifact_id
             or getattr(derived[0], "source", None) != "chart_calculation"
             or getattr(derived[0], "derived_from", None) != original_id
         ):
-            return None
+            raise ValueError("Chart provenance unavailable")
         # The current Canvas closure and the projector independently authorize
         # the stored calculation and its original source; do not trust a model
         # claim that two unrelated artifacts form a derivation.
@@ -70,18 +95,5 @@ async def project_chart_for_authoring(request: Any, session_id: str, section: An
     identities = collect_source_identities([required_section])
     if derived_section is not None:
         identities = list(dict.fromkeys([*identities, artifact_id]))
-    if not identities:
-        return None
-    refs = await _build_source_refs_for_session(request, session_id, strict=True)
-    related_refs = [ref for ref in refs if canonical_source_identity(ref) in identities]
-    if derived_section is not None:
-        # The server-owned derivation links this report's data artifact to the
-        # original, even when the report has no separate source-ref row for it.
-        related_refs.append({"id": original_id, "artifact_id": original_id})
-    projector = await _viewer_safe_projector(
-        request, canvas, [section], related_refs, additional_sections=[derived_section] if derived_section else None
-    )
-    if any(not projector.access_by_identity.get(identity, False) for identity in identities):
-        return None
-    projected, _ = projector.project([canonical])
-    return projected[0] if len(projected) == 1 else None
+    related_sources = [{"id": original_id, "artifact_id": original_id}] if derived_section is not None else []
+    return identities, related_sources, derived_section

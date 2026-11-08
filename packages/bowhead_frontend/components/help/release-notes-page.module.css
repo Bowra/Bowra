@@ -41,6 +41,10 @@
   margin-top: 22px;
 }
 
+.version {
+  display: flow-root;
+}
+
 .version + .version {
   margin-top: 22px;
 }

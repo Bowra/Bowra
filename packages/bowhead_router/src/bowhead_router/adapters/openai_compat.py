@@ -233,10 +233,11 @@ class OpenAICompatibleAdapter:
     supports_input_admission: ClassVar[bool] = True
 
     base_url: str
-    api_key: str
+    # Secrets stay out of repr: exception logs and error messages may render this object.
+    api_key: str = field(repr=False)
     provider_name: str = "openai_compat"
     timeout_sec: int = 60
-    default_headers: dict[str, str] = field(default_factory=dict)
+    default_headers: dict[str, str] = field(default_factory=dict, repr=False)
     ssrf_guard: bool = False
     # Rewrite tool names that providers reject (dots, over-long) on the wire and map them back
     # on inbound tool calls; see bowhead_router.tool_names. Compliant names are never changed.
@@ -631,7 +632,7 @@ class OpenAICompatibleAdapter:
         # Sprint χ-1.1: 2 attempts max (initial + sniff-drop retry).
         attempt = None
         attempt_settled = False
-        # Any yielded output makes a later transport failure unknown, never retried.
+        # Transport-failure settlement evidence records whether output was yielded.
         output_started = False
         try:
             for _attempt in range(2):

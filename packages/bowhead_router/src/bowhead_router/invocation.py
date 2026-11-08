@@ -368,33 +368,60 @@ def transport_phase(exc: BaseException) -> str:
     return "read"
 
 
+def is_transport_failure(exc: BaseException) -> bool:
+    """Whether a provider call failed in transport rather than with a provider answer.
+
+    Adapters raise their typed error ``from`` the ``httpx`` exception (timeout,
+    connect, read/network or protocol error) after ``settle_transport_failure``.
+    Only the explicit cause chain is followed, never implicit exception context.
+    """
+    import httpx2
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, httpx2.HTTPError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__
+    return False
+
+
 async def settle_transport_failure(
     attempt: PhysicalInvocationAttempt | None,
     exc: BaseException,
     *,
     output_started: bool,
 ) -> None:
-    """Settle a timeout or connect failure before any model output was yielded.
+    """Settle a model call that failed in transport as not applied.
 
-    No text, reasoning or tool call reached the caller, so nothing was used or
-    shown and, by product decision (2026-10-20), nothing is charged: the attempt
-    is recorded as not applied and its typed error may be retried. Metadata
+    Any transport failure (timeout, connect failure, read/network or protocol
+    error) is retried by the Router, before or after output started. A partial
+    stream is discarded by its consumer and never used: tool calls run only
+    after a stream completes. By product decisions (2026-10-20 for no output,
+    2026-11-08 after output) the interrupted attempt is not charged. Metadata
     frames may have arrived and the provider may already have been generating;
-    provider-side cost is not observable here in either case. Once any output
-    was yielded the outcome stays unknown and is never retried. Other transport
-    errors after the request was sent also stay unknown.
+    provider-side cost is not observable here in either case.
+
+    A timeout or connect failure before any output keeps its original evidence
+    code; every other transport failure records ``provider_transport_interrupted/v1``.
+    A settlement the authority refuses still raises the unknown outcome.
     """
     import httpx2
 
     phase = transport_phase(exc)
     timed_out = isinstance(exc, httpx2.TimeoutException)
-    if output_started or not (timed_out or phase == "connect"):
-        await fail_physical_invocation(attempt, reason_code="transport_timeout" if timed_out else "transport_network_error")
+    if not output_started and (timed_out or phase == "connect"):
+        await confirm_physical_not_applied(
+            attempt,
+            evidence_code="provider_no_response_timeout/v1",
+            evidence={"phase": phase, "timed_out": timed_out},
+        )
         return
     await confirm_physical_not_applied(
         attempt,
-        evidence_code="provider_no_response_timeout/v1",
-        evidence={"phase": phase, "timed_out": timed_out},
+        evidence_code="provider_transport_interrupted/v1",
+        evidence={"phase": phase, "timed_out": timed_out, "output_started": output_started},
     )
 
 
@@ -457,11 +484,13 @@ async def fail_physical_invocation(
             reason_code=reason_code,
         )
         raise
-    except InvocationOutcomeUnknownError:
+    except InvocationOutcomeUnknownError as exc:
+        if exc.failure is None:
+            exc.failure = failure
         raise
     except Exception as exc:
-        raise InvocationOutcomeUnknownError(reason_code) from exc
-    raise InvocationOutcomeUnknownError(reason_code)
+        raise InvocationOutcomeUnknownError(reason_code, failure=failure) from exc
+    raise InvocationOutcomeUnknownError(reason_code, failure=failure)
 
 
 async def abandon_physical_invocation(

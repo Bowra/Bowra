@@ -149,7 +149,34 @@ test("desktop report reading width expands prose and keeps a local reversible ma
   await expect(page.locator(".canvas-report-shell")).toHaveAttribute("data-reading-width", "standard");
 });
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 768, 390]) {
+  test(`HTML preview follows the pane height at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openReport(page);
+    await page.goto("/?session=s_e2e&result=art_delivery&mode=preview");
+    const frame = page.locator('iframe[title="executive-brief.html"]');
+    await expect(frame).toBeVisible();
+    const measure = () => frame.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const body = element.closest(".results-body--artifact")!;
+      const pane = body.getBoundingClientRect();
+      const controls = body.querySelector(".safe-html-preview-status")!.getBoundingClientRect();
+      const hint = body.querySelector(".safe-html-preview-hint")!.getBoundingClientRect();
+      return { height: bounds.height, unused: pane.bottom - hint.bottom, bottom: hint.bottom, paneBottom: pane.bottom,
+        overlap: Math.max(controls.bottom - bounds.top, bounds.bottom - hint.top) };
+    });
+    await expect.poll(async () => Math.abs((await measure()).unused)).toBeLessThan(20);
+    const tall = await measure();
+    await page.setViewportSize({ width, height: 680 });
+    await expect.poll(async () => tall.height - (await measure()).height).toBeGreaterThan(180);
+    const short = await measure();
+    expect(short.height).toBeGreaterThan(100);
+    expect(short.overlap).toBeLessThanOrEqual(1);
+    expect(short.bottom).toBeLessThanOrEqual(short.paneBottom + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await page.screenshot({ path: test.info().outputPath(`html-pane-height-${width}.jpg`) });
+  });
+
   test(`artifact full view fills the viewport and returns focus at ${width}px`, async ({ page }) => {
     const height = 844;
     await page.setViewportSize({ width, height });
@@ -314,3 +341,37 @@ test.describe("compact report entry and reading", () => {
     await page.screenshot({ path: test.info().outputPath("touch-landscape.png") });
   });
 });
+
+for (const width of [390, 1440]) {
+  test(`native palette color survives reload at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route("**/api/v1/canvas/by-session/s_e2e**", async (route) => {
+      const response = await route.fetch();
+      const dto = await response.json();
+      if (Array.isArray(dto.sections)) {
+        const section = dto.sections.find((item: { id: string }) => item.id === "sec_results_data");
+        section.spec = { kind: "bar", title: "Native green counts", row_count: 2,
+          columns: [{ key: "range", header: "Range", type: "categorical" }, { key: "count", header: "Count", type: "numeric", color_index: 4 }],
+          rows: [{ range: "1-100", count: 25 }, { range: "101-200", count: 21 }],
+          explicit_presentation: { version: 1, mode: "plot", axes: { x: "range", y: ["count"], x_scale: "category" }, group_by: [] } };
+      }
+      await route.fulfill({ json: dto });
+    });
+    await openReport(page);
+    await page.goto("/?session=s_e2e&result=report");
+    const figure = page.getByRole("figure", { name: "Native green counts", exact: true });
+    const greenPixels = () => figure.locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
+      const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3]! > 200 && pixels[i + 1]! > pixels[i]! * 1.05 && pixels[i + 1]! > pixels[i + 2]! * 1.1) count += 1;
+      }
+      return count;
+    });
+    await expect(figure.locator("canvas").first()).toBeVisible();
+    await expect.poll(greenPixels).toBeGreaterThan(500);
+    await page.reload();
+    await expect.poll(greenPixels).toBeGreaterThan(500);
+    await page.screenshot({ path: test.info().outputPath(`native-green-${width}.png`) });
+  });
+}

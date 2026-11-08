@@ -5227,15 +5227,29 @@ class UserStore:
         addresses). Raw (not masked like list_team_directory) because it's an exact-match allowlist."""
         if not team_id:
             return set()
+        return set(await self.team_member_ids_by_email(team_id))
+
+    async def team_member_ids_by_email(self, team_id: str) -> dict[str, str]:
+        """Lower-cased email → user id for the active members of an active Team.
+
+        Membership is the Team's own active membership (or its creator), never the legacy
+        ``users.team_id``: a person in several Teams is a member of each, and a departed one of none.
+        """
+        if not team_id:
+            return {}
         async with (
             diagnostic_connect(self.db_path) as db,
             db.execute(
-                "SELECT email FROM users WHERE team_id = ? AND status = 'active' AND email IS NOT NULL",
+                "SELECT u.email, u.id FROM users u JOIN teams t ON t.id = ? "
+                "WHERE u.status = 'active' AND t.status = 'active' AND u.email IS NOT NULL "
+                "AND (t.created_by_user_id = u.id OR EXISTS ("
+                "SELECT 1 FROM team_members om WHERE om.team_id = t.id AND om.user_id = u.id AND om.status = 'active'"
+                "))",
                 (team_id,),
             ) as cur,
         ):
             rows = await cur.fetchall()
-        return {str(r[0]).strip().lower() for r in rows if r[0]}
+        return {str(r[0]).strip().lower(): str(r[1]) for r in rows if r[0]}
 
     async def workspace_in_team(
         self,
@@ -5491,6 +5505,30 @@ class UserStore:
             ) as cur,
         ):
             return await cur.fetchone() is not None
+
+    async def filter_active_team_members(self, team_id: str, user_ids: set[str]) -> set[str]:
+        """The subset of ``user_ids`` who are active users with an active membership in an active Team.
+
+        The Team's creator counts as a member, as `list_team_users_by_roles` treats it. Notification
+        delivery uses this so an item never reaches someone who has left its Team.
+        """
+        if not team_id or not user_ids:
+            return set()
+        ids = sorted(user_ids)
+        placeholders = ",".join(["?"] * len(ids))
+        async with (
+            diagnostic_connect(self.db_path) as db,
+            db.execute(
+                "SELECT u.id FROM users u JOIN teams t ON t.id = ? "  # noqa: S608
+                f"WHERE u.id IN ({placeholders}) AND u.status = 'active' AND t.status = 'active' "
+                "AND (t.created_by_user_id = u.id OR EXISTS ("
+                "SELECT 1 FROM team_members om WHERE om.team_id = t.id AND om.user_id = u.id AND om.status = 'active'"
+                "))",
+                (team_id, *ids),
+            ) as cur,
+        ):
+            rows = await cur.fetchall()
+        return {str(row[0]) for row in rows}
 
     async def set_active_team(self, user_id: str, team_id: str) -> bool:
         if not await self.user_has_active_team_membership(user_id, team_id):

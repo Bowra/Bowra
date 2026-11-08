@@ -406,10 +406,20 @@ async def capture_ordinary_lead_loop(
             )
         ):
             raise OrdinaryContinuationUnavailable()
+    report_reads = []
+    for invocation in lead_calls:
+        if invocation.tool_name == "read_report" and isinstance(invocation.result, dict) and invocation.result.get("ok") is True:
+            observed = state.tool_materials.get((subagent_id, invocation.call_id))
+            if observed is None:
+                observed = getattr(getattr(ctx, "context_source_observations", None), "tool_materials", {}).get((subagent_id, invocation.call_id))
+            if observed is None or observed.get("kind") != "report_read":
+                raise OrdinaryContinuationUnavailable()
+            report_reads.append({**observed, "call_id": invocation.call_id})
     material = {"helpers": helper_materials} if len(helpers) > 1 or shared_outcomes else helper_materials[0]
     await _uploads(ctx, source)
     from bowhead_core.ordinary_lead_material import revalidate_tool_materials
 
+    await revalidate_tool_materials(ctx, report_reads)
     for entry in helper_materials:
         await revalidate_tool_materials(ctx, entry["tools"])
     if parallel or retained_knowledge:
@@ -447,6 +457,13 @@ async def capture_ordinary_lead_loop(
     if remaining_wallclock_s <= 0:
         raise OrdinaryContinuationUnavailable()
     checkpoint = OrdinaryLeadCheckpoint(
+        material_receipts={
+            inv.call_id: {"references": inv.material_refs.model_dump(exclude_none=True), "readers": list(inv.material_readers)}
+            for inv in prefix
+            if inv.material_refs is not None
+        }
+        or None,
+        report_reads=report_reads or None,
         storage_format="segmented.v1",
         context_projection_enabled=getattr(ctx, "_model_context_history", None) is not None,
         context_base_generation=getattr(getattr(ctx, "_model_context_history", None), "generation_id", None),
@@ -586,6 +603,7 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
 
     for entry in checkpoint.helper_materials():
         await revalidate_tool_materials(ctx, entry.get("tools", []), contract=checkpoint.contract)
+    await revalidate_tool_materials(ctx, checkpoint.report_reads or [], contract=checkpoint.contract)
     from bowhead_core.ordinary_lead_material import canvas_evidence
 
     if "canvas" in material and await canvas_evidence(ctx, contract=checkpoint.contract) != material["canvas"]:
@@ -644,6 +662,7 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
         for entry in checkpoint.helper_materials():
             await _helper(ctx, db, entry)
             await revalidate_material_authority_in_connection(ctx, db, entry, contract=checkpoint.contract)
+        await revalidate_material_authority_in_connection(ctx, db, {"tools": checkpoint.report_reads or []}, contract=checkpoint.contract)
         source = await _source(ctx, db)
         await _uploads(ctx, source)
         if checkpoint.contract in {

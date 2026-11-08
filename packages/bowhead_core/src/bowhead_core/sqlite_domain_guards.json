@@ -3193,6 +3193,19 @@
         ]
       ],
       "compiled": "CREATE TRIGGER trg_reference_method_composition BEFORE INSERT ON chat_reference_resolutions WHEN bowhead_domain_predicate_v1('trg_reference_method_composition',NEW.\"composition_json\",NEW.\"execution_id\",NEW.\"turn_id\",NEW.\"created_generation\",NEW.\"resolution_seq\",NEW.\"idempotency_key\")=1 BEGIN SELECT RAISE(ABORT,'reference skill composition material mismatch'); END"
+    },
+    "trg_account_retired_notification_deliveries_insert": {
+      "source": "CREATE TRIGGER trg_account_retired_notification_deliveries_insert BEFORE INSERT ON \"notification_deliveries\" WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id=NEW.\"user_id\") BEGIN SELECT RAISE(ABORT,'account is deleted'); END",
+      "domain": "notifications",
+      "table": "notification_deliveries",
+      "predicate": "SELECT CASE WHEN (EXISTS(SELECT 1 FROM account_deletions WHERE user_id=?1)) THEN 1 ELSE 0 END",
+      "refs": [
+        [
+          "NEW",
+          "user_id"
+        ]
+      ],
+      "compiled": "CREATE TRIGGER trg_account_retired_notification_deliveries_insert BEFORE INSERT ON \"notification_deliveries\" WHEN bowhead_domain_predicate_v1('trg_account_retired_notification_deliveries_insert',NEW.\"user_id\")=1 BEGIN SELECT RAISE(ABORT,'account is deleted'); END"
     }
   },
   "views": {

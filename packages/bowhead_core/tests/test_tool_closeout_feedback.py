@@ -104,7 +104,8 @@ def test_optional_caveat_and_successful_empty_data_do_not_require_review():
     assert validate_delivery_review(None, calls).complete
 
 
-def test_mixed_batch_can_be_covered_by_successful_read_without_requery():
+@pytest.mark.parametrize("required_profit_missing", [False, True])
+def test_mixed_batch_can_be_covered_by_successful_read_without_requery(required_profit_missing):
     calls = [
         ToolInvocation(
             "bi_query",
@@ -126,8 +127,13 @@ def test_mixed_batch_can_be_covered_by_successful_read_without_requery():
     }
     assert not validate_delivery_review(review, calls).valid
     calls.append(ToolInvocation("read_data_artifact", {"artifact_id": "art_revenue"}, call_id="read", result={"ok": True, "rows": [[4200]]}))
+    if required_profit_missing:
+        review["requirements"].append({"requirement": "Deliver required profit", "status": "unfulfilled", "evidence_call_ids": []})
     evaluated = validate_delivery_review(review, calls)
-    assert evaluated.valid and evaluated.complete
+    assert evaluated.valid and evaluated.complete is not required_profit_missing
+    payload = {"exec_summary": "Revenue verified from the original result.", "delivery_review": review}
+    assert review_terminal_payload(payload, calls) is None
+    assert payload["completion"] == ("partial" if required_profit_missing else "complete")
     assert classify_tool_outcome(calls[0].result).state == "partial"
     assert len([call for call in calls if call.tool_name == "bi_query"]) == 1
 

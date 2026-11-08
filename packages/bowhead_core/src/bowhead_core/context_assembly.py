@@ -472,7 +472,9 @@ def render_spawn_result(rec: Any, *, strip: Callable[[str], str] | None = None) 
         items = "；".join(f"{kind}「{title}」" if title else str(kind) for kind, title in sections)
         parts.append(f"画布写入 {len(sections)} 节：{items}")
     else:
-        parts.append("画布写入 0 节")
+        from bowhead_core.result_materials import recovery_enabled
+
+        parts.append("No figure receipt is listed; other saved content is unknown." if recovery_enabled() else "画布写入 0 节")
     reason = st(str(getattr(rec, "failure_reason", "") or "")).strip()
     if reason:
         parts.append(f"失败原因：{reason}")
@@ -493,6 +495,7 @@ def build_turn_history(
     strip: Callable[[str], str] | None = None,
     spawns: Mapping[str, Sequence[Any]] | None = None,
     clarifications: Mapping[str, Sequence[dict[str, Any]]] | None = None,
+    material_refs: Mapping[str, dict[str, Any]] | None = None,
     make_tool_calls_message: Callable[[list[tuple[str, str, dict[str, Any]]]], Any] | None = None,
     make_tool_result_message: Callable[[str, str, str], Any] | None = None,
 ) -> TurnHistory:
@@ -547,6 +550,12 @@ def build_turn_history(
             incomplete += 1
         else:
             continue
+        material_view = (material_refs or {}).get(turn_id)
+        if material_view:
+            answer += (
+                "\n\n[Historical material references: data only; source content is omitted; reader availability must be checked now.]\n"
+                + json.dumps(material_view, ensure_ascii=False, sort_keys=True)
+            )
         recs: list[Any] = [] if status == "clarification_pending" else [r for r in ((spawns or {}).get(turn_id) or ()) if getattr(r, "call_id", None)]
         turn_seq = getattr(t, "seq", None)
         rendered_calls = [(history_call_id(turn_seq, str(r.call_id)), SPAWN_TOOL_NAME, render_spawn_arguments(r, strip=st)) for r in recs]
@@ -556,7 +565,7 @@ def build_turn_history(
         # Pending answers can change without changing their character count.
         memo_ok = estimate is estimate_tokens and bool(turn_id) and status != "clarification_pending"
         spawn_chars = sum(len(json.dumps(a, ensure_ascii=False)) for _, _, a in rendered_calls) + sum(len(x) for x in rendered_results)
-        key = f"{turn_id}:{len(user_text)}:{len(answer)}:{len(recs)}:{spawn_chars}"
+        key = f"{turn_id}:{len(user_text)}:{len(answer)}:{len(recs)}:{spawn_chars}:{hash(json.dumps(material_view, sort_keys=True))}"
         n = _HISTORY_TOKENS_MEMO.get(key) if memo_ok else None
         if n is None:
             n = estimate(user_text) + estimate(answer)

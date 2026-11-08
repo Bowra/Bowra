@@ -14,9 +14,19 @@ import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 
 import { apiFetch } from "@/lib/api-client";
-import { unprefixAppPath } from "@/lib/base-path";
+import {
+  HIDDEN_POLL_MS,
+  notificationsAvailable,
+  readOffer,
+  TURN_CHANNEL,
+  VISIBLE_POLL_MS,
+  viewedSessionId,
+  writeOffer,
+} from "@/lib/attention-loop";
 import { toast, type ToastKind } from "@/lib/use-toast";
 import { useAppRouter } from "@/lib/use-app-router";
+
+export { viewedSessionId } from "@/lib/attention-loop";
 
 export interface TurnCompletion {
   turn_id: string;
@@ -26,38 +36,9 @@ export interface TurnCompletion {
   ended_at: string;
 }
 
-const URL = "/api/v1/sessions/turn-completions";
-const VISIBLE_POLL_MS = 15_000;
-const HIDDEN_POLL_MS = 60_000;
-const OFFER_KEY = "bowhead.completion-notifications.offer";
-const CHANNEL = "bowhead-turn-completions";
-
-/** The session the user is looking at, when the chat page is in the foreground. */
-export function viewedSessionId(): string | null {
-  if (typeof document === "undefined" || document.visibilityState !== "visible") return null;
-  if (unprefixAppPath(window.location.pathname) !== "/") return null;
-  return new URLSearchParams(window.location.search).get("session");
-}
-
-function readOffer(): string | null {
-  try {
-    return window.localStorage.getItem(OFFER_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeOffer(value: "granted" | "dismissed"): void {
-  try {
-    window.localStorage.setItem(OFFER_KEY, value);
-  } catch {
-    // Private windows may block storage; the offer can then show again later.
-  }
-}
-
-function notificationsAvailable(): boolean {
-  return typeof window !== "undefined" && window.isSecureContext && "Notification" in window;
-}
+export const TURN_COMPLETIONS_URL = "/api/v1/sessions/turn-completions";
+const URL = TURN_COMPLETIONS_URL;
+const CHANNEL = TURN_CHANNEL;
 
 export function TurnCompletionNotifier() {
   const t = useTranslations("completion");

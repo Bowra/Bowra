@@ -1,4 +1,5 @@
 import { quantityUnitOf } from "./format";
+import { colorIndex, editableColorColumns } from "./series-colors";
 import { CHART_STYLE_PRESENTATION_POLICY } from "./chart-style-registry";
 import { compareDateAxisValues } from "./date-order";
 import { pivotLongSpec, transposeTimeWideSpec, type CellOrigins } from "./pivot-long";
@@ -32,6 +33,7 @@ export interface NormalizedChartRenderShapeV1 {
     stackKey: string | null;
     hasPositive: boolean;
     hasNegative: boolean;
+    paletteIndex?: number;
   }>;
   barStackEdges?: {
     positiveOuterSeriesIndexByCategory: Array<number | null>;
@@ -320,6 +322,17 @@ export function deriveNormalizedChartRenderShapeV1(spec: ChartSpec): NormalizedC
     }),
     valuesBySeries: analytical.binding.series_values!.map((value) => rows.filter((row) => row[analytical.series_key!] === value).map((row) => finiteNumber(row[analytical.value_key!]))),
   } : deriveSeries(spec);
+  let colorColumns = editableColorColumns(spec);
+  if (colorColumns.length) {
+    if (spec.kind === "dual_axis") {
+      const split = dualAxisColumns(spec.columns);
+      colorColumns = [...split.bars, ...split.lines];
+    }
+    derived.series.forEach((series, index) => {
+      const selected = colorIndex(colorColumns[index]?.color_index);
+      if (selected !== undefined) (series as NormalizedChartRenderShapeV1["series"][number]).paletteIndex = selected;
+    });
+  }
   const stacked = spec.kind === "area_stacked" || spec.kind === "stacked_bar";
   const allSeriesValues = derived.valuesBySeries.flat();
   const hasPositive = allSeriesValues.some((value) => value !== null && value > 0);

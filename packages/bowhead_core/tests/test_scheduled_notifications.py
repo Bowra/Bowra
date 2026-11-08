@@ -23,6 +23,9 @@ class _Users:
     async def list_team_users_by_roles(self, team_id, roles, *, include_creator=True):
         return ["u_admin"]
 
+    async def filter_active_team_members(self, team_id, user_ids):
+        return set(user_ids)
+
 
 def _svc(tmp_path):
     store = NotificationStore(str(tmp_path / "n.db"))

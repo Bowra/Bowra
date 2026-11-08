@@ -278,6 +278,7 @@ async def build_access_context_from_request(
     allow_missing_workspace: bool = False,
     operation: SpaceOperation = SpaceOperation.WRITE,
     allow_team_admin_override: bool = False,
+    expected_team_id: str | None = None,
 ) -> AccessContext:
     return await build_access_context_for_user_from_request(
         request,
@@ -286,6 +287,7 @@ async def build_access_context_from_request(
         allow_missing_workspace=allow_missing_workspace,
         operation=operation,
         allow_team_admin_override=allow_team_admin_override,
+        expected_team_id=expected_team_id,
     )
 
 

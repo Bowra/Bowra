@@ -950,6 +950,12 @@ def test_mcp_preview_only_marks_explicit_destructive_tools_as_approval_gated(tmp
     per_op = {op["operation_id"]: op["approval_executable"] for op in preview.json()["operations"]}
     assert per_op == {"search": None, "delete": False}
 
+    monkeypatch.setenv("FEATURE_TEAM_TOOL_CONFIRMATION", "1")
+    confirmed = client.post("/api/v1/team-tool-sources/preview", json={"kind": "mcp", "mcp_url": _PUB + "/mcp"})
+    assert confirmed.status_code == 200, confirmed.text
+    # The requester confirms each remote MCP write, so it no longer depends on the approval executor.
+    assert {op["operation_id"]: op["approval_executable"] for op in confirmed.json()["operations"]} == {"search": None, "delete": True}
+
 
 def test_mcp_prompt_preview_and_create_persist_metadata_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_MCP_PROMPT", "1")

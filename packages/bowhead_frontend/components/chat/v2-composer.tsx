@@ -48,7 +48,6 @@ import {
   type AttachmentErrorKind,
   type AttachmentItem,
 } from "./attachment-chip";
-import { DialogShell } from "@/components/ui/dialog";
 import { copyDiagnostics, ErrorDiagnosticsInline } from "@/components/error-notice";
 import { errorDiagnosticsFrom } from "@/lib/error-presentation";
 import { toast } from "@/lib/use-toast";
@@ -171,6 +170,9 @@ interface Props {
   running?: boolean;
   /** Durable Stop accepted; wait for the worker terminal frame. */
   stopRequested?: boolean;
+  /** A question card above waits for the user's answer. The composer's polite status region says so, so the pause
+   *  reaches screen-reader users without moving focus away from whatever they are typing. */
+  awaitingAnswer?: boolean;
   /** Stop callback; parent persists the cancel request and retains SSE authority. */
   onCancel?: () => void | boolean | Promise<void | boolean>;
   /** Sprint chat-v4-streaming Wave 4 — "换个问法" prefill. When parent passes
@@ -440,7 +442,7 @@ function PlanningControl({
 }
 
 /**
- * Comfortable-layout "+" when Google Drive selection is available: upload a file or pick
+ * "+" in every layout when Google Drive selection is available: upload a file or pick
  * Drive files (inserted into the input as plain "name link" lines). Without Google the
  * "+" stays a plain upload button.
  */
@@ -450,12 +452,14 @@ function ComposerAddMenu({
   fallbackFocusRef,
   onUpload,
   onPickGoogleDrive,
+  onOpen,
 }: {
   disabled: boolean;
   uploadDisabled: boolean;
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   onUpload: () => void;
   onPickGoogleDrive: () => void;
+  onOpen: () => void;
 }) {
   const t = useTranslations("composer");
   const tDrive = useTranslations("google_drive");
@@ -466,13 +470,19 @@ function ComposerAddMenu({
     open,
     onOpenChange: (next) => {
       if (next && disabled) return;
+      if (next && !open) onOpen();
       setOpen(next);
     },
     placement: "top-start",
     maxHeight: COMPOSER_MENU_MAX_HEIGHT,
     returnFocusFallback,
-    sheetTitle: t("tools_title"),
+    // Two source actions stay anchored, including in narrow desktop columns.
+    // The existing upload input must remain outside an inert modal background.
+    presentation: "popover",
   });
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   return (
     <div ref={wrapRef} className="composer-v2__planning-wrap">
       <button
@@ -580,110 +590,6 @@ function PlanningMenuItem({ mode, on, onSelect }: { mode: PlanningMode; on: bool
   );
 }
 
-function ComposerToolsSheet({
-  open,
-  dialogId,
-  triggerRef,
-  planning,
-  onUploadChange,
-  uploadDisabled,
-  onPickGoogleDrive,
-  onPlanningToggle,
-  onClose,
-}: {
-  open: boolean;
-  dialogId: string;
-  triggerRef: React.RefObject<HTMLButtonElement | null>;
-  planning: boolean;
-  onUploadChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  uploadDisabled: boolean;
-  /** Present only while Google Drive selection is available to this member's team. */
-  onPickGoogleDrive?: () => void;
-  onPlanningToggle: (enabled: boolean) => void;
-  onClose: () => void;
-}) {
-  const t = useTranslations("composer");
-  const tDrive = useTranslations("google_drive");
-  const uploadRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const composerRoot = triggerRef.current?.closest("[data-composer-surface]") ?? null;
-    // On close the trigger may be disabled (sending/read-only), defeating DialogShell focus restoration; fall back to the input in the original order.
-    return () => focusComposerFallback(composerRoot, triggerRef.current, previous);
-  }, [open, triggerRef]);
-
-  if (!open) return null;
-
-  return (
-    <DialogShell
-      presentation="center"
-      onClose={onClose}
-      label={t("tools_title")}
-      backdropClassName="composer-v2__sheet-backdrop"
-      // FloatingOverlay's inline top/bottom overrides the stylesheet's visual-viewport values; restore them here.
-      backdropStyle={{
-        top: "var(--bh-visual-viewport-top, 0px)",
-        bottom: "var(--bh-visual-viewport-bottom, 0px)",
-      }}
-      panelClassName="composer-v2__sheet"
-      panelProps={{ id: dialogId }}
-    >
-      <div className="composer-v2__sheet-head">
-        <strong>{t("tools_title")}</strong>
-        <button type="button" onClick={onClose} aria-label={t("tools_close")}><CharIcon ch="×" aria-hidden /></button>
-      </div>
-      <input
-        ref={uploadRef}
-        disabled={uploadDisabled}
-        type="file"
-        multiple
-        accept={UPLOAD_ACCEPT}
-        tabIndex={-1}
-        aria-hidden="true"
-        style={{ display: "none" }}
-        onChange={(event) => {
-          onUploadChange(event);
-          onClose();
-        }}
-      />
-      <button
-        type="button"
-        className="composer-v2__sheet-row"
-        disabled={uploadDisabled}
-        onClick={() => {
-          // This input lives inside the non-inert dialog portal, so the
-          // native picker remains in the trusted click task on mobile.
-          uploadRef.current?.click();
-        }}
-      >
-        <ComposerGlyph kind="add" />
-        {t("upload_file")}
-      </button>
-      {onPickGoogleDrive ? (
-        <button
-          type="button"
-          className="composer-v2__sheet-row"
-          onClick={() => {
-            onClose();
-            onPickGoogleDrive();
-          }}
-        >
-          <ComposerGlyph kind="add" />
-          {tDrive("composer_entry")}
-        </button>
-      ) : null}
-      {/* ★2026-08-14: remove the planning row from the ＋ panel (design §5): the three-state trigger now stays in the toolbar
-          in **all modes** (including compact/ultra's 44×44 icon form). This row became a second source
-          for the same state: two controls expressing one thing recreate the need for users to reason
-          about state in two places. Once the entry returns to the toolbar, it must be absent here. */}
-    </DialogShell>
-  );
-}
-
 export function V2Composer(props: Props) {
   const auth = useOptionalAuthSession();
   const referenceInputEnabled = props.referenceInputEnabled ?? auth?.me?.capabilities?.composer?.reference_input === true;
@@ -719,7 +625,7 @@ function V2ComposerScope({
   referenceInputEnabled = false,
   onInputInteraction,
   onSend, onResolveDraftSubmissionProtocol, onCaptureSubmissionWireSnapshot, disabled, placeholder, sessionTexts, running, onCancel, prefillText, prefillInputDocument, onPrefillConsumed, onPrefillInputDocumentConsumed, statusMessage, prefillAttachments, onPrefillAttachmentsConsumed, onSteer,
-  lastUserText, lastUserAttachments = [], onReplay, readOnly, recoveryLocked = false, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", autoFocus, hidden, surface = "workbench", stopRequested = false, draftControlRef,
+  lastUserText, lastUserAttachments = [], onReplay, readOnly, recoveryLocked = false, draftPersistenceScope = null, onPendingActionHydrated, draftReconcileEpoch = 0, draftPersistenceFailureMode = "block", autoFocus, hidden, surface = "workbench", stopRequested = false, awaitingAnswer = false, draftControlRef,
   fileDropTargetRef, sendBlockedReason = null, draftTransferLocked, transferNotice = null, submitRequest,
 }: Props & { draftTransferLocked: boolean; transferNotice?: ComposerNoticeItem | null }) {
   const t = useTranslations("composer");
@@ -907,11 +813,8 @@ function V2ComposerScope({
   const compositionFencedRef = useRef(false);
   const [compositionFenced, setCompositionFenced] = useState(false);
   const [effectiveHidden, setEffectiveHidden] = useState(Boolean(hidden));
-  const [toolsOpen, setToolsOpen] = useState(false);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const composerHadFocusRef = useRef(false);
-  const toolsTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const toolsDialogId = `composer-tools-${useId().replaceAll(":", "")}`;
   const actionTooltipId = `composer-action-${useId().replaceAll(":", "")}`;
   const layoutMode = useComposerLayoutMode(composerRef);
   const draftScopeSignatureRef = useRef(draftScopeSignature);
@@ -1255,20 +1158,6 @@ function V2ComposerScope({
     if (hidden && compositionFenced) return;
     setEffectiveHidden(Boolean(hidden));
   }, [compositionFenced, hidden]);
-  useEffect(() => {
-    if (
-      layoutMode === "comfortable"
-      || readOnly
-      || mutationLocked
-      || effectiveHidden
-      || sendPending
-      || steerPending
-      || compositionFenced
-    ) {
-      setToolsOpen(false);
-    }
-  }, [compositionFenced, effectiveHidden, layoutMode, mutationLocked, readOnly, sendPending, steerPending]);
-
   // Sprint chat-v4-streaming Wave 4 — "换个问法" prefill. When prefillText
   // changes to a non-empty value, overwrite local val + focus textarea so
   // user can edit and submit. We watch `prefillText` directly; parent should
@@ -1945,7 +1834,6 @@ function V2ComposerScope({
   }, []);
   useEffect(() => {
     if (!readOnly) return;
-    setToolsOpen(false);
     for (const controller of abortControllers.current.values()) controller.abort();
     abortControllers.current.clear();
   }, [readOnly]);
@@ -3139,6 +3027,26 @@ function V2ComposerScope({
     return true;
   };
   requestReplayRef.current = requestReplay;
+  // While a turn runs, a non-empty draft turns the primary slot into "Add instruction" (the same path as Enter), so
+  // reaching for the usual Send position never cancels the run. Stop stays visible beside it, neutral as before.
+  const steerDraftReady = Boolean(
+    inSteerMode && onCancel && !stopPending && !stopRequested && (hasTaskText || hasCompletedAttachments),
+  );
+  const stopButton = running && onCancel ? (
+    <button
+      type="button"
+      className="v2-send-btn v2-send-btn--cancel"
+      disabled={stopPending}
+      onClick={requestCancel}
+      title={stopStatus ?? t("stop_title")}
+      aria-label={stopStatus ?? t("stop_label")}
+      aria-busy={stopPending}
+      aria-describedby={steerDraftReady ? undefined : actionTooltipId}
+    >
+      {stopPending ? <span aria-hidden="true">…</span> : <ComposerGlyph kind="stop" />}
+      <span>{stopStatus ?? t("stop_label")}</span>
+    </button>
+  ) : null;
   const primaryAction = sendPending ? (
     <button
       type="button"
@@ -3150,20 +3058,21 @@ function V2ComposerScope({
     >
       <span className="composer-v2__send-spinner" aria-hidden="true" />
     </button>
-  ) : running && onCancel ? (
+  ) : steerDraftReady ? (
     <button
       type="button"
-      className="v2-send-btn v2-send-btn--cancel"
-      disabled={stopPending}
-      onClick={requestCancel}
-      title={stopStatus ?? t("stop_title")}
-      aria-label={stopStatus ?? t("stop_label")}
-      aria-busy={stopPending}
+      className="v2-send-btn"
+      data-testid="composer-steer-send"
+      disabled={sendDisabled}
+      onClick={submit}
+      title={t("steer_send_title")}
+      aria-label={t("steer_send_label")}
       aria-describedby={actionTooltipId}
     >
-      {stopPending ? <span aria-hidden="true">…</span> : <ComposerGlyph kind="stop" />}
-      <span>{stopStatus ?? t("stop_label")}</span>
+      <ComposerGlyph kind="send" />
     </button>
+  ) : stopButton ? (
+    stopButton
   ) : (
       <button
         type="button"
@@ -3179,6 +3088,8 @@ function V2ComposerScope({
     );
   const primaryActionTooltip = sendPending
     ? t("preparing")
+    : steerDraftReady
+    ? t("steer_send_title")
     : running && onCancel
     ? stopStatus ?? t("stop_title")
     : t("send_title");
@@ -3206,7 +3117,9 @@ function V2ComposerScope({
           ? stopStatus
           : sendPending || steerPending
             ? t("preparing")
-            : ""}
+            : awaitingAnswer
+              ? t("awaiting_answer_status")
+              : ""}
       </span>
       {slashMessage && (
         <div
@@ -3305,6 +3218,7 @@ function V2ComposerScope({
         <div style={{ position: "relative" }}>
           {showReferenceEditor ? (
             <ReferenceEditor
+              menuAnchorRef={composerRef}
               scope={draftPersistenceScope}
               snapshot={draftPersistenceScope ? { scope: draftPersistenceScope, resetKey: String(inputResetKey), document: inputDocument ?? { schema_version: 1, nodes: [{ type: "text", text: val }] } } : null}
               readOnly={textareaMutationLocked || !referenceInputEnabled || Boolean(disabled && !inSteerMode)}
@@ -3352,7 +3266,14 @@ function V2ComposerScope({
             readOnly={textareaMutationLocked}
             aria-readonly={textareaMutationLocked}
             aria-disabled={mutationLocked || undefined}
-            aria-label={placeholder ?? t("placeholder")}
+            // The name follows the visible prompt (read-only, steering, ordinary); the steering glyph is not read aloud.
+            aria-label={
+              readOnly
+                ? t("readonly_placeholder")
+                : inSteerMode
+                  ? t("steer_placeholder").replace(/^↻\s*/u, "")
+                  : (placeholder ?? t("placeholder"))
+            }
             onChange={(e) => {
               chartPrefillRef.current = null;
               const nextValue = e.target.value;
@@ -3523,15 +3444,22 @@ function V2ComposerScope({
           <div className="composer-v2__tools">
             {readOnly ? (
               <EntitlementReadOnlyChip />
-            ) : layoutMode === "comfortable" ? (
+            ) : (
               <>
                 {googleDriveAvailable ? (
                   <ComposerAddMenu
-                    disabled={controlsMutationLocked}
+                    disabled={controlsMutationLocked || effectiveHidden}
                     uploadDisabled={uploadDisabled}
                     fallbackFocusRef={textareaRef}
                     onUpload={pickFiles}
                     onPickGoogleDrive={pickFromGoogleDrive}
+                    onOpen={() => {
+                      trackComposerEvent({
+                        event_name: "composer_tools_opened",
+                        surface,
+                        composer_mode: layoutMode,
+                      });
+                    }}
                   />
                 ) : (
                   <button
@@ -3552,6 +3480,7 @@ function V2ComposerScope({
                 />
                 {composerCapabilities.planning ? (
                   <PlanningControl
+                    compact={layoutMode !== "comfortable"}
                     disabled={controlsMutationLocked}
                     onToggle={(enabled) => {
                       trackComposerEvent({
@@ -3565,67 +3494,10 @@ function V2ComposerScope({
                   />
                 ) : null}
               </>
-            ) : (
-              <>
-                <button
-                  ref={toolsTriggerRef}
-                  type="button"
-                  className={`composer-v2__tool-button${planningMode === "planning" ? " is-active" : ""}`}
-                  onClick={() => {
-                    if (!toolsOpen) {
-                      trackComposerEvent({
-                        event_name: "composer_tools_opened",
-                        surface,
-                        composer_mode: layoutMode === "ultra" ? "ultra" : "compact",
-                      });
-                    }
-                    setToolsOpen(true);
-                  }}
-                  disabled={controlsMutationLocked}
-                  aria-label={
-                    planningMode === "planning" && composerCapabilities.planning
-                      ? t("tools_planning_active")
-                      : t("tools_title")
-                  }
-                  aria-haspopup="dialog"
-                  aria-expanded={toolsOpen}
-                  aria-controls={toolsDialogId}
-                >
-                  <ComposerGlyph kind="add" />
-                </button>
-                <ModelPicker
-                  disabled={Boolean((disabled && !inSteerMode) || controlsMutationLocked)}
-                  fallbackFocusRef={textareaRef}
-                  telemetry={{ surface, composerMode: layoutMode }}
-                />
-                {/* ★2026-08-14: remove the `planningMode === "planning"` condition.
-                    With narrow columns + auto/off, the control **entirely vanished from the toolbar**, retreating into the ＋ panel,
-                    prompting bug reports about the missing narrow-column planning entry. DEFAULT_SPLIT_RATIO
-                    remains 0.4, so opening canvas puts the left column in compact; this is no edge case.
-                    ★Also caught on device 116 that day: this originally checked only `=== "compact"`, omitting ultra (<360).
-                    The planning row in the ＋ panel was removed in that same change, leaving ultra
-                    **no planning-mode entry anywhere on the page**, worse than before (which still had the panel).
-                    CSS already specifies 44×44 in both compact/ultra; only this render guard was missing. */}
-                {(layoutMode === "compact" || layoutMode === "ultra") &&
-                composerCapabilities.planning ? (
-                    <PlanningControl
-                      compact
-                      disabled={controlsMutationLocked}
-                      onToggle={(enabled) => {
-                        trackComposerEvent({
-                          event_name: "composer_planning_toggled",
-                          enabled,
-                          entry: "toolbar",
-                          surface,
-                          composer_mode: layoutMode,
-                        });
-                      }}
-                    />
-                  ) : null}
-              </>
             )}
           </div>
           <div className="composer-v2__actions">
+            {readOnly || !steerDraftReady ? null : stopButton}
             {readOnly ? null : primaryAction}
             {readOnly ? null : (
               <span id={actionTooltipId} className="composer-v2__tooltip" role="tooltip">
@@ -3634,30 +3506,7 @@ function V2ComposerScope({
             )}
           </div>
         </div>
-        <ComposerToolsSheet
-          open={
-            toolsOpen
-            && layoutMode !== "comfortable"
-            && !readOnly
-            && !controlsMutationLocked
-          }
-          dialogId={toolsDialogId}
-          triggerRef={toolsTriggerRef}
-          planning={composerCapabilities.planning}
-          onUploadChange={onFileChange}
-          uploadDisabled={uploadDisabled}
-          onPickGoogleDrive={googleDriveAvailable ? pickFromGoogleDrive : undefined}
-          onPlanningToggle={(enabled) => {
-            trackComposerEvent({
-              event_name: "composer_planning_toggled",
-              enabled,
-              entry: "tools_sheet",
-              surface,
-              composer_mode: layoutMode,
-            });
-          }}
-          onClose={() => setToolsOpen(false)}
-        />
+
       </div>
       <ComposerNotices notices={composerNotices} />
     </div>

@@ -71,7 +71,7 @@ async def test_domain_stores_initialize_without_recreating_tables_and_write_owne
     assert await artifacts.get(artifact.id) is not None
     await metrics.track("domain.test", user_id="u_1")
     assert len(await metrics.query_recent(name="domain.test")) == 1
-    await notifications.upsert_item(
+    await notifications.write(
         team_id="team_1",
         category="system",
         type="domain.test",
@@ -85,6 +85,7 @@ async def test_domain_stores_initialize_without_recreating_tables_and_write_owne
         actions=None,
         metadata=None,
         dedupe_key="domain.test",
+        recipients=[],
     )
     with sqlite3.connect(domain_directory / "bowhead_execution.db") as connection:
         assert connection.execute("SELECT artifact_id FROM session_attachments WHERE session_id='s_1'").fetchone() == (artifact.id,)

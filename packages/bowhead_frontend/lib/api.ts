@@ -2939,12 +2939,20 @@ export interface NotificationItemDTO {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** FEATURE_NOTIFICATION_REACH: "personal" items never carry a Team or switch it. */
+  scope?: "team" | "personal";
+  /** Set only when the user belongs to more than one Team. */
+  teamName?: string | null;
+  /** False when opening the item first switches to its Team. */
+  currentTeam?: boolean;
 }
 
 export interface NotificationCountDTO {
   actionRequired: number;
   updatesUnread: number;
   totalBadge: number;
+  /** FEATURE_NOTIFICATION_REACH: when the newest item the browser may announce arrived. */
+  latestBrowserCandidateAt?: string | null;
 }
 
 export async function fetchNotificationCount(): Promise<NotificationCountDTO> {
@@ -2962,6 +2970,17 @@ export async function fetchNotifications(
   const r = await fetch(`/api/v1/notifications?${params}`);
   if (!r.ok) throw new HttpStatusError("notifications", r);
   return r.json();
+}
+
+/** Unread urgent items delivered after `since` that the open app may announce (FEATURE_NOTIFICATION_REACH). */
+export async function fetchBrowserCandidates(since: string | null): Promise<NotificationItemDTO[]> {
+  const params = new URLSearchParams();
+  if (since) params.set("since", since);
+  const query = params.toString();
+  const r = await fetch(`/api/v1/notifications/browser-candidates${query ? `?${query}` : ""}`, { cache: "no-store" });
+  if (!r.ok) throw new HttpStatusError("notification browser candidates", r);
+  const body = (await r.json()) as { items?: NotificationItemDTO[] };
+  return body.items ?? [];
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
@@ -3333,6 +3352,8 @@ export type ScheduledRunStatus =
 export interface ScheduledNotifyChannels {
   email?: string[];
   deliver_on_success?: boolean;
+  /** FEATURE_ROUTINE_NOTIFY: "on_alert" delivers only runs the task's Agent flagged; absent means "always". */
+  deliver?: "always" | "on_alert";
 }
 
 export interface ScheduledJobDTO {
@@ -3379,6 +3400,16 @@ export interface ScheduledJobRunDTO {
   status: ScheduledRunStatus;
   error?: string | null;
   error_diagnostics?: unknown;
+  /** FEATURE_NOTIFICATION_DELIVERY: what happened to this run's result and alert emails (no addresses). */
+  deliveries?: ScheduledRunDeliveryDTO[];
+}
+
+export interface ScheduledRunDeliveryDTO {
+  kind: "result" | "alert";
+  status: "pending" | "sent" | "skipped" | "failed" | "dead";
+  outcome_code?: string | null;
+  diagnostic_ref?: string | null;
+  attempts: number;
 }
 
 export interface CreateScheduledJobPayload {

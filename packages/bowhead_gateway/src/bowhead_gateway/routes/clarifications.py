@@ -2641,6 +2641,10 @@ async def resume_turn(
             except Exception as exc:
                 logger.warning("clarify.resume_workflow_failed job=%s err=%s", _sched_job.id, exc)
 
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    turn_req.report_read_access = ReportReadAccess(request, turn_req.session_id, turn_req.workspace_id, turn_req.team_id, turn_req.user_id)
+
     # Spawn the resume worker via the channel-neutral TurnService shared with the Feishu bridge.
     # The bus generation guard (close → get_or_create) lives
     # inside spawn_resume_turn.

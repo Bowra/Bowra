@@ -151,7 +151,35 @@ async def test_confirmed_parameter_rejection_gets_new_physical_id_same_context(m
         reset_learned_for_test()
 
 
-@pytest.mark.parametrize("failure", ["timeout", "network", "unclassified", "missing_usage", "invalid_usage", "cancel", "unregistered_rejection"])
+@pytest.mark.parametrize("family", ["openai", "anthropic"])
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("PRIVATE"), httpx2.ConnectError("PRIVATE"), httpx2.ReadError("PRIVATE")])
+async def test_transport_failure_is_retried_with_new_physical_id_same_context(model_case, family, mode, failure):
+    case = model_case
+    adapter = adapter_for(family)
+    sent = []
+
+    def respond(http_request):
+        sent.append(json.loads(http_request.content))
+        if len(sent) == 1:
+            raise failure
+        return success(family, mode)
+
+    try:
+        with receiver(case.case.handle.subagent_id), scope(case), respx.mock() as mock:
+            mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+            assert await call(router_for(adapter), request(case), mode) == "OK"
+        rows = invocations(case)
+        assert [row["status"] for row in rows] == ["not_applied", "completed"]
+        assert len({row["invocation_id"] for row in rows}) == 2
+        assert len({row["context_id"] for row in rows}) == 1
+        assert rows[0]["input_tokens"] == rows[0]["output_tokens"] == rows[0]["cached_tokens"] == 0
+        assert "PRIVATE" not in str(rows)
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.parametrize("failure", ["unclassified", "missing_usage", "invalid_usage", "cancel", "unregistered_rejection"])
 async def test_unknown_or_cancelled_send_blocks_fallback_and_rebuilt_hook(model_case, failure):
     case = model_case
     adapter = adapter_for("openai")
@@ -163,10 +191,6 @@ async def test_unknown_or_cancelled_send_blocks_fallback_and_rebuilt_hook(model_
         sent.append(True)
         if failure == "unregistered_rejection":
             return httpx2.Response(400, json={"error": {"message": "PRIVATE", "param": "temperature", "type": "invalid_request_error"}})
-        if failure == "timeout":
-            raise httpx2.ReadTimeout("PRIVATE")
-        if failure == "network":
-            raise httpx2.ConnectError("PRIVATE")
         if failure == "cancel":
             raise asyncio.CancelledError()
         if failure == "unclassified":

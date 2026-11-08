@@ -121,8 +121,10 @@ class InvocationOutcomeUnknownError(RuntimeError):
     boundary can preserve it without introducing a reverse dependency.
     """
 
-    def __init__(self, reason_code: str = "provider_outcome_unknown") -> None:
+    def __init__(self, reason_code: str = "provider_outcome_unknown", *, failure: LLMTargetFailure | None = None) -> None:
         self.reason_code = reason_code if isinstance(reason_code, str) and reason_code else "provider_outcome_unknown"
+        # Diagnostic evidence does not establish that a dispatch was not applied.
+        self.failure = failure
         super().__init__("physical provider invocation outcome is unknown")
 
 

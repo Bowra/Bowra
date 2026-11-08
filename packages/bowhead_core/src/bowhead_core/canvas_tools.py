@@ -122,7 +122,7 @@ def register_canvas_tools(registry: ToolRegistry) -> None:
         )
     )
     # multimodal-v1: image_generate output → Canvas image section (additive evidence)
-    registry.register(ToolSpec(schema=_add_image_schema(), handler=_add_image))
+    registry.register(ToolSpec(schema=_add_image_schema(), handler=coordinate_chart_handler(_add_image)))
     # multimodal-v2A: image background + editable text layers
     if is_design_v2a_enabled():
         registry.register(ToolSpec(schema=_create_design_schema(), handler=_create_design))
@@ -1253,6 +1253,11 @@ def _add_image_schema() -> ToolSchema:
 
 
 async def _add_image(args: dict[str, Any], ctx: ToolExecutionContext) -> Any:
+    from bowhead_core.chart.edit_guard import blocked, denial
+
+    protected = await blocked(ctx)
+    if protected:
+        return denial(history_unavailable="chart_guard_history_unavailable" in protected)
     if args.get("_args_parse_error"):
         return {"error": f"args parse failed: {args['_args_parse_error']}"}
 

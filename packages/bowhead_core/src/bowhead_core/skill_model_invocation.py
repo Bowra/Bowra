@@ -232,11 +232,14 @@ class ReferenceModelInvocationAttempt:
         return await self._hook.settle(self._identity, status="completed", usage=usage, response_digest=response_digest)
 
     async def confirmed_not_applied(self, *, evidence_code: str, evidence_digest: str) -> bool:
-        # Only the existing native adapters' recognized parameter rejections
+        # Only the existing native adapters' recognized parameter rejections and
+        # transport failures (settled not applied and retried like chat calls)
         # permit another transport attempt. Arbitrary error text is not evidence.
         if type(evidence_code) is not str or evidence_code not in {
             "parallel_tool_calls_parameter_rejected/v1",
             *(f"outbound_param_rejected/{param}/v1" for param in OUTBOUND_PARAMS),
+            "provider_no_response_timeout/v1",
+            "provider_transport_interrupted/v1",
         }:
             await self.unknown(reason_code="unrecognized_non_application")
             return False

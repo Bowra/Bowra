@@ -82,7 +82,9 @@ def _flags_and_membership(request: pytest.FixtureRequest, monkeypatch: pytest.Mo
     monkeypatch.setenv("FEATURE_SOURCE_ATTRIBUTION_V2", request.param)
     member_of = {"ws_kb"}
 
-    async def fake_build(request: object, *, user: object, workspace_id: str, allow_missing_workspace: bool, operation: object) -> object:
+    async def fake_build(
+        request: object, *, user: object, workspace_id: str, allow_missing_workspace: bool, operation: object, expected_team_id: str | None = None
+    ) -> object:
         if workspace_id and workspace_id not in member_of:
             raise PermissionError("not a member")
         return SimpleNamespace(workspace_id=workspace_id)

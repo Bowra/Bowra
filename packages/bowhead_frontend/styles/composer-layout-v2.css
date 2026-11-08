@@ -60,6 +60,7 @@
   flex: none;
   justify-self: end;
   align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -298,67 +299,6 @@
 [data-composer-layout-v2][data-layout-mode="ultra"] .v2-send-btn--cancel {
   width: 44px;
   padding: 0;
-}
-
-.composer-v2__sheet-backdrop {
-  position: fixed;
-  top: var(--bh-visual-viewport-top, 0px);
-  right: 0;
-  bottom: var(--bh-visual-viewport-bottom, 0px);
-  left: 0;
-  z-index: 10020;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-  background: color-mix(in srgb, var(--c-ink) 32%, transparent);
-}
-
-.composer-v2__sheet {
-  width: min(100%, 520px);
-  max-height: calc(100dvh - 16px - var(--bh-visual-viewport-top, 0px) - var(--bh-visual-viewport-bottom, 0px) - env(safe-area-inset-bottom));
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 10px;
-  color: var(--c-ink);
-}
-
-.composer-v2__sheet-head {
-  min-height: 44px;
-  padding: 0 4px 4px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.composer-v2__sheet-head button {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  color: var(--c-ink-3);
-  font-size: 1.375rem;
-}
-
-.composer-v2__sheet-row {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 48px;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: transparent;
-  text-align: left;
-}
-
-.composer-v2__sheet-row--planning {
-  padding: 4px;
-}
-
-.composer-v2__sheet-row--planning .composer-v2__planning {
-  min-height: 44px;
-  width: 100%;
-  justify-content: flex-start;
 }
 
 @media (prefers-reduced-motion: reduce) {

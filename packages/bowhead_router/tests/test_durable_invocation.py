@@ -906,9 +906,9 @@ async def test_anthropic_durable_stream_rejects_malformed_frame_before_terminal(
 @pytest.mark.unit
 @respx.mock
 async def test_transport_failure_stays_unknown_when_durable_unknown_write_fails() -> None:
-    # A failure after the request was sent; a no-output timeout is settled instead.
+    # An unclassified failure after the request was sent; httpx transport failures are settled instead.
     route = respx.post(f"{_BASE}/chat/completions").mock(
-        side_effect=httpx2.RemoteProtocolError("connection dropped"),
+        side_effect=RuntimeError("custom transport failed after dispatch"),
     )
     hook = _FailingUnknownHook()
     adapter = OpenAICompatibleAdapter(
@@ -932,9 +932,9 @@ async def test_transport_failure_stays_unknown_when_durable_unknown_write_fails(
     finally:
         await adapter.close()
 
-    assert raised.value.reason_code == "transport_network_error"
+    assert raised.value.reason_code == "transport_unclassified_error"
     assert len(route.calls) == 1
-    assert hook.attempts[0].outcomes == ["unknown_failed:transport_network_error"]
+    assert hook.attempts[0].outcomes == ["unknown_failed:transport_unclassified_error"]
 
 
 @pytest.mark.unit
@@ -1714,18 +1714,29 @@ async def test_router_only_closes_adapter_iterator_for_durable_stream(
     assert adapter.iterator.close_calls == int(durable)
 
 
-class _StallAfterFirstLine(httpx2.AsyncByteStream):
-    """A stream that yields one content frame, then times out."""
+class _FailAfterFirstFrame(httpx2.AsyncByteStream):
+    """A stream that yields one content frame, then fails in transport."""
+
+    def __init__(self, family: str, failure: Exception) -> None:
+        self.family = family
+        self.failure = failure
 
     async def __aiter__(self):
-        yield b'data: {"choices":[{"delta":{"content":"Partial"},"finish_reason":null}]}\n\n'
-        raise httpx2.ReadTimeout("stalled after output")
+        if self.family == "openai":
+            yield b'data: {"choices":[{"delta":{"content":"Partial"},"finish_reason":null}]}\n\n'
+        else:
+            yield b'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5}}}\n\n'
+            yield b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Partial"}}\n\n'
+        raise self.failure
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("family", ["openai", "anthropic"])
 @pytest.mark.parametrize("mode", ["invoke", "stream"])
-@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("no response"), httpx2.ConnectError("refused")])
+@pytest.mark.parametrize(
+    "failure",
+    [httpx2.ReadTimeout("no response"), httpx2.ConnectError("refused"), httpx2.ReadError("reset"), httpx2.RemoteProtocolError("peer closed")],
+)
 @respx.mock
 async def test_no_output_transport_failure_is_settled_not_applied(family: str, mode: str, failure: Exception) -> None:
     base_url = _BASE if family == "openai" else _ANTHROPIC_BASE
@@ -1750,31 +1761,63 @@ async def test_no_output_transport_failure_is_settled_not_applied(family: str, m
         await adapter.close()
 
     timed_out = isinstance(failure, httpx2.TimeoutException)
+    no_response = timed_out or isinstance(failure, httpx2.ConnectError)
+    code = "provider_no_response_timeout/v1" if no_response else "provider_transport_interrupted/v1"
     assert raised.value.kind is (ProviderFailureKind.TIMEOUT if timed_out else ProviderFailureKind.NETWORK)
     assert raised.value.retryable is True
     assert len(route.calls) == 1
-    assert hook.attempts[0].outcomes == ["not_applied:provider_no_response_timeout/v1"]
-    assert observer.attempts[0].outcomes == ["not_applied:provider_no_response_timeout/v1"]
+    assert hook.attempts[0].outcomes == [f"not_applied:{code}"]
+    assert observer.attempts[0].outcomes == [f"not_applied:{code}"]
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("family", ["openai", "anthropic"])
+@pytest.mark.parametrize("failure", [httpx2.ReadTimeout("stalled"), httpx2.ReadError("reset"), httpx2.RemoteProtocolError("peer closed")])
 @respx.mock
-async def test_timeout_after_streamed_output_stays_unknown() -> None:
-    route = respx.post(f"{_BASE}/chat/completions").mock(
-        return_value=httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=_StallAfterFirstLine())
+async def test_transport_failure_after_streamed_output_is_settled_not_applied(family: str, failure: Exception) -> None:
+    base_url = _BASE if family == "openai" else _ANTHROPIC_BASE
+    route = respx.post(f"{base_url}{'/chat/completions' if family == 'openai' else '/v1/messages'}").mock(
+        return_value=httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=_FailAfterFirstFrame(family, failure))
     )
     hook = _Hook()
-    adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="test-key", provider_name="provider")
+    adapter = (
+        OpenAICompatibleAdapter(base_url=base_url, api_key="test-key", provider_name="provider")
+        if family == "openai"
+        else AnthropicCompatibleAdapter(base_url=base_url, api_key="test-key", provider_name="provider")
+    )
     seen = []
     try:
-        with physical_invocation_scope(hook), pytest.raises(InvocationOutcomeUnknownError):
+        with physical_invocation_scope(hook), pytest.raises(ProviderCallError) as raised:
             async for chunk in adapter.stream(LLMRequest(model="model", messages=[Message(role="user", content="hi")])):
                 seen.append(chunk.delta)
     finally:
         await adapter.close()
+    timed_out = isinstance(failure, httpx2.TimeoutException)
     assert seen == ["Partial"]
     assert len(route.calls) == 1
-    assert hook.attempts[0].outcomes == ["unknown:transport_timeout"]
+    assert raised.value.kind is (ProviderFailureKind.TIMEOUT if timed_out else ProviderFailureKind.NETWORK)
+    assert raised.value.retryable is True
+    assert hook.attempts[0].outcomes == ["not_applied:provider_transport_interrupted/v1"]
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_refused_transport_settlement_stays_unknown() -> None:
+    respx.post(f"{_BASE}/chat/completions").mock(
+        return_value=httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=_FailAfterFirstFrame("openai", httpx2.ReadError("reset"))
+        )
+    )
+    observer = _DecliningObserver()
+    adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="test-key", provider_name="provider")
+    try:
+        with physical_observation_scope(observer), pytest.raises(InvocationOutcomeUnknownError) as raised:
+            async for _ in adapter.stream(LLMRequest(model="model", messages=[Message(role="user", content="hi")])):
+                pass
+    finally:
+        await adapter.close()
+    assert raised.value.reason_code == "durable_invocation_fenced"
+    assert observer.attempts[0].outcomes == ["declined:provider_transport_interrupted/v1"]
 
 
 @pytest.mark.unit
@@ -1882,11 +1925,50 @@ async def test_provider_failure_observation_precedes_fence_and_cannot_enable_ret
     route = respx.post(f"{_BASE}/chat/completions").respond(400, json={"error": {"message": "Invalid request"}})
     adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="sk-test", provider_name="provider")
     try:
-        with physical_invocation_scope(hook, failure_observer=failed_observer), pytest.raises(InvocationOutcomeUnknownError):
+        with physical_invocation_scope(hook, failure_observer=failed_observer), pytest.raises(InvocationOutcomeUnknownError) as raised:
             await adapter.invoke(LLMRequest(model="model", messages=[Message(role="user", content="hello")]))
     finally:
         await adapter.close()
     assert route.call_count == 1
     assert len(observed) == 1
     assert observed[0].status_code == 400
+    assert raised.value.failure is observed[0]
     assert hook.attempts[0].outcomes == ["unknown:provider_response_unclassified"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("family", ["openai", "anthropic"])
+@pytest.mark.parametrize("mode", ["invoke", "stream"])
+@pytest.mark.parametrize("durable", [False, True])
+@respx.mock
+async def test_unknown_invocation_retains_provider_diagnosis_without_resending(family: str, mode: str, durable: bool) -> None:
+    observer = _Observer()
+    hook = _Hook()
+    if family == "openai":
+        adapter = OpenAICompatibleAdapter(base_url=_BASE, api_key="test-key", provider_name="provider")
+        url = f"{_BASE}/chat/completions"
+    else:
+        adapter = AnthropicCompatibleAdapter(base_url=_ANTHROPIC_BASE, api_key="test-key", provider_name="provider")
+        url = f"{_ANTHROPIC_BASE}/v1/messages"
+    route = respx.post(url).respond(500, json={"error": {"type": "api_error", "message": "Synthetic upstream unavailable"}})
+    request = LLMRequest(model="model", messages=[Message(role="user", content="hello")])
+    try:
+        with (
+            physical_observation_scope(observer),
+            physical_invocation_scope(hook if durable else None),
+            pytest.raises(InvocationOutcomeUnknownError) as raised,
+        ):
+            if mode == "invoke":
+                await adapter.invoke(request)
+            else:
+                async for _ in adapter.stream(request):
+                    pass
+    finally:
+        await adapter.close()
+    assert route.call_count == 1
+    failure = raised.value.failure
+    assert failure is not None
+    assert (failure.kind, failure.status_code, failure.mode) == (ProviderFailureKind.UPSTREAM, 500, mode)
+    assert failure.upstream_message == "Synthetic upstream unavailable"
+    assert observer.attempts[0].outcomes == ["unknown:provider_response_unclassified"]
+    assert [attempt.outcomes for attempt in hook.attempts] == ([["unknown:provider_response_unclassified"]] if durable else [])

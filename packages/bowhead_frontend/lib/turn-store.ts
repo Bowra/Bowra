@@ -168,9 +168,11 @@ export interface PeerTerminal {
 }
 
 /**
- * A model call failed before replying and the Router scheduled a retry
- * (`llm.retry_scheduled`). Transient running status only: cleared by the next
- * model output or terminal event, so a finished turn never carries it.
+ * A model call failed (before or after it started replying) and the Router
+ * scheduled a retry (`llm.retry_scheduled`). Output the failed attempt had
+ * already streamed is withdrawn by the following `llm.stream_restarted`.
+ * Transient running status only: cleared by the next model output or terminal
+ * event, so a finished turn never carries it.
  */
 export interface ModelRetryStatus {
   /** 1-based retry number. */
@@ -1096,6 +1098,45 @@ export function applyPeerProse(turnId: string, peerId: string, delta: string): v
   _commit(turnId, { ...prev, peerProse });
 }
 
+/**
+ * Remove up to `count` Unicode code points from the end of `text`. The backend
+ * counts withdrawn output with Python `len()` (code points), while a JavaScript
+ * string length counts UTF-16 units, so a surrogate pair is one character here.
+ * Returns the kept text and how many code points were still left to remove.
+ */
+function _dropTrailingCodePoints(
+  text: string,
+  count: number,
+): { text: string; remaining: number } {
+  let end = text.length;
+  let left = count;
+  while (left > 0 && end > 0) {
+    const last = text.charCodeAt(end - 1);
+    if (end >= 2 && last >= 0xdc00 && last <= 0xdfff) {
+      const prev = text.charCodeAt(end - 2);
+      if (prev >= 0xd800 && prev <= 0xdbff) end -= 1;
+    }
+    end -= 1;
+    left -= 1;
+  }
+  return { text: text.slice(0, end), remaining: left };
+}
+
+/** `llm.stream_restarted`: withdraw the last `chars` code points of a peer's streamed
+ *  prose (the restarted attempt's `partial_answer` text). A peer left without prose
+ *  loses its entry, matching a peer that never streamed. Shared by live and replay. */
+export function applyPeerProseWithdrawn(turnId: string, peerId: string, chars: number): void {
+  if (!turnId || !peerId || !(chars > 0)) return;
+  const prev = _states.get(turnId);
+  const current = prev?.peerProse[peerId];
+  if (!prev || current === undefined) return;
+  const kept = _dropTrailingCodePoints(current, chars).text;
+  const peerProse = { ...prev.peerProse };
+  if (kept) peerProse[peerId] = kept;
+  else delete peerProse[peerId];
+  _commit(turnId, { ...prev, peerProse });
+}
+
 /** Record a scheduled model retry. Ignored once the card is finalized: a finished
  *  turn must never look like it is still retrying. */
 export function applyModelRetryScheduled(turnId: string, status: ModelRetryStatus): void {
@@ -1536,6 +1577,38 @@ export function applyNarrativeAppend(input: ApplyNarrativeAppendInput): void {
     nextBeats = [...prev.beats, { kind: "narrative", segId: input.segId, text: input.text }];
   }
   _commit(input.turnId, { ...prev, beats: nextBeats });
+}
+
+/**
+ * `llm.stream_restarted`: withdraw the last `chars` code points of the turn's Lead
+ * narrative, the text a restarted model attempt had already streamed. The text may
+ * span several narrative beats (a step started inside the attempt opens a new
+ * segment); non-narrative beats are kept and narrative beats left empty are dropped.
+ * Returns the segIds of the dropped beats. Shared by live SSE and replay.
+ */
+export function applyNarrativeWithdrawn(turnId: string, chars: number): string[] {
+  const prev = _states.get(turnId);
+  if (!prev || !(chars > 0)) return [];
+  let remaining = chars;
+  let changed = false;
+  const dropped: string[] = [];
+  const nextBeats = prev.beats.slice();
+  for (let i = nextBeats.length - 1; i >= 0 && remaining > 0; i--) {
+    const beat = nextBeats[i];
+    if (beat.kind !== "narrative") continue;
+    const trimmed = _dropTrailingCodePoints(beat.text, remaining);
+    remaining = trimmed.remaining;
+    changed = true;
+    if (trimmed.text) {
+      nextBeats[i] = { ...beat, text: trimmed.text };
+    } else {
+      dropped.push(beat.segId);
+      nextBeats.splice(i, 1);
+    }
+  }
+  if (!changed) return [];
+  _commit(turnId, { ...prev, beats: nextBeats });
+  return dropped;
 }
 
 // chat-solidify W7 (2026-07-03): removed applyAnswerToken no-op; its claimed

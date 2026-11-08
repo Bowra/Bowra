@@ -2,18 +2,19 @@
  * Text sizes follow the user's root text size (WCAG 1.4.4 "Resize text"): the --fs-* type scale and every literal
  * font size are rem relative to the 16px browser default, never px. A px font size stays put when the user raises the
  * browser or system text size (the composer model button stayed 13px at 200%); rem renders the same px at the
- * default root and scales with it. See docs/DESIGN_TOKENS.md "字号".
+ * default root and scales with it. See docs/design/component-design-spec/foundations.md, section 2.
  *
  * Allowed px: the iOS focus-zoom floor written as an argument of max() (`max(1rem, 16px)`), which keeps touch inputs
  * at least 16px whatever the root size. Line heights are unitless or rem.
  */
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FRONTEND, parseRules, read, stripComments, tsxFiles } from "./css-contract";
 
 const ENTERPRISE = join(FRONTEND, "../../enterprise/frontend");
+const EDITION_ROOTS = existsSync(ENTERPRISE) ? [ENTERPRISE] : [];
 
 function cssUnder(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -23,7 +24,7 @@ function cssUnder(dir: string): string[] {
   });
 }
 
-const SHEETS = [...["app", "components", "styles", "lib"].flatMap((d) => cssUnder(join(FRONTEND, d))), ...cssUnder(ENTERPRISE)];
+const SHEETS = [...["app", "components", "styles", "lib"].flatMap((d) => cssUnder(join(FRONTEND, d))), ...EDITION_ROOTS.flatMap(cssUnder)];
 
 /** Type declarations: font-size, the font shorthand, line-height and font-size custom properties. */
 const TYPE_DECL = /(?<![\w-])(font-size|font|line-height|--fs-[\w-]+|--[\w-]*-fs|--[\w-]*font-size)\s*:\s*([^;{}]+)/g;
@@ -124,10 +125,10 @@ describe("the personal text size scales the root font size", () => {
 });
 
 describe("no px font sizes in the stylesheets", () => {
-  it("scans the app, component, Business and edition stylesheets", () => {
+  it("scans the shared stylesheets and installed edition stylesheets", () => {
     expect(SHEETS.length).toBeGreaterThan(40);
     expect(SHEETS.some((f) => f.endsWith("ui-controls-legacy.css"))).toBe(true);
-    expect(SHEETS.some((f) => f.includes("enterprise"))).toBe(true);
+    expect(SHEETS.some((f) => f.includes("enterprise"))).toBe(EDITION_ROOTS.length > 0);
   });
 
   it("writes every font-size, font, line-height and font-size custom property in rem (px only as a max() floor)", () => {
@@ -161,7 +162,7 @@ describe("no px font sizes in inline styles", () => {
     );
 
   it("uses rem strings, tokens or box-relative arithmetic for fontSize", () => {
-    const files = [...["app", "components", "lib"].flatMap((d) => tsxFiles(join(FRONTEND, d))), ...tsxFiles(ENTERPRISE)];
+    const files = [...["app", "components", "lib"].flatMap((d) => tsxFiles(join(FRONTEND, d))), ...EDITION_ROOTS.flatMap(tsxFiles)];
     expect(files.length).toBeGreaterThan(200);
     const found = files.flatMap((f) => offenders(read(relative(FRONTEND, f))).map((expr) => `${relative(FRONTEND, f)}: fontSize: ${expr}`));
     expect(found).toEqual([]);

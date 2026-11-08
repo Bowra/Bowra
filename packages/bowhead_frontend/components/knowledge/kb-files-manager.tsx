@@ -1045,11 +1045,14 @@ export function KbFilesManager({
         <div className="mlist" data-testid="kb-files-list">
           {loading ? skeleton : files.length === 0 ? emptyState : files.map((f) => {
             const tm = typeMeta(f.filename);
+            const hit = deep ? hits[f.file_id] : undefined;
+            // No snippet fits the two-line row, so the hit is named in text: “Page 3 · Search hit” (same as the drawer pin).
+            const hitText = hit ? [kbChunkLocation(t, hit), t("drawer.search_hit")].filter(Boolean).join(" · ") : null;
             return (
               <button
                 key={f.file_id}
                 type="button"
-                className={`mrow${deep && hits[f.file_id] ? " hit" : ""}`}
+                className={`mrow${hit ? " hit" : ""}`}
                 data-testid="kb-files-row"
                 data-file-id={f.file_id}
                 // detail > 0: a mouse click or tap (keyboard activation reports 0).
@@ -1058,7 +1061,10 @@ export function KbFilesManager({
                 <span className="kb-ftype" aria-hidden style={{ background: tm.color }}>{tm.tag}</span>
                 <span className="mbody">
                   <span className="nm">{f.filename}</span>
-                  <span className="mt">{showScopeCol ? `${scopeCell(f)} · ` : null}{formatBytes(f.size_bytes)} · {fmtAgo(f.uploaded_at, t)}</span>
+                  <span className="mt">
+                    {hitText && <span className="loc" data-testid="kb-hit-loc">{hitText}</span>}
+                    {showScopeCol ? `${scopeCell(f)} · ` : null}{formatBytes(f.size_bytes)} · {fmtAgo(f.uploaded_at, t)}
+                  </span>
                 </span>
                 <span className="st">
                   <KbStatusPill

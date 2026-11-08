@@ -185,3 +185,31 @@ it("respects a changed history selection for the same retained page and rejects 
   rerender(options());
   expect(result.current.selected).toBe(true);
 });
+
+it("history removal hides the selected page without disposing its controller and Back restores it", () => {
+  window.history.replaceState(null, "", settingsCanvasHref(target));
+  const { result, rerender } = renderHook(useSettingsCanvas, { initialProps: options() });
+  window.history.pushState(null, "", "/?session=s_original");
+  rerender(options());
+  expect(result.current.selected).toBe(false);
+  expect(result.current.targets).toEqual([target]);
+  window.history.replaceState(null, "", settingsCanvasHref(target));
+  rerender(options());
+  expect(result.current.selected).toBe(true);
+  expect(result.current.targets).toEqual([target]);
+});
+
+it("retries an unconsumed pointer after scope matches without bypassing capability or role admission", () => {
+  window.history.replaceState(null, "", settingsCanvasHref(target));
+  const { result, rerender } = renderHook(useSettingsCanvas, {
+    initialProps: { ...options(), scope: { ...target, workspaceId: "ws_other" } },
+  });
+  expect(result.current.target).toBeNull();
+  rerender({ ...options(), canManageSpace: false });
+  expect(result.current.target).toBeNull();
+  rerender({ ...options(), enabled: false });
+  expect(result.current.target).toBeNull();
+  rerender(options());
+  expect(result.current.target).toEqual(target);
+  expect(result.current.selected).toBe(true);
+});

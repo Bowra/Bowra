@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from bowhead_core.llm_failure import LLMDeliveryFailedError, project_llm_failure
 from bowhead_router.errors import (
+    InvocationOutcomeUnknownError,
     InvocationTargetsExhaustedError,
     LLMTargetFailure,
     ProviderFailureKind,
@@ -110,6 +111,69 @@ def _llm_target_failure(
         upstream_message="Internal server error Authorization: Bearer secret",
         first_visible_chunk_emitted=visible,
     )
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize(
+    "mode,visible,state,reason",
+    [
+        ("invoke", False, "not_started", "llm_provider_unavailable"),
+        ("stream", False, "pre_visible", "llm_provider_unavailable"),
+        ("stream", True, "interrupted", "llm_stream_interrupted"),
+    ],
+)
+def test_unknown_provider_failure_survives_taskgroup_projection(wrapped, mode, visible, state, reason) -> None:
+    failure = replace(_llm_target_failure(kind=ProviderFailureKind.UPSTREAM, status_code=500, visible=visible), mode=mode)
+    error = InvocationOutcomeUnknownError("provider_response_unclassified", failure=failure)
+    if wrapped:
+        error = ExceptionGroup("TaskGroup", [ExceptionGroup("MCP session", [error])])
+    projection = project_llm_failure(error)
+    assert projection is not None
+    assert (projection.reason_code, projection.phase, projection.stream_state) == (reason, mode, state)
+    assert projection.http_status == 500
+    assert projection.outcome_unknown and not projection.retryable
+    assert projection.fallback_state == "not_attempted"
+    published = diagnostics.build_chat_llm_failure(projection=projection, turn_id="t_model_unknown")
+    assert published.diagnostics["retryable"] is False
+    assert published.recovery_action == "copy_diagnostics"
+    assert "outcome=unknown" in published.diagnostics["safe_detail"]
+    assert "private-configured-name" not in str(published.diagnostics)
+    assert "secret" not in str(published.diagnostics)
+
+
+def test_unknown_failure_projection_does_not_infer_from_prose_context_or_mixed_errors() -> None:
+    unknown = InvocationOutcomeUnknownError()
+    assert project_llm_failure(unknown) is None
+    typed = InvocationOutcomeUnknownError(failure=_llm_target_failure(kind=ProviderFailureKind.UPSTREAM, status_code=None))
+    assert project_llm_failure(ExceptionGroup("mixed", [typed, RuntimeError("programming error")])) is None
+    internal = RuntimeError("HTTP 500 provider failed")
+    internal.__context__ = typed
+    assert project_llm_failure(internal) is None
+    projection = project_llm_failure(typed)
+    assert projection is not None and projection.http_status is None
+
+
+def test_unclassified_unknown_failure_keeps_internal_reason_without_retry_advice() -> None:
+    failure = diagnostics.build_chat_turn_failure(reason_code="lead_internal_error", turn_id="t_mixed_unknown", outcome_unknown=True)
+    assert failure.reason_code == "lead_internal_error"
+    assert failure.recovery_action == "copy_diagnostics"
+    assert failure.diagnostics["retryable"] is False
+    assert failure.diagnostics["safe_detail"] == "phase=chat; failure_class=internal; outcome=unknown"
+    assert diagnostics.publish_chat_turn_failure("wallclock_exceeded", outcome_unknown=True) is None
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_unknown_capacity_diagnosis_does_not_authorize_context_retry(wrapped: bool) -> None:
+    from bowhead_core.context_maintenance import recoverable_context_target
+
+    failure = _llm_target_failure(kind=ProviderFailureKind.CONTEXT_OVERFLOW, status_code=400)
+    error: BaseException = InvocationOutcomeUnknownError(failure=failure)
+    if wrapped:
+        error = ExceptionGroup("MCP session", [error])
+    projection = project_llm_failure(error)
+    assert projection is not None and projection.reason_code == "llm_context_overflow"
+    assert not projection.retryable
+    assert recoverable_context_target(error) is None
 
 
 def test_chat_llm_failure_publishes_finite_detail_and_screens_provider_prose() -> None:
@@ -773,9 +837,15 @@ def test_runtime_policy_and_documented_policy_have_identical_code_sets() -> None
         assert callable(publisher)
         parameters = tuple(inspect.signature(publisher).parameters)
         if publisher in {diagnostics.publish_chat_turn_failure, diagnostics.publish_rule_clarification_failure}:
-            assert parameters == ("reason_code", "clarification_stage")
+            expected_parameters = ("reason_code", "clarification_stage")
+            if publisher is diagnostics.publish_chat_turn_failure:
+                expected_parameters += ("outcome_unknown",)
+            assert parameters == expected_parameters
             stage = inspect.signature(publisher).parameters["clarification_stage"]
             assert stage.kind is inspect.Parameter.KEYWORD_ONLY and stage.default is None
+            if publisher is diagnostics.publish_chat_turn_failure:
+                outcome = inspect.signature(publisher).parameters["outcome_unknown"]
+                assert outcome.kind is inspect.Parameter.KEYWORD_ONLY and outcome.default is False
         elif publisher in {
             diagnostics.publish_chat_canvas_failure,
             diagnostics.publish_chat_peer_failure,

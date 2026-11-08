@@ -38,7 +38,8 @@ export function LiteConfirmConnected({ proposalId }: { proposalId: string }) {
   useSyncExternalStore(bridge?.subscribe ?? (() => () => {}), bridge?.getSnapshot ?? (() => 0), () => 0);
   useSyncExternalStore(subscribeLite, liteVersion, liteVersion);
   const proposal = getLiteProposal(proposalId);
-  const serverState = getLiteServerState(proposalId);
+  // A card the Configuration Agent already saved renders as saved until its authoritative receipt loads.
+  const serverState = getLiteServerState(proposalId) ?? (proposal?.status === "applied" ? "applied" : null);
   const [busy, setBusy] = useState(false);
   const [failedOp, setFailedOp] = useState<"apply" | "undo" | null>(null);
   const [baselineConflict, setBaselineConflict] = useState(false);

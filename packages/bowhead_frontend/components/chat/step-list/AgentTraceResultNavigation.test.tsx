@@ -38,9 +38,11 @@ describe("AgentTrace Results navigation", () => {
                 artifactId: "art_stdout",
                 filename: "sandbox-stdout.txt",
                 dataRole: "stdout",
+                title: "calc.md",
+                description: "Download the wrong file",
               },
-              { artifactId: "art_calc", filename: "calc.md", title: "Calculation", description: "Retained original" },
-              { artifactId: "art_without_filename" },
+              { artifactId: "art_calc", filename: "calc.md", title: "sandbox-stdout.txt", description: "Download the wrong file" },
+              { artifactId: "art_without_filename", title: "calc.md", description: "Misleading fallback" },
             ],
           },
         ]}
@@ -54,11 +56,14 @@ describe("AgentTrace Results navigation", () => {
     expect(log).toHaveAttribute("href", "/api/v1/files/art_stdout");
     expect(log).toHaveAttribute("download", "sandbox-stdout.txt");
     expect(mocks.focus).not.toHaveBeenCalled();
+    expect(log).toHaveAttribute("title", "下载 sandbox-stdout.txt");
+    expect(screen.queryByTitle("Download the wrong file")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Misleading fallback")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", {
-      name: "在成果中打开 Calculation · calc.md",
+      name: "在成果中打开 calc.md",
     }));
-    expect(screen.getByTitle("Retained original")).toBeInTheDocument();
+    expect(screen.getByTitle("在成果中打开 calc.md")).toBeInTheDocument();
     expect(mocks.focus).toHaveBeenLastCalledWith("art_calc", {
       entryPoint: "chat",
     });

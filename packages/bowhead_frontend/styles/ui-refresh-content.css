@@ -136,6 +136,19 @@
 :root:root .lead-narrative-md > .v2-md li {
   color: var(--c-ink);
 }
+/* Model output keeps its list markers: the base reset removes them, so ranked results and steps read as loose lines */
+:root:root .v2-md ul {
+  list-style: disc;
+}
+:root:root .v2-md ol {
+  list-style: decimal;
+}
+:root:root .v2-md :is(ul, ol) ul {
+  list-style: circle;
+}
+:root:root .v2-md li::marker {
+  color: var(--c-ink-3);
+}
 :root:root .lead-narrative-md > .v2-md a[data-compact-web-link] {
   display: inline-block;
   max-width: 100%;
@@ -265,7 +278,7 @@
   overflow-wrap: anywhere;
 }
 /* Caption under charts / figures: 12.5 / 1.55 --c-ink-3 */
-:root:root .canvas-report-article p.rc-fig-caption:not(.v2-report-deck) {
+:root:root .canvas-report-article p.rc-fig-caption:not(.v2-report-deck):not([data-chart-unit-note]) {
   max-width: var(--report-content-measure, calc(var(--content-measure) * 1.5));
   color: var(--c-ink-3);
   font-size: var(--fs-content-caption);

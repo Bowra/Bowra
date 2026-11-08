@@ -44,7 +44,7 @@ describe("AttachmentChip — state 1 (small ready)", () => {
   it("exposes current selected scope and the whole-file qualification in the existing chip", () => {
     const selectedContext = { version: 1 as const, sectionId: "sec", sectionRev: 1, viewId: "v", bindingId: "b", datasetDigest: "a".repeat(64), measureKeys: ["revenue"], tuples: [["2026-02"]] };
     const { container, getByText } = render(i18nWrap(<AttachmentChip item={makeItem({ selectedContext })} />));
-    expect(getByText('Selected: [["2026-02"]]')).toBeTruthy();
+    expect(getByText('Selected: 2026-02')).toBeTruthy();
     expect(container.querySelector(".v2-chip")!.getAttribute("title")).toContain("The attached file may include more data");
   });
   it("renders a line icon for the type, no progress bar and no spinner", () => {

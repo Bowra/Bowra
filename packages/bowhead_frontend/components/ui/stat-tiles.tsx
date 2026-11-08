@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
-import { formatPrecise, kpiValueLines } from "@/lib/chart/format";
+import { formatPrecise, kpiValueEms, kpiValueLines } from "@/lib/chart/format";
 
 import styles from "./stat-tiles.module.css";
 
@@ -49,6 +49,8 @@ export function StatTiles({
           : tile.format ? tile.format(tile.value) : formatPrecise(tile.value, tile.unit);
         const { main, exact, swapped, ems } = tile.value === null
           ? { main: display, exact: null, swapped: false, ems: 1 }
+          : tile.format
+          ? { main: display, exact: null, swapped: false, ems: kpiValueEms(display) }
           : kpiValueLines(tile.value, display, { unit: tile.unit });
         return (
           <div key={tile.id} className={styles.tile} data-stat-tile={tile.id}>

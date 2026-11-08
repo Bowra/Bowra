@@ -24,7 +24,7 @@ When working in the Bowhead repo, inspect these before writing:
 - `docs/help/release-notes/index.en-US.md`
 - `docs/help/release-notes/index.zh-CN.md`
 - Recent files in `docs/help/release-notes/releases/`
-- `docs/release-playbook.md`
+- `docs/help/README.md` and the repository delivery rules in `AGENTS.md`
 - The PRs, commits, sprint docs, or user-provided bullet list for this release
 
 Prefer the latest shipped notes as the style source. Older notes may have one-off section names; do not copy a historical exception unless the release is similarly small.

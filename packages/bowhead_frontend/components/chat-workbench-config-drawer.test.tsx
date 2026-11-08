@@ -90,6 +90,7 @@ function workbenchElement(
   drawerOpen: boolean,
   options: {
     runner?: Record<string, unknown>;
+    onSend?: React.ComponentProps<typeof ChatWorkbench>["onSend"];
     onCancel?: () => boolean | Promise<boolean>;
     onSteer?: (text: string) => boolean | Promise<boolean>;
     onReplay?: (turnId: string, text: string, attachments: unknown[]) => boolean | Promise<boolean>;
@@ -116,7 +117,7 @@ function workbenchElement(
   return (
     <ChatWorkbench
       runner={runner as never}
-      onSend={vi.fn()}
+      onSend={options.onSend ?? vi.fn()}
       onCancel={options.onCancel ?? vi.fn()}
       onSteer={options.onSteer}
       onReplay={options.onReplay as never}
@@ -177,6 +178,47 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+describe("ChatWorkbench message scrolling", () => {
+  it.each([true, false])("restores following only after an accepted send (accepted=%s)", async (accepted) => {
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => { resolveSend = resolve; }));
+    const { container } = renderWorkbench(false, { onSend });
+    const scroller = container.querySelector<HTMLElement>(".v2-messages")!;
+    let scrollHeight = 1000;
+    Object.defineProperties(scroller, {
+      scrollHeight: { get: () => scrollHeight },
+      clientHeight: { value: 400 },
+    });
+    const scrollTo = vi.fn((options: ScrollToOptions) => {
+      scroller.scrollTop = Math.min(options.top ?? 0, scrollHeight - 400);
+    });
+    Object.defineProperty(scroller, "scrollTo", { value: scrollTo, configurable: true });
+    scroller.scrollTop = 100;
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    expect(screen.getByTestId("jump-to-latest")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Show the next visualization" } });
+    expect(scroller.scrollTop).toBe(100);
+    fireEvent.click(screen.getByRole("button", { name: zhMessages.welcome.send }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    await act(async () => {
+      if (accepted) scrollHeight = 1600;
+      resolveSend(accepted);
+    });
+    if (accepted) {
+      await waitFor(() => expect(screen.queryByTestId("jump-to-latest")).toBeNull());
+      expect(scrollTo).toHaveBeenCalledWith({ top: 1600, behavior: "smooth" });
+      expect(scroller.scrollTop + scroller.clientHeight).toBe(scrollHeight);
+    } else {
+      expect(screen.getByTestId("jump-to-latest")).toBeTruthy();
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(100);
+    }
+  });
+});
 
 describe("ChatWorkbench × ConfigDrawer 形态接缝", () => {
   it("有 canvas + 桌面 → overlay，且 scrim 挂在 canvas 列内（对话区永不被遮）", () => {

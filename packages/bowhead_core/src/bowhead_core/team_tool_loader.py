@@ -25,6 +25,8 @@ from bowhead_core.openapi_tool_source import (
     openapi_entry,
     parse_openapi_ops,
 )
+from bowhead_core.team_tool_categories import effective_admin_category, load_team_tool_categories
+from bowhead_core.team_tool_confirmation import team_tool_confirmation_enabled
 
 if TYPE_CHECKING:
     from bowhead_core.user_store import TeamToolSource
@@ -57,6 +59,11 @@ async def load_team_tool_entries(
     if not team_id or store is None:
         return [], {}
     sources = await store.list_team_tool_sources(team_id, only_enabled=True)
+    # Administrator categories only exist with requester confirmation, which they refine.
+    categories: dict[str, dict] = {}
+    db_path = getattr(store, "db_path", None)
+    if db_path and team_tool_confirmation_enabled() and any(src.kind == "mcp" for src in sources):
+        categories = await load_team_tool_categories(db_path, team_id)
     entries: list[TeamToolEntry] = []
     by_id: dict[str, TeamToolSource] = {}
     for src in sources:
@@ -74,7 +81,12 @@ async def load_team_tool_entries(
                 desc_ovr = (ovr.get(raw) or {}).get("description")
                 if desc_ovr:
                     meta["description"] = desc_ovr
-                entries.append(mcp_entry(src.id, meta))
+                entry = mcp_entry(src.id, meta)
+                # The confirmation is bound to the server's cached definition, not the description override.
+                confirmed = effective_admin_category(tm, (categories.get(src.id) or {}).get(raw))
+                if confirmed:
+                    entry = replace(entry, admin_category=confirmed)
+                entries.append(entry)
                 added = True
             if added:
                 by_id[src.id] = src

@@ -27,6 +27,7 @@ export const CHAT_SEND_BACKEND_CODES = [
   "configuration_mention_unsupported",
   "configuration_mention_unavailable",
   "resource_unavailable",
+  "reference_receiver_selection_failed",
   "plan_execution_claim_lost",
   "source_projection_unavailable",
   "attachment_bundle_mismatch",

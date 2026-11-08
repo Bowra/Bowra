@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Check, ChevronDown, CircleAlert, Download, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState, type CSSProperties } from "react";
 
 import { LucideGlyph } from "@/components/icon-refresh";
@@ -145,7 +145,8 @@ export function AttachmentChip({
   flash = false,
 }: Props) {
   const t = useTranslations("attachment");
-  const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext) : null;
+  const locale = useLocale();
+  const scopeLabel = item.selectedContext ? chartSelectedScopeLabel(item.selectedContext, locale) : null;
   const kind: "file" | "bundle" = item.kind ?? "file";
   const [menuOpen, setMenuOpen] = useState(false);
   const bundleMenu = useMenu({

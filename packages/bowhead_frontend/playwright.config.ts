@@ -19,6 +19,7 @@ const E2E_PROFILE = process.env.BOWHEAD_E2E_PROFILE ?? "gate";
 
 /** E2e specs requiring Chromium and WebKit (focus/layers/keyboard/history/deep-link navigation). */
 const CROSS_BROWSER_SPECS = [
+  "**/html-preview-worker-production.spec.ts",
   "**/model-verification-diagnostics.spec.ts",
   "**/bowra-model-connection.spec.ts",
   "**/tool-outcomes.spec.ts",
@@ -67,6 +68,7 @@ const CROSS_BROWSER_SPECS = [
   "**/configuration-canvas-agents.spec.ts",
   "**/document-canvas-root.spec.ts",
   "**/document-draft-canvas.spec.ts",
+  "**/pptx-preview-busy.spec.ts",
   "**/settings-pages-canvas.spec.ts",
   "**/canvas-cc/configuration-settings.spec.ts",
   "**/canvas-cc/results-reading-layout.spec.ts",

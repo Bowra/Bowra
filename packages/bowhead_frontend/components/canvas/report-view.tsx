@@ -1309,22 +1309,20 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
       )}
       {/* Visual refresh batch 4b: toolbar status group — writing progress while writing (replaces banner above), otherwise status badge
           (replaces the report-header badge below); edit group explains editing via "正在编辑 · 保存状态", omitted here. */}
-      {toolbarStatus && statusHost
-        ? createPortal(
-            <ReportToolbarStatusGroup
-              isStreaming={isStreaming}
-              turnId={currentTurnId}
-              onCancel={onCancelTurn}
-              turnTerminalStatus={turnTerminalStatus}
-              connection={reportStreamConnection}
-              interruption={writingInterruptionKind}
-              sectionsSaved={turnReportSectionsSaved}
-              onRefresh={canvasId ? () => void refreshFromServer() : undefined}
-              idle={canvasId && !isEditMode ? <ReportStatusChip canvasId={canvasId} readOnly={!canEdit} hideDefault /> : null}
-            />,
-            statusHost,
-          )
-        : null}
+      {toolbarStatus ? (
+        <ReportToolbarStatusGroup
+          host={statusHost ?? null}
+          isStreaming={isStreaming}
+          turnId={currentTurnId}
+          onCancel={onCancelTurn}
+          turnTerminalStatus={turnTerminalStatus}
+          connection={reportStreamConnection}
+          interruption={writingInterruptionKind}
+          sectionsSaved={turnReportSectionsSaved}
+          onRefresh={canvasId ? () => void refreshFromServer() : undefined}
+          idle={canvasId && !isEditMode ? <ReportStatusChip canvasId={canvasId} readOnly={!canEdit} hideDefault /> : null}
+        />
+      ) : null}
       {/* report-streaming D2: phase before the output begins taking shape (prod p50 62s / p90 173s,
           77% of turns have their longest stationary phase here) — band determines its own visibility; appearance and exit
           rules are documented at the component top. */}

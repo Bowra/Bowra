@@ -521,6 +521,92 @@ describe("DataTabFiles runtime path prefix", () => {
     expect(fetchMock.mock.calls.every(([input]) => String(input).endsWith("/representations/details"))).toBe(true);
   });
 
+  it("keeps a busy PPT conversion retryable without marking the result as failed", async () => {
+    const artifact: ArtifactItem = {
+      id: "art_busy_deck", filename: "board.pptx",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 2048, source: "upload", created_at: "2026-07-30T00:00:00Z", preview_available: true,
+    };
+    getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({
+      getViewport: () => ({ width: 480, height: 270 }), render: () => ({ promise: Promise.resolve() }),
+    }) }), destroy: vi.fn().mockResolvedValue(undefined) });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    let attempts = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input).endsWith("/details")) return Promise.resolve(detailsResponse(artifact.id));
+      attempts += 1;
+      return Promise.resolve(attempts === 1
+        ? new Response(JSON.stringify({ detail: { error: {
+          code: "artifact_representation_busy", message: "Do not expose internal diagnostics",
+        } } }), { status: 503, headers: { "Retry-After": "2" } })
+        : new Response(new Uint8Array([1]), { headers: { "content-type": "application/pdf" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onOpenFailed = vi.fn();
+    render(<DataTabFiles sessionId="s_busy_deck" focusArtifactId={artifact.id} viewerOnly
+      artifactItems={[artifact]} onOpenFailed={onOpenFailed} />);
+    expect(await screen.findByText("presentation_preview_busy")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(onOpenFailed).not.toHaveBeenCalled();
+    expect(screen.queryByText(/internal diagnostics/)).not.toBeInTheDocument();
+    expect(attempts).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+    expect(await screen.findByLabelText("board.pptx · 1")).toBeInTheDocument();
+    expect(attempts).toBe(2);
+    expect(onOpenFailed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    JSON.stringify({ detail: { error: { code: "artifact_representation_unavailable" } } }),
+    "Service unavailable",
+  ])("keeps a non-busy PPT service failure visible (%s)", async (body) => {
+    const artifact: ArtifactItem = {
+      id: "art_failed_deck", filename: "board.pptx",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 2048, source: "upload", created_at: "2026-07-30T00:00:00Z", preview_available: true,
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).endsWith("/details")
+      ? detailsResponse(artifact.id) : new Response(body, { status: 503 }))));
+    const onOpenFailed = vi.fn();
+    render(<DataTabFiles sessionId="s_failed_deck" focusArtifactId={artifact.id} viewerOnly
+      artifactItems={[artifact]} onOpenFailed={onOpenFailed} />);
+    expect(await screen.findByText("presentation_preview_failed")).toBeInTheDocument();
+    expect(screen.queryByText("presentation_preview_busy")).not.toBeInTheDocument();
+    expect(onOpenFailed).toHaveBeenCalledWith("unknown");
+  });
+
+  it("ignores a late busy response after selecting another PPT", async () => {
+    const original: ArtifactItem = {
+      id: "art_late_busy", filename: "Original.pptx",
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 2048, source: "upload", created_at: "2026-07-30T00:00:00Z", preview_available: true,
+    };
+    const next = { ...original, id: "art_next_deck", filename: "Next.pptx" };
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/details")) return Promise.resolve(detailsResponse(path.split("/").at(-3)!));
+      return path.includes(original.id) ? pending : Promise.resolve(new Response(new Uint8Array([1])));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    getDocument.mockReturnValue({ promise: Promise.resolve({ numPages: 1, getPage: vi.fn().mockResolvedValue({
+      getViewport: () => ({ width: 480, height: 270 }), render: () => ({ promise: Promise.resolve() }),
+    }) }), destroy: vi.fn().mockResolvedValue(undefined) });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const failed = vi.fn();
+    const view = render(<DataTabFiles sessionId="s_late_busy" focusArtifactId={original.id} viewerOnly
+      artifactItems={[original, next]} onOpenFailed={failed} />);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`${original.id}/representations/pptx-pdf`))).toBe(true));
+    view.rerender(<DataTabFiles sessionId="s_late_busy" focusArtifactId={next.id} viewerOnly
+      artifactItems={[original, next]} onOpenFailed={failed} />);
+    expect(await screen.findByLabelText("Next.pptx · 1")).toBeInTheDocument();
+    await act(async () => { finish(new Response(JSON.stringify({ detail: { error: { code: "artifact_representation_busy" } } }), { status: 503 })); });
+    expect(screen.queryByText("presentation_preview_busy")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Next.pptx · 1")).toBeInTheDocument();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
   it("renders all PPTX pages and keeps the same page canvases when expanded", async () => {
     const artifact: ArtifactItem = {
       id: "art_deck",

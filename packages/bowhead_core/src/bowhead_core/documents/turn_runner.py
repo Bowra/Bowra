@@ -6,13 +6,14 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 
+import aiosqlite
 import anyio
 from bowhead_router.errors import InvocationOutcomeUnknownError
 from bowhead_router.invocation import physical_invocation_scope
 from bowhead_router.types import LLMResponse
 from bowhead_router.usage import detached_usage_context, usage_context
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef, DocumentTurnOwner
 from bowhead_core.documents.continuation import (
     DocumentCallRef,
@@ -51,8 +52,9 @@ from bowhead_core.sqlite_domains import domain_database_path
 async def fail_document_turn(delivery: DocumentDeliveryStore, worker: DocumentTurnOwner, job_id: str, code: str) -> DocumentPlanningFailure:
     # Terminalize only this retained worker identity, including failure before
     # input freezing. Revocation must not leave a permanently queued request.
-    async with open_shared_ctx(domain_database_path(delivery.path, "execution")) as db:
-        await db.execute("BEGIN IMMEDIATE")
+    now = _now()
+
+    async def record_failure(db: aiosqlite.Connection) -> DocumentPlanningFailure:
         identity = await _one(
             db,
             """SELECT 1 FROM document_jobs j JOIN document_turn_dispatches d ON d.job_id=j.id
@@ -83,8 +85,8 @@ async def fail_document_turn(delivery: DocumentDeliveryStore, worker: DocumentTu
             AND d.owner_id=? AND d.creation_generation=? AND NOT EXISTS(SELECT 1 FROM document_executions WHERE job_id=j.id)""",
             (
                 RATE_CARD_VERSION,
-                _now(),
-                _now(),
+                now,
+                now,
                 job_id,
                 worker.team_id,
                 worker.user_id,
@@ -98,10 +100,11 @@ async def fail_document_turn(delivery: DocumentDeliveryStore, worker: DocumentTu
         await db.execute(
             """UPDATE document_executions SET state='failed',error_code=?,updated_at=?
             WHERE job_id=? AND owner=? AND state IN ('preparing','planning','rendering')""",
-            (code, _now(), job_id, worker.owner_id),
+            (code, now, job_id, worker.owner_id),
         )
-        await db.commit()
-    return DocumentPlanningFailure("failed", job_id, code)
+        return DocumentPlanningFailure("failed", job_id, code)
+
+    return await run_sqlite_authority_write(domain_database_path(delivery.path, "execution"), record_failure)
 
 
 async def _read_inputs(delivery, scope, job_id):

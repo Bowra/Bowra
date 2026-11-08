@@ -18,9 +18,9 @@ from uuid import uuid4
 from bowhead_core.sqlite_diagnostics import DiagnosticConnection
 from bowhead_core.sqlite_domains import (
     DOMAIN_LAYOUT,
-    DOMAIN_TABLES,
     DOMAIN_TARGET_FILES,
     ORIGINAL_TARGET_FILES,
+    domain_tables_at,
 )
 from bowhead_core.sqlite_schema_identity import static_schema_digest
 from bowhead_core.sqlite_source_compatibility import (
@@ -773,7 +773,8 @@ def _run_append_upgrade(
         _assert_integrity(path)
         with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, factory=DiagnosticConnection)) as connection:
             actual_tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            expected_tables = set(DOMAIN_TABLES[name]) | {"alembic_version"} | ({"_phase0_probe"} if name in _PROBE_DOMAINS else set())
+            reached = lambda revision: revision in positions and positions[revision] <= positions[head]  # noqa: E731
+            expected_tables = set(domain_tables_at(name, reached)) | {"alembic_version"} | ({"_phase0_probe"} if name in _PROBE_DOMAINS else set())
             if actual_tables != expected_tables:
                 raise SQLiteUpgradeError(f"Post-append table ownership verification failed for {filename}; inspect its migration revision.")
             state["targets"][name]["schema_digest"] = schema_digest(connection)

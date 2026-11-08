@@ -128,6 +128,52 @@ def test_correction_feedback_bounds_large_runs_without_trusting_omitted_calls(mo
     assert "every failed call must be accounted for" in validate_delivery_review(review, calls).problems
 
 
+@pytest.mark.parametrize("retain_explicit_partial", [False, True])
+@pytest.mark.parametrize("review_tool", [None, "review_delivery"])
+def test_post_read_correction_rechecks_scope_without_clearing_explicit_partial(retain_explicit_partial: bool, review_tool: str | None) -> None:
+    calls = [
+        ToolInvocation("bi_query", {}, call_id="mixed", result={"ok": True, "completion": "partial"}),
+        ToolInvocation("python_exec", {}, call_id="read", result={"ok": True, "stdout": "revenue=4200"}),
+    ]
+    review = {
+        "requirements": [
+            {"requirement": "Deliver required revenue", "status": "fulfilled", "evidence_call_ids": ["read"]},
+            {"requirement": "Report optional rejection", "status": "fulfilled", "evidence_call_ids": []},
+        ],
+        "issues": [
+            {
+                "call_id": "mixed",
+                "resolution": "covered",
+                "evidence_call_ids": ["read"],
+                "explanation": "The original reader verified revenue; the other observation is optional.",
+            }
+        ],
+    }
+    payload = {"completion": "partial", "delivery_review": review}
+    refusal = review_terminal_payload(payload, calls, review_tool=review_tool)
+    assert refusal is not None
+    assert refusal["review_context"]["invalid_evidence_fields"] == ["requirements[1].evidence_call_ids"]
+    assert refusal["review_context"]["successful_calls"] == [{"call_id": "read", "tool": "python_exec"}]
+    assert refusal["review_context"]["failed_calls"][0]["state"] == "partial"
+    problem, guidance = refusal["error"].split("\n", 1)
+    assert "successful evidence_call_ids" in problem
+    assert guidance.startswith("Fix requirement scope before filling evidence IDs.")
+    assert "never an extra success or negative-test requirement" in guidance
+    assert "known state=failure, never partial or unknown" in guidance
+    assert "Preserve genuine unmet requirements" in guidance
+    assert "Reassess explicit completion after correction" in guidance
+    assert ("Call review_delivery alone" in guidance) is (review_tool is not None)
+    assert len(review["requirements"]) == 2 and payload["completion"] == "partial"
+    calls.append(ToolInvocation("subagent_return", {}, call_id="correction", result=refusal))
+    # The model owns scope correction. Native feedback must not prune requirements.
+    review["requirements"].pop()
+    if not retain_explicit_partial:
+        payload.pop("completion")
+    assert validate_delivery_review(review, calls).complete
+    assert review_terminal_payload(payload, calls) is None
+    assert payload["completion"] == ("partial" if retain_explicit_partial else "complete")
+
+
 def test_expected_failure_observations_do_not_become_positive_delivery_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FEATURE_TOOL_DELIVERY_REVIEW", raising=False)
     calls = _calls()

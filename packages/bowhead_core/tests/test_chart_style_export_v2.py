@@ -280,3 +280,16 @@ async def test_snapshot_freezes_chart_and_export_identity_is_not_screen_receipt(
         expected_rev=section.rev,
     )
     assert normalize_export_snapshot(saved).blocks[0].visual_input_sha256 == identity
+
+
+def test_selected_series_palette_survives_export_freeze_and_changes_identity():
+    theme = build_chart_style_export_theme_v2(_effective_v2(), print_theme=current_print_theme_snapshot())
+    spec = _spec()
+    before = freeze_chart_presentation_v2(spec, theme=theme, locale="en-US")
+    metric = next(column for column in spec["columns"] if column["type"] == "numeric")
+    metric["color_index"] = 4
+    colored = freeze_chart_presentation_v2(spec, theme=theme, locale="en-US")
+    assert colored["effective"]["series"][0]["paletteIndex"] == 4
+    assert colored["normalizedRenderShape"]["series"][0]["paletteIndex"] == 4
+    assert colored["presentationChecksum"] != before["presentationChecksum"]
+    assert parse_frozen_chart_presentation_v2(colored, locale="en-US") == colored

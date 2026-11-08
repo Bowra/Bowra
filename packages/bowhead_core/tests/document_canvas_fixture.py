@@ -10,10 +10,9 @@ from bowhead_gateway.document_canvas_inputs import DocumentCanvasInputs
 from test_document_store import SCOPE
 
 
-async def setup_canvas(ctx, state=None):
+async def setup_canvas(ctx, state=None, *, complete=b"period,revenue\nEast,87.25\nWest,120.5\nNorth,9\n"):
     store = CanvasStore(ctx.path)
     canvas = await store.ensure_canvas(session_id="s_doc", user_id=SCOPE.user_id, workspace_id=SCOPE.workspace_id)
-    complete = b"period,revenue\nEast,87.25\nWest,120.5\nNorth,9\n"
     artifact = await ctx.artifacts.put_bytes(content=complete, filename="revenue.csv", mime="text/csv", created_by=SCOPE.user_id)
     payload = {
         "spec": {

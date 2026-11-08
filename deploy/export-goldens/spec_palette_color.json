@@ -1,0 +1,35 @@
+{
+  "sectionKind": "chart",
+  "blockKey": "golden:spec_palette_color",
+  "payload": {
+    "spec": {
+      "kind": "bar",
+      "title": "Native selected palette export",
+      "row_count": 2,
+      "columns": [
+        {
+          "key": "range",
+          "header": "Range",
+          "type": "categorical"
+        },
+        {
+          "key": "count",
+          "header": "Count",
+          "type": "numeric",
+          "color_index": 4
+        }
+      ],
+      "rows": [
+        {
+          "range": "1-100",
+          "count": 25
+        },
+        {
+          "range": "101-200",
+          "count": 21
+        }
+      ],
+      "show_data_labels": true
+    }
+  }
+}

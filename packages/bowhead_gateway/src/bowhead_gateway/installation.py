@@ -21,6 +21,7 @@ from bowhead_core.installation import (
 from bowhead_core.sqlite_upgrade import _recover_rollback_journal, migration_lock
 
 from bowhead_gateway.edition_extensions import read_build_edition
+from bowhead_gateway.logging_config import configure_logging
 from bowhead_gateway.settings import get_settings
 
 if TYPE_CHECKING:
@@ -105,6 +106,8 @@ def main() -> None:
     from dotenv import load_dotenv
 
     load_dotenv(".env", override=False)
+    # Same rendering as the gateway: migration failures must not print local variables (settings, keys).
+    configure_logging(os.environ.get("BOWHEAD_LOG_LEVEL", "INFO"), os.environ.get("BOWHEAD_LOG_FORMAT", "json"))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "preflight", "setup-token"))
     parser.add_argument("--db-url", default=None)

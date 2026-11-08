@@ -429,7 +429,7 @@ async def test_notification_routes_are_recipient_scoped(app_ctx) -> None:
         for headers in (_as_member(app_ctx), _as_owner(app_ctx), _as_outsider(app_ctx)):
             r = await c.get("/api/v1/notifications/unread-count", headers=headers)
             assert r.status_code == 200
-            assert r.json() == {"actionRequired": 0, "updatesUnread": 0, "totalBadge": 0}
+            assert r.json() == {"actionRequired": 0, "updatesUnread": 0, "totalBadge": 0, "latestBrowserCandidateAt": None}
             r = await c.get("/api/v1/notifications?tab=all", headers=headers)
             assert r.status_code == 200
             assert r.json()["items"] == []

@@ -53,6 +53,7 @@ vi.mock("@/components/chat/toast-container", () => ({
 
 vi.mock("@/components/chat/personal-mcp-confirmations", () => ({ PersonalMcpConfirmations: () => <div data-testid="personal-mcp-confirmations" /> }));
 vi.mock("@/components/chat/email-send-confirmations", () => ({ EmailSendConfirmations: () => <div data-testid="email-send-confirmations" /> }));
+vi.mock("@/components/chat/team-tool-confirmations", () => ({ TeamToolConfirmations: () => <div data-testid="team-tool-confirmations" /> }));
 
 import { AuthenticatedAppRoot } from "./authenticated-app-root";
 

@@ -258,7 +258,16 @@ describe("a failed turn folds into one 'Not finished' line (spec §8), live and 
     expect(summary?.getAttribute("data-state")).toBe("failed");
     expect(summary?.querySelector('[data-testid="step-summary-progress"]')?.textContent).toBe(" · summary_steps_count:1");
     expect(summary?.querySelector('[data-testid="step-summary-duration"]')?.textContent).toContain("summary_duration_min_sec:2,4");
+    expect(summary?.getAttribute("aria-expanded")).toBe("false");
+    summary!.focus();
     await act(async () => { summary!.click(); });
-    expect(container.querySelector('[data-testid="step-summary"]')).toBeNull();
+    // The row stays above the trace as the control that folds it again, and keeps keyboard focus.
+    const open = container.querySelector<HTMLElement>('[data-testid="step-summary"]');
+    expect(open).toBe(summary);
+    expect(open?.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(open);
+    expect(open?.textContent).toContain("collapse_trace");
+    await act(async () => { open!.click(); });
+    expect(container.querySelector('[data-testid="step-summary"]')?.getAttribute("aria-expanded")).toBe("false");
   });
 });

@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 from bowhead_core.citation_marks import CITATION_PROSE_KEYS
+from bowhead_core.events import stream_restart_narrative_chars
 from bowhead_core.kb_citations import KB_CHUNK_KIND, parse_kb_citation_identity
 from bowhead_core.results_report_relations import project_report_relations
 from bowhead_core.source_access_projection import (
@@ -60,13 +61,20 @@ def _project_legacy_chat_failures(
 ) -> list[dict[str, Any]]:
     """Keep older persisted private model text and raw dispatch errors off browser surfaces."""
     narrative_run: list[int] = []
+    # An `llm.stream_restarted` with narrative characters withdraws code points counted on the
+    # original deltas, so those deltas must reach the viewer unchanged. Only Turns
+    # recorded after restarts existed carry them, and their narrative never holds
+    # inline reasoning: the Router separates it before Lead streams.
+    narrative_withdrawn = any(
+        event_type == "llm.stream_restarted" and stream_restart_narrative_chars(payloads[index]) for index, (event_type, _) in enumerate(events)
+    )
 
     def flush_narrative() -> None:
         if not narrative_run:
             return
         original = "".join(str(payloads[index].get("delta") or "") for index in narrative_run)
         visible, _ = split_inline_reasoning(original)
-        if visible != original:
+        if visible != original and not narrative_withdrawn:
             for index in narrative_run:
                 payloads[index]["delta"] = ""
             payloads[narrative_run[-1]]["delta"] = visible
@@ -912,6 +920,28 @@ async def project_event_payloads_for_viewer(
     _extra_in_flight: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Project a persisted event page without changing event ordering or shape."""
+    # Native recovery metadata is an internal model-context carrier. Its own
+    # current-authority reader controls disclosure, not the browser event DTO.
+    events = [
+        (
+            event_type,
+            {
+                key: ({k: v for k, v in value.items() if k != "material_refs"} if key == "result_meta" and isinstance(value, Mapping) else value)
+                for key, value in payload.items()
+                if key != "material_refs"
+            },
+        )
+        for event_type, payload in events
+    ]
+    for event_type, payload in events:
+        if event_type in {"tool_result", "step_done"} and payload.get("tool_name") == "read_report":
+            for key in ("result_inline", "result_meta", "inline_artifacts", "preview"):
+                payload.pop(key, None)
+            # Older persisted reader events may contain outlines or prose.
+            # The current report reader remains the authorized content exit.
+            for key in ("result_preview", "output_preview"):
+                if key in payload:
+                    payload[key] = ""
     if any(event_type == "document.draft_open" for event_type, _ in events):
         from bowhead_gateway.document_canvas_projection import project_document_draft_open
 

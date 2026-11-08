@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 from pathlib import PurePosixPath
 from typing import Literal
@@ -10,6 +11,7 @@ from typing import Literal
 import anyio
 from bowhead_router.errors import InvocationOutcomeUnknownError
 from bowhead_router.invocation import physical_invocation_scope
+from bowhead_router.output_budget import ContextCapacityError
 from bowhead_router.types import Message, ToolCall
 from bowhead_router.usage import detached_usage_context, usage_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,7 +23,7 @@ from bowhead_core.documents.authoring_context import context as authoring_contex
 from bowhead_core.documents.authoring_context import tools
 from bowhead_core.documents.authoring_executor import ScriptExecutionError
 from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE
-from bowhead_core.documents.authoring_protocol import digest
+from bowhead_core.documents.authoring_protocol import COMPUTE_CONTRACT, digest
 from bowhead_core.documents.authoring_review import review_result
 from bowhead_core.documents.continuation import (
     DocumentCallRef,
@@ -47,24 +49,70 @@ from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _json
 from bowhead_core.documents.turn_runner import _read_inputs, fail_document_turn
 from bowhead_core.documents.usage import DocumentModelHook
+from bowhead_core.pptx_reading import inspect_pptx_read_info
+from bowhead_core.read_receipts import ReadInfo, ReadRecovery, read_info
 
+log = logging.getLogger(__name__)
 MAX_SCRIPT_ATTEMPTS = 2
 MAX_UNKNOWN_SOURCES = 2
+MATERIAL_REFUSALS = frozenset(
+    {
+        "document_data_limit",
+        "document_data_format_unsupported",
+        "document_data_encoding_unsupported",
+        "document_data_formula_unsupported",
+        "document_data_unsupported",
+        "document_data_invalid",
+        "planning_invalid_json",
+        "planning_duplicate_key",
+        "planning_nonfinite_number",
+    }
+)
+
+
+async def _read_material(executor, *, run_id, item, expected_image_id):
+    """Observe a bounded read of an already authorized, exact script input."""
+    try:
+        value = await executor.read_material(run_id=run_id, item=item, expected_image_id=expected_image_id)
+    except OfficePackageError as error:
+        if error.code not in MATERIAL_REFUSALS:
+            raise
+        metadata = ReadInfo.model_validate(error.read_info or read_info(view="none", unit="bytes", returned=0))
+        boundary = ""
+        if metadata.limit is not None:
+            limit = metadata.limit
+            observed = "unknown" if limit.actual is None else str(limit.actual)
+            maximum = "unknown" if limit.maximum is None else str(limit.maximum)
+            boundary = f" Boundary {limit.kind}: observed {observed} {limit.unit}; maximum {maximum} {limit.unit}."
+        value = {
+            "error": error.code,
+            "read_info": metadata.model_dump(mode="json"),
+            "hint": "This file cannot be returned by the normalized data reader."
+            + boundary
+            + " Its exact full bytes remain in this task's bound script inputs. Use another available source or parse those bytes "
+            "in Python when available, or the final edit script; do not retry this unchanged read or treat it as complete data.",
+        }
+    if "read_info" in value:
+        metadata = ReadInfo.model_validate(value["read_info"])
+        recovery = ReadRecovery(action="use_full_input") if metadata.view != "complete" else ReadRecovery()
+        value = {**value, "read_info": metadata.model_copy(update={"full_input_available": True, "recovery": recovery}).model_dump(mode="json")}
+    return value
 
 
 class ReadArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     source: str = "source"
     slides: list[int] | None = None
-    detail: Literal["index", "content", "objects"] = "index"
+    detail: Literal["index", "content", "objects", "datasets"] = "index"
     section_id: str | None = Field(default=None, min_length=1, max_length=128)
     view_id: str | None = Field(default=None, min_length=1, max_length=128)
+    dataset_alias: str | None = Field(default=None, min_length=1, max_length=128)
     offset: int = Field(default=0, ge=0)
 
 
 class WordReadArguments(ReadArguments):
     slides: None = None
-    detail: Literal["index", "content"] = "index"
+    detail: Literal["index", "content", "datasets"] = "index"
     limit: int = Field(default=50, ge=1, le=50)
 
 
@@ -72,6 +120,12 @@ class ExecuteArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     based_on: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     code: str = Field(min_length=1, max_length=64_000)
+
+
+class ComputeArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    code: str = Field(min_length=1, max_length=64_000)
+    intent: str = Field(min_length=1, max_length=500)
 
 
 class QuestionArguments(BaseModel):
@@ -227,6 +281,10 @@ async def run_authoring_turn(
             )
             messages = [Message(role="user", content=context["payload"])]
             used_tools = used_steps = 0
+        readiness = await executor.capabilities()
+        if readiness.get("image_id") != runtime.image_id:
+            raise OfficePackageError("document_runtime_changed")
+        compute_enabled = readiness.get("compute_contract") == COMPUTE_CONTRACT
         limits = AgentRunLimits(**runtime.authoring_limits)
         script_attempts = sum(
             message.role == "tool" and message.name == "document_execute" and json.loads(message.content).get("outcome") == "known_failed"
@@ -250,7 +308,7 @@ async def run_authoring_turn(
                 physical_invocation_scope(hook),
                 anyio.fail_after(timeout),
             ):
-                reply = await invoke(system, messages, tools(runtime.planner_profile))
+                reply = await invoke(system, messages, tools(runtime.planner_profile, compute=compute_enabled))
             await _observed(delivery, scope, worker, job_id, attempt_no, call_no)
             if reply.finish_reason not in {"stop", "tool_use"} or not reply.tool_calls:
                 raise DocumentRequestError("document_authoring_no_output")
@@ -296,9 +354,22 @@ async def run_authoring_turn(
                             )
                             continue
                         if item.role == "canvas":
-                            from bowhead_core.documents.canvas_material import read_material
+                            from bowhead_core.documents.canvas_material import dataset_input, read_material
 
-                            value = read_material(item.content, section_id=args.section_id, view_id=args.view_id, offset=args.offset)
+                            if args.slides is not None:
+                                raise DocumentRequestError("document_canvas_selection_invalid")
+                            if args.dataset_alias is not None:
+                                if args.section_id is not None or args.view_id is not None or args.offset or args.detail not in {"index", "content"}:
+                                    raise DocumentRequestError("document_canvas_selection_invalid")
+                                linked = dataset_input(item.content, args.dataset_alias)
+                                value = await _read_material(executor, run_id=run_id, item=linked, expected_image_id=runtime.image_id)
+                                value.update(dataset_alias=args.dataset_alias, canvas_sha256=digest(item.content))
+                            else:
+                                value = read_material(
+                                    item.content, section_id=args.section_id, view_id=args.view_id, offset=args.offset, detail=args.detail
+                                )
+                        elif args.dataset_alias is not None or args.detail == "datasets":
+                            raise DocumentRequestError("document_canvas_selection_invalid")
                         elif word and (item.role == "template" or PurePosixPath(item.name).suffix.lower() == ".docx"):
                             if args.section_id is not None or args.view_id is not None or args.slides is not None:
                                 raise DocumentRequestError("document_canvas_selection_invalid")
@@ -316,8 +387,18 @@ async def run_authoring_turn(
                             value = await executor.inspect_source(
                                 run_id=run_id, source=item.content, expected_image_id=runtime.image_id, slides=args.slides, detail=args.detail
                             )
+                            value["read_info"] = inspect_pptx_read_info(value, source=args.source, slides=args.slides, detail=args.detail)
                         else:
-                            value = await executor.read_material(run_id=run_id, item=item, expected_image_id=runtime.image_id)
+                            value = await _read_material(executor, run_id=run_id, item=item, expected_image_id=runtime.image_id)
+                    elif call.name == "python_exec" and compute_enabled:
+                        args = ComputeArguments.model_validate(call.arguments)
+                        value = await executor.compute(
+                            run_id=run_id,
+                            source=source.content,
+                            code=args.code,
+                            expected_image_id=runtime.image_id,
+                            data=data,
+                        )
                     elif call.name == "document_execute":
                         args = ExecuteArguments.model_validate(call.arguments)
                         if args.based_on is not None and args.based_on != digest(source.content):
@@ -460,11 +541,29 @@ async def run_authoring_turn(
                         "document_canvas_selection_invalid",
                         "document_canvas_section_unavailable",
                         "document_canvas_view_unavailable",
+                        "document_canvas_dataset_unavailable",
                     }:
                         raise
-                    value = {"error": error.code, "hint": "Read the Canvas input directory, then choose an offered section/view and offset."}
+                    value = {
+                        "error": error.code,
+                        "hint": "Read the Canvas input directory, then choose an offered section/view and next_offset. "
+                        "For linked files use detail='datasets', then dataset_alias alone with the same source. "
+                        "Unavailable files have no readable bytes; use available sources or ask for the missing data.",
+                    }
                 messages.append(Message(role="tool", name=call.name, tool_call_id=call.id, content=_json(value)))
         raise DocumentRequestError("document_authoring_budget_exhausted")
+    except ContextCapacityError as error:
+        budget = error.budget
+        log.warning(
+            "document.context_limit job_id=%s context_window=%s context_source=%s input_estimate=%s estimate_coverage=%s required_output=%s",
+            job_id,
+            budget.context_window,
+            budget.context_source,
+            budget.input_estimate,
+            budget.estimate_coverage,
+            budget.required_output,
+        )
+        code = "document_context_limit"
     except InvocationOutcomeUnknownError:
         code = "document_usage_unresolved"
     except (DocumentRequestError, OfficePackageError) as error:

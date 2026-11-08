@@ -139,6 +139,39 @@ describe("personal appearance saved results", () => {
       window.removeEventListener(PERSONAL_APPEARANCE_REFRESH_EVENT, saved);
     }
   });
+
+  it("shows an appearance the Configuration Agent saved live, but not again on replay", () => {
+    const saved = vi.fn();
+    window.addEventListener(PERSONAL_APPEARANCE_REFRESH_EVENT, saved);
+    const card = (proposalId: string, over: Record<string, unknown> = {}) => ({
+      proposal_id: proposalId,
+      turn_id: "t_1",
+      form_id: "personal_appearance",
+      team_id: "team_original",
+      workspace_id: null,
+      workspace_name: null,
+      rows: APPEARANCE.rows,
+      notes: {},
+      ...over,
+    });
+    try {
+      dispatchToTurnStore("config.lite_propose", card("ccd_saved", { status: "applied" }));
+      expect(getLiteProposal("ccd_saved")?.status).toBe("applied");
+      expect(saved).toHaveBeenCalledTimes(1);
+      expect(refreshEffectiveTheme).toHaveBeenLastCalledWith("team_original");
+
+      dispatchToTurnStore("config.lite_propose", card("ccd_replayed", { status: "applied" }), "replay");
+      dispatchToTurnStore("config.lite_propose", card("ccd_pending"));
+      dispatchToTurnStore("config.lite_propose", card("ccd_unknown", { status: "proposed" }));
+      expect(getLiteProposal("ccd_unknown")?.status).toBeUndefined();
+      expect(saved).toHaveBeenCalledTimes(1);
+      expect(refreshEffectiveTheme).toHaveBeenCalledTimes(1);
+      // The receipt stays authoritative: the payload hint never fills the server-state cache.
+      expect(getLiteServerState("ccd_saved")).toBeNull();
+    } finally {
+      window.removeEventListener(PERSONAL_APPEARANCE_REFRESH_EVENT, saved);
+    }
+  });
 });
 
 function dto(proposalId: string, status: string) {

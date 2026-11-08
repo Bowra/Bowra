@@ -94,6 +94,8 @@ class AuditAction:
     TEAM_TOOL_SOURCE_CREATED: Final = "team_tool_source_created"
     TEAM_TOOL_SOURCE_UPDATED: Final = "team_tool_source_updated"  # tools sprint WP1b — patch (rename/enable-disable/re-select/rotate-auth)
     TEAM_TOOL_SOURCE_DELETED: Final = "team_tool_source_deleted"  # tools sprint WP1b
+    # FEATURE_TEAM_TOOL_CONFIRMATION — an administrator confirms or removes team MCP tool categories.
+    TEAM_TOOL_CATEGORY_CHANGED: Final = "team_tool_category_changed"
     # cca P3 — team subagent authoring (a routable expert assembled from a SUBSET of team
     # tools). OPS tier, best-effort audit from the route. NO secret (subagent holds none).
     TEAM_SUBAGENT_CREATED: Final = "team_subagent_created"

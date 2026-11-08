@@ -224,7 +224,13 @@ class SkillReadSourceResolver:
             _fail()
 
     async def _resolve_in_connection(
-        self, db: aiosqlite.Connection, resource: SkillResourceRef, scope: ReferenceRequestScope, *, retained: SkillReadSourceProof | None = None
+        self,
+        db: aiosqlite.Connection,
+        resource: SkillResourceRef,
+        scope: ReferenceRequestScope,
+        *,
+        retained: SkillReadSourceProof | None = None,
+        historical: bool = False,
     ) -> _Source:
         """Read source metadata/use facts; no connection ownership or file IO."""
         ctx = await read_reference_access_context_in_connection(db, scope=scope, access_store=self.access)
@@ -238,7 +244,7 @@ class SkillReadSourceResolver:
             if len(found) != 1:
                 _fail(reason="not_visible")
             item = found[0]
-            if item.revision != resource.version:
+            if not historical and item.revision != resource.version:
                 _fail("reference_skill_version_changed")
             relative = PurePosixPath(item.relative_path)
             if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != item.relative_path:
@@ -299,7 +305,7 @@ class SkillReadSourceResolver:
             approved = record.approved_sha256
             if approved:
                 approved = approved if approved.startswith("sha256:") else "sha256:" + approved
-                if approved != resource.version:
+                if not historical and approved != resource.version:
                     _fail("reference_skill_version_changed")
             elif record.visibility == "team_wide":
                 _fail(reason="not_approved")
@@ -410,6 +416,25 @@ class SkillReadSourceResolver:
             resource = SkillResourceRef.model_validate(proof.resource.model_dump(mode="python", warnings="error"))
             scope = ReferenceRequestScope.model_validate(proof.scope.model_dump(mode="python", warnings="error"))
             await self._resolve_in_connection(db, resource, scope, retained=proof)
+        except SkillReadResolutionError:
+            raise
+        except Exception:
+            _fail()
+
+    async def authorize_history_in_connection(self, db: aiosqlite.Connection, proof: SkillReadSourceProof) -> None:
+        """Authorize an immutable historical observation, never a new execution.
+
+        The context carrier verifies the original evidence and bytes. Resolve
+        the same source identity under current scope, visibility, approval and
+        use permissions without comparing its current package to old content.
+        Exact selected-input, resume and execution readers remain separate.
+        """
+        try:
+            resource = SkillResourceRef.model_validate(proof.resource.model_dump(mode="python", warnings="error"))
+            scope = ReferenceRequestScope.model_validate(proof.scope.model_dump(mode="python", warnings="error"))
+            current = (await self._resolve_in_connection(db, resource, scope, historical=True)).proof
+            if current.name != proof.name or type(proof.policy_epoch) is not int or not 0 <= proof.policy_epoch <= current.policy_epoch:
+                _fail("reference_skill_source_changed")
         except SkillReadResolutionError:
             raise
         except Exception:

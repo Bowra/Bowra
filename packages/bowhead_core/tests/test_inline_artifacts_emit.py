@@ -377,6 +377,35 @@ async def _put_deliverable(
     )
 
 
+async def test_final_files_exclude_a_revised_input_but_keep_its_execution_record(store: CanvasStore, art_store: ArtifactStore) -> None:
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    await store.ensure_canvas(session_id="s_deck", workspace_id="w", user_id="u")
+    draft = await _put_deliverable(art_store, turn="t_revision", filename="fibonacci.html", mime="text/html", content=b"draft")
+    final = await _put_deliverable(art_store, turn="t_revision", filename="fibonacci.html", mime="text/html", content=b"corrected")
+    unrelated = await _put_deliverable(art_store, turn="t_revision", filename="fibonacci.html", mime="text/html", content=b"independent")
+    log = TurnLogStore(str(art_store.db_path))
+    await log.initialize()
+    for kind, payload in [
+        ("step_started", {"step_id": "step_revision", "tool_name": "python_sandbox", "code_input": {"input_artifact_ids": [draft.id]}}),
+        (
+            "step_done",
+            {
+                "step_id": "step_revision",
+                "state": "success",
+                "result_meta": {"output_artifacts": [{"artifact_id": final.id, "filename": final.filename, "mime": final.mime}]},
+            },
+        ),
+    ]:
+        assert await log.record(turn_id="t_revision", event_type=kind, payload=payload) is not None
+    ctx = SimpleNamespace(canvas_store=store, artifact_store=art_store)
+    payload: dict = {}
+    await _inject_inline_artifacts(payload, ctx, "t_revision")
+    assert {item["id"] for item in payload["inline_artifacts"]} == {final.id, unrelated.id}
+    assert await art_store.get(draft.id) is not None
+    assert len(await log.list_events("t_revision")) == 2
+
+
 async def test_pptx_deliverable_emits_chip_when_report_worthy(
     store: CanvasStore,
     art_store: ArtifactStore,

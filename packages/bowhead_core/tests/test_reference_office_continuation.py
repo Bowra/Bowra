@@ -1,5 +1,6 @@
 """Confirmed Office upload, explicit read, original-card resume without rereading."""
 
+import hashlib
 import io
 import json
 import sqlite3
@@ -26,7 +27,7 @@ pytestmark = [
 ]
 
 
-def office_bytes(kind):
+def office_bytes(kind, *, pages=1):
     output = io.BytesIO()
     if kind == "docx":
         from docx import Document
@@ -37,14 +38,18 @@ def office_bytes(kind):
         from pptx import Presentation
 
         document = Presentation()
-        slide = document.slides.add_slide(document.slide_layouts[1])
-        slide.shapes.title.text = "Original Office profit is 42."
+        for page in range(pages):
+            slide = document.slides.add_slide(document.slide_layouts[1])
+            slide.shapes.title.text = "Original Office profit is 42." if page == pages - 1 else f"Other source page {page + 1}"
     document.save(output)
     return output.getvalue()
 
 
-@pytest.mark.parametrize("kind,changed", [("docx", False), ("pptx", False), ("docx", True), ("pptx", True)])
-async def test_office_read_survives_original_question(lead_prompt, monkeypatch, kind, changed):
+@pytest.mark.parametrize(
+    "kind,changed,selected",
+    [(kind, changed, False) for kind in ("docx", "pptx") for changed in (False, True)] + [("pptx", changed, True) for changed in (False, True)],
+)
+async def test_office_read_survives_original_question(lead_prompt, monkeypatch, kind, changed, selected):
     p = lead_prompt
     case = p.case
     backend = LocalBackend(
@@ -58,7 +63,7 @@ async def test_office_read_survives_original_question(lead_prompt, monkeypatch, 
     case.app.state.artifact_backend = backend
     case.app.state.orchestrator.artifact_store = uploads
     case.app.include_router(files_presign.router)
-    content = office_bytes(kind)
+    content = office_bytes(kind, pages=31 if selected else 1)
     space = {"X-Space-Id": case.fixture.scope.workspace_id, "Content-Type": "application/json"}
     presign = await case.client.post(
         "/api/v1/files/presign",
@@ -90,9 +95,9 @@ async def test_office_read_survives_original_question(lead_prompt, monkeypatch, 
 
     extract = attachment_read.extract_attachment_bounded
 
-    async def parsed(*args):
+    async def parsed(*args, **kwargs):
         parses.append(args[0].id)
-        return await extract(*args)
+        return await extract(*args, **kwargs)
 
     monkeypatch.setattr(attachment_read, "extract_attachment_bounded", parsed)
 
@@ -102,7 +107,12 @@ async def test_office_read_survives_original_question(lead_prompt, monkeypatch, 
         if "subagent_spawn" in names:
             return tool_response(
                 "subagent_spawn",
-                {"agent_id": p.agent.id, "task": "Read the attached source document and analyze its profit.", "delegation_role": "primary"},
+                {
+                    "agent_id": p.agent.id,
+                    "task": "Read the attached source document and analyze its profit.",
+                    "delegation_role": "primary",
+                    "required_source_urls": [],
+                },
                 stream=model.get("stream", False),
             )
         if "attachment_read" not in names:
@@ -111,7 +121,10 @@ async def test_office_read_survives_original_question(lead_prompt, monkeypatch, 
         if len(calls) == 1:
             assert "Original Office profit" not in json.dumps(model)
             assert blob_reads == []
-            return tool_response("attachment_read", {"artifact_id": artifact_id}, stream=model.get("stream", False))
+            arguments = {"artifact_id": artifact_id}
+            if selected:
+                arguments.update(slides=[31], detail="content", expected_content_hash="sha256:" + hashlib.sha256(content).hexdigest())
+            return tool_response("attachment_read", arguments, stream=model.get("stream", False))
         assert "Original Office profit is 42." in json.dumps(model), model
         if len(calls) == 2:
             return tool_response(
@@ -175,6 +188,24 @@ async def test_office_read_survives_original_question(lead_prompt, monkeypatch, 
     for field, value in (("user_id", "u_other"), ("workspace_id", "ws_other"), ("session_id", "s_other")):
         with pytest.raises(ValueError, match="attachment_read_unavailable"):
             await attachment_read._original_attachment(SimpleNamespace(**{**vars(current), field: value}), artifact_id)
+    if not changed:
+        reader = SimpleNamespace(**vars(current), reference_skill_required=False)
+        invalid = await attachment_read.read_attachment({"artifact_id": artifact_id, "slides": list(range(1, 32))}, reader)
+        assert invalid["error"] == "attachment_read_query_invalid"
+        assert invalid["read_info"]["limit"] == {"scope": "model_preview", "kind": "selected_pages", "actual": 31, "maximum": 30, "unit": "pages"}
+        if kind == "docx":
+            refused = await attachment_read.read_attachment({"artifact_id": artifact_id, "slides": [1]}, reader)
+            assert refused["error"] == "attachment_read_query_invalid" and "only for PPTX" in refused["hint"]
+        monkeypatch.setattr(attachment_read, "MAX_READ_BYTES", 1)
+        if kind == "pptx":
+            changed_source = await attachment_read.read_attachment(
+                {"artifact_id": artifact_id, "expected_content_hash": "sha256:" + "0" * 64}, reader
+            )
+            assert changed_source["error"] == "attachment_read_changed" and "read_info" not in changed_source
+        limited = await attachment_read.read_attachment({"artifact_id": artifact_id}, reader)
+        assert limited["error"] == "attachment_read_limit"
+        assert limited["read_info"]["limit"] == {"scope": "parser", "kind": "input_bytes", "actual": art.size, "maximum": 1, "unit": "bytes"}
+        assert parses == [artifact_id]
     unrelated = await uploads.put_bytes(
         content=content,
         filename="unrelated." + kind,

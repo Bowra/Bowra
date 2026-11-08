@@ -94,7 +94,8 @@ async def test_ambiguous_source_requires_a_unique_user_quotation_before_admissio
     await _assert_empty(ctx)
 
 
-async def test_quoted_continuation_retains_confirmed_answers_supplement_and_canvas(ctx):
+@pytest.mark.parametrize("quote_in_current", [False, True])
+async def test_quoted_continuation_retains_confirmed_answers_supplement_and_canvas(ctx, quote_in_current):
     card_store = ClarificationStore(ctx.path)
     question = "What period should the report cover?"
     card = await card_store.put(
@@ -121,11 +122,23 @@ async def test_quoted_continuation_retains_confirmed_answers_supplement_and_canv
     canvas_store = CanvasStore(ctx.path)
     canvas = await canvas_store.ensure_canvas(session_id=ctx.source.session_id, workspace_id=SCOPE.workspace_id, user_id=SCOPE.user_id)
     await canvas_store.append_section(canvas_id=canvas.id, kind="text", payload={"text": "Unlinked data"})
+    for index in range(65):
+        await canvas_store.append_section(canvas_id=canvas.id, kind="code_block", payload={"code": f"value = {index}"}, by_turn_id=supplement.turn_id)
     section = await canvas_store.append_section(
         canvas_id=canvas.id, kind="text", payload={"text": "Demo store revenue"}, by_turn_id=supplement.turn_id
     )
-    current = await follow_up(ctx, text="Please apply that to the same template now.", turn_id="t_apply")
-    proposal = proposal_for(ctx, current)
+    text = "Please apply that to the same template now."
+    if quote_in_current:
+        text += " Original request: " + ctx.source.user_text
+    current = await follow_up(ctx, text=text, turn_id="t_apply")
+    proposal = parse_document_tool_arguments(
+        {
+            "action": "generate",
+            "inputs": [{"artifact_id": ctx.artifact.id, "role": "template"}],
+            "original_request_quote": ctx.source.user_text,
+            "requested_outputs": list(ctx.proposal.requested_outputs),
+        }
+    )
     prepared = await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=current.turn_id, proposal=proposal)
     assert prepared.task_source.continuation.through_turn_id == current.turn_id
     async with open_shared_ctx(ctx.path) as db:
@@ -162,6 +175,28 @@ async def test_quoted_continuation_retains_confirmed_answers_supplement_and_canv
     assert json.loads(row["request_json"])["canvas_input"] == manifest.model_dump(mode="json")
     assert prepared.proposal.inputs[0].artifact_id == ctx.artifact.id
     assert await ctx.store.recover_from_turn(scope=SCOPE, turn_id=current.turn_id, command_id="task-source", proposal=proposal) == receipt
+
+
+async def test_complete_original_message_wins_over_later_quoted_mentions(ctx):
+    await follow_up(ctx, text="Continue this task: " + ctx.source.user_text, turn_id="t_mention")
+    current = await follow_up(ctx)
+    prepared = await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=current.turn_id, proposal=proposal_for(ctx, current))
+    assert prepared.task_source.turn_id == ctx.source.turn_id
+
+
+async def test_ambiguous_earlier_quote_does_not_fall_back_to_current_message(ctx):
+    await follow_up(ctx, text=ctx.source.user_text, turn_id="t_duplicate")
+    current = await follow_up(ctx, text="Continue: " + ctx.source.user_text)
+    parsed = parse_document_tool_arguments(
+        {
+            "action": "generate",
+            "inputs": [{"artifact_id": ctx.artifact.id, "role": "template"}],
+            "original_request_quote": ctx.source.user_text,
+        }
+    )
+    with pytest.raises(DocumentRequestError, match="document_task_source_ambiguous"):
+        await ctx.store.prepare_from_turn(scope=SCOPE, turn_id=current.turn_id, proposal=parsed)
+    await _assert_empty(ctx)
 
 
 @pytest.mark.parametrize("boundary", ["session", "space", "user", "future", "assistant"])

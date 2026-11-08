@@ -22,7 +22,8 @@ from bowhead_router import ToolCall
 pytestmark = pytest.mark.integration
 
 
-async def test_swapped_titles_do_not_replace_native_file_identities(presentation):
+@pytest.mark.parametrize("crossed_names", [True, False], ids=["crossed-filenames", "misleading-labels"])
+async def test_authored_labels_cannot_replace_original_file_identity_live_or_on_replay(presentation, crossed_names):
     from bowhead_core.model_view import project_tool_result
 
     ctx, first = presentation
@@ -35,18 +36,34 @@ async def test_swapped_titles_do_not_replace_native_file_identities(presentation
         session_id="s_old",
         kind="deliverable",
     )
-    result = await present_artifacts(
-        {"artifacts": [{"artifact_id": first.id, "title": second.filename}, {"artifact_id": second.id, "title": first.filename}]}, ctx
-    )
-    assert result["ok"] is True
-    assert {item["artifact_id"] for item in result["label_conflicts"]} == {first.id, second.id}
-    projected = project_tool_result("present_artifacts", result)
-    assert "artifacts" not in projected
-    assert [(item["artifact_id"], item["name"], item["mime"], item["size"]) for item in projected["output_artifacts"]] == [
-        (first.id, first.filename, first.mime, first.size),
-        (second.id, second.filename, second.mime, second.size),
-    ]
-    assert all("title" not in item for item in projected["output_artifacts"])
+    args = {
+        "artifacts": [
+            {"artifact_id": first.id, "title": second.filename if crossed_names else "Misleading report", "description": "Wrong file description"},
+            {"artifact_id": second.id, "title": first.filename if crossed_names else "Another misleading report"},
+        ]
+    }
+    logs = TurnLogStore(ctx.artifact_store.db_path)
+    bus = TurnEventBus(log_sink=OrderedTurnLogSink(logs))
+    for _ in range(2):
+        result = (await _execute(ctx, bus, args)).result
+        assert result["ok"] is True
+        expected = [(item.id, item.filename, item.mime, item.size) for item in (first, second)]
+        assert [(item["artifact_id"], item["name"], item["mime"], item["size"]) for item in result["output_artifacts"]] == expected
+        projected = project_tool_result("present_artifacts", result)
+        assert "artifacts" not in projected
+        assert [(item["artifact_id"], item["name"], item["mime"], item["size"]) for item in projected["output_artifacts"]] == expected
+        metadata = _tool_result_meta(result)
+        assert [(item["artifact_id"], item["filename"]) for item in metadata["output_artifacts"]] == [
+            (first.id, first.filename),
+            (second.id, second.filename),
+        ]
+        assert all("title" not in item and "description" not in item for item in metadata["output_artifacts"])
+        assert all("title" not in item and "description" not in item for item in result["output_artifacts"])
+    events = [event for event in bus._events if event.event_type == "tool_result"]
+    assert len(events) == 1
+    assert events[0].payload["result_meta"]["artifact_presentation"]["items"] == args["artifacts"], "Audit arguments must remain unchanged"
+    restored = await ctx.artifact_store.list_presented_result_artifacts_for_turn(ctx.turn_id, session_id=ctx.session_id, user_id=ctx.user_id)
+    assert [(item.id, item.filename) for item in restored] == [(first.id, first.filename), (second.id, second.filename)]
 
 
 @pytest.mark.parametrize(

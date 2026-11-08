@@ -16,6 +16,7 @@ const errors: Record<string, string> = {
   document_canvas_access_unavailable: "error_runtime",
   document_authoring_no_output: "error_authoring_no_output",
   document_authoring_budget_exhausted: "error_authoring_budget",
+  document_context_limit: "error_context_limit",
   document_authoring_script_failed: "error_authoring_script",
   document_information_incomplete: "error_incomplete",
   document_history_unavailable: "error_history",

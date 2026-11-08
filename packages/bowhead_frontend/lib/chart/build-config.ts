@@ -284,6 +284,12 @@ export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: Bui
       return { ...dataset, _observedValues: rows.map((row) => row[source.key]), _observedFmtCtx: columnFormatCtx(source, rows) };
     }) as ChartData["datasets"];
   }
+  formatted.data.datasets = formatted.data.datasets.map((dataset, index) => {
+    if (normalized.shape.series[index]?.paletteIndex === undefined) return dataset;
+    const color = seriesColor(theme.palette, presentation.effective.series[index]!.paletteIndex, theme.surface, theme.ink);
+    return { ...dataset, borderColor: color, pointBackgroundColor: color, pointBorderColor: color,
+      backgroundColor: (dataset as { fill?: unknown }).fill ? withAlpha(color, "33") : color, hoverBackgroundColor: color };
+  }) as ChartData["datasets"];
   const styled = applyChartJsStylePresentation(formatted, spec, normalized.shape, theme, presentation);
   if (spec._export_analytical) styled.data.datasets = styled.data.datasets.map((dataset) => ({ ...dataset, ...(dataset as unknown as { _analyticalStyle?: object })._analyticalStyle })) as ChartData["datasets"];
   for (const scale of Object.values(styled.options.scales ?? {})) {

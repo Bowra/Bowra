@@ -70,7 +70,7 @@ async def r4_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield app, db_file
 
 
-async def _run_seeded_turn(app, *, text: str, team_router=None, live_events=None) -> str:
+async def _run_seeded_turn(app, *, text: str, team_router=None, live_events=None, through_worker=False, worker_team_id=None) -> str:
     """复刻 chat.py:_persist_turn_row_for_stream 前置两行后跑一个 turn。"""
     from bowhead_core.types import TurnRequest
     from bowhead_gateway.turn_service import admit_legacy_chat_execution
@@ -87,6 +87,7 @@ async def _run_seeded_turn(app, *, text: str, team_router=None, live_events=None
         text=text,
         turn_id=tid,
         team_router=team_router,
+        team_id=worker_team_id,
     )
     bus = await admit_legacy_chat_execution(orch, request)
     try:
@@ -95,8 +96,16 @@ async def _run_seeded_turn(app, *, text: str, team_router=None, live_events=None
             workspace_id="ws_r4_test",
             user_id="u_r4",
         )
-        await store.record_turn(turn_id=tid, session_id=sid, user_text=text)
-        await orch.run_turn(request)
+        if through_worker:
+            from bowhead_gateway.routes.chat import _persist_turn_row_for_stream
+            from bowhead_gateway.turn_service import spawn_turn
+
+            await _persist_turn_row_for_stream(orch, request)
+            worker = await spawn_turn(orch, request, team_id=worker_team_id, admitted_legacy_bus=bus, cleanup_grace_s=0)
+            await worker
+        else:
+            await store.record_turn(turn_id=tid, session_id=sid, user_text=text)
+            await orch.run_turn(request)
     finally:
         if live_events is not None:
             live_events.extend(bus.snapshot())
@@ -200,6 +209,99 @@ async def test_lead_llm_control_turn_unchanged(r4_app) -> None:
     assert "step_list_card_finalized" in types
     assert "canvas.done" in types
     assert types.count("done") == 1
+
+
+@respx.mock
+async def test_observed_model_failure_through_mcp_keeps_live_and_saved_diagnosis(r4_app, monkeypatch) -> None:
+    from bowhead_core._db import open_shared_ctx
+    from bowhead_core.openapi_tool_source import build_team_mcp_server, connect_team_mcp
+
+    from bowhead_router import AgentBinding, ProviderConfig, ProviderRegistry, Router
+
+    app, db_file = r4_app
+    orch = app.state.orchestrator
+    # The physical usage reader requires the same Space/Team binding as a
+    # request admitted by the HTTP route, before allowing a provider dispatch.
+    team_id = "team_r4_test"
+
+    async with open_shared_ctx(str(db_file)) as db:
+        await db.execute(
+            "INSERT INTO teams(id,name,status,created_at,created_by_user_id) VALUES (?,'Synthetic failure Team','active',datetime('now'),'u_r4')",
+            (team_id,),
+        )
+        await db.execute(
+            "INSERT INTO users(id,team_id,email,email_verified,display_name,status,created_at) VALUES ('u_r4',?,'failure@example.test',1,'Synthetic user','active',datetime('now'))",
+            (team_id,),
+        )
+        await db.execute(
+            "INSERT INTO workspaces(id,team_id,name,status,created_at,updated_at) VALUES ('ws_r4_test',?,'Synthetic failure Space','active',datetime('now'),datetime('now'))",
+            (team_id,),
+        )
+        await db.execute(
+            "INSERT INTO team_members(id,user_id,team_id,role,status,created_at) VALUES ('tm_r4','u_r4',?,'team_admin','active',datetime('now'))",
+            (team_id,),
+        )
+        await db.execute(
+            "INSERT INTO workspace_members(workspace_id,user_id,role,joined_at,status) VALUES ('ws_r4_test','u_r4','admin',datetime('now'),'active')",
+        )
+        await db.commit()
+    route = respx.post("https://provider.example/v1/messages").respond(
+        500,
+        json={"error": {"type": "api_error", "message": "Synthetic upstream unavailable"}},
+    )
+    registry = ProviderRegistry()
+    registry.load(
+        [ProviderConfig(name="team_model", type="anthropic_compatible", base_url="https://provider.example", api_key="test-key", models=["model"])]
+    )
+    team_router = Router(registry)
+    team_router.max_retries = 3
+    team_router.bind(AgentBinding(agent_type="lead", primary=("team_model", "model")))
+
+    async def no_tools(*args, **kwargs):
+        raise AssertionError("A failed model call cannot execute a Tool")
+
+    server = build_team_mcp_server([], no_tools)
+    run_turn = orch.run_turn
+    wrapped_failures = []
+
+    async def run_with_mcp(request):
+        try:
+            async with connect_team_mcp(server):
+                return await run_turn(request)
+        except ExceptionGroup as exc:
+            wrapped_failures.append(exc)
+            raise
+
+    monkeypatch.setattr(orch, "run_turn", run_with_mcp)
+    live = []
+    try:
+        tid = await _run_seeded_turn(
+            app, text="Create a small HTML file.", team_router=team_router, live_events=live, through_worker=True, worker_team_id=team_id
+        )
+    finally:
+        await registry.close_all()
+    assert route.call_count == 1
+    assert len(wrapped_failures) == 1
+    row, events = _read_turn(db_file, tid)
+    assert row["status"] == "failed"
+    assert row["error"] == "llm_provider_unavailable"
+    assert row["error_kind"] == "llm_failed"
+    assert row["final_answer"] in (None, "")
+    saved = [(event["event_type"], json.loads(event["payload_json"])) for event in events if event["event_type"] in {"turn_failed", "done"}]
+    assert [kind for kind, _ in saved] == ["turn_failed", "done"]
+    replayed = await app.state.turn_log_store.list_events(tid, event_types=("turn_failed", "done"))
+    assert [(event.event_type, event.payload) for event in replayed] == saved
+    assert [(event.event_type, event.payload) for event in live if event.event_type in {"turn_failed", "done"}] == saved
+    failed, done = (payload for _, payload in saved)
+    assert failed["reason_code"] == done["reason_code"] == "llm_provider_unavailable"
+    assert failed["diagnostics"] == done["diagnostics"]
+    assert failed["recovery_action"] == done["recovery_action"] == "copy_diagnostics"
+    diagnosis = done["diagnostics"]
+    assert diagnosis["retryable"] is False
+    assert diagnosis["provider_message"] == "Synthetic upstream unavailable"
+    assert "http_status=500" in diagnosis["safe_detail"]
+    assert "outcome=unknown" in diagnosis["safe_detail"]
+    assert "TaskGroup" not in json.dumps(saved)
 
 
 @respx.mock

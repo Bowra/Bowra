@@ -35,7 +35,7 @@
  * rules become dead and are swept in 1.7-E.
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   canonicalizeAnswers,
   projectAnswerValues,
@@ -416,8 +416,8 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // on the runner. Backend `_collect_inline_artifacts` shapes each entry to
   // match `ChatInlineArtifact`, so we just need to narrow the unknown blob.
   const inlineArtifacts = useMemo(
-    () => extractInlineArtifacts(runner.finalPayload),
-    [runner.finalPayload],
+    () => extractInlineArtifacts(runner.finalPayload, turnStoreState?.steps),
+    [runner.finalPayload, turnStoreState?.steps],
   );
 
   // D10: id of a clarification the user has just answered. We hide the card
@@ -622,6 +622,17 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // (t1 completed, t2 failed, t3 running ⇒ t1). Archive completion uses the same criterion as ArchivedTurnView.
   const latestArchivedIdx = latestAnsweredArchivedIndex(archivedTurns, turnComplete);
   const [stepsFolded, setStepsFolded] = useState(false);
+  // The reader opened the folded trace. The summary row then stays above the trace as the control that folds it
+  // again, so keyboard focus survives and the trace can be closed. Automatic folds and unfolds never set it.
+  const [traceOpenedByUser, setTraceOpenedByUser] = useState(false);
+  const expandSteps = useCallback(() => {
+    setTraceOpenedByUser(true);
+    setStepsFolded(false);
+  }, []);
+  const collapseSteps = useCallback(() => {
+    setTraceOpenedByUser(false);
+    setStepsFolded(true);
+  }, []);
   // chat-ux-2026-08 · 1e band: user **explicitly requested details** this turn (band click / disclosure-region
   // pointerdown / scroll / focus). Once requested, the band never takes over again this turn:
   // withdrawing details would take control away from the user.
@@ -630,7 +641,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // reuses turn_id; user decision: those reading trace during clarification must not have their content
   // replaced by the band on resume (inventory §4 ③). Resetting on running would violate this.
   /** **Expansion origin**, recorded only on the first absent→present transition and never rewritten afterward.
-   *  · `"band"`: click `展开运行过程` → expand in the band slot without moving the viewport.
+   *  · `"band"`: click `查看运行过程` → expand in the band slot without moving the viewport.
    *  · `"inline"`: explicit inspection of inline collapsed strip / step list → expand at its original position.
    *
    *  ⚠ **Distinguish origin**: users read trace **inline** during HITL clarification; moving it to the
@@ -655,6 +666,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   // Reset disclosure intent when a different turn starts.
   useEffect(() => {
     setStepsFolded(false);
+    setTraceOpenedByUser(false);
     setTraceRequestOrigin(null);
     setDisclosureBeforeAnswer(false);
     lastInteractionAtRef.current = 0;
@@ -666,6 +678,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   useEffect(() => {
     if (runner.running && turnStoreState && !turnStoreState.cardFinalized) {
       setStepsFolded(false);
+      setTraceOpenedByUser(false);
       setDisclosureBeforeAnswer(false);
       lastInteractionAtRef.current = 0;
       explicitlyInspectedDisclosureRef.current = false;
@@ -831,6 +844,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   useEffect(() => {
     if (!liveApprovalBlocksFold) return;
     setStepsFolded(false);
+    setTraceOpenedByUser(false);
     setDisclosureBeforeAnswer(false);
   }, [liveApprovalBlocksFold]);
 
@@ -850,7 +864,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   //   · Turn already errored: FinalFailBanner takes over (running already false)
   //
   // ⚠ Two layers (`bandSlotActive` / `bandMode`), rather than one flag:
-  // after clicking `展开运行过程`, **the slot still belongs to running-state disclosure**,
+  // after clicking `查看运行过程`, **the slot still belongs to running-state disclosure**,
   // merely switching band to full trace. Previously expansion rendered trace at the beat's original position,
   // while the band sat at the turn block's **bottom**; on 116, ~280px apart, with expansion above
   // the viewport. User complaint: `点击展开跳到顶部了`. In-place expansion structurally removes this jump:
@@ -864,7 +878,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
   );
   /** Slot shows the collapsed band. */
   const bandMode = bandSlotActive && !traceRequested;
-  /** Slot shows full trace expanded in place (user clicked `展开运行过程`). */
+  /** Slot shows full trace expanded in place (user clicked `查看运行过程`). */
   const bandExpandedInPlace = bandSlotActive && traceRequestOrigin === "band";
   /** Whether the slot owns all running disclosure (collapsed band or in-place expanded trace).
    *  Inline expansion keeps the original path; no slot takeover, with BeatStream rendering at the beat position. */
@@ -1721,7 +1735,9 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
                 stepsFolded={stepsFolded}
                 bandMode={bandMode}
                 bandSlotActive={bandSlotOwnsDisclosure}
-                onExpandSteps={() => setStepsFolded(false)}
+                onExpandSteps={expandSteps}
+                onCollapseSteps={collapseSteps}
+                traceOpenedByUser={traceOpenedByUser}
                 clarification={clarification}
                 clarificationSlot={clarificationSlot}
                 inlineArtifacts={inlineArtifacts}
@@ -2033,6 +2049,10 @@ interface BeatStreamProps {
    *  If true, BeatStream never renders trace at the beat's original position, avoiding duplicate peer ledgers. */
   bandSlotActive?: boolean;
   onExpandSteps: () => void;
+  /** Folds a trace the reader opened from the summary row. */
+  onCollapseSteps: () => void;
+  /** The reader opened the folded trace: keep the summary row above it as the collapse control. */
+  traceOpenedByUser: boolean;
   clarification: {
     questions: ThetaClarificationQuestion[];
     intro: string | null;
@@ -2315,6 +2335,8 @@ function BeatStream({
   bandMode = false,
   bandSlotActive = false,
   onExpandSteps,
+  onCollapseSteps,
+  traceOpenedByUser,
   clarification,
   clarificationSlot,
   inlineArtifacts,
@@ -2401,7 +2423,7 @@ function BeatStream({
       data-testid="execution-disclosure"
       data-placement="before-answer"
     >
-      {stepsFolded ? (
+      {stepsFolded || traceOpenedByUser ? (
         <StepSummary
           steps={stepViews}
           peerNames={turnStoreState?.peerNames}
@@ -2409,8 +2431,11 @@ function BeatStream({
           stepOutcome={turnStoreState?.stepOutcome}
           failed={failedSummary}
           onExpand={onExpandSteps}
+          expanded={!stepsFolded}
+          onCollapse={onCollapseSteps}
         />
-      ) : (
+      ) : null}
+      {stepsFolded ? null : (
         <TurnTraceRegion
           steps={stepViews}
           peerNames={turnStoreState?.peerNames}
@@ -2451,7 +2476,7 @@ function BeatStream({
             startedAt={runner.startedAt}
             elapsedKey={elapsedAnchorKeyOf(runner.turnId, runner.executionGeneration)}
           /> : null}
-        {placeStepDisclosureBeforeAnswer || fastPathHasNoSteps || showWorking ? null : stepsFolded ? (
+        {placeStepDisclosureBeforeAnswer || fastPathHasNoSteps || showWorking ? null : stepsFolded || traceOpenedByUser ? (
           <StepSummary
             steps={stepViews}
             peerNames={turnStoreState?.peerNames}
@@ -2459,8 +2484,11 @@ function BeatStream({
             stepOutcome={turnStoreState?.stepOutcome}
             failed={failedSummary}
             onExpand={onExpandSteps}
+            expanded={!stepsFolded}
+            onCollapse={onCollapseSteps}
           />
-        ) : noBeatHasTraceFacts ? (
+        ) : null}
+        {placeStepDisclosureBeforeAnswer || fastPathHasNoSteps || showWorking || stepsFolded ? null : noBeatHasTraceFacts ? (
           <TurnTraceRegion
             steps={traceStepViews}
             peerNames={turnStoreState?.peerNames}
@@ -2525,7 +2553,7 @@ function BeatStream({
       {/* Folded path: ONE StepSummary collapses ALL steps regardless of beats
           position. Narrative + answer beats still iterate inline below so
           the prose around the summary stays readable. */}
-      {!placeStepDisclosureBeforeAnswer && stepsFolded && hasAnyStepBeat && !fastPathHasNoSteps ? (
+      {!placeStepDisclosureBeforeAnswer && (stepsFolded || traceOpenedByUser) && hasAnyStepBeat && !fastPathHasNoSteps ? (
         <StepSummary
           steps={collectStepViews(runner, turnStoreState)}
           peerNames={turnStoreState?.peerNames}
@@ -2533,6 +2561,8 @@ function BeatStream({
           stepOutcome={turnStoreState?.stepOutcome}
           failed={failedSummary}
           onExpand={onExpandSteps}
+          expanded={!stepsFolded}
+          onCollapse={onCollapseSteps}
         />
       ) : null}
 
@@ -2912,8 +2942,8 @@ function ArchivedTurnView({
 
   // Phase 1.6 G4 — same artifact surface for replayed/historical turns.
   const inlineArtifacts = useMemo(
-    () => extractInlineArtifacts(archived.finalPayload),
-    [archived.finalPayload],
+    () => extractInlineArtifacts(archived.finalPayload, storeState?.steps),
+    [archived.finalPayload, storeState?.steps],
   );
 
   // Phase 1.7-B — beats snapshot captured at archive time (`unknown[]` in
@@ -2929,6 +2959,17 @@ function ArchivedTurnView({
   const [stepsFolded, setStepsFolded] = useState(
     initialDisclosurePlacement === undefined,
   );
+  // As in the live turn: once the reader opens the trace, the summary row stays above it to fold it again.
+  // A trace the reader opened while this turn was live counts as opened by them.
+  const [traceOpenedByUser, setTraceOpenedByUser] = useState(initialDisclosurePlacement !== undefined);
+  const expandArchivedSteps = useCallback(() => {
+    setTraceOpenedByUser(true);
+    setStepsFolded(false);
+  }, []);
+  const collapseArchivedSteps = useCallback(() => {
+    setTraceOpenedByUser(false);
+    setStepsFolded(true);
+  }, []);
 
   // chat-ux-2026-08 batch F: formerly hardcoded `""`, with a comment claiming historical turns lacked timestamps.
   // Obsolete: `ArchivedTurn.archivedAt` is now required. Live byline showed
@@ -3005,20 +3046,26 @@ function ArchivedTurnView({
     archived.errorReason && hasArchivedDisclosure && stepsFolded && !awaitingUser,
   );
   const hideArchivedTrace = placeArchivedDisclosureBeforeAnswer || foldArchivedFailure;
+  const showArchivedFailureRow = Boolean(
+    archived.errorReason && hasArchivedDisclosure && !awaitingUser && (stepsFolded || traceOpenedByUser),
+  );
   const archivedBeforeAnswerDisclosure = placeArchivedDisclosureBeforeAnswer ? (
     <div
       data-testid="execution-disclosure"
       data-placement="before-answer"
     >
-      {stepsFolded ? (
+      {stepsFolded || traceOpenedByUser ? (
         <StepSummary
           steps={steps}
           peerNames={storeState?.peerNames}
           totalDurationMs={storeState?.totalDurationMs}
           stepOutcome={storeState?.stepOutcome}
-          onExpand={() => setStepsFolded(false)}
+          onExpand={expandArchivedSteps}
+          expanded={!stepsFolded}
+          onCollapse={collapseArchivedSteps}
         />
-      ) : (
+      ) : null}
+      {stepsFolded ? null : (
         <TurnTraceRegion
           steps={steps}
           peerNames={storeState?.peerNames}
@@ -3074,14 +3121,16 @@ function ArchivedTurnView({
       ) : null}
 
       {/* Same place as the live turn's folded summary: the top of the reply, before its beats. */}
-      {foldArchivedFailure ? (
+      {showArchivedFailureRow ? (
         <StepSummary
           steps={steps}
           peerNames={storeState?.peerNames}
           totalDurationMs={storeState?.totalDurationMs}
           stepOutcome={storeState?.stepOutcome}
           failed={{ plannedTotal: null }}
-          onExpand={() => setStepsFolded(false)}
+          onExpand={expandArchivedSteps}
+          expanded={!stepsFolded}
+          onCollapse={collapseArchivedSteps}
         />
       ) : null}
 
@@ -3488,8 +3537,9 @@ function UserMessage({ text, attachments, id, time, who }: UserMessageProps) {
           // =3.66:1 (deliberately darkened earlier for WCAG-AA, see globals.css inline comment),
           // leaving the theme ink scales misaligned. 554 references repository-wide make token changes global visual changes,
           // needing separate visual acceptance. Fix only the reported element here; track token imbalance separately.
+          // 12px matches the assistant timestamp; the earlier 10.5px sat below the 11px text floor.
           fontFamily: "var(--f-mono)",
-          fontSize: "0.65625rem",
+          fontSize: "0.75rem",
           color: "var(--c-ink-3)",
           letterSpacing: "0.04em",
           marginBottom: 6,
@@ -3503,7 +3553,8 @@ function UserMessage({ text, attachments, id, time, who }: UserMessageProps) {
             maxWidth: "78%",
             overflowWrap: "anywhere",
             fontFamily: "var(--f-sans)",
-            fontSize: "1rem",
+            // 14px matches the answer body, so the question never outranks the answer it asked for.
+            fontSize: "0.875rem",
             lineHeight: 1.5,
             color: "var(--c-ink)",
             fontWeight: 500,

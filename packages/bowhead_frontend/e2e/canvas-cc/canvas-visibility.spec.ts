@@ -99,7 +99,7 @@ test("DF-04: sandbox code/data cannot summon Report; explicit Data focus still o
     return snapshot?.steps.length ?? 0;
   })).toBe(1);
 
-  await page.getByRole("button", { name: /展开运行过程/ }).click();
+  await page.getByRole("button", { name: /查看运行过程/ }).click();
   await page.locator(".stp-head", { hasText: "运行代码" }).click();
   const openOutputButton = page.getByRole("button", {
     name: "在成果中打开 sandbox-stdout.txt",

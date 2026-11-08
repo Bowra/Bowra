@@ -437,7 +437,7 @@ async def test_snapshot_projects_records_from_real_stores(
         payload={"text": "Board update content"},
     )
 
-    notice = await notification_store.upsert_item(
+    await notification_store.write(
         team_id=team.id,
         category="access",
         type="approval.required",
@@ -451,9 +451,9 @@ async def test_snapshot_projects_records_from_real_stores(
         actions=None,
         metadata=None,
         dedupe_key="approval:ap_1",
+        recipients=[(real_user.id, "approver")],
     )
-    await notification_store.add_recipients(notice.id, [(real_user.id, "approver")])
-    other_notice = await notification_store.upsert_item(
+    await notification_store.write(
         team_id=team.id,
         category="access",
         type="access_requested",
@@ -467,8 +467,8 @@ async def test_snapshot_projects_records_from_real_stores(
         actions=None,
         metadata=None,
         dedupe_key="access:ar_other",
+        recipients=[(other_user.id, "approver")],
     )
-    await notification_store.add_recipients(other_notice.id, [(other_user.id, "approver")])
 
     request = cast(
         "Request",

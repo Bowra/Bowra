@@ -83,6 +83,8 @@ export interface StepCodeInput {
   language: "python";
   code: string;
   truncated: boolean;
+  /** Native sandbox inputs used to distinguish a revised file from unrelated same-name outputs. */
+  inputArtifactIds?: string[];
 }
 
 /**

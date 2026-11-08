@@ -212,6 +212,10 @@ class LLMChunk:
     finish_reason: FinishReason | None = None
     usage: TokenUsage | None = None
     diagnostics: LLMResponseDiagnostics | None = None
+    # Router-only marker for callers that pass ``Router.stream(allow_restart=True)``:
+    # everything yielded since the previous restart belongs to a failed attempt
+    # and must be discarded before the next attempt streams. Carries nothing else.
+    stream_restart: bool = False
 
 
 @runtime_checkable

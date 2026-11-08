@@ -14,6 +14,7 @@ from bowhead_core.skill_read_model_input import RequiredSkillModelInput
 from bowhead_core.skill_reference_execution import claim_reference_skill_primary_for_worker
 from bowhead_core.subagent import SubagentRunner
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
+from bowhead_router.adapters.openai_compat import OpenAICompatibleAdapter
 from bowhead_router.router import AgentBinding, Router
 from test_skill_read_model_input import Adapter, Registry
 from test_skill_reference_claim import claimed_case as _claimed_case
@@ -38,40 +39,53 @@ async def test_real_loop_keeps_full_saved_methods_or_calls_no_adapter(claimed_ca
     claim = await claim_reference_skill_primary_for_worker(**case.args)
     composition, prepared, rendered = await restore(case)
     required = RequiredSkillModelInput.from_rendered(rendered)
-    adapter = Adapter(["盈利分析已完成。", "普通任务完成。"])
-    router = Router(Registry(primary=adapter))
-    for agent_type in ("analyst", "echo"):
-        router.bind(AgentBinding(agent_type=agent_type, primary=("primary", "test-model")))
-    if window is not None:
-        router.set_context_windows({("primary", "test-model"): window})
-    ctx = ToolExecutionContext(**case.scope.model_dump(), turn_id="t_reference", member_uid=case.fixture.case.fixture.member_id, datarc=None)
-    runner = SubagentRunner(router=router, tool_registry=build_default_registry(), team_subagent_store=case.fixture.case.fixture.users)
-    before = claim.primary.binding.definition.copy()
-    result = await runner.run(
-        profile_name=claim.primary.binding.runtime_profile_name,
-        task=claim.primary.source.input_document.text_content(),
-        parent_turn_id="t_reference",
-        parent_bus=TurnEventBus(),
-        parent_ctx=ctx,
-        exact_binding=claim.primary.binding,
-        required_model_input=required,
-    )
-    if window != 1000000:
-        assert not result.ok and adapter.calls == []
-        return
-    assert result.ok and len(adapter.calls) == 1
-    sent = adapter.calls[0]
-    assert sent.input_admission is required
-    assert sum(message.content == required.content for message in sent.messages) == 1
-    assert rendered.content.decode() in sent.messages[0].content
-    assert claim.primary.source.input_document.text_content() in [message.content for message in sent.messages]
-    assert "SAVED_METHOD_LABEL" not in sent.system
-    assert claim.primary.binding.definition == before
-    assert composition.rendered_content_hash == rendered.rendered_content_hash
-    # A second independent call on the shared runner, with a shallow ctx copy,
-    # receives no per-run input policy/material. This is not a second claim.
-    other = await runner.run(
-        profile_name="compute", task="普通任务", parent_turn_id="t_reference", parent_bus=TurnEventBus(), parent_ctx=copy.copy(ctx)
-    )
-    assert other.ok and adapter.calls[-1].input_admission is None
-    assert all(required.content not in message.content for message in adapter.calls[-1].messages)
+    native = OpenAICompatibleAdapter(base_url="https://api.example.com/v1", api_key="test-only", provider_name="primary")
+
+    class CompiledAdapter(Adapter):
+        def _build_body(self, request, *, stream):
+            return native._build_body(request, stream=stream)
+
+        async def invoke(self, request):
+            self._build_body(request, stream=False)
+            return await super().invoke(request)
+
+    adapter = CompiledAdapter(["盈利分析已完成。", "普通任务完成。"])
+    try:
+        router = Router(Registry(primary=adapter))
+        for agent_type in ("analyst", "echo"):
+            router.bind(AgentBinding(agent_type=agent_type, primary=("primary", "test-model")))
+        if window is not None:
+            router.set_context_windows({("primary", "test-model"): window})
+        ctx = ToolExecutionContext(**case.scope.model_dump(), turn_id="t_reference", member_uid=case.fixture.case.fixture.member_id, datarc=None)
+        runner = SubagentRunner(router=router, tool_registry=build_default_registry(), team_subagent_store=case.fixture.case.fixture.users)
+        before = claim.primary.binding.definition.copy()
+        result = await runner.run(
+            profile_name=claim.primary.binding.runtime_profile_name,
+            task=claim.primary.source.input_document.text_content(),
+            parent_turn_id="t_reference",
+            parent_bus=TurnEventBus(),
+            parent_ctx=ctx,
+            exact_binding=claim.primary.binding,
+            required_model_input=required,
+        )
+        if window != 1000000:
+            assert not result.ok and adapter.calls == []
+            return
+        assert result.ok and len(adapter.calls) == 1
+        sent = adapter.calls[0]
+        assert sent.input_admission is required
+        assert sum(message.content == required.content for message in sent.messages) == 1
+        assert rendered.content.decode() in sent.messages[0].content
+        assert claim.primary.source.input_document.text_content() in [message.content for message in sent.messages]
+        assert "SAVED_METHOD_LABEL" not in sent.system
+        assert claim.primary.binding.definition == before
+        assert composition.rendered_content_hash == rendered.rendered_content_hash
+        # A second independent call on the shared runner, with a shallow ctx copy,
+        # receives no per-run input policy/material. This is not a second claim.
+        other = await runner.run(
+            profile_name="compute", task="普通任务", parent_turn_id="t_reference", parent_bus=TurnEventBus(), parent_ctx=copy.copy(ctx)
+        )
+        assert other.ok and adapter.calls[-1].input_admission is None
+        assert all(required.content not in message.content for message in adapter.calls[-1].messages)
+    finally:
+        await native.close()

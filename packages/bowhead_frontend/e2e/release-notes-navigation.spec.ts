@@ -50,20 +50,18 @@ for (const width of [1440, 390]) {
             const full =
               count === Math.min(10, groups.length) ||
               used +
-                next.scrollHeight +
+                (next.lastElementChild!.getBoundingClientRect().bottom - next.getBoundingClientRect().top) +
                 parseFloat(getComputedStyle(next).marginTop) +
                 (count + 1 < groups.length ? footer : 0) >
                 available - 1;
-            return (
-              count >= 1 &&
-              count <= 10 &&
-              fits &&
-              full &&
-              (count === 1 || sidebar.scrollHeight <= sidebar.clientHeight + 1)
-            );
+            return {
+              valid: count >= 1 && count <= 10 && fits && full && (count === 1 || sidebar.scrollHeight <= sidebar.clientHeight + 1),
+              count, fits, full, available, used, footer,
+              scrollHeight: sidebar.scrollHeight, clientHeight: sidebar.clientHeight,
+            };
           }),
       )
-      .toBe(true);
+      .toMatchObject({ valid: true });
     const totalCount = await page.locator("[data-release-version]").count();
     const initialCount = await headings.count();
     await page.setViewportSize({ width, height: 3000 });
@@ -76,13 +74,14 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("link", { name: "v1.5.0", exact: true }),
     ).toBeVisible();
-    await expect(page.locator("article h2")).toHaveCount(1);
+    const matchingVersions = await page.locator("nav [data-release-version]").count();
+    await expect(page.locator("article h2")).toHaveCount(matchingVersions);
     await expect(page.locator("article mark").first()).toHaveText("v1.5.0");
-    await expect(page.locator("article time")).toHaveCount(1);
+    await expect(page.locator("article time")).toHaveCount(matchingVersions);
     await expect(page.locator("article h2").last()).toHaveText("v1.5.0");
     await search.fill("");
     await expect(headings).toHaveCount(initialCount);
-    const firstSection = page.locator("article h3").first();
+    const firstSection = page.locator("article h2").first();
     const firstId = await firstSection.getAttribute("id");
     await page.locator(`nav a[href="#${firstId}"]`).click();
     // Move away from the explicit link before appending history.
@@ -164,6 +163,11 @@ test("release notes retain reading state through search and loading and follow m
   await page.goto("/release-notes/");
   const article = page.locator("article");
   const sections = article.locator("h3");
+  while (await sections.count() < 2) {
+    const count = await article.locator("h2").count();
+    await page.getByRole("button", { name: /加载更多|Load more/ }).click();
+    await expect.poll(() => article.locator("h2").count()).toBeGreaterThan(count);
+  }
   const firstId = (await sections.first().getAttribute("id"))!;
   const firstLink = page.locator(`nav a[href="#${firstId}"]`);
   await firstLink.click();
@@ -176,9 +180,10 @@ test("release notes retain reading state through search and loading and follow m
   const initialCount = await article.locator("h2").count();
   const search = page.getByRole("searchbox");
   await search.fill("v1.5.0");
-  await expect(article.locator("h2")).toHaveCount(1);
+  await expect(article.getByRole("heading", { name: "v1.5.0", exact: true })).toBeVisible();
+  await expect(article.locator("h2")).toHaveCount(await page.locator("nav [data-release-version]").count());
   await expect(article.locator("mark").first()).toHaveText("v1.5.0");
-  await expect(article.locator("time")).toHaveAttribute(
+  await expect(article.locator("time").last()).toHaveAttribute(
     "datetime",
     /^\d{4}-\d{2}-\d{2}$/,
   );
@@ -191,6 +196,7 @@ test("release notes retain reading state through search and loading and follow m
       ),
     )
     .toBeLessThan(1);
+  await page.getByRole("button", { name: /加载更多|Load more/ }).click();
   const secondId = (await sections.nth(1).getAttribute("id"))!;
   await sections.nth(1).evaluate((heading) => heading.scrollIntoView());
   await expect(page.locator(`nav a[href="#${secondId}"]`)).toHaveAttribute(

@@ -72,8 +72,16 @@ export interface MeUser {
     shopify_plugin?: boolean;
     /** FEATURE_AGENT_EVAL_ALIGNMENT: the Coach alignment loop, point and suite review, held-out controls. */
     agent_eval_alignment?: boolean;
+    /** FEATURE_NOTIFICATION_REACH: one attention loop, panel actions, Team labels and browser notifications. */
+    notification_reach?: boolean;
+    /** FEATURE_ROUTINE_NOTIFY: scheduled runs may flag results; the task form offers "only when flagged". */
+    routine_notify?: boolean;
+    /** FEATURE_NOTIFICATION_DELIVERY: recorded email deliveries, reminder emails and their personal switch. */
+    notification_delivery?: boolean;
     /** Both Shopify integration and requester-confirmed content writes are enabled. */
     shopify_content_confirmations?: boolean;
+    /** FEATURE_TEAM_TOOL_CONFIRMATION: the requester confirms each non-read Team MCP call. */
+    team_tool_confirmations?: boolean;
     credit?: CreditCapabilities;
     /** Future Composer controls and the legacy submission-reader capability. */
     composer?: {

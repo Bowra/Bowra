@@ -18,12 +18,14 @@ export function useSettingsCanvas({
   canManageSpace,
   searchParams,
   sessionId,
+  onRouteSelectionChange,
 }: {
   enabled: boolean;
   scope: { userId: string; teamId: string; workspaceId: string } | null;
   canManageSpace: boolean;
   searchParams: URLSearchParams;
   sessionId: string | null;
+  onRouteSelectionChange?: (selected: boolean) => void;
 }) {
   const [targets, setTargets] = useState<SettingsCanvasTarget[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -32,6 +34,8 @@ export function useSettingsCanvas({
   const toolRequestsRef = useRef(new Set<string>());
   const consumedRef = useRef<string | null>(null);
   const sessionRef = useRef(sessionId);
+  const routeSelectionRef = useRef(onRouteSelectionChange);
+  routeSelectionRef.current = onRouteSelectionChange;
   const scopeKey = scope ? JSON.stringify([scope.userId, scope.teamId, scope.workspaceId]) : null;
   const request = readSettingsCanvasTarget(searchParams);
   const requestKey = request ? settingsCanvasKey(request) : null;
@@ -80,6 +84,13 @@ export function useSettingsCanvas({
 
   useEffect(() => {
     if (!requestKey) {
+      if (readSettingsCanvasTarget(new URLSearchParams(window.location.search))) return;
+      // History may hide this editor without disposing its unsaved controller.
+      if (consumedRef.current !== null) {
+        const previous = current.current;
+        commit(previous.targets, previous.target, false);
+        routeSelectionRef.current?.(false);
+      }
       consumedRef.current = null;
       return;
     }
@@ -90,11 +101,12 @@ export function useSettingsCanvas({
     const live = readSettingsCanvasTarget(liveParams);
     if (!live || settingsCanvasKey(live) !== requestKey) return;
     if (readSettingsCanvasSelection(liveParams) !== requestSelected) return;
-    consumedRef.current = requestIdentity;
     if (!settingsCanvasTargetMatches(request, scope)) return;
+    consumedRef.current = requestIdentity;
     const previous = current.current.targets;
     const retained = previous.find((item) => settingsCanvasKey(item) === requestKey);
     commit(retained ? previous : [...previous, request], retained ?? request, requestSelected);
+    routeSelectionRef.current?.(requestSelected);
   }, [authorized, scopeKey, requestKey, searchParams, commit]);
 
   return {

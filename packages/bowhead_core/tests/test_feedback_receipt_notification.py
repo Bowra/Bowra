@@ -16,14 +16,19 @@ class _CaptureStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def upsert_item_with_recipients(self, **kwargs):  # noqa: ANN003
+    async def write(self, **kwargs):  # noqa: ANN003
         self.calls.append(kwargs)
-        return SimpleNamespace(id="ntf_1", **kwargs)
+        return SimpleNamespace(item=SimpleNamespace(id="ntf_1", **kwargs), outcome="inserted")
+
+
+class _Members:
+    async def filter_active_team_members(self, team_id, user_ids):
+        return set(user_ids)
 
 
 def test_receipt_contains_only_minimal_fields():
     store = _CaptureStore()
-    service = NotificationService(store=store, user_store=SimpleNamespace())  # type: ignore[arg-type]
+    service = NotificationService(store=store, user_store=_Members())  # type: ignore[arg-type]
     item = asyncio.run(
         service.emit_feedback_candidate_receipt(
             team_id="t1",
@@ -48,7 +53,7 @@ def test_receipt_contains_only_minimal_fields():
 
 def test_receipt_without_recipients_is_a_noop():
     store = _CaptureStore()
-    service = NotificationService(store=store, user_store=SimpleNamespace())  # type: ignore[arg-type]
+    service = NotificationService(store=store, user_store=_Members())  # type: ignore[arg-type]
     item = asyncio.run(
         service.emit_feedback_candidate_receipt(
             team_id="t1",

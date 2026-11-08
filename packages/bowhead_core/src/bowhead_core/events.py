@@ -182,6 +182,10 @@ EventType = Literal[
     "peer.iter",  # Per-iteration telemetry, internal/no frontend. **Includes Lead**, distinguished by payload.profile.
     "llm.call_timing",  # Internal timing and bounded transport/parser diagnostics; no model content.
     "llm.retry_scheduled",  # payload: {subagent_id, profile, retry, max_retries, reason, delay_s} — Router retry after a failed model attempt; shown as running status.
+    # payload: {subagent_id, profile, parent_agent_id (helpers), discarded_narrative_chars,
+    # discarded_partial_answer_chars, discarded_step_ids} — a Router retry/fallback after output
+    # withdrew that attempt; views drop exactly these code points/steps. Persisted and replayed.
+    "llm.stream_restarted",
     "notice",  # Subagent user notice (no frontend consumer yet).
     "trace.step",  # canvas_streaming timeline step, internal; old frontend allowlist removed.
     "template_clone.progress",  # Historical template progress retained for event replay.
@@ -535,6 +539,20 @@ class NarrativeDeltaPayload:
 
     card_id: str  # = turn_id (matches step_* routing key)
     delta: str  # appended to narrative buffer
+
+
+def stream_restart_narrative_chars(payload: Any) -> int:
+    """Lead narrative code points an ``llm.stream_restarted`` withdraws from the end.
+
+    The count applies whatever the scope. A reference primary streams Lead narrative
+    from a helper-scoped stream, so its restart carries ``parent_agent_id`` and
+    narrative characters; an ordinary helper reports zero and withdraws only its
+    ``partial_answer`` prose. The browser applies the same rule.
+    """
+    if not isinstance(payload, dict):
+        return 0
+    count = payload.get("discarded_narrative_chars")
+    return count if type(count) is int and count > 0 else 0
 
 
 def _fanout_enabled() -> bool:

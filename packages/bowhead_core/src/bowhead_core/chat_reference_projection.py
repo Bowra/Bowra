@@ -638,6 +638,7 @@ async def _task_billing(db, *, scope: ReferenceScope, turn_id: str, plan: dict[s
         "attribution": "shared_unallocated",
         "coverage": "partial" if rows else "unavailable",
         "entries": [dict(row) for row in rows[:MAX_PROJECTION_FACTS]],
+        "observed_credits_delta": sum(row["delta"] for row in rows[:MAX_PROJECTION_FACTS]) if rows else None,
         "truncated": truncated,
     }, truncated
 
@@ -849,6 +850,7 @@ async def read_reference_projection(
                 except ValueError:
                     plan_association_invalid = True
                 billing, billing_truncated = await _task_billing(db, scope=scope, turn_id=turn_id, plan=plan_association)
+                physical_calls = await _task_physical_receipts(db, scope=scope, turn_id=turn_id, plan=plan_association)
                 descriptors: list[tuple[ContentDescriptor, aiosqlite.Row]] = []
                 descriptor_invalid = False
                 for row in snapshots:
@@ -882,10 +884,16 @@ async def read_reference_projection(
                     "ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END,created_at,id LIMIT 101",
                     (turn_id, scope.team_id, execution_id),
                 )
-                # These receipts cover the reference primary, not Lead or helper
-                # calls. Absence of a receipt never proves zero orchestration cost.
+                # Logical invocations cover the reference primary. Physical
+                # receipts also expose observed Lead calls, without certifying
+                # whole-task coverage or providing provider currency charges.
                 lead_orchestration = plan.orchestration_contract == "lead-delegation.v1"
                 cost_unavailable = bool(invocations) or lead_orchestration or any(row["started_at"] is not None for row in agent_executions)
+                lead_receipts = [
+                    row["receipt_id"]
+                    for row in physical_calls["entries"]
+                    if row["agent_type"] == "lead" and row["reason"] == "turn" and row["usage"] is not None
+                ]
                 prompt_results = ()
                 prompt_results_invalid = False
                 if composition is not None and composition.get("runtime_policy") == "initial-primary-mcp-prompt.v1":
@@ -1222,9 +1230,9 @@ async def read_reference_projection(
                 ):
                     reasons.add("facts_truncated")
                 if cost_unavailable:
-                    reasons.add("cost_unavailable")
+                    reasons.add("provider_cost_unavailable" if billing["entries"] else "cost_unavailable")
                 if lead_orchestration:
-                    reasons.add("orchestration_usage_unavailable")
+                    reasons.add("orchestration_usage_partial" if lead_receipts else "orchestration_usage_unavailable")
                 if any(row["status"] == "delivery_unknown" for row in invocations):
                     reasons.add("model_delivery_unknown")
                 if include_content and cipher is None:
@@ -1329,6 +1337,10 @@ async def read_reference_projection(
                         "turn_status": turn["status"],
                         "execution_generation": turn["execution_generation"],
                         "model_receipt_scope": "reference_plan_steps" if plan_association is not None else "reference_primary",
+                        "observed_lead_usage": {
+                            "coverage": "partial" if lead_receipts else "unavailable" if lead_orchestration else "not_applicable",
+                            "receipt_ids": lead_receipts,
+                        },
                         "agent_executions": [
                             {
                                 "execution_id": row["id"],
@@ -1360,11 +1372,11 @@ async def read_reference_projection(
                     ],
                     "model_invocations": model_invocations,
                     "billing": billing,
-                    "physical_calls": await _task_physical_receipts(db, scope=scope, turn_id=turn_id, plan=plan_association),
+                    "physical_calls": physical_calls,
                     "cost_attribution": {
                         "status": "unavailable" if cost_unavailable else "not_applicable",
                         "amount_usd": None,
-                        "reason": "shared_or_unlinked" if cost_unavailable else None,
+                        "reason": "provider_cost_not_recorded" if cost_unavailable else None,
                     },
                     "evidence_completeness": {
                         "status": "partial" if reasons else "complete",

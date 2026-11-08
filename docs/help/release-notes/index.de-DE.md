@@ -2,6 +2,7 @@
 
 Community-Quellstände haben eine eigene Historie. Eine Anwendungsversion bedeutet nicht, dass Images oder ein gehosteter Dienst veröffentlicht wurden.
 
+- [v1.7.17](releases/v1.7.17.de-DE.md) — Mit gespeicherten Materialien weiterarbeiten, Diagrammfarben anpassen und Benachrichtigungen klarer verwalten.
 - [v1.6.95](releases/v1.6.95.de-DE.md) — Klarere Wiederaufnahme von Unterhaltungen, optionale KPI-Karten und zuverlässigerer Zugriff bei paralleler Arbeit.
 - [v1.6.80](releases/v1.6.80.de-DE.md) — Autorisierte Wissensnavigation, explizite Diagrammfelder, klarere Modellsteuerung und sicherere Dateifreigabe.
 - [v1.6.43](releases/v1.6.43.de-DE.md)

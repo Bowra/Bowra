@@ -17,11 +17,12 @@ from bowhead_core.sqlite_domain_runtime import DomainConnection, guard_connectio
 from bowhead_core.sqlite_domain_upgrade import (
     SOURCE_REVISION,
     SPLIT_REVISION,
+    SPLIT_TABLES,
     domain_table_sql,
     run_domain_upgrade,
     table_evidence,
 )
-from bowhead_core.sqlite_domains import DOMAIN_LAYOUT, DOMAIN_TABLES, DOMAIN_TARGET_FILES, ORIGINAL_TARGET_FILES
+from bowhead_core.sqlite_domains import DOMAIN_LAYOUT, DOMAIN_TARGET_FILES, ORIGINAL_TARGET_FILES
 from bowhead_core.sqlite_upgrade import LAYOUT_FILE, SQLiteUpgradeError, database_head, run_legacy_upgrade, runtime_shared_lease
 
 from bowhead_core import migrations
@@ -130,7 +131,8 @@ def test_populated_layout_migrates_exactly_and_normal_restart_keeps_live_changes
         assert len(state["targets"][domain]["schema_digest"]) == 64
         with sqlite3.connect(directory / filename) as connection:
             actual = {row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            assert actual - {"alembic_version", "_phase0_probe"} == set(DOMAIN_TABLES[domain])
+            # The split creates its frozen table map; later revisions append to it.
+            assert actual - {"alembic_version", "_phase0_probe"} == set(SPLIT_TABLES[domain])
             assert sqlite_domain_upgrade.schema_digest(connection) == state["targets"][domain]["schema_digest"]
             assert sqlite_domain_upgrade.schema_digest(connection) == static_schema_digest(sqlite_domain_upgrade.schema_rows(connection))
     with sqlite3.connect(directory / "bowhead_observability.db") as connection:

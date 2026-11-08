@@ -2049,18 +2049,6 @@
 :root:root .ui-menu .legacy-menu-model-provider-name {
   display: inline;
 }
-:root:root .ui-menu .legacy-menu-model-tag {
-  display: inline-flex;
-  align-items: center;
-  height: 16px;
-  padding: 0 5px;
-  border: 0;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 0.5px var(--c-control-line);
-  color: var(--c-ink-3);
-  font-size: 0.65625rem;
-  font-weight: 600;
-}
 :root:root .ui-menu .legacy-menu-model-group {
   margin-bottom: 0;
 }
@@ -3260,27 +3248,6 @@
   width: 15px;
   height: 15px;
 }
-:root:root .composer-v2__sheet-row .composer-v2__refresh-glyph {
-  display: block;
-}
-:root:root .composer-v2__sheet {
-  border: 1px solid var(--c-separator);
-  border-radius: var(--r-4);
-  background: var(--c-surface);
-  box-shadow: var(--shadow-overlay);
-  font-family: var(--font-control);
-}
-:root:root .composer-v2__sheet-head {
-  font: 600 var(--fs-md) var(--font-control);
-}
-:root:root .composer-v2__sheet-row {
-  border-radius: var(--r-2);
-  color: var(--c-ink-2);
-  font: 500 var(--fs-md) var(--font-control);
-}
-:root:root .composer-v2__sheet-row:hover {
-  background: var(--c-fill-1);
-}
 :root:root .composer-v2 :is(.composer-v2__draft-warning, .composer-reference-editor__notice) {
   font-family: var(--font-control);
   font-size: var(--fs-sm);
@@ -3308,11 +3275,6 @@
   border-color: var(--c-accent);
   background: var(--c-accent);
   color: var(--c-accent-ink);
-}
-@media (max-width: 640px) {
-  :root:root .composer-v2__sheet {
-    border-radius: var(--sheet-radius, var(--r-4)) var(--sheet-radius, var(--r-4)) 0 0;
-  }
 }
 @media (pointer: coarse) {
   :root:root .composer-v2 {

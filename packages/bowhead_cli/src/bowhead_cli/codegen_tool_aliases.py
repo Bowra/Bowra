@@ -30,7 +30,7 @@ and writes 7 deterministic output files:
   7. `bowhead_core/agents/_generated/tool_kinds.py`
      `TOOL_KINDS` (user-visible Tool or internal part), `TOOL_RISKS` and
      `USER_VISIBLE_TOOLS`. The frontend gets the same `kind` / `risk` on each
-     `TOOL_DISPLAY` entry. See docs/design/capability-center-plugins-tech-design.md §4.1.
+     `TOOL_DISPLAY` entry. See docs/drafts/agents/capability-center-plugins-tech-design.md §4.1.
 
 Hard exclusion (NEVER touched by codegen): Prometheus metric label
 `bowhead_bi_query_url_only_total` at `tool_registry.py:1334`. r3.1 §2.3

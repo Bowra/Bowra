@@ -5,7 +5,7 @@ Compilation produces the same exact Skill grants and Tool whitelist used by the
 ordinary execution snapshot. Bundles do not confer caller permissions.
 
 The registry lives in ``agents/manifests/plugins/builtin-v1.yaml``; see
-docs/design/capability-center-plugins-tech-design.md §5.
+docs/drafts/agents/capability-center-plugins-tech-design.md §5.
 """
 
 from __future__ import annotations

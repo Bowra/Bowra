@@ -42,9 +42,9 @@ Während der Bearbeitung prüft **Entwurfszuweisungen prüfen** die im Entwurf a
 
 ## Automatische Wiederholungen bei Fehlern
 
-Unter **Modellzuweisungen** enthält **Modellverhalten** eine Einstellung: **Automatische Wiederholungen bei Fehlern**. Schlägt ein Modellaufruf fehl, bevor das Modell überhaupt antwortet (etwa durch Zeitüberschreitung, Verbindungsfehler oder einen vorübergehenden Dienstfehler), wiederholt Bowra den Aufruf bis zu dieser Anzahl. Standard ist 3, zulässig sind 0 bis 5; mit 0 sind Wiederholungen aus. Wählen Sie **Speichern** neben dem Feld; die Einstellung wird separat gespeichert und ändert keine Zuweisungen.
+Unter **Modellzuweisungen** enthält **Modellverhalten** eine Einstellung: **Automatische Wiederholungen bei Fehlern**. Schlägt ein Modellaufruf fehl (etwa durch Zeitüberschreitung, Verbindungsfehler, eine während der Antwort abgebrochene Verbindung oder einen vorübergehenden Dienstfehler), wiederholt Bowra den Aufruf bis zu dieser Anzahl. Standard ist 3, zulässig sind 0 bis 5; mit 0 sind Wiederholungen aus. Wählen Sie **Speichern** neben dem Feld; die Einstellung wird separat gespeichert und ändert keine Zuweisungen.
 
-Wiederholt wird nur, solange das Modell noch nicht antwortet, sodass keine Antwort doppelt erscheint. Jede Wiederholung zählt zum Zeitlimit der Runde; reicht die Zeit nicht mehr, endet der Versuch mit einer Fehlermeldung. Während einer Wiederholung zeigt der Laufstatus der Unterhaltung z. B. „Zeitüberschreitung bei der Modellantwort, neuer Versuch (1/3)“. Meldet die Seite, dass sich die Konfiguration geändert hat, laden Sie die Seite neu und legen Sie den Wert erneut fest.
+Bricht die Verbindung ab, nachdem das Modell bereits zu antworten begonnen hat, verschwindet die unvollständige Antwort und das Modell antwortet von vorn, sodass keine Antwort doppelt erscheint. Der abgebrochene Aufruf wird nicht von Ihren Credits abgezogen. Jede Wiederholung zählt zum Zeitlimit der Runde; reicht die Zeit nicht mehr, endet der Versuch mit einer Fehlermeldung. Während einer Wiederholung zeigt der Laufstatus der Unterhaltung z. B. „Zeitüberschreitung bei der Modellantwort, neuer Versuch (1/3)“. Meldet die Seite, dass sich die Konfiguration geändert hat, laden Sie die Seite neu und legen Sie den Wert erneut fest.
 
 ## Externe Capabilities und Indizes
 

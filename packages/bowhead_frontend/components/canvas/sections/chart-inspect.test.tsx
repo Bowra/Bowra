@@ -7,10 +7,11 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChartInspect } from "./chart-inspect";
+import { onChartFollowup } from "@/lib/chart/chart-followup";
 import type { ChartSpec } from "@/lib/chart/types";
 
 vi.mock("next-intl", () => ({
@@ -289,10 +290,12 @@ describe("ChartInspect", () => {
     const seen: unknown[] = [];
     const listener = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("bowhead:chart-followup", listener);
+    const stop = onChartFollowup(() => {});
     try {
       render(<ChartInspect spec={spec(3, 3)} captionText="女装贡献超三分之一" onClose={onClose} />);
       fireEvent.click(screen.getByRole("button", { name: "AskAbout" }));
     } finally {
+      stop();
       window.removeEventListener("bowhead:chart-followup", listener);
     }
     expect(seen).toHaveLength(1);
@@ -305,11 +308,32 @@ describe("ChartInspect", () => {
   });
 
   it("数据页签只出 CSV 与追问（PNG/复制是图表专属）", () => {
+    const stop = onChartFollowup(() => {});
+    try {
+      render(<ChartInspect spec={spec(3, 3)} onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("tab", { name: "Data" }));
+      expect(screen.queryByRole("button", { name: "PNG" })).toBeNull();
+      expect(screen.getByRole("button", { name: "CSV" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "AskAbout" })).toBeInTheDocument();
+    } finally {
+      stop();
+    }
+  });
+
+  it("offers no follow-up where no Composer can take it (read-only, shared and report-only views)", () => {
     render(<ChartInspect spec={spec(3, 3)} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Data" }));
-    expect(screen.queryByRole("button", { name: "PNG" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "AskAbout" })).toBeNull();
     expect(screen.getByRole("button", { name: "CSV" })).toBeInTheDocument();
+  });
+
+  it("shows and hides the follow-up as a Composer subscribes and leaves", () => {
+    render(<ChartInspect spec={spec(3, 3)} onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "AskAbout" })).toBeNull();
+    let stop = () => {};
+    act(() => { stop = onChartFollowup(() => {}); });
     expect(screen.getByRole("button", { name: "AskAbout" })).toBeInTheDocument();
+    act(() => { stop(); stop(); });
+    expect(screen.queryByRole("button", { name: "AskAbout" })).toBeNull();
   });
 });
 

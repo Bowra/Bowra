@@ -15,7 +15,7 @@ import {
 } from "@/lib/llm-config-api";
 
 /**
- * Team-wide automatic retries after a model call fails before replying.
+ * Team-wide automatic retries after a failed model call.
  *
  * Saved on its own endpoint with the loaded configuration version, so it never
  * goes through the model-assignment draft/readiness review.

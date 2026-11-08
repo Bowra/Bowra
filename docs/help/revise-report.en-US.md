@@ -1,5 +1,7 @@
 # Revise an existing report
 
+You can ask what an existing report says without requesting a revision. Name the section you mean. If its saved text or source is unavailable, provide the relevant passage; a brief chat summary may omit qualifications from the report.
+
 KPI cards are optional. You can ask for only the chart, specify a few useful KPI cards, or say “Do not add KPI cards.” A minimal report does not need extra KPI cards or additional analytical sections. State whether existing cards should stay when revising an earlier report.
 
 A new Table shows every column of the selected result unless you name the columns to show. Named columns keep your order, including constant values. For a plot, state the horizontal field, value fields and grouping (or “no grouping”); for example, “Decile on the horizontal axis, hospital count on the vertical axis, grouped by region.” Numeric Decile values remain categories when you request a category axis. Missing fields or unsupported shapes produce an explanation instead of a guessed plot. Request sorting, aggregation or Top N in data preparation; the renderer does not silently shorten the prepared result. To change an explicit view into another chart kind, ask in Chat with the intended fields; its menu does not guess new bindings. Existing charts keep their saved behavior until you request a new revision.
@@ -84,3 +86,5 @@ Open **Share** from the report library or report toolbar to inspect the audience
 If sharing is disabled for your deployment, you can still inspect or revoke shares you are allowed to manage, but cannot add recipients or expand the audience. Existing shares are suspended and may resume if the deployment administrator enables sharing again. If availability cannot be verified, reopen the dialog to retry; existing shares remain manageable.
 
 A report may reference a file shared with its author by someone else. Report recipients need their own access to that original; otherwise that file is unavailable while the rest of the report remains readable. Ask the file owner to grant appropriate access. Authorized HTML keeps its normal interaction and original download. Revocation prevents subsequent authorized reads; it cannot recall downloaded files or erase content already open in a browser.
+
+While preparing a document draft, the assistant may calculate or check the complete data you supplied before making the edits. A calculation result is not a ready draft. Review the generated document, its figures and its sources before confirming publication.

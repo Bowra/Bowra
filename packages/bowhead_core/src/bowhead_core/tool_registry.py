@@ -1087,6 +1087,9 @@ class ToolExecutionContext:
     # returns an error indicating gateway has not integrated it.
     canvas_store: Any | None = None
     chart_authoring_projection: Any | None = field(default=None, repr=False)
+    report_read_access: Any | None = field(default=None, repr=False)
+    material_recovery_readers: tuple[str, ...] = field(default=(), repr=False)
+    material_read_token_budget: int | None = field(default=None, repr=False)
     # ScheduledJobStore: used by the scheduled_job_create tool (flag-gated). None = gateway has not integrated it.
     scheduled_store: Any | None = None
     # SessionStore: subagent previous-work memo (peer_prior_run) reads the previous spawn with the same session/profile; None = memo absent.
@@ -1268,6 +1271,9 @@ class ToolExecutionContext:
     # Configuration copilot batch 0.5 (tech-design-batch05-chat.md §5.2): config_propose channel gate, forwarded from the
     # same-named TurnRequest field (True for flag-enabled web construction; False for Feishu/scheduled, etc. → structured propose rejection).
     config_lite_supported: bool = False
+    # The scheduled task run this Turn executes (``TurnRequest.scheduled_run``); None for every
+    # other entry point. ``routine_notify`` refuses without it.
+    scheduled_run: Any | None = field(default=None, repr=False, compare=False)
     configuration_settings_target: Any | None = field(default=None, repr=False, compare=False)
     coach_canvas_target: Any | None = field(default=None, repr=False, compare=False)
     # Batch 1/c12: deduplicate resolve_datarc_project invalid-state warnings once per ctx (internal state; do not inject).
@@ -3510,8 +3516,8 @@ def build_default_registry() -> ToolRegistry:
         # bi-answer-correctness B2 (2026-09-15, user decision): original "明显属于另一个工作区才切换，不确定就先问"
         # permits silent switches after model judgment, contradicting tool_switch_context description (only explicit user requests, review c4). Unify on asking first.
         base_hint = (
-            "这就是完整列表。普通数据问题不要逐个工作区查询——默认在当前北极九章工作区查。"
-            "问题看起来属于另一个北极九章工作区时，先用 clarification_ask 问用户要不要切换，"
+            "这就是完整列表。普通数据问题不要逐个工作区查询——默认在当前数据源工作区查。"
+            "问题看起来属于另一个数据源工作区时，先用 clarification_ask 问用户要不要切换，"
             "用户同意后再调 tool_switch_context；不要自己切换。"
         )
         if len(names) > _WORKSPACE_TOUR_SOFT_LIMIT:
@@ -3561,8 +3567,8 @@ def build_default_registry() -> ToolRegistry:
             schema=ToolSchema(
                 name="tool_list_workspaces",
                 description=(
-                    "列出当前用户可访问的全部北极九章工作区（数据源），含当前连接的是哪个。"
-                    "回答「我有哪些工作区」、或需要切换/盘点工作区而不知道有哪些时使用。"
+                    "List all source workspaces accessible to the current user, including the currently connected one. "
+                    "Use this to answer which source workspaces are available or to discover them before switching or inspection."
                 ),
                 input_schema={
                     "type": "object",
@@ -3740,7 +3746,9 @@ def build_default_registry() -> ToolRegistry:
                 # Review c4: inspection branch must retain the explicit-request constraint; removing it lets the model
                 # decide a question needs another workspace and silently switch session context.
                 description=(
-                    "切换当前北极九章工作区（数据源）。当用户明确要求更换工作区、或明确要求逐个查看/盘点多个工作区时使用；name 传目标工作区名字（不知道有哪些时先用 tool_list_workspaces 查看）。"
+                    "Switch the current source workspace. Use only when the user explicitly requests a switch or explicitly requests "
+                    "inspecting multiple source workspaces one by one. Pass the target workspace name in name; "
+                    "call tool_list_workspaces first if the available names are unknown."
                 ),
                 input_schema={
                     "type": "object",

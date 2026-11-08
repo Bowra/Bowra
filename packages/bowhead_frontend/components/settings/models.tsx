@@ -1,5 +1,7 @@
 "use client";
 
+import { withoutNextRouterHistoryMarkers } from "@/lib/url-session-nav";
+
 
 import { ConfigurationFieldHelp, ConfigurationFieldProvider } from "@/components/settings/configuration-field-help";
 import { modelExternalCapabilitiesPath, modelSettingsOverviewPath, teamSettingsPath } from "@/lib/team-settings-paths";
@@ -2056,7 +2058,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     if (!clean.pathname.endsWith("/")) clean.pathname += "/";
     clean.searchParams.delete("bowra_import");
     clean.searchParams.delete("bowra_error");
-    window.history.replaceState(window.history.state, "", `${clean.pathname}${clean.search}${clean.hash}`);
+    window.history.replaceState(withoutNextRouterHistoryMarkers(window.history.state), "", `${clean.pathname}${clean.search}${clean.hash}`);
     if (bowraCallback.error) {
       bowraImportLoaded.current = true;
       const reasons = ["invalid_callback", "unavailable", "permission_changed", "cancelled", "rate_limited", "service_unavailable", "exchange_rejected", "exchange_uncertain", "no_models"];

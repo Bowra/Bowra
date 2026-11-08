@@ -9,6 +9,8 @@
 
 import type { ChatInlineArtifact } from "@/components/chat/step-list/ChatBubbleNew";
 import { appPath } from "@/lib/base-path";
+import { selectFinalInlineArtifacts } from "./final-deliverables";
+import type { Step } from "./turn-store";
 
 /**
  * Narrow `lead.final.payload` (unknown) to a typed list of
@@ -17,12 +19,13 @@ import { appPath } from "@/lib/base-path";
  */
 export function extractInlineArtifacts(
   finalPayload: unknown,
+  steps: readonly Step[] = [],
 ): ChatInlineArtifact[] {
   if (!finalPayload || typeof finalPayload !== "object") return [];
   const raw = (finalPayload as Record<string, unknown>).inline_artifacts;
   if (!Array.isArray(raw)) return [];
   const out: ChatInlineArtifact[] = [];
-  for (const entry of raw) {
+  for (const entry of selectFinalInlineArtifacts(raw, steps)) {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as Record<string, unknown>;
     const id = typeof e.id === "string" ? e.id : "";

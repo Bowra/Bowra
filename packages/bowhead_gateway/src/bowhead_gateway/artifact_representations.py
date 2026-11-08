@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import codecs
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Hashable
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
@@ -29,7 +31,8 @@ RepresentationRequest = Literal[Representation, "pptx-pdf"]
 RAW_LIMIT = 512 * 1024
 PREVIEW_LIMIT = 100 * 1024 * 1024  # Same maximum as file upload, not the Raw budget.
 log = logging.getLogger(__name__)
-_presentation_view_slot = anyio.Semaphore(1)
+_MAX_PRESENTATION_JOBS = 4
+_PRESENTATION_QUEUE_SECONDS = 30
 
 
 class ArtifactRepresentationDTO(FilePreviewDTO):
@@ -42,9 +45,64 @@ class ArtifactRepresentationDTO(FilePreviewDTO):
 
 
 def representation_error(kind: str) -> HTTPException:
-    statuses = {"unsupported": 415, "too_large": 413, "corrupt": 422, "unavailable": 503, "scope_unavailable": 404}
+    statuses = {"unsupported": 415, "too_large": 413, "corrupt": 422, "unavailable": 503, "busy": 503, "scope_unavailable": 404}
     code = "artifact_scope_unavailable" if kind == "scope_unavailable" else f"artifact_representation_{kind}"
-    return HTTPException(statuses[kind], detail={"error": {"code": code}}, headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if kind == "busy":
+        headers["Retry-After"] = "2"
+    return HTTPException(statuses[kind], detail={"error": {"code": code}}, headers=headers)
+
+
+class PresentationPreviewCoordinator:
+    """Application-owned in-flight reads; completed PDFs are not retained."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[Hashable, asyncio.Task[bytes]] = {}
+        self._slot = anyio.Semaphore(1)
+        self._closed = False
+
+    async def render(self, key: Hashable, build: Callable[[], Awaitable[bytes]]) -> bytes:
+        if self._closed:
+            raise representation_error("unavailable")
+        task = self._jobs.get(key)
+        if task is None:
+            if len(self._jobs) >= _MAX_PRESENTATION_JOBS:
+                raise representation_error("busy")
+            task = asyncio.create_task(self._render(build), name="presentation-preview")
+            self._jobs[key] = task
+            task.add_done_callback(partial(self._finished, key))
+        # A browser detaches its read, not the execution shared with other readers.
+        return await asyncio.shield(task)
+
+    async def _render(self, build: Callable[[], Awaitable[bytes]]) -> bytes:
+        acquired = False
+        try:
+            try:
+                with anyio.fail_after(_PRESENTATION_QUEUE_SECONDS):
+                    await self._slot.acquire()
+                    acquired = True
+            except TimeoutError:
+                raise representation_error("busy") from None
+            return await build()
+        finally:
+            if acquired:
+                self._slot.release()
+
+    def _finished(self, key: Hashable, task: asyncio.Task[bytes]) -> None:
+        if self._jobs.get(key) is task:
+            del self._jobs[key]
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None and not isinstance(error, HTTPException):
+                log.warning("artifact.presentation_job_failed error_type=%s", type(error).__name__)
+
+    async def close(self) -> None:
+        self._closed = True
+        tasks = list(self._jobs.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._jobs.clear()
 
 
 def safe_metadata(art: Artifact) -> dict[str, Any]:
@@ -97,24 +155,56 @@ async def _read_prefix(store: ArtifactStore, art: Artifact, limit: int) -> bytes
     return bytes(chunks)
 
 
-async def build_presentation_view(store: ArtifactStore, art: Artifact, executor: Callable[[], DocumentExecutor] | None) -> Response:
+async def _presentation_source_version(store: ArtifactStore, art: Artifact) -> str | None:
+    try:
+        head = await store.backend.head(art.path)
+    except Exception as exc:
+        log.warning("artifact.presentation_head_failed artifact_id=%s error_type=%s", art.id, type(exc).__name__)
+        raise representation_error("unavailable") from exc
+    if head is None or head.size != art.size:
+        raise representation_error("unavailable")
+    return head.identity or head.etag
+
+
+async def build_presentation_view(
+    store: ArtifactStore,
+    art: Artifact,
+    executor: Callable[[], DocumentExecutor] | None,
+    previews: PresentationPreviewCoordinator | None,
+) -> Response:
     if office_upload_mime(art.filename, art.mime) != OFFICE_MIMES[".pptx"]:
         raise representation_error("unsupported")
     if art.size > MAX_FILE:
         raise representation_error("too_large")
-    if executor is None:
+    if executor is None or previews is None:
         raise representation_error("unavailable")
-    try:
-        _presentation_view_slot.acquire_nowait()
-    except anyio.WouldBlock as exc:
-        raise representation_error("unavailable") from exc
     try:
         document = executor()
         renderer = AuthoringExecutor(root=document.root, url=document.url, token=document.token)
-        source = await _read_prefix(store, art, art.size + 1)
-        if len(source) != art.size:
-            raise representation_error("corrupt")
-        pdf = await renderer.view_presentation(source)
+        version = await _presentation_source_version(store, art)
+        # Unknown backend identities remain readable, but cannot identify shared work.
+        key = (
+            id(store),
+            art.id,
+            art.path,
+            art.size,
+            version if version is not None else object(),
+            str(document.root),
+            document.url,
+            renderer.profile,
+        )
+
+        async def convert() -> bytes:
+            if await _presentation_source_version(store, art) != version:
+                raise representation_error("unavailable")
+            source = await _read_prefix(store, art, art.size + 1)
+            if len(source) != art.size:
+                raise representation_error("corrupt")
+            return await renderer.view_presentation(source)
+
+        pdf = await previews.render(key, convert)
+        if await _presentation_source_version(store, art) != version:
+            raise representation_error("unavailable")
     except (httpx2.HTTPError, ValueError, OSError) as exc:
         code = getattr(exc, "code", type(exc).__name__)
         log.warning("artifact.presentation_view_failed artifact_id=%s error_code=%s", art.id, code)
@@ -123,8 +213,6 @@ async def build_presentation_view(store: ArtifactStore, art: Artifact, executor:
         if code in {"file_office_invalid_package", "document_pdf_invalid", "document_pdf_page_mismatch"}:
             raise representation_error("corrupt") from exc
         raise representation_error("unavailable") from exc
-    finally:
-        _presentation_view_slot.release()
     return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 

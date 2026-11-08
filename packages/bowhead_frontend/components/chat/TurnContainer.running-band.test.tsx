@@ -120,7 +120,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
     // ⚠ **The containing surface changed (③)**; capability did not (`docs/单元测试规范.md`: `能力搬家 ≠ 能力丢失`).
     //   With the running ledger entirely disabled, the **band** carries terminal disclosure plus one-click access to the full reason:
     //     ① The band shows this peer's red row (from ①) and a persistent failure count;
-    //     ② Click `展开运行过程` → the full Chinese `outcomeReason` returns.
+    //     ② Click `查看运行过程` → the full Chinese `outcomeReason` returns.
     //   Guard ② **must** be asserted: asserting only ① lets a broken expansion target pass all tests,
     //   although losing access to the reason is the regression this invariant originally prevented.
     // Mutation: remove peerTerminalById from RunningBand → ① fails;
@@ -493,7 +493,7 @@ describe("1e 带 · 与既有披露面的边界", () => {
   });
 
   // Observed on 116 (1.0.97 plan turn): the band rendered at the turn block's **bottom**, trace at the beat's original position,
-  // ~280px apart. Clicking `展开运行过程` expanded trace **above** the viewport; the user reported `跳到顶部了`.
+  // ~280px apart. Clicking `查看运行过程` expanded trace **above** the viewport; the user reported `跳到顶部了`.
   // Fix: expand in place, showing the expanded content where the user tapped.
   // These guards must be **paired**: band origin → band slot; inline origin → original position.
   // Guarding only the first half invites moving inline expansion to the slot too, relocating

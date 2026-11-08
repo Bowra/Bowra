@@ -76,6 +76,7 @@ function agentVersionCopy(
 }
 
 const PAUSED_REASONS = new Set(["recipe_lost", "recipe_changed", "recipe_rejected"]);
+const ALERT_LEVELS = new Set(["info", "attention", "urgent"]);
 
 const FEEDBACK_STATES = new Set(["accepted", "rejected", "expired"]);
 const FEEDBACK_KINDS = new Set(["agent_def", "team_skill", "semantic", "tool_source", "new_asset", "retire"]);
@@ -221,6 +222,12 @@ export function localizeNotification(item: NotificationCopySource, t: Translate,
       return { title: jobName ? c("routine_delivered_title", { name: jobName }) : raw.title, body: raw.body };
     case "routine.needs_input":
       return { title: c("routine_needs_input_title"), body: jobName ? c("routine_needs_input_body", { name: jobName }) : raw.body };
+    case "routine.alert": {
+      // The task's Agent chose the level; the copy is fixed and names the task (its reason stays in the run).
+      const level = str(meta, "level");
+      if (!jobName || !level || !ALERT_LEVELS.has(level)) return raw;
+      return { title: c(`routine_alert_${level}_title`, { name: jobName }), body: c("routine_alert_body") };
+    }
     case "feedback_candidate_receipt": {
       const state = str(meta, "finalState");
       if (!state || !FEEDBACK_STATES.has(state)) return raw;
@@ -298,6 +305,7 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   "scheduled.recovered": "type_scheduled_recovered",
   "routine.delivered": "type_routine_delivered",
   "routine.needs_input": "type_routine_needs_input",
+  "routine.alert": "type_routine_alert",
   content_shared: "type_content_shared",
   "agent.eval.regression_failed": "type_agent_eval",
 };

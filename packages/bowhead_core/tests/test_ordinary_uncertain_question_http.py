@@ -76,10 +76,16 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
             index = len(lead_calls)
             if index == 1:
                 message = call(
-                    "original-helper", "subagent_spawn", {"profile": profile, "task": "Inspect synthetic facts.", "delegation_role": "helper"}
+                    "original-helper",
+                    "subagent_spawn",
+                    {"profile": profile, "task": "Inspect synthetic facts.", "delegation_role": "helper", "required_source_urls": []},
                 )
             elif index == 2 and boundary in {"live_retry", "live_retry_question"}:
-                message = call("next-helper", "subagent_spawn", {"profile": profile, "task": "Inspect again.", "delegation_role": "helper"})
+                message = call(
+                    "next-helper",
+                    "subagent_spawn",
+                    {"profile": profile, "task": "Inspect again.", "delegation_role": "helper", "required_source_urls": []},
+                )
             elif index == 3 and boundary == "live_retry_question":
                 message = call("later-question", "clarification_ask", {"questions": [question]})
             elif index == 2:
@@ -88,7 +94,12 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
                 message = call(
                     "new-id-retry",
                     "subagent_spawn",
-                    {"profile": profile, "task": "Repeat the earlier inspection with different wording.", "delegation_role": "helper"},
+                    {
+                        "profile": profile,
+                        "task": "Repeat the earlier inspection with different wording.",
+                        "delegation_role": "helper",
+                        "required_source_urls": [],
+                    },
                 )
             else:
                 return response(
@@ -130,7 +141,6 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
             assert sorted(row["status"] for row in executions) == ["completed", "failed"]
             assert cards == []
             if boundary == "live_retry_question":
-                assert len(lead_calls) == 4
                 refusal = next(message for message in lead_calls[-1]["messages"] if message.get("tool_call_id") == "later-question")
                 assert "clarification_capture_unavailable" in refusal["content"]
                 earlier = next(message for message in lead_calls[-1]["messages"] if message.get("tool_call_id") == "original-helper")
@@ -162,12 +172,14 @@ async def test_helper_failure_continues_original_lead_without_replaying(http_sta
         async with open_shared_ctx(case.path) as db:
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card["request_id"]))
-        assert checkpoint.contract == "ordinary-lead-loop.v9"
+        assert checkpoint.contract == "ordinary-lead-loop.v12"
         outcome = checkpoint.helper_materials()[0]["outcome"]
         assert outcome["reason"] == ("model_failure" if boundary == "refused" else "model_unknown")
         assert checkpoint.invocations()[0].result["ok"] is False
         if boundary != "refused":
             assert checkpoint.invocations()[0].result["execution_outcome"] == "unknown"
+            assert checkpoint.invocations()[0].result["llm_reason_code"] == "llm_provider_unavailable"
+            assert checkpoint.invocations()[0].result["failure_stage"] == "model_request"
             assert "error_code" not in checkpoint.invocations()[0].result
             assert "subagent_execution_uncertain" not in json.dumps(lead_calls[1])
             assert "subagent_failed" not in json.dumps(lead_calls[1])

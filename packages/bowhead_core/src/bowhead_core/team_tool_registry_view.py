@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx2
@@ -25,6 +26,13 @@ from bowhead_router.types import ToolSchema
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
 from bowhead_core.openapi_tool_source import TeamToolEntry
 from bowhead_core.scrub import scrub as _scrub
+from bowhead_core.team_tool_confirmation import (
+    MAX_ARGUMENT_BYTES,
+    default_team_tool_confirmations,
+    resolve_team_mcp_category,
+    team_tool_confirmation_enabled,
+    team_tool_schema_digest,
+)
 from bowhead_core.tool_registry import TeamToolExecutionBinding, ToolExecutionContext, ToolSpec
 from bowhead_core.types import ToolAnnotations
 
@@ -118,6 +126,72 @@ def _is_timeout_error(exc: BaseException, _depth: int = 0) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class _CallConfirmation:
+    """What the requester reviews before a non-read team MCP call runs."""
+
+    tool_name: str
+    description: str
+    schema_digest: str
+    source_fallback: str
+
+
+# Model-facing outcomes. The call did not run in any of these cases.
+_CONFIRMATION_OUTCOMES: dict[str, str] = {
+    "rejected": "The user declined this call, so it did not run. Do not retry it; continue without this action or ask the user how to proceed.",
+    "expired": (
+        "The user did not confirm this call within the time limit, so it did not run. Do not retry it automatically; "
+        "tell the user that this action needs their confirmation."
+    ),
+    "unavailable": (
+        "This call needs the requesting user's confirmation, which could not be requested now (no interactive user, "
+        "arguments too large to review, or too many pending confirmations). It did not run. Do not retry it automatically; tell the user."
+    ),
+}
+
+
+def _confirmation_outcome(decision: str) -> dict[str, Any]:
+    outcome = decision if decision in _CONFIRMATION_OUTCOMES else "unavailable"
+    return {"ok": False, "error_kind": f"team_tool_confirmation_{outcome}", "error": _CONFIRMATION_OUTCOMES[outcome]}
+
+
+async def _confirm_call(
+    ctx: ToolExecutionContext,
+    *,
+    team_id: str,
+    advertised_name: str,
+    args: dict[str, Any] | None,
+    confirmation: _CallConfirmation,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Ask the requester; return ``(denial or None, the exact arguments to dispatch)``.
+
+    The arguments are frozen before review, so the call that runs is the call that was shown.
+    """
+    try:
+        blob = json.dumps(args or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return _confirmation_outcome("unavailable"), dict(args or {})
+    if len(blob.encode()) > MAX_ARGUMENT_BYTES:
+        return _confirmation_outcome("unavailable"), dict(args or {})
+    snapshot = json.loads(blob)
+    labels = getattr(ctx, "team_tool_source_labels", None) or {}
+    decision = await default_team_tool_confirmations().request(
+        owner_user_id=getattr(ctx, "user_id", "") or "",
+        turn_id=getattr(ctx, "turn_id", "") or "",
+        session_id=getattr(ctx, "session_id", "") or "",
+        team_id=team_id,
+        source_name=str(labels.get(advertised_name) or confirmation.source_fallback),
+        tool_ref=advertised_name,
+        tool_name=confirmation.tool_name,
+        description=confirmation.description,
+        schema_digest=confirmation.schema_digest,
+        arguments=snapshot,
+    )
+    if decision != "approved":
+        return _confirmation_outcome(decision), snapshot
+    return None, snapshot
+
+
 def _make_team_handler(
     team_id: str,
     source_id: str,
@@ -126,11 +200,13 @@ def _make_team_handler(
     advertised_name: str,
     client: ToolCallClient,
     audit_store: Any | None,
+    confirmation: _CallConfirmation | None = None,
 ) -> Any:
     """Closure dispatching one team tool through the turn's ClientSession + mapping the
     result to Bowhead-native form. Captures the owning team_id for the §3.5 dispatch-time
     team-bind and the audit store (§9.6 exec log). Shared Turn limits are enforced
-    by the Agent Tool execution boundary."""
+    by the Agent Tool execution boundary. With ``confirmation``, the requester approves
+    each call after authorization and before dispatch."""
 
     async def handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, Any]:
         # §3.5: the per-turn view already isolates by team; re-assert the calling ctx
@@ -147,6 +223,8 @@ def _make_team_handler(
             operation_id=operation_id,
             advertised_name=advertised_name,
         )
+        if res is None and confirmation is not None:
+            res, args = await _confirm_call(ctx, team_id=team_id, advertised_name=advertised_name, args=args, confirmation=confirmation)
         try:
             result = await client.call_tool(full_name, args or {}) if res is None else None
         except Exception as e:
@@ -237,9 +315,38 @@ def build_team_specs(
 
     Tool calls count once in the shared Turn budget before this handler runs.
     An optional audit store records each remote call without secrets or raw arguments.
+
+    With ``FEATURE_TEAM_TOOL_CONFIRMATION``, a remote MCP tool takes its category from
+    ``resolve_team_mcp_category`` (annotations, refined by an administrator confirmation): read tools run directly, every other category waits for the
+    requester's confirmation in the handler instead of the administrator approval queue,
+    so ``needs_approval`` is False and Lead advertising and Agent authoring agree.
     """
+    confirm_mcp = team_tool_confirmation_enabled()
     specs: list[ToolSpec] = []
     for entry in entries:
+        needs_approval = entry.destructive
+        destructive = entry.destructive
+        read_only = not entry.destructive
+        confirmation: _CallConfirmation | None = None
+        if confirm_mcp and entry.kind == "mcp":
+            category, _ = resolve_team_mcp_category(
+                read_only=entry.read_only_hint, destructive=entry.destructive_hint, admin_category=entry.admin_category
+            )
+            needs_approval = False
+            destructive = category == "destructive"
+            read_only = category == "read"
+            if category != "read":
+                confirmation = _CallConfirmation(
+                    tool_name=sanitize_external_tool_description(entry.dispatch_name)[:120],
+                    description=sanitize_external_tool_description(entry.description)[:1000],
+                    schema_digest=team_tool_schema_digest(
+                        name=entry.dispatch_name,
+                        description=entry.description,
+                        input_schema=entry.input_schema,
+                        annotations={"readOnlyHint": entry.read_only_hint, "destructiveHint": entry.destructive_hint},
+                    ),
+                    source_fallback=entry.source_id,
+                )
         # advertised_name is the stable teammcp.<src>.<op> identity (LLM schema + whitelist +
         # grants); dispatch_name is what the ClientSession is called with (== advertised for an
         # OpenAPI in-process server; the remote raw tool name for an MCP source, WP2).
@@ -261,9 +368,10 @@ def build_team_specs(
                     entry.advertised_name,
                     client,
                     audit_store,
+                    confirmation,
                 ),
-                needs_approval=entry.destructive,
-                risk_level="medium" if entry.destructive else "low",
+                needs_approval=needs_approval,
+                risk_level="medium" if needs_approval or confirmation is not None else "low",
                 # tools sprint WP2c — role binding correctness. The REAL "which agent may use this
                 # team tool" axis is now the per-subagent bundle (overlay ∩ bundle), NOT this role
                 # stamp: the Lead is excluded because its team_tool_bundle is () → the whitelist filter
@@ -281,8 +389,8 @@ def build_team_specs(
                 source="external",
                 annotations=ToolAnnotations(
                     open_world=True,
-                    destructive=entry.destructive,
-                    read_only=not entry.destructive,
+                    destructive=destructive,
+                    read_only=read_only,
                 ),
                 team_tool_binding=TeamToolExecutionBinding(
                     team_id=team_id,

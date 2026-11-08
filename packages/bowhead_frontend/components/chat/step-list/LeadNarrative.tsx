@@ -330,9 +330,9 @@ export interface LeadNarrativeProps {
 // `_POST_HOC_SANITIZE_RE` (response_kind_scanner.py:130). See
 // [[feedback_llm_internal_syntax_unreliable]].
 const _INTERNAL_MARKER_RE =
-  /(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*<\/\s*response_kind\s*>|<\s*headline\s*>[\s\S]*?<\/\s*headline\s*>/gi;
+  /(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*<\/\s*response_kind\s*>|<\s*(?:headline|healine)\s*>[^\n]{0,200}?<\/\s*(?:headline|healine)\s*>/gi;
 // Mid-stream: an opened-but-not-yet-closed marker at the tail (e.g. `<headline>导`).
-const _DANGLING_MARKER_RE = /<\s*(?:response_kind|headline)\s*>[^<]*$/i;
+const _DANGLING_MARKER_RE = /<\s*(?:response_kind|headline|healine)\s*>[^<\n]{0,200}$/i;
 
 /** Exported so narrative/answer dedup compares the same prose the user sees. */
 export function stripInternalMarkers(text: string): string {

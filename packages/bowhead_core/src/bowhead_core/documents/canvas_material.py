@@ -6,8 +6,10 @@ import base64
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 from typing import Any
 
+from bowhead_core.documents.executor import WorkerInput
 from bowhead_core.documents.request import DocumentRequestError
 
 CONTRACT = "document-canvas-material-v1"
@@ -88,10 +90,9 @@ def _view_index(view_id: str | None, spec: dict, *, script_path: str) -> dict:
     }
 
 
-def read_material(content: bytes, *, section_id: str | None = None, view_id: str | None = None, offset: int = 0) -> dict:
-    """Read a bounded directory or field page; do not flatten child datasets."""
-    if type(offset) is not int or offset < 0 or len(content) > MAX_BYTES:
-        raise DocumentRequestError("document_canvas_selection_invalid")
+def _material(content: bytes) -> dict:
+    if len(content) > MAX_BYTES:
+        raise DocumentRequestError("document_canvas_material_invalid")
     try:
         material = json.loads(content)
         if (
@@ -104,6 +105,31 @@ def read_material(content: bytes, *, section_id: str | None = None, view_id: str
             raise ValueError("Invalid Canvas material")
     except (ValueError, KeyError, TypeError) as error:
         raise DocumentRequestError("document_canvas_material_invalid") from error
+    return material
+
+
+def dataset_input(content: bytes, alias: str) -> WorkerInput:
+    """Unwrap one frozen, byte-verified file for the original isolated parser."""
+    record = _material(content)["datasets"].get(alias)
+    if not isinstance(record, dict) or record.get("availability", "available") != "available" or "content" not in record:
+        raise DocumentRequestError("document_canvas_dataset_unavailable")
+    try:
+        name = record["filename"]
+        if not isinstance(name, str) or not name or PurePosixPath(name).name != name or record["encoding"] != "base64":
+            raise ValueError("Invalid frozen dataset metadata")
+        raw = base64.b64decode(record["content"], validate=True)
+        if len(raw) != record["size_bytes"] or len(raw) > MAX_BYTES or hashlib.sha256(raw).hexdigest() != record["sha256"]:
+            raise ValueError("Frozen dataset identity mismatch")
+    except (ValueError, KeyError, TypeError) as error:
+        raise DocumentRequestError("document_canvas_material_invalid") from error
+    return WorkerInput(name, "data", raw)
+
+
+def read_material(content: bytes, *, section_id: str | None = None, view_id: str | None = None, offset: int = 0, detail: str = "index") -> dict:
+    """Read a bounded directory or field page; do not flatten child datasets."""
+    if type(offset) is not int or offset < 0 or detail not in {"index", "content", "objects", "datasets"}:
+        raise DocumentRequestError("document_canvas_selection_invalid")
+    material = _material(content)
     result = {
         "contract": CONTRACT,
         "canvas_id": material["canvas_id"],
@@ -117,7 +143,14 @@ def read_material(content: bytes, *, section_id: str | None = None, view_id: str
             "row_sample": "Tool preview only; the complete JSON stores original rows in the selected spec['rows']",
         },
     }
-    if section_id is None:
+    if detail == "datasets":
+        if section_id is not None or view_id is not None:
+            raise DocumentRequestError("document_canvas_selection_invalid")
+        entries = list(material["datasets"].items())[offset : offset + PAGE_SIZE]
+        result["datasets"] = {alias: {key: value for key, value in record.items() if key != "content"} for alias, record in entries}
+        result["selection"] = {"kind": "datasets", "offset": offset, "total": len(material["datasets"]), "returned": len(entries)}
+        result["read_file"] = "Use the same source alias and dataset_alias to inspect one linked file through the original data reader."
+    elif section_id is None:
         if view_id is not None:
             raise DocumentRequestError("document_canvas_selection_invalid")
         selected = material["sections"][offset : offset + PAGE_SIZE]
@@ -145,6 +178,7 @@ def read_material(content: bytes, *, section_id: str | None = None, view_id: str
         }
         result["dataset_count"] = len(material["datasets"])
         result["dataset_metadata_sampled"] = len(material["datasets"]) > PAGE_SIZE
+        result["dataset_directory"] = {"detail": "datasets", "offset": 0}
     else:
         section = next((item for item in material["sections"] if item["id"] == section_id), None)
         if section is None:
@@ -154,7 +188,15 @@ def read_material(content: bytes, *, section_id: str | None = None, view_id: str
         if views:
             spec = views.get(view_id)
             if spec is None:
-                raise DocumentRequestError("document_canvas_view_unavailable")
+                return {
+                    "error": "document_canvas_view_unavailable",
+                    "section_id": section_id,
+                    "available_view_ids": list(views),
+                    **({"dataset_read": {"dataset_alias": view_id}} if view_id in material["datasets"] else {}),
+                    "hint": "Keep the same source. Omit view_id for the root; child view IDs are listed here. "
+                    "Dataset aliases are files, not views: read one with dataset_alias, or list them with detail='datasets'. "
+                    "Do not guess additional view IDs.",
+                }
             columns = spec.get("columns") or [{"key": key} for key in dict.fromkeys(key for row in spec.get("rows", []) for key in row)]
             selected = columns[offset : offset + FIELD_PAGE_SIZE]
             section_index = material["sections"].index(section)
@@ -174,6 +216,25 @@ def read_material(content: bytes, *, section_id: str | None = None, view_id: str
     selection["next_offset"] = (
         selection["offset"] + selection["returned"] if selection["offset"] + selection["returned"] < selection["total"] else None
     )
+    selection["complete"] = selection["next_offset"] is None
+    if offset and not selection["returned"]:
+        return {
+            "contract": CONTRACT,
+            "error": "document_canvas_selection_invalid",
+            "selection": selection,
+            "section_id": section_id,
+            "view_id": view_id,
+            **({"script_path": result["script_path"]} if "script_path" in result else {}),
+            "hint": "This offset is past the end. There are no further pages in this selection. "
+            "Offsets select directory sections or fields, not data rows. If this selection has not been read, use offset=0 once. "
+            "Otherwise use the completed read and the bound full JSON in the final script; "
+            "do not increment this offset or request the same empty page again.",
+        }
+    if selection["complete"]:
+        result["next_step"] = (
+            "This selection is complete; there is no next page. Offsets do not select data rows. "
+            "Use the bound complete JSON and linked files in the final script."
+        )
     result["sample_limits"] = {"rows": 3, "string_characters": 160, "nested_items": 12, "complete_input_unchanged": True}
     if len(json.dumps(result, ensure_ascii=False).encode()) > 60 * 1024:
         raise DocumentRequestError("document_data_limit")

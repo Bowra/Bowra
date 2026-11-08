@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
@@ -52,6 +52,7 @@ export function SaveBar({
   /** Related actions shown beside Save, such as verifying a connection draft. */
   actions?: ReactNode;
 }) {
+  const messageId = useId();
   const slot = useContext(SaveBarSlotContext);
   const canvasFooter = useCanvasObjectFooter();
   const t = useTranslations("common");
@@ -138,7 +139,7 @@ export function SaveBar({
       style={slot ? ({ "--savebar-keyboard-inset": `${keyboardInset}px` } as CSSProperties) : undefined}
     >
       {dirty || saving ? <span className="ui-savebar-dot" aria-hidden="true" /> : null}
-      <span className="ui-savebar-text" role="status">
+      <span id={messageId} className="ui-savebar-text" role="status">
         {message ?? t(dirty ? "unsaved_changes" : "save")}
       </span>
       <span className="ui-savebar-actions">
@@ -149,6 +150,7 @@ export function SaveBar({
         <Button
           type="button"
           variant="primary"
+          aria-describedby={messageId}
           onClick={onSave}
           disabled={saveDisabled || saving}
           loading={saving}

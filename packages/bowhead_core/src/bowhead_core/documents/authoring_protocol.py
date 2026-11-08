@@ -12,6 +12,8 @@ from bowhead_core.documents.package_io import OfficePackageError
 
 PROFILE = "pptx-script-worker-v1"
 CONTRACT = "private-draft-authoring-v1"
+COMPUTE_CONTRACT = "private-python-compute-v1"
+MAX_COMPUTE_OUTPUT = 8192
 MAX_CODE = 64 * 1024
 MAX_FILE = 32 * 1024 * 1024
 MAX_VIEW_PDF = 25 * 1024 * 1024
@@ -40,12 +42,12 @@ def read_file(path: Path, limit: int = MAX_FILE) -> bytes:
 def control(operation: str, inputs: tuple[bytes, ...], *, parent_sha256: str, profile: str = PROFILE) -> bytes:
     if (
         profile not in AUTHORING_PROFILES
-        or operation not in {"inspect", "material", "execute", "render", "view"}
+        or operation not in {"inspect", "material", "compute", "execute", "render", "view"}
         or not (
             (operation == "render" and len(inputs) == (2 if profile == WORD_PROFILE else 1))
             or (operation == "view" and profile == PROFILE and len(inputs) == 1)
             or (operation in {"inspect", "material"} and len(inputs) == 2)
-            or (operation == "execute" and 2 <= len(inputs) <= 9)
+            or (operation in {"compute", "execute"} and 2 <= len(inputs) <= 9)
         )
     ):
         raise OfficePackageError("document_authoring_control_invalid")
@@ -56,7 +58,7 @@ def control(operation: str, inputs: tuple[bytes, ...], *, parent_sha256: str, pr
         raise OfficePackageError("source_hash_mismatch")
     if any(len(content) > MAX_FILE for content in inputs):
         raise OfficePackageError("document_inputs_too_large")
-    if operation in {"inspect", "material", "execute"}:
+    if operation in {"inspect", "material", "compute", "execute"}:
         if digest(inputs[0]) != parent_sha256 or not 0 < len(inputs[1]) <= MAX_CODE:
             raise OfficePackageError("document_authoring_control_invalid")
         try:

@@ -3888,7 +3888,10 @@ async def test_skill_only_http_uses_the_unique_current_lead_receiver_without_inv
     assert execution["dispatch_source"] == "lead"
     assert binding["requested_agent_id"] == execution["agent_id"] == "osa_exact"
     assert resolved_teams and set(resolved_teams) == {case.fixture.scope.team_id}
-    assert gathered_unconfigured and set(gathered_unconfigured) == {frozenset({"image_generate"})}
+    assert set(gathered_unconfigured) == {
+        frozenset({"image_generate"}),
+        frozenset({"image_generate", "routine_notify"}),
+    }
     source = next(row for row in rows(case, "chat_turn_user_sources") if row["turn_id"] == response.json()["turn_id"])
     saved = InputDocument.model_validate_json(source["input_document_json"])
     assert all(not isinstance(node.resource, AgentResourceRef) for node in saved.nodes if isinstance(node, ReferenceNode))
@@ -3972,6 +3975,16 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
             }
             fields[column] = value
             db.execute("INSERT INTO credit_ledger (" + ",".join(fields) + ") VALUES (" + ",".join("?" for _ in fields) + ")", tuple(fields.values()))
+        db.row_factory = sqlite3.Row
+        physical_template = dict(
+            db.execute("SELECT * FROM llm_usage_events WHERE turn_id=? AND receipt_state='completed' LIMIT 1", (turn_id,)).fetchone()
+        )
+        for column, value in (("user_id", "other_user"), ("team_id", "other_team"), ("workspace_id", "other_space"), ("turn_id", another_turn_id)):
+            foreign_receipt = {**physical_template, "id": "lu_foreign_" + column, "agent_type": "lead", column: value}
+            db.execute(
+                "INSERT INTO llm_usage_events (" + ",".join(foreign_receipt) + ") VALUES (" + ",".join("?" for _ in foreign_receipt) + ")",
+                tuple(foreign_receipt.values()),
+            )
 
     state = await case.client.get(f"/api/v1/turns/{turn_id}/references")
     assert state.status_code == 200, state.text
@@ -4005,6 +4018,8 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
     assert {row["execution_id"] for row in other_evidence.json()["orchestration"]["agent_executions"]}.isdisjoint({execution["execution_id"]})
     assert other_evidence.json()["cost_attribution"]["status"] == "unavailable"
     assert facts["model_invocations"][0]["cost_usd"] is None
+    assert facts["orchestration"]["observed_lead_usage"] == {"coverage": "not_applicable", "receipt_ids": []}
+    assert all(not row["receipt_id"].startswith("lu_foreign_") for row in facts["physical_calls"]["entries"])
     billing = facts["billing"]
     assert (billing["unit"], billing["scope"], billing["coverage"], billing["attribution"]) == (
         "credits",
@@ -4013,6 +4028,7 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
         "shared_unallocated",
     )
     (charge,) = billing["entries"]
+    assert billing["observed_credits_delta"] == charge["delta"]
     assert (charge["ledger_id"], charge["turn_id"], charge["tokens_input"], charge["tokens_output"]) == (owned_ledger_id, turn_id, 13, 3)
     assert charge["delta"] < 0
     assert charge["rate_card_version"] and billing["truncated"] is False
@@ -4020,9 +4036,10 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
     assert facts["cost_attribution"] == {
         "status": "unavailable",
         "amount_usd": None,
-        "reason": "shared_or_unlinked",
+        "reason": "provider_cost_not_recorded",
     }
-    assert "cost_unavailable" in facts["evidence_completeness"]["reason_codes"]
+    assert "provider_cost_unavailable" in facts["evidence_completeness"]["reason_codes"]
+    assert "cost_unavailable" not in facts["evidence_completeness"]["reason_codes"]
     material = next(item["material"] for item in facts["references"] if item["resource_kind"] == "skill")
     assert material and all(item["content_state"] == "included" for item in material)
     assert "injection_content_unavailable" in facts["evidence_completeness"]["reason_codes"]
@@ -4045,6 +4062,8 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
     missing = (await case.client.get(f"/api/v1/turns/{turn_id}/reference-evidence")).json()
     assert missing["billing"]["coverage"] == "unavailable" and missing["billing"]["entries"] == []
     assert missing["cost_attribution"]["amount_usd"] is None
+    assert missing["billing"]["observed_credits_delta"] is None
+    assert "cost_unavailable" in missing["evidence_completeness"]["reason_codes"]
     # Bounded history stays explicitly partial even when all visible rows are valid.
     with sqlite3.connect(case.path) as db:
         for index in range(101):
@@ -4055,6 +4074,7 @@ async def test_reference_evidence_projects_source_injection_and_physical_usage_w
     bounded = (await case.client.get(f"/api/v1/turns/{turn_id}/reference-evidence")).json()
     assert len(bounded["billing"]["entries"]) == 100 and bounded["billing"]["truncated"] is True
     assert bounded["billing"]["coverage"] == "partial"
+    assert bounded["billing"]["observed_credits_delta"] == sum(row["delta"] for row in bounded["billing"]["entries"])
     assert "facts_truncated" in bounded["evidence_completeness"]["reason_codes"]
 
 

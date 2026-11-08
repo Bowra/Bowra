@@ -31,6 +31,7 @@ pytestmark = [
 async def test_helper_can_read_own_skill_without_inheriting_selected_method(http_start, monkeypatch, declared):
     case = http_start
     enable_lead_writer(case, monkeypatch)
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     _, profile = await configure(case.fixture, monkeypatch)
     monkeypatch.setitem(
         PROFILES,
@@ -95,13 +96,24 @@ async def test_helper_can_read_own_skill_without_inheriting_selected_method(http
             if len(calls["lead"]) == 1:
                 return tool_response(
                     "subagent_spawn",
-                    {"profile": "compute", "agent_id": "system:compute", "task": "Read your own unused SOP.", "delegation_role": "helper"},
+                    {
+                        "profile": "compute",
+                        "agent_id": "system:compute",
+                        "task": "Read your own unused SOP.",
+                        "required_source_urls": [],
+                        "delegation_role": "helper",
+                    },
                     stream=stream,
                 )
             if len(calls["lead"]) == 2:
                 return tool_response(
                     "subagent_spawn",
-                    {"agent_id": "osa_exact", "task": "Analyze profit using the selected method.", "delegation_role": "primary"},
+                    {
+                        "agent_id": "osa_exact",
+                        "task": "Analyze profit using the selected method.",
+                        "required_source_urls": [],
+                        "delegation_role": "primary",
+                    },
                     stream=stream,
                 )
             return answer_response(request)
@@ -126,8 +138,9 @@ async def test_helper_can_read_own_skill_without_inheriting_selected_method(http
         assert accepted.status_code == 200, accepted.text
         turn_id = accepted.json()["turn_id"]
         await settled(turn_id)
-    assert (await case.fixture.case.store.get_turn(turn_id)).status == "completed"
-    assert {key: len(value) for key, value in calls.items()} == {"lead": 3, "helper": 3, "primary": 1}
+    assert (await case.fixture.case.store.get_turn(turn_id)).status == "completed", [(item.tool_name, item.result) for item in invocations]
+    # A rejected baseline read retains the existing one-off delivery review.
+    assert {key: len(value) for key, value in calls.items()} == {"lead": 3 + int(not declared), "helper": 3 + int(not declared), "primary": 1}
     executions = [row for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id]
     assert len(executions) == 2 and all(row["status"] == "completed" for row in executions)
     selected_execution = next(row["id"] for row in executions if row["agent_id"] == "osa_exact")
@@ -161,7 +174,19 @@ async def test_helper_can_read_own_skill_without_inheriting_selected_method(http
         assert snapshot["selection_identity"] == facts["selection_identity"]
         assert snapshot["cost_attribution"]["status"] == "unavailable"
         assert snapshot["cost_attribution"]["amount_usd"] is None
-        assert "orchestration_usage_unavailable" in snapshot["evidence_completeness"]["reason_codes"]
+        assert snapshot["physical_calls"]["coverage"] == "partial"
+    assert lead_evidence[0]["orchestration"]["observed_lead_usage"] == {"coverage": "unavailable", "receipt_ids": []}
+    assert "orchestration_usage_unavailable" in lead_evidence[0]["evidence_completeness"]["reason_codes"]
+    observed = facts["orchestration"]["observed_lead_usage"]
+    native_lead_ids = {
+        row["id"]
+        for row in rows(case, "llm_usage_events")
+        if row["turn_id"] == turn_id and row["agent_type"] == "lead" and row["reason"] == "turn" and row["receipt_state"] == "completed"
+    }
+    assert native_lead_ids and set(observed["receipt_ids"]) == native_lead_ids
+    assert observed["coverage"] == "partial"
+    assert "orchestration_usage_partial" in facts["evidence_completeness"]["reason_codes"]
+    assert "orchestration_usage_unavailable" not in facts["evidence_completeness"]["reason_codes"]
     assert lead_evidence[-1]["projection_etag"] != facts["projection_etag"]
     if not declared:
         assert "BASELINE_SOP_unused" not in json.dumps(calls["helper"])

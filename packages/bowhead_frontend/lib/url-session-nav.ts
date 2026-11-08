@@ -169,6 +169,12 @@ export function syncActiveSessionSearchParams(args: {
     next.delete("mode");
     next.delete("tab");
     next.delete("focus");
+    next.delete("canvas_document");
+    next.delete("canvas_doc_session");
+    next.delete("canvas_doc_user");
+    next.delete("canvas_doc_team");
+    next.delete("canvas_doc_space");
+    next.delete("canvas_doc_view");
   }
   return next;
 }

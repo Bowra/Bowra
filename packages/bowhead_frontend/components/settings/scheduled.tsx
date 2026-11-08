@@ -93,6 +93,7 @@ import { AiFillPanel } from "@/components/config-copilot/ai-fill-panel";
 import { type AiFillApplyReceipt } from "@/components/config-copilot/ai-fill-panel";
 import { type ConfigDraftResult } from "@/lib/config-drafts-api";
 import { useCopilotFields } from "@/lib/use-copilot-fields";
+import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 
 const MAX_JOBS = 10;
 const MAX_EMAILS = 5;
@@ -982,6 +983,38 @@ function RoutineRow({
   );
 }
 
+const DELIVERY_OUTCOMES = new Set([
+  "resolved", "read", "archived", "not_member", "opted_out", "smtp_unconfigured", "item_missing", "not_recipient",
+  "rejected", "retries_exhausted", "send_failed", "check_failed",
+]);
+
+/**
+ * FEATURE_NOTIFICATION_DELIVERY: one line per recorded email of this run (its result, its alert), with
+ * what to do when it did not go out and the diagnostic reference to quote.
+ */
+function RunDeliveries({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
+  const rows = run.deliveries ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <ul className="legacy-sched-run-deliveries">
+      {rows.map((row, index) => {
+        const what = t(`delivery_kind_${row.kind}`);
+        const outcome = row.outcome_code && DELIVERY_OUTCOMES.has(row.outcome_code) ? t(`delivery_outcome_${row.outcome_code}`) : null;
+        const text = t(`delivery_status_${row.status}`, { what });
+        return (
+          <li key={`${row.kind}-${index}`} className={`legacy-sched-run-delivery is-${row.status}`}>
+            {text}
+            {outcome && row.status !== "sent" ? ` — ${outcome}` : ""}
+            {row.diagnostic_ref && row.status !== "sent" ? (
+              <span className="legacy-sched-run-delivery-ref"> {t("delivery_reference", { ref: row.diagnostic_ref })}</span>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function RunRow({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
   // State colors: styles/ui-controls-legacy.css .legacy-badge-sched-run.is-* (original inline state colors moved verbatim).
   // Awaiting your answer is unfinished like running, but without pulse: waiting for a person, not executing.
@@ -1026,6 +1059,7 @@ function RunRow({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
             surface="task"
           />
         ) : null}
+        <RunDeliveries run={run} t={t} />
       </div>
       {run.status === "running" ? (
         <span className="legacy-sched-run-act-run-act-muted">{t("run_refresh_hint")}</span>
@@ -1092,6 +1126,11 @@ export function RoutineDrawer({
   const [emailErr, setEmailErr] = useState<string | null>(null);
   const [sendEmail, setSendEmail] = useState(
     (job?.notify_channels?.email?.length ?? 0) > 0 || (job?.notify_channels?.deliver_on_success ?? false),
+  );
+  // FEATURE_ROUTINE_NOTIFY: deliver every run, or only runs the task's Agent flagged for the owner.
+  const routineNotify = useOptionalAuthSession()?.me?.capabilities?.routine_notify === true;
+  const [deliverMode, setDeliverMode] = useState<"always" | "on_alert">(
+    job?.notify_channels?.deliver === "on_alert" ? "on_alert" : "always",
   );
 
   // ── Bind solidified workflows (PRD FR-3.2) ──
@@ -1299,9 +1338,13 @@ export function RoutineDrawer({
     setSubmissionError(null);
     // Backend expects a dict, not an array: {email:[...], deliver_on_success:bool}. Send delivery-off
     // explicitly (not {}) so an edit-save unambiguously clears it on PATCH rather than relying on shape.
+    // The delivery mode is sent only while it can be chosen; otherwise a saved mode is kept as it was.
+    const savedMode = job?.notify_channels?.deliver;
+    const deliverChoice = routineNotify ? deliverMode : savedMode;
+    const deliver = deliverChoice ? { deliver: deliverChoice } : {};
     const notify = sendEmail
-      ? { email: emails, deliver_on_success: true }
-      : { email: [], deliver_on_success: false };
+      ? { email: emails, deliver_on_success: true, ...deliver }
+      : { email: [], deliver_on_success: false, ...deliver };
     // When selector is absent (unavailable endpoint), omit the entire field from body; PATCH None means leave unchanged,
     // never unbind existing recipes merely because frontend omitted the selector.
     const recipeRefPatch: Record<string, unknown> | null = !showWorkflowField
@@ -1681,6 +1724,22 @@ export function RoutineDrawer({
                 <span className={`legacy-switch-sched-knob${sendEmail ? " is-on" : ""}`} />
               </Switch>
             </div>
+            {routineNotify && sendEmail ? (
+              <div className="legacy-sched-rcards legacy-sched-deliver-mode" role="radiogroup" aria-label={t("notify_mode_name")}>
+                <RadioCard
+                  on={deliverMode === "always"}
+                  name={t("notify_mode_always_name")}
+                  desc={t("notify_mode_always_desc")}
+                  onClick={() => setDeliverMode("always")}
+                />
+                <RadioCard
+                  on={deliverMode === "on_alert"}
+                  name={t("notify_mode_on_alert_name")}
+                  desc={t("notify_mode_on_alert_desc")}
+                  onClick={() => setDeliverMode("on_alert")}
+                />
+              </div>
+            ) : null}
           </Field>
           {submissionError ? (
             <ErrorNotice
@@ -1837,19 +1896,19 @@ function RadioCard({
 }: {
   on: boolean;
   name: string;
-  pill: string;
+  pill?: string;
   desc: string;
   onClick: () => void;
 }) {
   return (
-    <button type="button" onClick={onClick} className={`legacy-sched-rcard${on ? " is-on" : ""}`}>
+    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`legacy-sched-rcard${on ? " is-on" : ""}`}>
       <span className={`legacy-sched-radio${on ? " is-on" : ""}`}>
         {on ? <span className="legacy-sched-radio-dot" /> : null}
       </span>
       <span className="legacy-sched-rcard-text">
         <span className="legacy-sched-rcard-name">
           {name}
-          <span className={`legacy-sched-pill${on ? " is-on" : ""}`}>{pill}</span>
+          {pill ? <span className={`legacy-sched-pill${on ? " is-on" : ""}`}>{pill}</span> : null}
         </span>
         <span className="legacy-sched-rcard-desc">{desc}</span>
       </span>

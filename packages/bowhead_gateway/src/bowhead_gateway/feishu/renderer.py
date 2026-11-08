@@ -11,6 +11,7 @@ from bowhead_core.agents._generated.legacy_trace_names import LEGACY_TRACE_NAMES
 from bowhead_core.agents._generated.tool_display import TOOL_DISPLAY
 from bowhead_core.agents._generated.tool_renames import canonical_tool_name
 from bowhead_core.chart.types import capped_series, downsampled_points
+from bowhead_core.events import stream_restart_narrative_chars
 
 from bowhead_gateway.feishu.client import _content_string
 from bowhead_gateway.im.blocks import resolve_markers
@@ -64,6 +65,9 @@ class FeishuTurnCardState:
     title: str = ""
     status: str = "running"
     narrative: str = ""
+    # Unclipped streamed Lead narrative; `narrative` is its card-sized view. A model
+    # attempt restarted after output withdraws characters from the end of this text.
+    narrative_stream: str = ""
     final_answer: str = ""
     inline_artifacts: list[dict[str, Any]] = field(default_factory=list)
     steps: dict[str, FeishuStepView] = field(default_factory=dict)
@@ -307,9 +311,19 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
     if event_type == "narrative.delta":
         delta = str(payload.get("delta") or "")
         if delta:
-            state.narrative = _clip(state.narrative + delta, 2500)
+            state.narrative_stream += delta
+            state.narrative = _clip(state.narrative_stream, 2500)
             return True
         return False
+    if event_type == "llm.stream_restarted":
+        # Same rule as the browser: a restart withdraws its streamed Lead narrative
+        # (code points from the end), including a helper-scoped reference primary.
+        withdrawn = stream_restart_narrative_chars(payload)
+        if withdrawn <= 0 or not state.narrative_stream:
+            return False
+        state.narrative_stream = state.narrative_stream[: max(0, len(state.narrative_stream) - withdrawn)]
+        state.narrative = _clip(state.narrative_stream, 2500)
+        return True
     if event_type == "step_started":
         step_id = str(payload.get("step_id") or "")
         if not step_id:

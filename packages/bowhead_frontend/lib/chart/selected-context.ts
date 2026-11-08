@@ -54,7 +54,32 @@ export function selectedContextForView(scope: ChartFollowupScope | undefined, bi
 }
 
 
-/** A visible chip summary; its existing title carries the complete scope. */
-export function chartSelectedScopeLabel(scope: ChartSelectedContext): string {
-  return scope.frameKey !== undefined ? String(scope.frameKey) : scope.tuples ? JSON.stringify(scope.tuples) : `${scope.window!.lower} – ${scope.window!.upper}`;
+/** One observation, read the same way as the observation-details heading: missing cells show "—". */
+export function observationTupleLabel(tuple: readonly TypedCell[]): string {
+  return tuple.map((value) => value ?? "—").join(" · ");
+}
+
+/** A selected or inspected range between two observations. */
+export function observationRangeLabel(lower: string | number, upper: string | number): string {
+  return `${lower} – ${upper}`;
+}
+
+function localizedList(items: readonly string[], locale: string | undefined): string {
+  if (items.length < 2) return items[0] ?? "";
+  try {
+    return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(items);
+  } catch {
+    // Unsupported locale tag or missing Intl.ListFormat: keep every value readable.
+    return items.join(", ");
+  }
+}
+
+/**
+ * The readable selected scope shared by the composer chip and the follow-up prefill.
+ * Several observations become a localized list; a prepared frame reads as its frame value.
+ */
+export function chartSelectedScopeLabel(scope: ChartSelectedContext, locale?: string): string {
+  if (scope.frameKey !== undefined) return String(scope.frameKey);
+  if (scope.tuples) return localizedList([...new Set(scope.tuples.map(observationTupleLabel))], locale);
+  return scope.window ? observationRangeLabel(scope.window.lower, scope.window.upper) : "";
 }

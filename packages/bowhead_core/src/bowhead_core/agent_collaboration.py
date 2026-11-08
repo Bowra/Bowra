@@ -19,7 +19,7 @@ from typing import Annotated, Literal
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.chat_reference_scope import ReferenceRequestScope, require_reference_request_scope
 from bowhead_core.chat_reference_storage import ReferenceCipher, ReferenceScope
 from bowhead_core.document_chat_continuation import DocumentTurnOwner
@@ -209,7 +209,8 @@ class CollaborationStore:
     @asynccontextmanager
     async def _transaction(self, worker: DocumentTurnOwner, *, write: bool = True, history: bool = False) -> AsyncIterator[aiosqlite.Connection]:
         worker = DocumentTurnOwner.model_validate(worker.model_dump())
-        async with open_shared_ctx(domain_database_path(self.db_path, "execution")) as db:
+        open_database = open_shared_ctx if write else open_pooled_read_ctx
+        async with open_database(domain_database_path(self.db_path, "execution")) as db:
             await db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
                 if write:

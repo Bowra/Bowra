@@ -110,6 +110,13 @@
   font-family: var(--font-control);
   font-size: var(--fs-sm);
 }
+/* History rows recede by ink step, not opacity: opacity took this 12px text to 2.1-3.8:1. Warn and fail colors still win. */
+:root:root .bh-band__row--h1 :is(.bh-band__lab, .bh-band__rmeta) {
+  color: var(--c-ink-4);
+}
+:root:root .bh-band__row--h2 :is(.bh-band__lab, .bh-band__rmeta) {
+  color: var(--c-ink-3);
+}
 :root:root :is(.bh-band__row.is-warn .bh-band__glyph, .bh-band__row.is-warn .bh-band__rmeta) {
   color: var(--c-warn-ink);
 }
@@ -1425,7 +1432,7 @@
 }
 
 /* Partial-answer footer with Continue (agent run limits; mockup "Agent Run Limits Spec Part 2" D2). */
-.bh-partial-footer {
+:root:root .bh-partial-footer {
   display: flex;
   gap: 10px;
   align-items: flex-start;
@@ -1434,31 +1441,31 @@
   border-radius: 10px;
   background: var(--c-warn-soft);
   color: var(--c-ink);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   line-height: 1.55;
 }
-.bh-partial-footer__icon {
+:root:root .bh-partial-footer__icon {
   flex: none;
   margin-top: 3px;
   color: var(--c-warn);
 }
-.bh-partial-footer__text {
+:root:root .bh-partial-footer__text {
   flex: 1;
   display: grid;
   gap: 2px;
   min-width: 0;
 }
-.bh-partial-footer__text b {
+:root:root .bh-partial-footer__text b {
   font-weight: 650;
 }
-.bh-partial-footer__text span {
+:root:root .bh-partial-footer__text span {
   color: var(--c-warn-ink);
 }
 @media (max-width: 640px) {
-  .bh-partial-footer {
+  :root:root .bh-partial-footer {
     flex-wrap: wrap;
   }
-  .bh-partial-footer .settings-button {
+  :root:root .bh-partial-footer .settings-button {
     width: 100%;
     min-height: 44px;
   }

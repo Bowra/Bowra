@@ -229,3 +229,42 @@ async def test_cancel_capacity_wait_never_starts_worker_or_leaks_slot(tmp_path, 
     assert conn._thread.ident is None
     assert sqlite_capacity._used == baseline
     assert not (tmp_path / "cancel-wait.db").exists()
+
+
+@pytest.mark.parametrize("close_first", ["cursor", "connection"])
+async def test_deferred_cursor_close_after_queued_close_is_idempotent(tmp_path, monkeypatch, close_first):
+    from unittest.mock import Mock
+
+    warning = Mock()
+    monkeypatch.setattr(sqlite_domain_runtime._LOG, "warning", warning)
+    baseline = sqlite_capacity._used
+    connection = await connect(tmp_path / "cursor-close.db", factory=sqlite_domain_runtime.DomainConnection)
+    cursor = await connection.execute("SELECT 1")
+    raw = connection._conn
+    held, resume = threading.Event(), threading.Event()
+
+    def pause_worker():
+        held.set()
+        assert resume.wait(5)
+
+    pending = [asyncio.create_task(connection._execute(pause_worker))]
+    try:
+        assert await asyncio.to_thread(held.wait, 5)
+        closing = asyncio.create_task(connection._execute((raw if close_first == "connection" else cursor._cursor).close))
+        pending.append(closing)
+        await asyncio.sleep(0)  # Enqueue close before cleanup while the worker is paused.
+        cleanup = asyncio.create_task(connection._close_abandoned_cursor(cursor._cursor))
+        pending.append(cleanup)
+        await asyncio.sleep(0)  # Cleanup's loop-side check must see the open connection.
+        assert not closing.done() and not cleanup.done()
+        resume.set()
+        await asyncio.gather(*pending)
+        assert cursor._cursor._domain_closed
+        warning.assert_not_called()
+    finally:
+        resume.set()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await connection.close()
+        await asyncio.to_thread(connection._thread.join, 5)
+    assert sqlite_capacity._used == baseline
+    assert not connection._thread.is_alive()

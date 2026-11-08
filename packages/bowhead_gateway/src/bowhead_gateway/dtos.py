@@ -673,6 +673,11 @@ class NotificationItemDTO(BaseModel):
     archivedAt: str | None = None
     createdAt: str
     updatedAt: str
+    # FEATURE_NOTIFICATION_REACH: the item's Team, named only when the user belongs to more than
+    # one Team (multi-Team authorization on). "personal" items never carry a Team or switch it.
+    scope: str = "team"
+    teamName: str | None = None
+    currentTeam: bool = True
 
 
 class NotificationListDTO(BaseModel):
@@ -684,6 +689,9 @@ class NotificationCountDTO(BaseModel):
     actionRequired: int
     updatesUnread: int
     totalBadge: int
+    # FEATURE_NOTIFICATION_REACH: newest delivery time of an unread item the browser may announce;
+    # the client fetches `browser-candidates` only when this moves.
+    latestBrowserCandidateAt: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────

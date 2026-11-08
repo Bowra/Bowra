@@ -112,7 +112,7 @@ for (const [width, mode] of [[1000, "light"], [320, "dark"]] as const) {
     expect(mark).not.toBeNull();
     await canvas.hover({ position: mark! });
     await expect.poll(() => page.evaluate(() => window.chartCompositionHost.tooltipLines("relationship").sort())).toEqual([
-      "Margin: 30.17%", "Revenue: USD 52.12",
+      "Margin: 30.16789%", "Revenue: USD 52.12345",
     ]);
     await page.screenshot({ path: test.info().outputPath(`dual-units-hover-${width}-${mode}.png`), fullPage: true });
     await caption.focus(); await page.keyboard.press("Enter");
@@ -211,7 +211,7 @@ for (const width of [1000, 390]) {
     const fixture = observationAdaptersFixture();
     await page.evaluate((value) => window.chartCompositionHost.hydrate(value), fixture);
     const details = page.locator('[data-chart-view="detail"]');
-    await expect(details).toContainText("0.000012345");
+    await expect(details).toContainText("0.000012");
     await expect.poll(() => page.evaluate(() => window.chartCompositionHost.settleCharts())).toBe(2);
     const position = await page.evaluate(() => window.chartCompositionHost.firstMarkPosition("trend"));
     expect(position).not.toBeNull();
@@ -364,7 +364,7 @@ for (const width of [1000, 390]) {
     await expect(seek).toHaveValue("1");
     await expect(player.getByRole("button", { name: "Play", exact: true })).toBeVisible();
     await expect(details.locator("tbody tr")).toHaveCount(2);
-    await expect(details).toContainText("0.000012345");
+    await expect(details).toContainText("0.000012");
     await expect.poll(() => page.evaluate(() => window.chartCompositionHost.settleCharts())).toBe(1);
     const axes = await page.evaluate(() => [window.chartCompositionHost.chartScale("relationship", "x"), window.chartCompositionHost.chartScale("relationship", "y")]);
     await seek.selectOption("0");
@@ -372,7 +372,7 @@ for (const width of [1000, 390]) {
     await player.getByRole("button", { name: "Play", exact: true }).click();
     await expect(seek).toHaveValue("2", { timeout: 5000 });
     await expect(details.locator("tbody tr")).toHaveCount(1);
-    await expect(details).toContainText("12.123456");
+    await expect(details).toContainText("12.12");
     await expect(player.getByRole("button", { name: "Play", exact: true })).toBeDisabled();
     expect(await page.evaluate(() => [window.chartCompositionHost.chartScale("relationship", "x"), window.chartCompositionHost.chartScale("relationship", "y")])).toEqual(axes);
     await seek.selectOption("0");
@@ -437,6 +437,7 @@ for (const width of [1000, 390]) {
     await page.keyboard.press("Enter");
     await expect(page.locator("[data-chart-observation-details]")).toHaveCount(0);
     await page.getByRole("button", { name: "Ask about this chart", exact: true }).click();
+    expect(errors).toEqual([]);
     const events = await page.evaluate(() => (window as unknown as { followups: Array<{ selectedContext: unknown }> }).followups);
     expect(events).toHaveLength(1);
     expect(events[0].selectedContext).toEqual({ version: 1, sectionId: fixture.id, sectionRev: fixture.rev, viewId: "relationship", bindingId: "time.fixture", datasetDigest: evidencePlanForViewer(fixture.spec.presentation_plan)!.dataset.content_digest, window: { lower: "2026-02", upper: "2026-03" }, tuples: [["2026-02"]], measureKeys: ["revenue", "cost"] });
@@ -933,7 +934,7 @@ for (const appearance of [
       const table = root.locator(".v2-chart-table");
       await expect(table).toHaveCSS("border-top-width", "0px");
       await expect(table).toHaveCSS("border-radius", "0px");
-      await expect(root.locator('[data-chart-view="detail"]')).toContainText("0.000012345");
+      await expect(root.locator('[data-chart-view="detail"]')).toContainText("0.000012");
       const selects = root.locator("[data-chart-time-window] select");
       await selects.first().selectOption("1");
       await expect(root.locator("tbody tr")).toHaveCount(2);
@@ -1149,7 +1150,7 @@ test("six native views report prepared-frame feedback for 120 frames and 1000 or
 
 
 for (const locale of ["zh-CN", "en-US", "de-DE", "fr-FR"] as const) for (const width of [1000, 320]) {
-  test(`readable magnitudes and base-value hover in ${locale} at ${width}px`, async ({ page }) => {
+  test(`readable magnitudes and source-value hover in ${locale} at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     const writes: string[] = [], errors: string[] = [];
@@ -1178,8 +1179,8 @@ for (const locale of ["zh-CN", "en-US", "de-DE", "fr-FR"] as const) for (const w
     const mark = await page.evaluate(() => window.chartCompositionHost.firstMarkPosition("loss"));
     expect(mark).not.toBeNull();
     await canvas.hover({ position: mark! });
-    const amount = new Intl.NumberFormat(locale).format(90000);
-    await expect.poll(() => page.evaluate(() => window.chartCompositionHost.tooltipLines("loss"))).toEqual([`Revenue: ${amount}元`]);
+    const amount = new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(0.0009);
+    await expect.poll(() => page.evaluate(() => window.chartCompositionHost.tooltipLines("loss"))).toEqual([`Revenue: ${amount}亿元`]);
     const ticks = await page.evaluate(() => window.chartCompositionHost.numericTickBounds("dual"));
     expect(ticks.length).toBeGreaterThan(0);
     for (const tick of ticks) { expect(tick.left).toBeGreaterThanOrEqual(0); expect(tick.right).toBeLessThanOrEqual(tick.width); }

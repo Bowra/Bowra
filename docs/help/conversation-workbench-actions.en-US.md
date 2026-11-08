@@ -25,6 +25,7 @@ If the connection is interrupted, Bowhead checks the original request when you r
 ## Choose an Agent, method or result
 
 - When quick references are available, type `@` to choose an Agent for this message, or `/` to choose a Skill, Outcome or tool. Select an available item from the menu to add its tag.
+- The reference menu opens above or below the composer according to the available space. Scroll the list for more matches; the attachment and Send controls remain visible.
 - An **Outcome** describes the result you want delivered. A **Plugin** groups Tools and Skills for an Agent; it is managed with the Agent's resources. Selecting an Outcome does not add a Plugin.
 - You can open a selected resource tag to edit its parameters when available. Your choices apply to this message; they do not change the Agent's saved configuration.
 
@@ -58,6 +59,10 @@ If the connection is interrupted, Bowhead checks the original request when you r
 - Here \ means the key where the backslash is on a US keyboard. On other keyboard layouts that key may show a different character; in browsers that can read the keyboard layout, the enlarge button's tooltip shows the character on your keyboard, otherwise it says "the \ key on a US keyboard".
 - The shortcut doesn't work while a menu, list, dialog, or popover is open; close it first.
 - The shortcut works on wide computer screens when there are results. Safari uses ⌘⇧\ for **Show All Tabs**; if pressing it in Safari opens the tab overview, use the enlarge button instead.
+
+## Identify and download a file
+
+File buttons in the execution details show the original filename. Open a file to check its preview and download that same original. AI-written titles and descriptions do not replace the filename on these buttons, including in older conversations. A filename identifies the saved file; it does not certify its contents.
 
 ## The dot on Results
 
@@ -119,6 +124,8 @@ For tasks that retain completed subtask work, if your answer was saved but the t
 - With focus on a citation marker, press Enter to open that source. When focus is in the source card, press Esc to close it and return to the marker. The source line under a chart also opens with Enter or Space and closes with Esc.
 
 ## When a turn cannot finish
+
+When recorded model-service details are available, the card shows the HTTP status and a screened provider explanation. If the call outcome is unconfirmed, use **Copy diagnostics** and ask your team administrator to check the result before sending the task again. An unconfirmed response does not establish that earlier steps failed or were never executed.
 
 The failure card explains the recorded reason, such as a model timeout, too many requests, an interrupted response, or an execution limit. Follow the action shown. Model authentication failures need a team administrator to check access; include the copied diagnostics. Credit failures identify whether your allowance or the team's allowance needs attention.
 

@@ -1000,3 +1000,44 @@ async def test_collected_cycle_keeps_its_fence_until_deferred_native_close(domai
             execution.commit()
     finally:
         execution.close()
+
+
+@pytest.mark.asyncio
+async def test_deferred_cursor_close_failure_preserves_authority_fence(domain_files: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from bowhead_core.sqlite_domain_runtime import DomainCursor, connect
+
+    from bowhead_core import sqlite_domain_runtime, sqlite_domains
+
+    monkeypatch.setattr(sqlite_domains, "domain_layout_active", lambda _path: True)
+    warning = Mock()
+    monkeypatch.setattr(sqlite_domain_runtime._LOG, "warning", warning)
+    execution = managed(domain_files, "execution")
+    try:
+        execution.execute("INSERT INTO sessions(id,user_id) VALUES('s','u')").close()
+        execution.commit()
+        async with connect(domain_files) as connection:
+            cursor = await connection.execute("SELECT id FROM sessions")
+            original_close = DomainCursor.close
+
+            def failed_close(self: DomainCursor) -> None:
+                if self is cursor._cursor:
+                    raise sqlite3.ProgrammingError("Synthetic native close failure")
+                original_close(self)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(DomainCursor, "close", failed_close)
+                await connection._close_abandoned_cursor(cursor._cursor)
+            warning.assert_called_once_with("sqlite.cursor_cleanup_deferred", exception_type="ProgrammingError", diagnostic_id=None)
+            assert not getattr(cursor._cursor, "_domain_closed", False)
+            with pytest.raises(sqlite3.OperationalError) as caught:
+                execution.execute("UPDATE sessions SET user_id='other'")
+            assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+            execution.rollback()
+            assert await cursor.fetchall() == [("s",)]
+            await cursor.close()
+            execution.execute("UPDATE sessions SET user_id='other'").close()
+            execution.commit()
+    finally:
+        execution.close()

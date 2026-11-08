@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import aiosqlite
 import pytest
 from bowhead_core.access_control import AccessControlStore
+from bowhead_core.notification_service import NotificationService
 from bowhead_core.notification_store import NotificationStore
 from bowhead_core.skill_upload import bundle_sha256
 from bowhead_core.user_store import TeamSkillStoreAdapter, User, UserStore, _now
@@ -97,6 +98,7 @@ def _app(store: UserStore, monkeypatch, tmp_path, *, access=False, notify=False,
         ns = NotificationStore(str(tmp_path / "u.db"))
         _run(ns.initialize())
         app.state.notification_store = ns
+        app.state.notification_service = NotificationService(store=ns, user_store=store)
     if personal:
         # promote/copy need personal surface: skills router + skill_instance_store + empty catalog.
         # Personal bundle validation uses CWD-relative .data → callers must monkeypatch.chdir(tmp_path).
@@ -727,23 +729,71 @@ def test_notifications_split_keys_and_recipients(tmp_path, monkeypatch):
             async with aiosqlite.connect(db) as conn:
                 conn.row_factory = aiosqlite.Row
                 rows = await conn.execute_fetchall(
-                    "SELECT i.dedupe_key AS k, i.type AS t, r.user_id AS u, i.action_url AS url"
+                    "SELECT i.dedupe_key AS k, i.type AS t, r.user_id AS u, i.action_url AS url, i.priority AS p"
                     " FROM notification_items i JOIN notification_recipients r ON r.notification_id = i.id"
                 )
-                return [(r["k"], r["t"], r["u"], r["url"]) for r in rows]
+                return [(r["k"], r["t"], r["u"], r["url"], r["p"]) for r in rows]
 
         return _run(q())
 
     submitted = [x for x in _items() if x[1] == "skill_approval_submitted"]
     assert {x[2] for x in submitted} == {"u_owner", "u_admin"}  # → admins; no author/member.
     assert all(x[0].startswith(f"skill_approval:submitted:{rid}:") for x in submitted)
-    assert {x[3] for x in submitted} == {"/team/settings/workflows"}
+    # Canonical settings route (trailing slash) and the shared p1/p2/p3 priority vocabulary.
+    assert {x[3] for x in submitted} == {"/team/settings/workflows/"}
+    assert {x[4] for x in submitted} == {"p2"}
     _client(app, ADMIN).post(f"{_BASE}/{rid}/approve", json={"source_sha256": sha})
     decided = [x for x in _items() if x[1] == "skill_approval_decided"]
     assert {x[2] for x in decided} == {"u_author"}  # → author.
     assert decided[0][0].startswith(f"skill_approval:decided:{rid}:")
     assert decided[0][3] == "/skills/"  # The author's Skills page, not the legacy /settings/skills redirect.
     assert len({x[0] for x in _items()}) == 2  # Separate keys: decision never overwrites admin's pending item.
+
+
+def _review_items(app: FastAPI, user: User) -> int:
+    """Open review items in ``user``'s badge."""
+    ns = app.state.notification_store
+    return _run(ns.notification_count(user_id=user.id)).action_required
+
+
+def test_a_submitted_skill_waits_in_the_administrators_badge_until_decided(tmp_path, monkeypatch):
+    """A submission asks administrators to act, so it counts in their badge (and Home "Needs
+    attention") until a decision closes it; the author's decision notice does not count."""
+    store = _store(tmp_path)
+    app = _app(store, monkeypatch, tmp_path, notify=True)
+    d = _create_pending(app)
+    assert _review_items(app, ADMIN) == 1 and _review_items(app, OWNER) == 1
+    assert _review_items(app, AUTHOR) == 0
+
+    r = _client(app, ADMIN).post(f"{_BASE}/{d['id']}/approve", json={"source_sha256": d["source_sha256"]})
+    assert r.status_code == 200, r.text
+
+    assert _review_items(app, ADMIN) == 0 and _review_items(app, OWNER) == 0
+    assert _review_items(app, AUTHOR) == 0
+
+
+def test_withdrawing_or_deleting_a_submission_clears_the_review_item(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    app = _app(store, monkeypatch, tmp_path, notify=True)
+    withdrawn = _create_pending(app, name="withdrawn-recipe")
+    deleted = _create_pending(app, name="deleted-recipe")
+    assert _review_items(app, ADMIN) == 2
+
+    assert _client(app, AUTHOR).post(f"{_BASE}/{withdrawn['id']}/withdraw").status_code == 200
+    assert _review_items(app, ADMIN) == 1
+    assert _client(app, AUTHOR).delete(f"{_BASE}/{deleted['id']}").status_code == 204
+    assert _review_items(app, ADMIN) == 0
+
+
+def test_skill_notifications_follow_the_notification_center_switch(tmp_path, monkeypatch):
+    """Routes now emit through `NotificationService`, so its switch applies to them too."""
+    store = _store(tmp_path)
+    app = _app(store, monkeypatch, tmp_path, notify=True)
+    app.state.notification_service.enabled = False
+    _create_pending(app)
+    assert _review_items(app, ADMIN) == 0
+    rows, _ = _run(app.state.notification_store.list_for_user(user_id=ADMIN.id))
+    assert rows == []
 
 
 def test_reject_notification_carries_reason(tmp_path, monkeypatch):
@@ -782,6 +832,41 @@ def test_direct_team_skill_share_notification_links_to_skills_page(tmp_path, mon
 
     # The recipient opens the shared skill on the Skills page, not the legacy redirect.
     assert _run(q()) == ["/skills/"]
+
+
+def test_each_share_grant_gets_its_own_notification(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    app = _app(store, monkeypatch, tmp_path, access=True, notify=True)
+    _mount_shares(app, monkeypatch)
+    skill = (
+        _client(app, AUTHOR)
+        .post(_BASE, json={"body_md": _skill_md(name="grant-recipe", desc="Recipe shared with two colleagues"), "visibility": "creator_only"})
+        .json()
+    )
+    grants_url = f"/api/v1/shares/team_skill/{skill['id']}/grants"
+
+    async def rows():
+        async with aiosqlite.connect(str(tmp_path / "u.db")) as conn:
+            conn.row_factory = aiosqlite.Row
+            found = await conn.execute_fetchall(
+                "SELECT i.dedupe_key AS k, i.priority AS p, i.title AS title, r.user_id AS u"
+                " FROM notification_items i JOIN notification_recipients r ON r.notification_id = i.id"
+                " WHERE i.type = 'content_shared' ORDER BY i.created_at, i.id"
+            )
+            return [dict(row) for row in found]
+
+    assert _client(app, AUTHOR).post(grants_url, json={"principal_type": "user", "principal_id": MEMBER.id}).status_code == 201
+    first = _run(rows())
+    assert _client(app, AUTHOR).post(grants_url, json={"principal_type": "user", "principal_id": ADMIN.id}).status_code == 201
+    both = _run(rows())
+
+    # A second grant is a separate item: the earlier recipient's item keeps its key and title,
+    # and the new recipient does not inherit the first share's time.
+    assert len(both) == 2
+    assert {row["u"] for row in both} == {MEMBER.id, ADMIN.id}
+    assert len({row["k"] for row in both}) == 2
+    assert [row for row in both if row["u"] == MEMBER.id] == first
+    assert {row["p"] for row in both} == {"p2"}
 
 
 # ── P2: three-plus promote branches / copy-to-personal ──────────────────────

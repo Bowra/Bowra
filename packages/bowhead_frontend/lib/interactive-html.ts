@@ -162,8 +162,8 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
         }
         if (attribute.name === "href" && ["a", "area"].includes(element.tagName)
           && attribute.value.trim().startsWith("#")) {
-          // A bare fragment in srcdoc otherwise resolves against the host URL.
-          attribute.value = `about:srcdoc${attribute.value.trim()}`;
+          // Authored scripts may use this exact attribute as a CSS selector.
+          // The trusted bootstrap handles its default navigation instead.
           continue;
         }
         if (["src", "href", "action", "poster", "srcset"].includes(attribute.name)
@@ -193,6 +193,15 @@ export async function buildInteractiveHtmlDocument(raw: string): Promise<Interac
   const keyboard = guarded(`addEventListener("keydown",event=>{
     if(event.key==="Escape")parent.postMessage("bowhead-html-escape","*");
   },true);
+  addEventListener("click",event=>{
+    if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+    const link=event.composedPath().find(node=>node&&node.nodeType===1&&(node.localName==="a"||node.localName==="area"));
+    const fragment=link?.getAttribute("href")?.trim();
+    const target=link?.getAttribute("target")?.toLowerCase();
+    if(!fragment?.startsWith("#")||(target&&target!=="_self")||link.hasAttribute("download"))return;
+    event.preventDefault();
+    location.assign("about:srcdoc"+fragment);
+  });
   const reported=new Set();
   function report(kind){if(!reported.has(kind)){reported.add(kind);parent.postMessage("bowhead-html-"+kind,"*")}}
   addEventListener("error",()=>report("runtime"));

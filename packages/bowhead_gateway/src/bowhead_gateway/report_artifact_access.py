@@ -15,7 +15,7 @@ from bowhead_gateway.files_sharing import shared_artifact_ids
 logger = logging.getLogger(__name__)
 
 
-async def authorized_report_artifact_ids(request: Request, canvas: Any, artifact_ids: list[str]) -> frozenset[str]:
+async def authorized_report_artifact_ids(request: Request, canvas: Any, artifact_ids: list[str], *, viewer_id: str | None = None) -> frozenset[str]:
     """Check author authority and each recipient's access to borrowed originals.
 
     Legacy author-owned files without a recorded Space retain their existing
@@ -100,7 +100,7 @@ async def authorized_report_artifact_ids(request: Request, canvas: Any, artifact
                 break
     from bowhead_gateway.routes.auth import resolve_user_id_sync
 
-    viewer_id = resolve_user_id_sync(request)
+    viewer_id = viewer_id or resolve_user_id_sync(request)
     if viewer_id == canvas.user_id:
         return frozenset(allowed)
 

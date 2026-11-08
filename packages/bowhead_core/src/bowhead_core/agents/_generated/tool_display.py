@@ -1083,6 +1083,18 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
         "sigil": "📊",
         "category": "compute",
     },
+    "routine_notify": {
+        "display_zh": "提醒任务所有者",
+        "display_en": "Notify Task Owner",
+        "blurb_zh": "定时任务运行中，把这次结果标记给任务所有者。",
+        "blurb_en": "In a scheduled task run, flag this run's result for the task owner.",
+        "display_de": "Aufgabenbesitzer benachrichtigen",
+        "blurb_de": "In einem geplanten Lauf das Ergebnis dieses Laufs für den Besitzer der Aufgabe markieren.",
+        "display_fr": "Prévenir le propriétaire de la tâche",
+        "blurb_fr": "Lors d’une exécution planifiée, signaler le résultat de cette exécution au propriétaire de la tâche.",
+        "sigil": "🔔",
+        "category": "orchestrate",
+    },
     "send_email": {
         "display_zh": "发送邮件",
         "display_en": "Send Email",

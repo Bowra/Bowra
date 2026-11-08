@@ -100,6 +100,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
     storage_format: Literal["segmented.v1"] | None = Field(default=None, exclude_if=lambda value: value is None)
     context_projection_enabled: bool = Field(default=False, exclude_if=lambda value: not value)
     context_base_generation: str | None = Field(default=None, pattern=r"^mcg_[a-z0-9]+$", exclude_if=lambda value: value is None)
+    material_receipts: dict[str, dict] | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
+    report_reads: list[dict] | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
 
     @property
     def payload_limit(self) -> int:
@@ -207,6 +209,27 @@ class OrdinaryLeadCheckpoint(BaseModel):
         payload = canonical_json(self.model_dump(exclude=excluded)).encode()
         if len(payload) > self.payload_limit:
             raise OrdinaryContinuationUnavailable()
+        from bowhead_core.report_read_material import ReportReadObservation
+
+        reads = [
+            inv for inv in self.invocations() if inv.tool_name == "read_report" and isinstance(inv.result, dict) and inv.result.get("ok") is True
+        ]
+        records = self.report_reads or []
+        if len(records) != len(reads):
+            raise OrdinaryContinuationUnavailable()
+        for inv, record in zip(reads, records, strict=True):
+            observation = ReportReadObservation.model_validate(record.get("observation"))
+            if (
+                record.get("kind") != "report_read"
+                or record.get("tool") != "read_report"
+                or record.get("call_id") != inv.call_id
+                or record.get("arguments_hash") != content_hash(inv.arguments)
+                or record.get("result_hash") != content_hash(inv.result)
+                or observation.result_hash != content_hash(inv.result)
+                or record.get("skills") != []
+                or record.get("error") is not None
+            ):
+                raise OrdinaryContinuationUnavailable()
         if self.next_iteration >= self.max_iterations:
             raise OrdinaryContinuationUnavailable()
         for encoded in (self.context_json, self.request_json, self.material_json, self.question_arguments_json):
@@ -356,7 +379,19 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 result.append(ToolInvocation(**{**item, "nested": restore(item["nested"], depth=depth + 1) if item["nested"] else []}))
             return result
 
-        return restore(value)
+        invocations = restore(value)
+        if self.material_receipts:
+            from bowhead_core.result_materials import parse_references
+
+            by_call = {inv.call_id: inv for inv in invocations}
+            for call_id, data in self.material_receipts.items():
+                receipt = parse_references(data.get("references"))
+                readers = data.get("readers")
+                if call_id not in by_call or receipt is None or not isinstance(readers, list) or any(not isinstance(name, str) for name in readers):
+                    raise OrdinaryContinuationUnavailable()
+                by_call[call_id].material_refs = receipt
+                by_call[call_id].material_readers = tuple(readers)
+        return invocations
 
     def resume_messages(self, answers: tuple[dict, ...]) -> list[Message]:
         return [
@@ -650,7 +685,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "sandbox",
                         "rejected",
                         *(
-                            {"attachment_read", "read_result"}
+                            {"attachment_read", "read_result", "report_read"}
                             if self.contract
                             in {
                                 "ordinary-lead-loop.v8",
@@ -701,7 +736,8 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         or child.error is not None
                         or not isinstance(attachment, dict)
                         or set(attachment) != {"artifact_id", "content_hash", "metadata_hash"}
-                        or child.arguments != {"artifact_id": attachment["artifact_id"]}
+                        or not isinstance(child.arguments, dict)
+                        or child.arguments.get("artifact_id") != attachment["artifact_id"]
                         or not isinstance(child.result, dict)
                         or child.result.get("ok") is not True
                         or child.result.get("artifact_id") != attachment["artifact_id"]
@@ -715,13 +751,31 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         or any(char not in "0123456789abcdef" for char in attachment["metadata_hash"])
                     ):
                         raise OrdinaryContinuationUnavailable()
+                    from bowhead_core.pptx_reading import validate_attachment_read_result
+
+                    try:
+                        validate_attachment_read_result(child.arguments, child.result)
+                    except ValueError as error:
+                        raise OrdinaryContinuationUnavailable() from error
+                if record["kind"] == "report_read":
+                    from bowhead_core.report_read_material import ReportReadObservation
+
+                    observation = ReportReadObservation.model_validate(record.get("observation"))
+                    if (
+                        child.tool_name != "read_report"
+                        or child.error is not None
+                        or record["skills"]
+                        or observation.result_hash != content_hash(child.result)
+                        or set(record) != {"kind", "skills", "observation", "error", "tool", "arguments_hash", "result_hash", "call_id"}
+                    ):
+                        raise OrdinaryContinuationUnavailable()
                 if record["kind"] == "read_result":
                     from bowhead_core.ordinary_lead_material import retained_read_tool
 
                     if (
                         set(record) != {"kind", "skills", "error", "tool", "arguments_hash", "result_hash", "call_id"}
                         or record["skills"] != []
-                        or not retained_read_tool(child.tool_name)
+                        or not retained_read_tool(child.tool_name, legacy_report=True)
                         or not child.ended_at
                     ):
                         raise OrdinaryContinuationUnavailable()

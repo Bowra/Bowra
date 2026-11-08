@@ -8,6 +8,7 @@
  * ③ Same sid + report target repeatedly triggered while hydrating: ignore.
  */
 import { describe, expect, it } from "vitest";
+import { readDocumentCanvasRoute } from "./document-canvas-navigation";
 
 import {
   cleanUrlNavigationOutcome,
@@ -137,6 +138,46 @@ describe("resolveUrlSessionNav", () => {
 });
 
 describe("syncActiveSessionSearchParams", () => {
+  const documentParams = {
+    canvas_document: "djob_a",
+    canvas_doc_session: "s_a",
+    canvas_doc_user: "usr_a",
+    canvas_doc_team: "org_a",
+    canvas_doc_space: "ws_a",
+    canvas_doc_view: "results",
+  };
+
+  it.each(["s_b", null])("clears the previous draft pointer when leaving for %s", (activeSessionId) => {
+    const current = new URLSearchParams({ session: "s_a", ...documentParams, keep: "1" });
+    const next = syncActiveSessionSearchParams({
+      current,
+      activeSessionId,
+      reportLinkSessionId: null,
+      clearSessionScopedResults: true,
+    });
+
+    expect(next.get("session")).toBe(activeSessionId);
+    expect([...next.keys()].filter((key) => key.startsWith("canvas_doc"))).toEqual([]);
+    expect(next.get("keep")).toBe("1");
+    expect(current.get("canvas_document")).toBe("djob_a");
+  });
+
+  it.each(["editor", "background", "results"])("preserves a same-session %s draft deep link without reset intent", (mode) => {
+    const current = new URLSearchParams({ session: "s_a", ...documentParams, canvas_doc_view: mode });
+    const next = syncActiveSessionSearchParams({
+      current,
+      activeSessionId: "s_a",
+      reportLinkSessionId: null,
+      clearSessionScopedResults: false,
+    });
+
+    expect(next.toString()).toBe(current.toString());
+    expect(readDocumentCanvasRoute(next)).toEqual({
+      target: { jobId: "djob_a", sessionId: "s_a", userId: "usr_a", teamId: "org_a", workspaceId: "ws_a" },
+      mode,
+    });
+  });
+
   it("clears source-session Results state on an accepted session switch", () => {
     const next = syncActiveSessionSearchParams({
       current: new URLSearchParams(

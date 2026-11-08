@@ -29,6 +29,7 @@ from bowhead_core.chat_references import (
     McpToolResourceRef,
     ReferenceNode,
 )
+from bowhead_core.reference_receiver_candidates import ReferenceReceiverSelectionError
 from bowhead_core.skill_read_resolution import SkillReadSourceResolver
 from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.sqlite_readable_schema import readable_view_exists
@@ -443,6 +444,15 @@ async def prepare_reference_http_start(
                 require_readonly_definition(definition, orchestrator.tool_registry)
                 if not await readable_view_exists(db, "chat_reference_plan_step_scope", owner_domain="execution"):
                     raise ValueError("reference_plan_migration_required")
+    except ReferenceReceiverSelectionError as exc:
+        logger.warning(
+            "reference_start.selection_failed entry_mode=%s team_id=%s trace_id=%s chain=%s",
+            entry_mode,
+            team_id,
+            trace_id,
+            _rejection_chain(exc),
+        )
+        raise HTTPException(409, detail={"error": {"code": "reference_receiver_selection_failed", "admission": "not_started"}}) from None
     except Exception as exc:
         # One opaque code for the caller, but never a silent one for the operator: every distinct
         # preparation failure used to look identical here and left no trace server-side.

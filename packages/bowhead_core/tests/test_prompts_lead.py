@@ -228,18 +228,28 @@ def test_lead_prompt_default_has_datarc_omits_no_data_source_notice() -> None:
     assert "<query_classification_decision_tree>" in prompt  # BI guidance still there
 
 
-def test_lead_prompt_no_datarc_injects_no_data_source_notice() -> None:
-    """has_datarc=False (a P4 no-connection team): inject the no-BI notice so Lead won't promise
-    or attempt BI and routes data questions to KB."""
+@pytest.mark.parametrize("knowledge_direct_use", [False, True], ids=["delegate-knowledge", "direct-knowledge"])
+def test_lead_prompt_no_datarc_preserves_available_knowledge_route(knowledge_direct_use: bool) -> None:
+    """Missing Datarc access preserves the admitted knowledge retrieval mode."""
     prompt = build_lead_system_prompt(
         "ws_test",
         facts=[],
         has_datarc=False,
+        knowledge_direct_use=knowledge_direct_use,
+        skill_catalog_block_override="",
     )
-    assert "<no_data_source>" in prompt
-    assert "no usable Datarc connection for this turn" in prompt
-    assert "applies only to Datarc" in prompt
-    assert "kb_search" in prompt  # routes to KB
+    notice = prompt.split("<no_data_source>", 1)[1].split("</no_data_source>", 1)[0]
+    assert "no usable Datarc connection for this turn" in notice
+    assert "applies only to Datarc" in notice
+    assert "preserve any source the user explicitly required" in notice
+    assert "Use knowledge-base Tools only if available and relevant" in notice
+    routing = prompt.split("<query_classification_decision_tree>", 1)[1].split("</query_classification_decision_tree>", 1)[0]
+    if knowledge_direct_use:
+        assert "KB question → kb_search" in routing
+        assert "kb_query_records" in routing
+    else:
+        assert "delegate directly to kb-analyst" in routing
+        assert "Do not search first or ask a second Agent to repeat the same lookup" in routing
 
 
 def test_lead_prompt_dynamic_roster_is_complete_without_truncation() -> None:

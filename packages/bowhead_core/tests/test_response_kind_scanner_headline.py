@@ -29,6 +29,36 @@ from bowhead_core.agents.response_kind_scanner import (
 )
 
 
+@pytest.mark.parametrize("opening,closing", [("healine", "healine"), ("healine", "headline"), ("headline", "healine"), ("HEALINE", "HEALINE")])
+@pytest.mark.parametrize("prefix", ["", "<response_kind>chat</response_kind>", "x" * 130])
+@pytest.mark.parametrize("chunk_size", [1, 3, 11, 250])
+def test_observed_headline_typo_is_captured_without_streaming_leaks(opening: str, closing: str, prefix: str, chunk_size: int) -> None:
+    state = init_per_turn_scanner_state()
+    raw = f"{prefix}<{opening}>Fibonacci visualization</{closing}>After"
+    emitted = ""
+    for offset in range(0, len(raw), chunk_size):
+        text, state = feed(state, raw[offset : offset + chunk_size])
+        emitted += text
+    tail, state = flush(state)
+    emitted += tail
+    assert emitted == ("x" * 130 if prefix.startswith("x") else "") + "After"
+    assert state.headline_text == "Fibonacci visualization"
+    assert strip_response_kind_markers(raw) == emitted
+
+
+@pytest.mark.parametrize("body", ["x" * 201, "first\nsecond"])
+def test_typo_alias_preserves_non_marker_bodies(body: str) -> None:
+    raw = f"<healine>{body}</healine>"
+    assert strip_response_kind_markers(raw) == raw
+    state = init_per_turn_scanner_state()
+    emitted = ""
+    for char in raw:
+        text, state = feed(state, char)
+        emitted += text
+    tail, _state = flush(state)
+    assert emitted + tail == raw
+
+
 def test_headline_clean_full_form() -> None:
     """`<response_kind>chat</response_kind><headline>梳理三年合同</headline>剩余`.
 

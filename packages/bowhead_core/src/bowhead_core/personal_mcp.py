@@ -33,7 +33,7 @@ from cryptography.fernet import Fernet
 from jsonschema import Draft202012Validator
 from mcp.types import PaginatedRequestParams
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_pooled_read_ctx, open_shared_ctx
 from bowhead_core.agents.prompts.peer_block import sanitize_external_tool_description
 from bowhead_core.openapi_tool_source import connect_remote_mcp
 from bowhead_core.scrub import scrub
@@ -346,9 +346,10 @@ class PersonalMcpStore:
             raise PersonalMcpError("personal_mcp_credentials_unavailable") from None
 
     async def rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        async with open_shared_ctx(self.db_path) as db:
+        async with open_pooled_read_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            return [dict(row) for row in await (await db.execute(sql, params)).fetchall()]
+            async with db.execute(sql, params) as cursor:
+                return [dict(row) for row in await cursor.fetchall()]
 
     async def connection(self, owner: str, connection_id: str) -> dict[str, Any]:
         rows = await self.rows("SELECT * FROM personal_mcp_connection WHERE owner_user_id=? AND id=?", (owner, connection_id))

@@ -123,7 +123,7 @@ class RunnerFixture:
             ToolSpec(schema=ToolSchema(name=name, description="Controlled business operation", input_schema={"type": "object"}), handler=handler)
         )
 
-    async def run(self, execution_id, *, permit=None, exact=True, context_changes=None, tool_deny=frozenset()):
+    async def run(self, execution_id, *, permit=None, exact=True, context_changes=None, tool_deny=frozenset(), task="Verify assigned evidence."):
         worker = self.collab.worker
         context = ToolExecutionContext(
             workspace_id=worker.workspace_id,
@@ -145,7 +145,7 @@ class RunnerFixture:
         binding = self.collab.executions[execution_id]
         return await self.runner.run(
             profile_name=binding.runtime_profile_name,
-            task="Verify assigned evidence.",
+            task=task,
             parent_turn_id=worker.turn_id,
             parent_bus=self.bus,
             parent_ctx=context,
@@ -342,7 +342,13 @@ async def test_collaboration_barrier_never_trips_the_cross_tool_failure_cap(coll
     monkeypatch.setenv("BOWHEAD_PEER_TOTAL_FAIL_LIMIT", "2")
     rounds = 0
     refusals = []
-    payload = {"payload": {"delivery_surface": "chat", "exec_summary": "Refund total is 1080 USD; the ledger period is unconfirmed."}}
+    payload = {
+        "payload": {
+            "delivery_surface": "chat",
+            "completion": "partial",
+            "exec_summary": "Refund total is 1080 USD; the ledger period is unconfirmed.",
+        }
+    }
 
     async def provider(request):
         nonlocal rounds
@@ -353,27 +359,13 @@ async def test_collaboration_barrier_never_trips_the_cross_tool_failure_cap(coll
         if rounds == 5:
             collab.clock[0] += 61  # The peer never answers; expiry records the limitation.
         arguments = copy.deepcopy(payload)
-        last_receipt = receipts(request)[-1]
-        if last_receipt.get("error_kind") == "tool_delivery_review_required":
-            arguments["payload"]["delivery_review"] = {
-                "requirements": [{"requirement": "Confirm the ledger period", "status": "unfulfilled", "evidence_call_ids": []}],
-                "issues": [
-                    {
-                        "call_id": item["call_id"],
-                        "resolution": "unfulfilled",
-                        "explanation": "The ledger period remains unconfirmed after the peer deadline.",
-                        "evidence_call_ids": [],
-                    }
-                    for item in last_receipt["review_context"]["failed_calls"]
-                ],
-            }
         return LLMResponse(content="", tool_calls=[ToolCall(id=f"return-{rounds}", name="subagent_return", arguments=arguments)])
 
     harness = RunnerFixture(collab, provider)
     register_subagent_return_tool(harness.registry)
     result = await asyncio.wait_for(harness.run(collab.requester), 10)
     assert result.ok, result.error
-    assert len(refusals) == 3 and rounds == 6
+    assert len(refusals) == 3 and rounds == 5
     assert result.completion == "partial"
 
 
@@ -468,7 +460,7 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
         assert any(message.role == "tool" and message.tool_call_id == "spawn-original" for message in request.messages)
         assert any("coordination_input" in message.content for message in request.messages)
         if base_round > 2:
-            assert base_round == 3 and invalid_first_reply and runtime_limit is None
+            assert base_round == 3 and runtime_limit is None
             reviews = [message for message in request.messages if "review_context (JSON data): " in message.content]
             assert len(reviews) == 1 and reviews[0].role == "user"
             review_contexts.append(json.loads(reviews[0].content.split("review_context (JSON data): ", 1)[1]))
@@ -518,24 +510,27 @@ async def test_lead_answers_child_before_original_spawn_completes(collab, invali
         assert review_contexts == []
         return
     assert result.ok, result.error
-    assert result.completion == ("partial" if invalid_first_reply else "complete")
-    review_rounds = int(invalid_first_reply and runtime_limit is None)
+    assert result.completion == "partial", "Unreviewed original scope stays partial after the bounded correction or original run limit"
+    review_rounds = int(runtime_limit is None)
     assert base_round == 2 + review_rounds and len(review_contexts) == review_rounds
     if review_contexts:
         failed = [
             inv for inv in result.tool_invocations if isinstance(inv.result, dict) and inv.result.get("error") == "collaboration_arguments_invalid"
         ]
-        assert len(failed) == 1
-        assert review_contexts[0]["failed_calls"] == [
-            {"call_id": failed[0].call_id, "tool": "agent_message", "state": "failure", "failure_code": "tool_execution_failed"}
-        ]
-        assert failed[0].call_id == "coordination-rejected"
+        assert len(failed) == int(invalid_first_reply)
+        assert review_contexts[0]["failed_calls"] == (
+            [{"call_id": failed[0].call_id, "tool": "agent_message", "state": "failure", "failure_code": "tool_execution_failed"}]
+            if invalid_first_reply
+            else []
+        )
+        if invalid_first_reply:
+            assert failed[0].call_id == "coordination-rejected"
         spawned = [inv for inv in result.tool_invocations if inv.tool_name == "subagent_spawn"]
         assert len(spawned) == 1
         assert {"coordination-reply-1", "coordination-reply-2", spawned[0].call_id} == {
             item["call_id"] for item in review_contexts[0]["successful_calls"]
         }
-        assert failed[0].call_id not in {item["call_id"] for item in review_contexts[0]["successful_calls"]}
+        assert not {item.call_id for item in failed}.intersection(item["call_id"] for item in review_contexts[0]["successful_calls"])
     assert result.tokens_input == (36 if invalid_first_reply else 33) + 3 * review_rounds
     assert result.tokens_output == (24 if invalid_first_reply else 22) + 2 * review_rounds
     assert result.tokens_input == 3 * len(harness.provider.requests), "Usage includes the original child, coordination correction and bounded review"

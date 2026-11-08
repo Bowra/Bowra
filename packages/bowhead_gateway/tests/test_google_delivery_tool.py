@@ -131,12 +131,14 @@ async def test_advertising_follows_connection_and_presence(ready) -> None:
     from bowhead_core.turn_runner import _resolve_unconfigured_capability_tools
 
     orch = SimpleNamespace(user_store=ready.env.store)
-    assert await _resolve_unconfigured_capability_tools(orch, SimpleNamespace(team_id=ready.env.team.id, config_lite_supported=True)) == frozenset()
+    # Every Turn here is outside a scheduled run, so routine_notify is hidden throughout.
+    not_scheduled = frozenset({"routine_notify"})
+    assert await _resolve_unconfigured_capability_tools(orch, SimpleNamespace(team_id=ready.env.team.id, config_lite_supported=True)) == not_scheduled
     hidden = await _resolve_unconfigured_capability_tools(orch, SimpleNamespace(team_id=ready.env.team.id, config_lite_supported=False))
-    assert hidden == frozenset(delivery.TOOL_NAMES)
+    assert hidden == frozenset(delivery.TOOL_NAMES) | not_scheduled
     await routes.update_status(routes.StatusBody(enabled=False), ready.env.request, ready.env.admin)
-    assert await _resolve_unconfigured_capability_tools(orch, SimpleNamespace(team_id=ready.env.team.id, config_lite_supported=True)) == frozenset(
-        delivery.TOOL_NAMES
+    assert await _resolve_unconfigured_capability_tools(orch, SimpleNamespace(team_id=ready.env.team.id, config_lite_supported=True)) == (
+        frozenset(delivery.TOOL_NAMES) | not_scheduled
     )
 
 

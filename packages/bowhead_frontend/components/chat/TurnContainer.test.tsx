@@ -454,7 +454,8 @@ describe("TurnContainer composition (Phase 1.7-B)", () => {
         (node) => node.textContent === answer,
       );
       const archivedDisclosure = archived?.querySelector(".bh-step-list");
-      expect(archived?.querySelector('[data-testid="step-summary"]')).toBeNull();
+      // The reader opened the trace while live: the archived turn keeps it open, with the row above it to fold it.
+      expect(archived?.querySelector('[data-testid="step-summary"]')?.getAttribute("aria-expanded")).toBe("true");
       expect(archivedDisclosure).toBeTruthy();
       expect(archivedAnswer).toBeTruthy();
       expectBefore(archivedDisclosure!, archivedAnswer!);

@@ -244,7 +244,7 @@ export interface RunningBandProps extends PeerIdentity {
    */
   paused?: boolean;
   /**
-   * turn-store `modelRetry`: a model call failed before replying and the Router is retrying it.
+   * turn-store `modelRetry`: a model call failed and the Router is retrying it.
    * Shown as the current action until the next model output or terminal event clears it.
    * Ranked above `paused`: the retry is the specific reason the model is silent.
    */

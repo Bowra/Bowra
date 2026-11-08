@@ -13,12 +13,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 
 import { renderIntl } from "@/__tests__/intl-render";
-import { CitationsProvider, LeadNarrative } from "./LeadNarrative";
+import { CitationsProvider, LeadNarrative, stripInternalMarkers } from "./LeadNarrative";
 import type { Citation } from "@/lib/types";
 
 afterEach(() => cleanup());
 
 describe("LeadNarrative", () => {
+  it.each([true, false])("hides the observed headline typo in streamed and replayed prose (streaming=%s)", (isStreaming) => {
+    const { container } = renderIntl(<LeadNarrative text={"<healine>Fibonacci visualization</healine>\n\nThe corrected result."} isStreaming={isStreaming} />);
+    expect(container.textContent).toContain("The corrected result.");
+    expect(container.textContent).not.toContain("healine");
+    expect(container.textContent).not.toContain("Fibonacci visualization");
+  });
+
+  it("holds a pending typo marker and preserves unrelated, multiline and overlong text", () => {
+    expect(stripInternalMarkers("Before\n<healine>Pending")).toBe("Before\n");
+    expect(stripInternalMarkers("<healine-guide>text</healine-guide>")).toBe("<healine-guide>text</healine-guide>");
+    for (const body of ["first\nsecond", "x".repeat(201)]) {
+      const text = `<healine>${body}</healine>`;
+      expect(stripInternalMarkers(text)).toBe(text);
+    }
+  });
+
   it("renders text content", () => {
     renderIntl(<LeadNarrative text="好的，我先查 Q3 数据" />);
     expect(screen.getByText("好的，我先查 Q3 数据")).toBeTruthy();

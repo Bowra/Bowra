@@ -103,6 +103,7 @@ from bowhead_core.kb_search_budget import SHARED_KNOWLEDGE_GUIDANCE, KnowledgeRe
 from bowhead_core.llm_failure import (
     ORCHESTRATOR_DEADLINE_PROVIDER,
     LLMDeliveryFailedError,
+    LLMFailureProjection,
     project_llm_failure,
     target_failures,
 )
@@ -161,6 +162,17 @@ from bowhead_router import (
 # multi-step subagent dispatch; thinking-model pauses can exceed 3min in
 # practice. The outer call deadline additionally bounds the drain.
 _KAPPA_STREAM_IDLE_TIMEOUT_SEC = 300.0
+
+# Identity of the streamed model attempt whose deltas are being delivered. Each
+# streaming model call and each Router restart gets a new token, so a stream
+# callback can tell which attempt its state belongs to without call-boundary hooks.
+_STREAM_ATTEMPT: contextvars.ContextVar[object | None] = contextvars.ContextVar("bowhead_stream_attempt", default=None)
+
+
+def current_stream_attempt() -> object | None:
+    """Return the token of the model attempt currently delivering stream deltas."""
+    return _STREAM_ATTEMPT.get()
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -350,6 +362,19 @@ def _public_skill_invoke_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def _public_tool_result(tool_name: str, result: Any) -> tuple[Any, str | None]:
     """Keep model-facing dispatch guidance and host paths out of live and replayed tool events."""
+    if tool_name == "read_report" and isinstance(result, dict):
+        # Saved prose must not become an alternate source-blind trace reader.
+        public = {"ok": result.get("ok") is True, "report_read": True}
+        code = result.get("error")
+        if code in {
+            "invalid_report_selection",
+            "not_found_or_unavailable",
+            "report_read_too_large",
+            "report_content_changed",
+            "report_reader_unavailable",
+        }:
+            public["error"] = code
+        return public, None
     if tool_name in {"read_chart", "edit_chart"} and isinstance(result, dict):
         # Chart contents are checked against the current viewer on every read.
         # Persisting a sample in step events would bypass a later revocation.
@@ -1699,6 +1724,8 @@ class SubagentResult:
     # The typed model failure behind a failed run (`llm_failure.LLM_REASON_CODES`), when the model call
     # itself failed; `error` stays the coarse code. Agent Eval reads it to say which cause it was.
     llm_reason_code: str | None = None
+    # Run-local native facts for the terminal owner; never restored as authority.
+    llm_failure: LLMFailureProjection | None = field(default=None, repr=False, kw_only=True)
 
     @property
     def step_usage(self) -> dict[str, int] | None:
@@ -2768,6 +2795,9 @@ class SubagentRunner:
         extra_instructions: str | None = None,
         stream_callback: Callable[[str], Awaitable[None]] | None = None,  # Sprint κ
         stream_on_tool_call: Callable[[], Awaitable[None]] | None = None,  # Sprint κ r2
+        # Withdraws what stream_callback published for an attempt the Router restarts;
+        # returns the narrative characters it withdrew.
+        stream_restart_callback: Callable[[], Awaitable[int]] | None = None,
         pre_minted_subagent_id: str | None = None,  # Sprint chat-v4 W3.2 — caller-supplied id
         language_override: str | None = None,  # spawn-language: Lead's explicit output language
         # lead-analyst-logic batch 1 review P0-1: **production** deny/guard scope is per run.
@@ -2951,6 +2981,7 @@ class SubagentRunner:
                             extra_instructions=extra_instructions,
                             stream_callback=stream_callback,  # Sprint κ
                             stream_on_tool_call=stream_on_tool_call,  # Sprint κ r2
+                            stream_restart_callback=stream_restart_callback,
                             pre_minted_subagent_id=pre_minted_subagent_id,  # chat-v4 W3.2
                             language_override=language_override,  # spawn-language
                             tool_deny=tool_deny,  # Batch 1 review P0-1: per-run hard gate
@@ -3315,6 +3346,9 @@ class SubagentRunner:
         extra_instructions: str | None = None,
         stream_callback: Callable[[str], Awaitable[None]] | None = None,  # Sprint κ
         stream_on_tool_call: Callable[[], Awaitable[None]] | None = None,  # Sprint κ r2
+        # Withdraws what stream_callback published for an attempt the Router restarts;
+        # returns the narrative characters it withdrew.
+        stream_restart_callback: Callable[[], Awaitable[int]] | None = None,
         pre_minted_subagent_id: str | None = None,  # Sprint chat-v4 W3.2
         resolved_profile: SubagentProfile | None = None,  # cca P3 §2.4 — pre-resolved
         runtime_control: _RuntimeExecution | None = None,
@@ -3421,6 +3455,15 @@ class SubagentRunner:
         # review P0-1: production uses **per-run parameters** (Lead passes them, peer spawn does not);
         # constructor field only matters for custom/exclusive runners, unioned with run parameters.
         _run_tool_deny = self.tool_deny | tool_deny
+        from bowhead_core.result_materials import recovery_enabled
+
+        if profile.name == "lead" and (not recovery_enabled() or getattr(parent_ctx, "report_read_access", None) is None):
+            _run_tool_deny = _run_tool_deny | {"read_report"}
+        if recovery_enabled() and getattr(parent_ctx, "report_read_access", None) is not None and parent_ctx.context_source_observations is None:
+            from bowhead_core.context_dependencies import ContextSourceObservations
+
+            parent_ctx.context_source_observations = ContextSourceObservations()
+
         # ξ B1 guard likewise prefers per-run input; constructor-level value always None on gateway's shared runner,
         # silently dead since byo-no-clone (also found in review P0-1).
         _dispatch_guard = dispatch_guard if dispatch_guard is not None else self.dispatch_guard
@@ -4040,6 +4083,20 @@ class SubagentRunner:
         await validate_source_messages(parent_ctx, messages)
         _bi_continuation = None
         invocations: list[ToolInvocation] = ordinary_checkpoint.invocations() if ordinary_checkpoint is not None else []
+
+        def _lead_scope_review_required() -> bool:
+            # A successful helper receipt covers its assigned task, not the original request.
+            # Reference runtimes retain their dedicated primary-delivery owner.
+            return (
+                delivery_review_enabled()
+                and delivery_review_carrier is not None
+                and getattr(parent_ctx, "_reference_runtime", None) is None
+                and any(
+                    inv.tool_name == "subagent_spawn" and classify_tool_outcome(invocation_result(inv), inv.error).state == "success"
+                    for inv in invocations
+                )
+            )
+
         from bowhead_core.output_recovery import OutputRecovery, output_exhausted
 
         output_recovery = OutputRecovery.restore(messages)
@@ -4566,7 +4623,7 @@ class SubagentRunner:
                 logger.warning("ctx.window_shrink_failed turn=%s profile=%s err=%s", parent_turn_id, profile.name, _ws_e)
                 return 0
 
-        def uncertain_helper_result(reason: OrdinaryHelperCompletionReason) -> SubagentResult:
+        def uncertain_helper_result(reason: OrdinaryHelperCompletionReason, *, model_failure: LLMFailureProjection | None = None) -> SubagentResult:
             _ν_cleanup_ctx()
             return SubagentResult(
                 profile=profile.name,
@@ -4579,6 +4636,8 @@ class SubagentRunner:
                 tokens_cached=tokens_cached,
                 duration_ms=int((time.perf_counter() - t0) * 1000),
                 error="subagent_execution_uncertain",
+                llm_failure=model_failure,
+                llm_reason_code=model_failure.reason_code if model_failure is not None else None,
                 ordinary_completion_reason=reason,
             )
 
@@ -5113,6 +5172,16 @@ class SubagentRunner:
                 getattr(parent_ctx, "preferred_model", None),
             )
 
+            if recovery_enabled() and getattr(parent_ctx, "report_read_access", None) is not None:
+                window_reader = getattr(self.router, "context_window_for", None)
+                read_window = window_reader(profile.llm_agent_type, profile.name, user_pref) if callable(window_reader) else None
+                if isinstance(read_window, int) and read_window > 0:
+                    # Tool schemas are counted inside the shared estimator;
+                    # its second argument accepts only additional text blocks.
+                    parent_ctx.material_read_token_budget = max(
+                        0, _window_budget(read_window, user_pref=user_pref, has_images=False) - _window_guard_extra(system, ())
+                    )
+
             # Request projection is not the canonical schema fingerprint retained for resume.
             _request_schemas = filtered_schemas
             if document_state is not None:
@@ -5123,6 +5192,14 @@ class SubagentRunner:
                 _request_schemas = [schema for schema in _request_schemas if schema.name != "kb_search"]
             if _kb_closing:
                 _request_schemas = [schema for schema in _request_schemas if schema.name in {"subagent_return", "write_report"}]
+
+            parent_ctx.material_recovery_readers = tuple(schema.name for schema in _request_schemas)
+
+            _material_supplement = None
+            if profile.name == "lead" and getattr(parent_ctx, "_model_context_history", None) is not None:
+                from bowhead_core.result_material_history import load_retained_material_supplement
+
+                _material_supplement = await load_retained_material_supplement(parent_ctx, readers=parent_ctx.material_recovery_readers)
 
             _document_inputs = ""
             if parent_ctx.document_caller_execution_id and any(schema.name == "template_document_submit" for schema in _request_schemas):
@@ -5158,6 +5235,7 @@ class SubagentRunner:
                     collaboration_roster.content if collaboration_roster is not None else "",
                     _source_hint[0] if _source_hint is not None else "",
                     _document_inputs,
+                    _material_supplement.message.content if _material_supplement is not None else "",
                 ),
                 user_pref=user_pref,
             )
@@ -5171,6 +5249,8 @@ class SubagentRunner:
                 )
 
             _tail_msgs: list[Message] = []
+            if _material_supplement is not None:
+                _tail_msgs.append(_material_supplement.message)
             if collaboration_roster is not None:
                 _tail_msgs.append(collaboration_roster)
             if _turn_tail:
@@ -5386,6 +5466,24 @@ class SubagentRunner:
                         if not prepared_context.needs_more:
                             break
                     llm_req = prepared_context.request
+                if _material_supplement is not None:
+                    from bowhead_core.result_material_history import authorize_material_supplement
+
+                    if not await authorize_material_supplement(parent_ctx, _material_supplement):
+                        # Removing optional metadata can only reduce the measured
+                        # request. Never retain this appendix in canonical history.
+                        llm_req = replace(
+                            llm_req,
+                            messages=[message for message in llm_req.messages if message != _material_supplement.message],
+                            context_budget=None,
+                            output_budget=None,
+                        )
+                if context_view is None and parent_ctx.context_source_observations is not None:
+                    from bowhead_core.report_read_material import validate_report_read
+
+                    for observation in parent_ctx.context_source_observations.tool_materials.values():
+                        if observation.get("kind") == "report_read":
+                            await validate_report_read(parent_ctx, observation)
                 _llm_call_started_at = utc_now_iso()
                 _llm_call_started = time.perf_counter()
                 _llm_timing: dict[str, float | None] = {
@@ -5443,6 +5541,7 @@ class SubagentRunner:
                                 agent_type=profile.llm_agent_type,
                                 llm_req=llm_req,
                                 stream_callback=stream_callback,
+                                stream_restart_callback=stream_restart_callback,
                                 timeout=llm_timeout,
                                 # Sprint π Phase A §J: forward profile + user_pref so
                                 # invoke fallback resolves the same model. user_pref
@@ -5569,9 +5668,9 @@ class SubagentRunner:
                     tokens_cached=tokens_cached,
                     duration_ms=int((time.perf_counter() - t0) * 1000),
                 )
-            except InvocationOutcomeUnknownError:
+            except InvocationOutcomeUnknownError as exc:
                 if profile.name != "lead" and exact_binding is not None and ordinary_failure_collection_enabled(parent_ctx):
-                    return uncertain_helper_result("model_unknown")
+                    return uncertain_helper_result("model_unknown", model_failure=project_llm_failure(exc))
                 _ν_cleanup_ctx()
                 raise
             except asyncio.CancelledError:
@@ -5823,6 +5922,7 @@ class SubagentRunner:
                     final_answer="",
                     duration_ms=dur,
                     error=error_code,
+                    llm_failure=llm_failure,
                     llm_reason_code="llm_request_rejected"
                     if local_output_failure
                     else llm_failure.reason_code
@@ -6013,7 +6113,7 @@ class SubagentRunner:
                     if (
                         _bounce is None
                         and delivery_review_enabled()
-                        and requires_delivery_review(invocations)
+                        and (requires_delivery_review(invocations) or _lead_scope_review_required())
                         and not _delivery_text_reviewed
                         and can_decide(iteration)
                         and (profile.name != "lead" or delivery_review_carrier is not None or terminal_review_advertised)
@@ -7542,7 +7642,7 @@ class SubagentRunner:
         from bowhead_core.tool_delivery_review import delivery_review_enabled, requires_delivery_review
 
         accepted_delivery_review = await delivery_review_carrier.current(invocations, parent_ctx) if delivery_review_carrier else None
-        _delivery_partial = delivery_review_enabled() and (
+        _business_delivery_partial = delivery_review_enabled() and (
             isinstance(returned_payload, dict)
             and returned_payload.get("completion") == "partial"
             or returned_payload is None
@@ -7555,7 +7655,7 @@ class SubagentRunner:
             for caveat in accepted_delivery_review.get("caveats", []):
                 if caveat and caveat not in final_answer:
                     final_answer += "\n\n" + caveat
-        if _delivery_partial and returned_payload is None and final_answer.strip():
+        if _business_delivery_partial and returned_payload is None and final_answer.strip():
             from bowhead_core.report_chrome_text import chrome_text
 
             delivery_notice = chrome_text(
@@ -7563,6 +7663,14 @@ class SubagentRunner:
             )
             if accepted_delivery_review is None or delivery_notice not in final_answer:
                 final_answer += "\n\n" + delivery_notice
+
+        _delivery_partial = _business_delivery_partial or (
+            _lead_scope_review_required()
+            and returned_payload is None
+            and not collaboration_paused
+            and not _chat_direct_reviewed_complete
+            and accepted_delivery_review is None
+        )
 
         return SubagentResult(
             profile=profile.name,
@@ -7794,6 +7902,14 @@ class SubagentRunner:
         This round can answer/dispose/correct; it cannot spawn or wait again.
         Required owner questions it leaves pending close as a limitation.
         """
+        from bowhead_core.result_material_history import SUPPLEMENT_NAME
+
+        # Optional pointer discovery belongs to the original base request.
+        # Coordination must not reuse its earlier disclosure authorization.
+        accepted_request = replace(
+            accepted_request,
+            messages=[message for message in accepted_request.messages if message.role != "user" or message.name != SUPPLEMENT_NAME],
+        )
         base = ctx.collaboration_execution
         frame = CollaborationExecution(base.runtime, base.execution_id, coordination=True, allow_wait=False)
         if not any(item.get("action") in {"ask", "reply", "update", "expire"} for item in context["items"]):
@@ -8113,6 +8229,7 @@ class SubagentRunner:
         call_diagnostics: dict[str, Any] | None = None,
         progress_idle: bool = False,
         target: tuple[str, str] | None = None,
+        stream_restart_callback: Callable[[], Awaitable[int]] | None = None,
     ) -> LLMResponse:
         """Sprint κ Phase B + Sprint π Phase A §J: stream LLM response.
 
@@ -8124,6 +8241,11 @@ class SubagentRunner:
         This layer keeps the existing whole-call deadline, translates that
         deadline into the same typed stream failure contract, and permits one
         non-streaming compatibility fallback only before visible output.
+
+        A Router retry or fallback after output (``allow_restart``) arrives as a
+        restart chunk: the attempt's accumulators are reset, its published
+        narrative, peer prose and writing steps are withdrawn, and one durable
+        ``llm.stream_restarted`` event records what the views must discard.
         """
 
         async def _attempt_stream() -> LLMResponse:
@@ -8136,15 +8258,90 @@ class SubagentRunner:
             response_diagnostics = None
             # Sprint chat-redesign-2026-05-21 Phase 1.1 (Spike 1) — per-attempt dedup
             # for `lead_thinking_writing` step. Maps step_id → True once emit_started
-            # has run; resets on stream retry (fresh _attempt_stream call).
+            # has run; resets on a Router restart.
             _lead_writing_started: dict[str, bool] = {}
+            # Characters (code points) of this attempt's peer prose already published as partial_answer.
+            partial_answer_chars = 0
             # On a per-call timeout, answer what the model emitted during these 300s: stream_visible=True alone
             # could not distinguish endless thinking, unfinished tool arguments (large code), or prose. Record only lengths and timestamps.
             _t_start = time.perf_counter()
             _deadline_stats: dict[str, Any] = {"chunks": 0, "first_s": None, "last_s": None, "tool_args_chars": 0, "tool_name": ""}
 
+            async def _withdraw_attempt() -> None:
+                """Discard everything the restarted attempt produced and published."""
+                nonlocal full_text, thinking_text, visible_output_seen, finish_reason, usage, response_diagnostics, partial_answer_chars
+                discarded_narrative_chars = 0
+                if stream_restart_callback is not None:
+                    try:
+                        discarded_narrative_chars = int(await stream_restart_callback())
+                    except Exception:
+                        if bus is not None:
+                            raise_if_terminal_bus_failed(bus)
+                        logger.warning("llm.stream_restart_callback_failed turn=%s sub=%s", turn_id, subagent_id, exc_info=True)
+                discarded_partial_answer_chars = partial_answer_chars
+                discarded_step_ids = list(_lead_writing_started)
+                full_text = ""
+                thinking_text = ""
+                visible_output_seen = False
+                accumulated_tool_calls.clear()
+                finish_reason = "stop"
+                usage = TokenUsage()
+                response_diagnostics = None
+                partial_answer_chars = 0
+                _lead_writing_started.clear()
+                _STREAM_ATTEMPT.set(object())
+                if bus is None or turn_id is None:
+                    return
+                writing_ids = getattr(bus, "_lead_writing_call_ids", None)
+                for step_id in discarded_step_ids:
+                    call_id = step_id.removeprefix("writing_")
+                    if isinstance(writing_ids, set):
+                        writing_ids.discard(call_id)
+                    # Close the withdrawn writing step so no trace keeps it running; the
+                    # restart event below tells views to drop it.
+                    try:
+                        await bus.emit(
+                            OrchestratorEvent(
+                                event_type="step_done",
+                                turn_id=turn_id,
+                                payload={
+                                    "card_id": turn_id,
+                                    "step_id": step_id,
+                                    "step_type": "lead_thinking_writing",
+                                    "state": "success",
+                                    "duration_ms": 0,
+                                    "call_id": call_id,
+                                    "ok": True,
+                                },
+                                parent_agent_id=None,
+                            )
+                        )
+                    except Exception:
+                        raise_if_terminal_bus_failed(bus)
+                        logger.warning("lead_writing.restart_close_failed turn=%s step=%s", turn_id, step_id, exc_info=True)
+                peer = profile_name != "lead" and subagent_id is not None
+                try:
+                    await bus.emit(
+                        OrchestratorEvent(
+                            event_type="llm.stream_restarted",
+                            turn_id=turn_id,
+                            payload={
+                                "subagent_id": subagent_id,
+                                "profile": profile_name,
+                                **({"parent_agent_id": subagent_id} if peer else {}),
+                                "discarded_narrative_chars": discarded_narrative_chars,
+                                "discarded_partial_answer_chars": discarded_partial_answer_chars,
+                                "discarded_step_ids": discarded_step_ids,
+                            },
+                            parent_agent_id=subagent_id if peer else None,
+                        )
+                    )
+                except Exception:
+                    raise_if_terminal_bus_failed(bus)
+                    logger.warning("llm.stream_restart_emit_failed turn=%s sub=%s", turn_id, subagent_id, exc_info=True)
+
             async def _drain() -> None:
-                nonlocal full_text, thinking_text, visible_output_seen, finish_reason, usage, response_diagnostics
+                nonlocal full_text, thinking_text, visible_output_seen, finish_reason, usage, response_diagnostics, partial_answer_chars
                 if bus is not None:
                     raise_if_terminal_bus_failed(bus)
                 it = self.router.stream(
@@ -8153,10 +8350,14 @@ class SubagentRunner:
                     profile=profile,
                     user_pref=user_pref,
                     idle_timeout_s=_KAPPA_STREAM_IDLE_TIMEOUT_SEC,
+                    allow_restart=True,
                     **({"progress_idle": True} if progress_idle else {}),
                     **({"target": target} if target is not None else {}),
                 )
                 async for chunk in it:
+                    if chunk.stream_restart:
+                        await _withdraw_attempt()
+                        continue
                     if chunk.diagnostics is not None:
                         response_diagnostics = chunk.diagnostics
                     if bus is not None:
@@ -8222,6 +8423,7 @@ class SubagentRunner:
                                         parent_agent_id=subagent_id,
                                     )
                                 )
+                                partial_answer_chars += len(chunk.delta)
                             except Exception as _phi_e:
                                 logger.warning(
                                     "phi.partial_answer_emit_failed: %s",
@@ -8325,6 +8527,7 @@ class SubagentRunner:
                     if chunk.usage:
                         usage = chunk.usage
 
+            attempt_token = _STREAM_ATTEMPT.set(object())
             try:
                 await asyncio.wait_for(_drain(), timeout=timeout)
                 if bus is not None:
@@ -8359,6 +8562,8 @@ class SubagentRunner:
                 if visible_output_seen:
                     raise StreamingInterruptedError([failure]) from exc
                 raise StreamingTargetsExhaustedError([failure]) from exc
+            finally:
+                _STREAM_ATTEMPT.reset(attempt_token)
             return LLMResponse(
                 content=full_text,
                 tool_calls=accumulated_tool_calls,
@@ -8719,6 +8924,11 @@ class SubagentRunner:
             )
 
         if collaboration_denial is not None:
+            if tc.name == "subagent_return" and collaboration_denial.get("error") == "collaboration_unresolved":
+                from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal
+
+                # A blocked early return did not execute business work.
+                collaboration_denial = TerminalCorrectionRefusal(collaboration_denial)
             inv = ToolInvocation(
                 tool_name=tc.name,
                 arguments=tc.arguments or {},
@@ -8920,6 +9130,11 @@ class SubagentRunner:
 
             _coach_receipt_meta = receipt_metadata([inv])
 
+        from bowhead_core.result_materials import capture_material_references
+
+        await capture_material_references(inv, scope_ctx, turn_id=parent_turn_id, producer_id=None if running_profile == "lead" else subagent_id)
+        inv.material_readers = tuple(getattr(scope_ctx, "material_recovery_readers", ()))
+
         # Classify once from the complete result before either model or UI caps.
         # Both existing event carriers publish the same bounded diagnostic.
         from bowhead_core.published_diagnostics import publish_tool_failure
@@ -9016,6 +9231,9 @@ class SubagentRunner:
             _event_result_meta = {**(_event_result_meta or {}), **_native_presentation.result_metadata()}
         if _coach_receipt_meta is not None and _coach_receipt_meta.receipts:
             _event_result_meta = {**(_event_result_meta or {}), "coach_operations": _coach_receipt_meta.model_dump(mode="json")}
+
+        if inv.material_refs is not None:
+            _event_result_meta = {**(_event_result_meta or {}), "material_refs": inv.material_refs.model_dump(exclude_none=True)}
 
         # A rejected attempt is not success merely because the model can retry.
         # Expected pauses retain the shared live/persist/replay classification.
@@ -9421,10 +9639,14 @@ def _extract_step_code_input(tool_name: str, arguments: Any) -> dict[str, Any] |
     truncated = len(encoded) > _STEP_CODE_INPUT_MAX_BYTES
     if truncated:
         source = encoded[:_STEP_CODE_INPUT_MAX_BYTES].decode("utf-8", errors="ignore")
+    from bowhead_core.final_deliverables import sandbox_input_artifact_ids
+
+    input_ids = sandbox_input_artifact_ids(arguments)
     return {
         "language": "python",
         "code": source,
         "truncated": truncated,
+        **({"input_artifact_ids": input_ids} if input_ids else {}),
     }
 
 
@@ -10184,6 +10406,8 @@ def _prettify_output_preview(
         return _t("已写入报告", "Written to report")
 
     if tool_name == "read_report" and isinstance(result, dict):
+        if result.get("report_read") is True:
+            return _t("已读取报告", "Read report")
         outline = result.get("outline")
         sections = result.get("sections")
         figures = result.get("figures")
@@ -10773,13 +10997,25 @@ def _serialize(inv: ToolInvocation, *, ref_allowlist: Any = None) -> str:
 
     from bowhead_core import model_view as _mv
 
-    if inv.error:
+    if inv.error and inv.material_refs is None:
         return _json.dumps({"error": inv.error}, ensure_ascii=False)
     projected = _mv.project_tool_result(
         getattr(inv, "tool_name", None),
         inv.result,
         figure_anchor_id=_figure_anchor_id(inv, ref_allowlist),
     )
+    from bowhead_core.result_materials import recovery_enabled
+
+    if recovery_enabled() and isinstance(projected, dict):
+        projected = {key: value for key, value in projected.items() if key not in {"material_refs", "material_recovery_guidance"}}
+    if inv.material_refs is not None:
+        from bowhead_core.result_materials import RECOVERY_GUIDANCE, model_reference_view
+
+        projected = dict(projected) if isinstance(projected, dict) else {"result": projected}
+        if inv.error:
+            projected = {"error": inv.error}
+        projected["material_refs"] = model_reference_view(inv.material_refs, readers=inv.material_readers)
+        projected["material_recovery_guidance"] = RECOVERY_GUIDANCE
     try:
         return _json.dumps(projected, ensure_ascii=False, default=str)
     except TypeError:
@@ -12236,6 +12472,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
 
             _coach_operations = receipt_metadata(result.tool_invocations)
 
+        from bowhead_core.result_materials import aggregate_references
+
+        _material_refs = aggregate_references(result.tool_invocations)
+
         # ── chat-v4 CHANGE-W4.2 — lead.subagent_summary emit ─────────────
         # Emitted per peer subagent_return, BEFORE the spawn handler's return
         # to Lead (which surfaces as the next tool_result). Carries spawn_id
@@ -12364,6 +12604,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         ),
                         "child_tool_count": _w42_tool_count,
                         "child_canvas_sections": _w42_canvas_sections,
+                        **({"material_refs": _material_refs.model_dump(exclude_none=True)} if _material_refs is not None else {}),
                         # Sprint chat-redesign-2026-05-21 Phase 1.1 (Audit A + P0-3)
                         "child_tool_summary": _w42_child_tool_summary,
                         "outcome_message": _outcome_message,
@@ -12859,15 +13100,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         )
                         if _confirmed_chart_edit and not (ins_n or recs_n or kpis_n or _native_deck_receipts)
                         else (
-                            "Subagent 已通过 subagent_return 交了结构化报告 payload，"
-                            "composer 会自动渲染 canvas. 你的 final_answer 用 2-3 句话点出"
-                            "**最关键的发现**（每句带一个本轮的具体数字，例如核心指标的"
-                            "数值 / 同比 / 占比 / 极值），用**用户的语言**写。"
-                            "**不要**自己写「见画布 / full report is on the canvas」类"
-                            "指路句——报告落库后系统会按用户语言自动补一句。"
-                            "**不要**逐条复述所有 insight、"
-                            "**不要** inline 表格（会跟 canvas 撞车）。关键数字从上面 "
-                            "payload_summary 和 payload 的 kpis/insights 里取。"
+                            "The helper returned a report payload for composition. Summarize only findings actually visible in this result, "
+                            "in the user's language. Counts and summaries do not contain omitted recommendations or body text. "
+                            "Use a currently available original reader when those details are needed; do not invent numbers or repeat production. "
+                            "Keep the final answer concise; the normal report pointer is added after saving."
                         )
                     ),
                 }
@@ -12892,7 +13128,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "completion": "partial",
                     "stop_reason": result.stop_reason,
                     **({"step_usage": result.step_usage} if result.step_usage is not None else {}),
-                    "done": result.partial_done or "",
+                    "done": result.partial_done or (result.final_answer if not result.stop_reason else "") or "",
                     "remaining": result.partial_remaining or "",
                     "tokens_input": result.tokens_input,
                     "tokens_output": result.tokens_output,
@@ -12961,12 +13197,10 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     ),
                     "directive": (
                         (
-                            f"Subagent 的 LLM 在**正文已落画布之后**失败（error={result.error or 'subagent_failed'}）。"
-                            f"画布上已有它成功写入的 {len(_wrote_sections)} 段（section_ids 见 canvas_written），"
-                            "这**不是**分析失败。**不要重派 / 不要补写正文**——那会得到第二份报告；"
-                            "来源 / 标题等外壳由系统收尾补齐。你的 final_answer 用 2-3 句点出画布正文里的"
-                            "**最关键的发现**（read_report 可读正文；每句带一个具体数字），用**用户的语言**写；"
-                            "**不要**说「未能完成 / insufficient_data」。"
+                            f"The helper stopped after acknowledged report writes (error={result.error or 'subagent_failed'}). "
+                            "Retain the saved sections listed in canvas_written separately from the unfinished work. "
+                            "Do not repeat confirmed writes to recover their content. Use an available original reader if details are needed; "
+                            "otherwise report the saved receipt and the remaining uncertainty. Do not infer that the whole analysis succeeded."
                         )
                         if _failed_after_write
                         else (
@@ -13088,10 +13322,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
             "type": "string",
             "maxLength": 2000,
             "description": (
-                "Only for configuration-agent with user_language: quote the user's explicit request to save a persistent answer-language "
-                "preference verbatim from this turn. Required to make that preference editable; it saves directly without confirmation. "
+                "Only for configuration-agent with user_language or personal_appearance: quote the user's explicit request verbatim "
+                "from this turn. For user_language, the request must save a persistent answer-language preference; the quote makes that "
+                "preference editable. For personal_appearance, the request must ask to change their own appearance now, such as "
+                "'switch to dark mode'. Either change then saves directly without confirmation; an appearance change keeps Undo in Chat. "
                 "A request for this answer/paragraph only must not supply this quote or change saved preferences. "
-                "Omit for explanations and for every other settings form."
+                "Omit for explanations, questions, requests for suggestions and every other settings form."
             ),
         },
     }

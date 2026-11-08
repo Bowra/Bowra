@@ -93,6 +93,11 @@ async def _resolve_unconfigured_capability_tools(orch: Any, request: Any) -> fro
         from bowhead_core.google_delivery_tool import TOOL_NAMES as GOOGLE_DELIVERY_TOOLS
 
         unconfigured = unconfigured | frozenset(GOOGLE_DELIVERY_TOOLS)
+    if getattr(request, "scheduled_run", None) is None:
+        # Only a scheduled task run may alert its owner: the positive run reference, not a channel guess.
+        from bowhead_core.routine_notify_tool import TOOL_NAME as ROUTINE_NOTIFY
+
+        unconfigured = unconfigured | frozenset({ROUTINE_NOTIFY})
     return unconfigured
 
 
@@ -1438,6 +1443,7 @@ def build_tool_exec_ctx(
         datarc_switch_resolution=getattr(request, "datarc_switch_resolution", None),
         datarc_helper_switch_resolution=getattr(request, "datarc_helper_switch_resolution", None),
         config_lite_supported=bool(getattr(request, "config_lite_supported", False)),  # Config copilot batch0.5 (sync both mirrors).
+        scheduled_run=getattr(request, "scheduled_run", None),
         configuration_settings_target=getattr(request, "configuration_settings_target", None),
         coach_canvas_target=getattr(request, "coach_canvas_target", None),
         document_revision_target=getattr(request, "document_revision_target", None),
@@ -1463,6 +1469,7 @@ def build_tool_exec_ctx(
         scheduled_store=getattr(orch, "scheduled_store", None),  # scheduled_job_create tool (flag-gated)
         canvas_store=getattr(orch, "canvas_store", None),
         chart_authoring_projection=getattr(request, "chart_authoring_projection", None),
+        report_read_access=getattr(request, "report_read_access", None),
         session_store=getattr(orch, "session_store", None),
         session_id=getattr(request, "session_id", ""),
         user_text=getattr(request, "text", "") or "",  # template-refresh: verbatim user msg
@@ -2575,6 +2582,7 @@ class TurnRunner:
             datarc_switch_resolution=getattr(request, "datarc_switch_resolution", None),
             datarc_helper_switch_resolution=getattr(request, "datarc_helper_switch_resolution", None),
             config_lite_supported=bool(getattr(request, "config_lite_supported", False)),  # Config copilot batch0.5 (sync both mirrors).
+            scheduled_run=getattr(request, "scheduled_run", None),
             configuration_settings_target=getattr(request, "configuration_settings_target", None),
             coach_canvas_target=getattr(request, "coach_canvas_target", None),
             document_revision_target=getattr(request, "document_revision_target", None),
@@ -2592,6 +2600,7 @@ class TurnRunner:
             artifact_store=getattr(orch, "artifact_store", None),
             canvas_store=getattr(orch, "canvas_store", None),
             chart_authoring_projection=getattr(request, "chart_authoring_projection", None),
+            report_read_access=getattr(request, "report_read_access", None),
             # scheduled_job_create tool (flag-gated). This inline Lead-path ctx — NOT the
             # build_tool_execution_context factory — is what the Lead actually runs with; the
             # factory copy alone leaves ctx.scheduled_store=None at runtime (caught by dogfood,

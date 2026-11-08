@@ -424,7 +424,8 @@ function useMenuInternal({
     enabled: Boolean(parent) && presentation === "popover",
     delay: { open: SUBMENU_HOVER_DELAY_MS },
     mouseOnly: true,
-    handleClose: safePolygon({ blockPointerEvents: true }),
+    // Keep geometry authoritative when pointer events are delayed.
+    handleClose: safePolygon({ blockPointerEvents: true, requireIntent: false }),
   });
   const dismiss = useDismiss(context, {
     ancestorScroll: closeOnScroll,
@@ -632,6 +633,7 @@ export function MenuFloating({
             context={menu.context}
             modal={sheet}
             initialFocus={0}
+            restoreFocus
             returnFocus={menu.returnFocusRef}
             {...(sheet ? { guards: false, outsideElementsInert: true, getInsideElements } : null)}
           >

@@ -366,6 +366,12 @@ async def _deliver_run_result(
     emails = channels.get("email") or []
     if not (emails or channels.get("deliver_on_success")):
         return
+    if await _skipped_without_alert(app, job, channels, run_id=run_id):
+        return
+    notif = getattr(app.state, "notification_service", None)
+    if notif is not None and getattr(notif, "delivery_enabled", False):
+        await _record_run_delivery(app, job, notif, emails, summary=summary, session_id=session_id, run_id=run_id, team_id=team_id)
+        return
     try:
         deep_link = await _deep_link(app, job, session_id, team_id)
         if emails:
@@ -419,6 +425,98 @@ async def _deliver_run_result(
             await notif.emit_routine_delivered(job, run_id=run_id, session_id=session_id, summary=summary)
     except Exception as exc:
         logger.warning("scheduler.routine_delivered_failed job=%s err=%s", job.id, exc)
+
+
+async def _record_run_delivery(
+    app: FastAPI,
+    job: ScheduledJob,
+    notif: Any,
+    emails: list[str],
+    *,
+    summary: str,
+    session_id: str,
+    run_id: str,
+    team_id: str | None,
+) -> None:
+    """FEATURE_NOTIFICATION_DELIVERY: the run's result becomes one in-app item plus recorded emails.
+
+    Each configured address must belong to an active member of the task's Team (the same allowlist,
+    at most 5 people); the delivery worker sends, retries and records each outcome for the run
+    history. Addresses that match no member are dropped and logged without the address.
+    """
+    user_store = getattr(app.state, "user_store", None)
+    members = await user_store.team_member_ids_by_email(team_id) if (user_store is not None and team_id) else {}
+    user_ids = list(dict.fromkeys(members[e] for e in (str(a).strip().lower() for a in emails) if e in members))[:5]
+    dropped = len(emails) - len(user_ids)
+    if dropped:
+        logger.warning("scheduler.delivery_recipients_dropped job=%s dropped=%d (non-member/unverified)", job.id, dropped)
+    try:
+        await notif.emit_routine_delivered(job, run_id=run_id, session_id=session_id, summary=summary, email_user_ids=user_ids)
+    except Exception as exc:
+        logger.warning("scheduler.routine_delivered_failed job=%s err=%s", job.id, exc)
+
+
+async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict[str, Any], *, run_id: str) -> bool:
+    """Delivery mode "only when flagged" (``notify_channels.deliver == "on_alert"``, FEATURE_ROUTINE_NOTIFY).
+
+    The run's result is delivered only when the task's Agent flagged this run with
+    ``routine_notify``. With the switch off the mode is ignored and every run is delivered as
+    before, so turning the switch off never silences a task.
+    """
+    from bowhead_core.routine_notify_tool import routine_notify_enabled
+
+    if channels.get("deliver") != "on_alert" or not routine_notify_enabled():
+        return False
+    notif = getattr(app.state, "notification_service", None)
+    try:
+        flagged = notif is not None and await notif.routine_alert_raised(job, run_id=run_id)
+    except Exception:
+        logger.warning("scheduler.alert_lookup_failed job=%s run=%s", job.id, run_id, exc_info=True)
+        flagged = True  # Unknown: deliver rather than silently drop a result.
+    if not flagged:
+        logger.info("scheduler.delivery_skipped_no_alert job=%s run=%s", job.id, run_id)
+    return not flagged
+
+
+async def send_routine_alert_email(app: FastAPI, run: Any, item: Any) -> None:
+    """Email the task owner about an urgent ``routine_notify`` alert, once (FEATURE_ROUTINE_NOTIFY).
+
+    Fixed product copy naming the task and a link to the run; no model text. The owner's address
+    must pass the same member allowlist as scheduled result email, under the task's own Team;
+    an unresolved Team sends nothing. A missing link still sends, pointing to the notifications.
+    """
+    from bowhead_core.smtp_notifier import send_notification
+
+    user_store = getattr(app.state, "user_store", None)
+    scheduled_store = getattr(app.state, "scheduled_store", None)
+    if user_store is None or scheduled_store is None:
+        return
+    job = await scheduled_store.get(run.job_id)
+    if job is None or job.user_id != run.owner_id:
+        return
+    team_id = await user_store.get_workspace_team_id(job.workspace_id)
+    owner = await user_store.get_user(job.user_id)
+    address = str(getattr(owner, "email", "") or "").strip()
+    allow = await user_store.team_member_emails(team_id) if team_id else set()
+    if not address or address.lower() not in allow:
+        logger.warning("scheduler.alert_email_skipped job=%s run=%s reason=not_member", job.id, run.run_id)
+        return
+    locale = await _delivery_locale(app, job, team_id=team_id, session_id=run.session_id, turn_id=run.run_id)
+    link = await _deep_link(app, job, run.session_id, team_id)
+    lines = [im_interface_message("routine_alert_email_body", locale, name=job.name), ""]
+    lines.append(
+        im_interface_message("routine_alert_email_link", locale, url=link) if link else im_interface_message("routine_alert_email_no_link", locale)
+    )
+    lines += ["", "— Bowhead"]
+    ok, err = await send_notification(
+        address,
+        im_interface_message("routine_alert_email_subject", locale, name=job.name),
+        "\n".join(lines),
+        team_id=team_id,
+        store=user_store,
+    )
+    if not ok:
+        logger.warning("scheduler.alert_email_failed job=%s run=%s reason=%s", job.id, run.run_id, err)
 
 
 def _turn_status_value(turn: Any) -> str:
@@ -902,9 +1000,21 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
         # IANA zone); an unknown zone keeps the deployment clock. Snapshotted with the
         # language context, so a resumed run keeps the same clock.
         language_context = language_context.with_time_zone(getattr(job, "tz", None))
+        from bowhead_core.types import ScheduledRunRef
+
+        turn_id = f"t_sched_{uuid4().hex[:10]}"
         tr = TurnRequest(
-            turn_id=f"t_sched_{uuid4().hex[:10]}",
+            turn_id=turn_id,
             session_id=session_id,
+            # The positive signal that this Turn is a scheduled run (admits routine_notify).
+            scheduled_run=ScheduledRunRef(
+                job_id=job.id,
+                run_id=turn_id,
+                owner_id=job.user_id,
+                workspace_id=job.workspace_id,
+                job_name=job.name,
+                session_id=session_id,
+            ),
             workspace_id=job.workspace_id,
             datarc_binding=datarc_ctx.connection_binding,
             active_datarc_project=_active_project,  # Batch 2/c9: per-user + snapshot = pin value.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -435,6 +436,7 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
         "design_flatten_exports",
     ),
     "notifications": (
+        "notification_deliveries",
         "notification_items",
         "notification_recipients",
     ),
@@ -447,6 +449,18 @@ DOMAIN_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 TABLE_DOMAINS = {table: domain for domain, tables in DOMAIN_TABLES.items() for table in tables}
+
+# Tables a revision after the domain split appends to a domain file: table -> (domain, revision).
+# The split's frozen map (`sqlite_domain_schema.json`) never lists them; a layout upgraded only to an
+# earlier revision does not have them yet.
+APPENDED_TABLES: dict[str, tuple[str, str]] = {
+    "notification_deliveries": ("notifications", "0226_notification_deliveries"),
+}
+
+
+def domain_tables_at(domain: str, reached: Callable[[str], bool]) -> frozenset[str]:
+    """The tables a domain file holds once ``reached(revision)`` says which appending revisions ran."""
+    return frozenset(table for table in DOMAIN_TABLES[domain] if table not in APPENDED_TABLES or reached(APPENDED_TABLES[table][1]))
 
 
 def resolve_domain_database(core_path: str | Path, domain: str) -> Path:

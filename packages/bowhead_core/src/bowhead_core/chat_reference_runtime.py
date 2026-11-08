@@ -991,6 +991,7 @@ class ReferencePrimaryRuntime:
         parent_bus: TurnEventBus,
         stream_callback: Callable[[str], Awaitable[None]] | None = None,
         stream_on_tool_call: Callable[[], Awaitable[None]] | None = None,
+        stream_restart_callback: Callable[[], Awaitable[int]] | None = None,
         delegation_task: str | None = None,
         delegation_call_id: str | None = None,
         extra_instructions: str | None = None,
@@ -1314,6 +1315,7 @@ class ReferencePrimaryRuntime:
             "tool_deny": frozenset(composition.tool_deny),
             "stream_callback": stream_callback,
             "stream_on_tool_call": stream_on_tool_call,
+            "stream_restart_callback": stream_restart_callback,
             "capture_bi_workspace_continuation": not delegated
             and self.allow_bi_workspace_continuation
             and self.skill_sources is not None

@@ -9,7 +9,9 @@ import { ProductShell } from "@/components/shell/ProductShell";
 import { ThemeBootstrap } from "@/components/theme-bootstrap";
 import { ToastContainer } from "@/components/chat/toast-container";
 import { ConfirmDialogHost } from "@/components/confirm-dialog-host";
+import { AttentionLoop } from "@/components/attention-loop";
 import { TurnCompletionNotifier } from "@/components/turn-completion-notifier";
+import { useNotificationReachCapability } from "@/lib/use-notification-reach-capability";
 import type { AppChromePolicy } from "@/lib/app-route-policy";
 import { appPath } from "@/lib/base-path";
 
@@ -50,9 +52,14 @@ export function AuthenticatedAppChrome({
           children
         )}
         <ToastContainer />
-        <TurnCompletionNotifier />
+        <AttentionNotifier />
         <ConfirmDialogHost />
       </SessionsDrawerProvider>
     </PersonalAppearanceProvider>
   );
+}
+
+/** With FEATURE_NOTIFICATION_REACH one loop also announces urgent notifications; otherwise the turn notifier runs alone. */
+function AttentionNotifier() {
+  return useNotificationReachCapability() ? <AttentionLoop /> : <TurnCompletionNotifier />;
 }

@@ -18,6 +18,7 @@ from alembic.config import Config
 from bowhead_core.coach_drafting import CoachDraft, CoachResult
 from bowhead_core.feedback_candidate_store import FeedbackCandidateStore
 from bowhead_core.feedback_casework_store import FeedbackCaseworkStore
+from bowhead_core.notification_types import REGISTRY
 from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_gateway.routes import feedback_candidates as fc
 
@@ -376,7 +377,9 @@ def test_expired_receipts_sent_once_including_lazy_expiry(env):
     _run(env.cands.propose(sig_text="swept", ttl_days=-1, **kw))
     assert _tick(env)["expired_receipts"] == 2
     assert {r["candidate_id"] for r in env.ntf.receipts} >= {lazy.id}
-    assert all(r["final_state"] == "expired" and r["reopen_resolved"] is False for r in env.ntf.receipts)
+    assert all(r["final_state"] == "expired" for r in env.ntf.receipts)
+    # A backfilled receipt never makes a handled one unread again: the registry makes the type not reopenable.
+    assert REGISTRY["feedback_candidate_receipt"].reopen_resolved is False
     assert _tick(env)["expired_receipts"] == 0
 
 

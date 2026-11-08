@@ -126,6 +126,8 @@ export interface ChatCardProps {
   onActivate?: () => void;
   /** Accessible name for the activation button (defaults to the card's text). */
   activateLabel?: string;
+  /** Set when the activation button is a disclosure: rendered as `aria-expanded`. */
+  activateExpanded?: boolean;
   live?: "polite" | "assertive" | "off";
   /** Leading icon colour override for the info intent (step summary that affected the answer). */
   iconTone?: "warning" | "muted";
@@ -243,6 +245,7 @@ export function ChatCard({
   progress,
   onActivate,
   activateLabel,
+  activateExpanded,
   live,
   iconTone,
   className,
@@ -303,6 +306,7 @@ export function ChatCard({
         style={progressStyle}
         onClick={onActivate}
         aria-label={activateLabel}
+        aria-expanded={activateExpanded}
         data-testid={testId}
         data-state={dataState}
         data-intent={intent}
@@ -442,7 +446,13 @@ export function ChatCard({
     >
       {onActivate ? (
         <>
-          <button type="button" className="ui-card__activate" onClick={onActivate} aria-label={activateLabel}>
+          <button
+            type="button"
+            className="ui-card__activate"
+            onClick={onActivate}
+            aria-label={activateLabel}
+            aria-expanded={activateExpanded}
+          >
             {iconNode}
             <span className="ui-card__body">{textBlock}{children}</span>
           </button>

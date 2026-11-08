@@ -39,7 +39,7 @@ class _FakeStreamRouter:
             raise KeyError(agent_type)
         return object()
 
-    async def stream(self, agent_type, req, profile=None, user_pref=None):
+    async def stream(self, agent_type, req, profile=None, user_pref=None, **kwargs):
         from bowhead_router import LLMChunk
 
         yield LLMChunk(delta="改写结果")
@@ -95,7 +95,7 @@ class _PoisonRouter:
 
 
 @pytest.fixture
-async def ctx(tmp_path, monkeypatch):
+async def ctx(tmp_path, monkeypatch, completed_community_user_store):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", SECRET)
     db = tmp_path / "rw.db"
     store = CanvasStore(db)
@@ -107,10 +107,18 @@ async def ctx(tmp_path, monkeypatch):
     app.state.orchestrator = None
     app.state.datarc = None
     app.state.router = _PoisonRouter()
-    app.state.user_store = _FakeUserStore()
+    users = completed_community_user_store
+    owner = await users.get_user_by_email("http-owner@example.test")
+    assert owner is not None
+    space_id = await users.create_local_workspace(team_id=owner.team_id, name="Rewrite contract", creator_user_id=owner.id)
+    monkeypatch.setattr(users, "get_team_llm_config_with_version", _FakeUserStore().get_team_llm_config_with_version)
+    app.state.user_store = users
+    from community_http_fixture import initialize_community_http_installation
 
-    canvas = await store.ensure_canvas(session_id="s_rw", workspace_id="ws_t", user_id="usr_writer")
-    return app, canvas
+    await initialize_community_http_installation(completed_community_user_store, monkeypatch, app=app)
+
+    canvas = await store.ensure_canvas(session_id="s_rw", workspace_id=space_id, user_id=owner.id)
+    return app, canvas, owner
 
 
 def _client(app) -> httpx2.AsyncClient:
@@ -123,41 +131,41 @@ def _payload() -> dict:
 
 @pytest.mark.integration
 async def test_rewrite_without_team_is_409_unconfigured(ctx) -> None:
-    app, canvas = ctx
+    app, canvas, owner = ctx
     async with _client(app) as c:
         r = await c.post(
             f"/api/v1/canvas/{canvas.id}/sections/_/rewrite",
             json=_payload(),
-            headers={"Authorization": f"Bearer {_jwt('usr_writer', None)}"},
+            headers={"Authorization": f"Bearer {_jwt(owner.id, None)}"},
         )
-    assert r.status_code == 409
+    assert r.status_code == 409, r.text
     assert r.json()["detail"]["error"]["code"] == "team_model_unconfigured"
 
 
 @pytest.mark.integration
 async def test_rewrite_team_without_registry_is_409(ctx) -> None:
-    app, canvas = ctx
+    app, canvas, owner = ctx
     async with _client(app) as c:
         r = await c.post(
             f"/api/v1/canvas/{canvas.id}/sections/_/rewrite",
             json=_payload(),
-            headers={"Authorization": f"Bearer {_jwt('usr_writer', 't_1')}"},
+            headers={"Authorization": f"Bearer {_jwt(owner.id, owner.team_id)}"},
         )
-    assert r.status_code == 409
+    assert r.status_code == 409, r.text
     assert r.json()["detail"]["error"]["code"] == "team_model_unconfigured"
 
 
 @pytest.mark.integration
 async def test_rewrite_binding_missing_is_503_before_stream(ctx) -> None:
-    app, canvas = ctx
+    app, canvas, owner = ctx
     app.state.team_router_registry = _Registry(_NoNarrativeRouter())
     async with _client(app) as c:
         r = await c.post(
             f"/api/v1/canvas/{canvas.id}/sections/_/rewrite",
             json=_payload(),
-            headers={"Authorization": f"Bearer {_jwt('usr_writer', 't_1')}"},
+            headers={"Authorization": f"Bearer {_jwt(owner.id, owner.team_id)}"},
         )
-    assert r.status_code == 503
+    assert r.status_code == 503, r.text
     detail = r.json()["detail"]["error"]
     assert detail["code"] == "rewrite_binding_missing"
     # Never expose exception class names.
@@ -166,15 +174,15 @@ async def test_rewrite_binding_missing_is_503_before_stream(ctx) -> None:
 
 @pytest.mark.integration
 async def test_rewrite_streams_via_team_router_and_never_touches_app_router(ctx) -> None:
-    app, canvas = ctx
+    app, canvas, owner = ctx
     app.state.team_router_registry = _Registry(_FakeStreamRouter())
     async with _client(app) as c:
         r = await c.post(
             f"/api/v1/canvas/{canvas.id}/sections/_/rewrite",
             json=_payload(),
-            headers={"Authorization": f"Bearer {_jwt('usr_writer', 't_1')}"},
+            headers={"Authorization": f"Bearer {_jwt(owner.id, owner.team_id)}"},
         )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/event-stream")
     assert "event: chunk" in r.text
     assert "改写结果" in r.text

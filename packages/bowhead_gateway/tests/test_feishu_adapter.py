@@ -1468,6 +1468,32 @@ def test_status_card_strips_response_kind_and_headline_markers_from_narrative() 
     assert "营收持平" not in dumped
 
 
+def test_status_card_withdraws_narrative_of_a_restarted_model_attempt() -> None:
+    """A Lead restart removes exactly its code points; a helper restart leaves Lead prose."""
+    long_prefix = "前" * 2600
+    state = renderer.FeishuTurnCardState(status="running", locale="zh-CN")
+    for kind, payload in [
+        ("narrative.delta", {"delta": long_prefix}),
+        ("narrative.delta", {"delta": "中断的回答 😀"}),
+        (
+            "llm.stream_restarted",
+            {"subagent_id": "sub_1", "parent_agent_id": "sub_1", "discarded_narrative_chars": 0, "discarded_partial_answer_chars": 4},
+        ),
+        ("llm.stream_restarted", {"subagent_id": "lead_root", "profile": "lead", "discarded_narrative_chars": 7, "discarded_step_ids": []}),
+        ("narrative.delta", {"delta": "营收持平。"}),
+    ]:
+        renderer.apply_event_to_state(state, kind, payload)
+
+    # The withdrawn text is cut from the unclipped stream, then the card view is clipped again.
+    assert state.narrative_stream == long_prefix + "营收持平。"
+    assert state.narrative == renderer._clip(long_prefix + "营收持平。", 2500)
+    short = renderer.FeishuTurnCardState(status="running", locale="zh-CN")
+    renderer.apply_event_to_state(short, "narrative.delta", {"delta": "中断的回答 😀"})
+    assert renderer.apply_event_to_state(short, "llm.stream_restarted", {"discarded_narrative_chars": 7})
+    renderer.apply_event_to_state(short, "narrative.delta", {"delta": "营收持平。"})
+    assert short.narrative == "营收持平。"
+
+
 def test_answer_card_converts_markdown_tables_to_feishu_table_component() -> None:
     card = renderer.answer_card(
         "**经营概览**\n\n| 指标 | 数值 |\n|---|---|\n| 营业额 | **51.80亿** |\n| 利润 | 8.94亿 |\n\n后续说明。", locale="zh-CN"

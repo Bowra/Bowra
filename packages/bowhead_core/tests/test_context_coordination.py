@@ -23,7 +23,10 @@ context_case = maintenance_fixture
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.parametrize("mode", ["enabled", "disabled", "disabled_capacity", "disabled_overflow", "overflow", "commit_failure"])
+@pytest.mark.parametrize(
+    "mode",
+    ["enabled", "disabled", "disabled_capacity", "disabled_overflow", "overflow", "commit_failure", "material_supplement", "material_tool_name"],
+)
 async def test_coordination_uses_its_lane_original_decisions_and_native_reply(collab, context_case, monkeypatch, mode):
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     case = context_case
@@ -102,6 +105,20 @@ async def test_coordination_uses_its_lane_original_decisions_and_native_reply(co
     controller = _RuntimeExecution(AgentLoopBudget(contract="agent-runtime-budget.v1", step_limit=5))
     observed_usage = []
     prefix = [Message(role="user", content="Original business task is waiting for its delegated result.")]
+    from bowhead_core.result_material_history import SUPPLEMENT_NAME
+
+    if mode == "material_tool_name":
+        prefix.extend(
+            [
+                Message(role="assistant", content="", tool_calls=[ToolCall("original", SUPPLEMENT_NAME, {})]),
+                Message(role="tool", name=SUPPLEMENT_NAME, tool_call_id="original", content="Original Tool observation."),
+            ]
+        )
+    accepted = (
+        [*prefix, Message(role="user", name=SUPPLEMENT_NAME, content="Earlier authorized pointer metadata.")]
+        if mode == "material_supplement"
+        else prefix
+    )
     history = deepcopy(case.request.messages[:8])
     if mode == "disabled_capacity":
         for message in history:
@@ -109,7 +126,7 @@ async def test_coordination_uses_its_lane_original_decisions_and_native_reply(co
     original_history = deepcopy(history)
     args = {
         "context": await runtime.context(collab.lead),
-        "accepted_request": LLMRequest(model="", messages=prefix, invocation_execution_id=collab.lead),
+        "accepted_request": LLMRequest(model="", messages=accepted, invocation_execution_id=collab.lead),
         "profile": SubagentProfile(name="lead", llm_agent_type="lead", tool_whitelist=(), system_prompt="Complete the original assignment."),
         "ctx": ctx,
         "bus": bus,
@@ -135,11 +152,13 @@ async def test_coordination_uses_its_lane_original_decisions_and_native_reply(co
         assert len(invocations) == len(retained) == 1
         assert invocations[0].result["ok"]
         assert (await collab.read(question))["response_status"] == "answered"
-        assert sent[-1].messages[:1] == prefix
+        assert sent[-1].messages[: len(prefix)] == prefix
         if mode in {"disabled_capacity", "disabled_overflow"}:
             assert len(sent[-1].messages) < len(prefix) + len(history) + 1
         assert any(message.name == "context_summary" for message in sent[-1].messages) == (not mode.startswith("disabled"))
     assert history == original_history
+    assert args["accepted_request"].messages == accepted
+    assert all(message.role != "user" or message.name != SUPPLEMENT_NAME for request in sent for message in request.messages)
     await sink.drain_turn(worker.turn_id)
     events = await log.list_events(worker.turn_id, event_types=("agent.context",))
     assert len(events) == (0 if mode.startswith("disabled") else 1 if mode == "commit_failure" else 2)

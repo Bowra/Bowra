@@ -273,13 +273,7 @@ async def test_approval_picker_projection_does_not_block_existing_dependency_com
 
 
 def test_report_tools_are_offerable_but_legacy_canvas_writes_are_not(monkeypatch) -> None:
-    """两支报告工具都可授权，四个 legacy canvas 写工具仍不可——正反一起断言。
-
-    时间线（都在 2026-09-09）：本测试最初写成「读可授权 / 写仍被挡」，因为当时
-    `write_report` 还在 `REPORT_WRITE_TOOLS` 围栏内；同日用户拍板放开写（tech-design:
-    docs/sprints/custom-agent-report-pen-2026-09-09/），本测试**如设计那样当场红**，
-    这里按新属性重写。仍守的边界是留栏的四个——它们没有 per-section owner 模型。
-    """
+    """Retired Canvas writes stay fenced while opened chart tools remain explicit."""
     from bowhead_core.custom_subagent_store import REPORT_WRITE_TOOLS, filter_destructive
     from bowhead_core.subagent_authoring_catalog import NATIVE_ALLOWLIST, classify_native_risk
 
@@ -291,7 +285,7 @@ def test_report_tools_are_offerable_but_legacy_canvas_writes_are_not(monkeypatch
 
     # Negative control: tools without ownership models (including batch B2-2 remove_chart) still cannot be
     # granted by the current catalog.
-    legacy = ["canvas_add_section", "canvas_compose_final", "canvas_patch_section", "canvas_reorder_sections", "remove_chart"]
+    legacy = ["canvas_add_section", "canvas_compose_final", "canvas_patch_section", "canvas_reorder_sections", "remove_chart", "edit_chart"]
     assert set(legacy) == set(REPORT_WRITE_TOOLS)
     assert filter_destructive(legacy) == ["remove_chart"]
     for name in legacy:
@@ -302,6 +296,7 @@ def test_report_tools_are_offerable_but_legacy_canvas_writes_are_not(monkeypatch
     assert filter_destructive(legacy) == ["remove_chart"]
     offered = {tool.stable_ref: tool for tool in native_authoring_tools()}
     assert offered["remove_chart"].selectable and offered["remove_chart"].risk == "destructive"
+    assert "edit_chart" not in offered
     assert offered["tool_list_workspaces"].selectable and offered["tool_list_workspaces"].risk == "read"
     assert not ({"canvas_add_section", "canvas_patch_section"} & set(offered))
 
@@ -391,3 +386,60 @@ def test_platform_only_skills_stay_out_of_owner_pickers() -> None:
     assert not is_platform_only_skill("python_sandbox") and not is_platform_only_skill("bowra-docx")
     # Platform and Coach-only Tools are not Owner choices either.
     assert not NATIVE_ALLOWLIST & {"agent_working_copy_open", "configuration_propose", "skill_save_generated"}
+
+
+def _team_mcp_entry(name: str, read_only: bool | None, destructive: bool | None) -> TeamToolEntry:
+    return TeamToolEntry(
+        source_id="src_1",
+        advertised_name=f"teammcp.src_1.{name}",
+        dispatch_name=name,
+        description=name,
+        input_schema={"type": "object"},
+        destructive=bool(destructive),
+        kind="mcp",
+        read_only_hint=read_only,
+        destructive_hint=destructive,
+    )
+
+
+async def _team_mcp_catalog(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    source = SimpleNamespace(id="src_1", name="CRM", updated_at="2026-11-08T00:00:00+00:00")
+    entries = [
+        _team_mcp_entry("create_note", False, False),
+        _team_mcp_entry("delete_note", False, True),
+        _team_mcp_entry("unlabeled", None, None),
+    ]
+
+    async def _load(team_id: str, store: object):
+        return entries, {"src_1": source}
+
+    monkeypatch.setattr("bowhead_core.subagent_authoring_catalog.load_team_tool_entries", _load)
+    snapshot = await SubagentAuthoringCatalogService().build(
+        store=object(), team_id="team_a", actor_user_id="user_a", actor_active=True, mcp_entitled=True
+    )
+    return {tool.stable_ref.rsplit(".", 1)[-1]: tool.for_selection() for tool in snapshot.team_tools}
+
+
+@pytest.mark.asyncio
+async def test_requester_confirmation_makes_annotated_team_mcp_writes_selectable(monkeypatch) -> None:
+    monkeypatch.setenv("FEATURE_TEAM_TOOL_CONFIRMATION", "1")
+    tools = await _team_mcp_catalog(monkeypatch)
+    for name, risk in (("create_note", "external_write"), ("delete_note", "destructive")):
+        tool = tools[name]
+        assert tool.risk == risk
+        assert tool.selectable is True and tool.locked_reason is None
+        assert tool.approval_required is False
+        assert tool.confirmation_summary
+    assert tools["unlabeled"].risk == "unknown"
+    assert tools["unlabeled"].selectable is False
+    assert tools["unlabeled"].locked_reason == "risk_metadata_unknown"
+
+
+@pytest.mark.asyncio
+async def test_without_requester_confirmation_team_mcp_writes_stay_locked(monkeypatch) -> None:
+    monkeypatch.delenv("FEATURE_TEAM_TOOL_CONFIRMATION", raising=False)
+    tools = await _team_mcp_catalog(monkeypatch)
+    assert tools["create_note"].risk == "unknown"
+    assert tools["create_note"].locked_reason == "risk_metadata_unknown"
+    assert tools["delete_note"].approval_required is True
+    assert tools["delete_note"].locked_reason == "approval_executor_unavailable"

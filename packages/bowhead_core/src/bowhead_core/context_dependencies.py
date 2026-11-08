@@ -101,6 +101,8 @@ def capture_context_dependencies(ctx) -> list[Message]:
             if checkpoint is not None
             else list(getattr(state, "tool_materials", {}).values())
         )
+        if checkpoint is not None:
+            tools.extend(checkpoint.report_reads or [])
     observed = getattr(ctx, "context_source_observations", None)
     if observed is not None:
         tools.extend(observed.tool_materials.values())
@@ -161,13 +163,14 @@ async def validate_context_dependencies(
                     material = MaterialContextDependencies.model_validate(json.loads(message.content))
                 if any(
                     record.get("kind")
-                    not in {"attachment_read", "skill_read", "skill_list", "sandbox", "uncertain_sandbox", "read_result", "rejected"}
+                    not in {"attachment_read", "skill_read", "skill_list", "sandbox", "uncertain_sandbox", "read_result", "report_read", "rejected"}
                     or not isinstance(record.get("skills"), list)
                     for record in material.tools
                 ):
                     raise ValueError("Invalid context material shape")
                 source_ctx = copy(ctx)
                 source_ctx.turn_id = material.turn_id
+                historical_skills = material.turn_id != ctx.turn_id
                 tools = material.tools
                 pending = {}
                 if validated_materials is not None:
@@ -183,12 +186,14 @@ async def validate_context_dependencies(
                     ):
                         if await cursor.fetchone() is None:
                             raise ValueError("Context material source is unavailable")
-                    await revalidate_tool_materials(source_ctx, tools, contract="ordinary-lead-loop.v13")
+                    await revalidate_tool_materials(source_ctx, tools, contract="ordinary-lead-loop.v13", historical_skills=historical_skills)
                 async with _source_connection(ctx, connection) as db:
                     async with db.execute("SELECT 1 FROM turns WHERE id=? AND session_id=?", (material.turn_id, ctx.session_id)) as cursor:
                         if await cursor.fetchone() is None:
                             raise ValueError("Context material source is unavailable")
-                    await revalidate_material_authority_in_connection(source_ctx, db, {"tools": tools}, contract="ordinary-lead-loop.v13")
+                    await revalidate_material_authority_in_connection(
+                        source_ctx, db, {"tools": tools}, contract="ordinary-lead-loop.v13", historical_skills=historical_skills
+                    )
                 if validated_materials is not None:
                     validated_materials.update(pending)
             except (ValueError, KeyError, TypeError, OSError) as exc:

@@ -3465,9 +3465,12 @@ function attachStream(
       // Durable control facts advance the exact contiguous event sequence but
       // do not project a marker into chat content.
       "turn.llm_invocation", "turn.effect_disclosure_settled",
-      // Router retry after a model call failed before replying. Same silent-drop concern:
+      // Router retry after a failed model call. Same silent-drop concern:
       // without this entry the running band never shows "retrying (n/m)".
       "llm.retry_scheduled",
+      // Withdrawal of the output a restarted model attempt had already streamed.
+      // Without this entry the browser keeps the discarded text while replay drops it.
+      "llm.stream_restarted",
     ] as const).forEach((name) => {
       es.addEventListener(name, (e: MessageEvent) => {
         // error collides with EventSource's native transport error: native errors lack .data; only

@@ -4,7 +4,7 @@ import { preparedFramesFixture } from "../../e2e/_chart-prepared-frames-fixture"
 import { prepareFrameViews, type FrameBinding } from "./prepared-frames";
 import { evidencePlanForViewer } from "./presentation-plan";
 import type { FocusBinding } from "./linked-focus";
-import { canonicalizeChartSelectedContext, selectedContextForView, type ChartFollowupScope } from "./selected-context";
+import { canonicalizeChartSelectedContext, chartSelectedScopeLabel, selectedContextForView, type ChartFollowupScope } from "./selected-context";
 import { canonicalizeComposerAttachmentRef } from "../composer-attachment-refs";
 
 const scope: ChartFollowupScope = { version: 1, sectionId: "sec", sectionRev: 3, viewId: "detail", bindingId: "time.fixture", datasetDigest: "a".repeat(64) };
@@ -47,5 +47,25 @@ describe("existing chart reference selection", () => {
     expect(canonicalizeChartSelectedContext({ ...selected, window: { lower: "2026-01", upper: "2026-02" } })).toBeNull();
     expect(canonicalizeChartSelectedContext({ ...selected, frameKey: true })).toBeNull();
     expect(canonicalizeChartSelectedContext({ ...selected, frameKey: null })).toBeNull();
+  });
+});
+
+describe("readable selected scope", () => {
+  const selected = (patch: Record<string, unknown>) => canonicalizeChartSelectedContext({ ...scope, measureKeys: ["revenue"], ...patch })!;
+  it("reads one observation like the observation-details heading", () => {
+    expect(chartSelectedScopeLabel(selected({ tuples: [["West"]] }), "en-US")).toBe("West");
+    expect(chartSelectedScopeLabel(selected({ tuples: [["West", null, 2026]] }), "en-US")).toBe("West · — · 2026");
+  });
+  it("lists several observations in the active locale without repeating identical ones", () => {
+    const tuples = [["West", "2026-01"], ["West", "2026-02"], ["West", "2026-02"], ["West", "2026-03"]];
+    expect(chartSelectedScopeLabel(selected({ tuples }), "en-US")).toBe("West · 2026-01, West · 2026-02, and West · 2026-03");
+    expect(chartSelectedScopeLabel(selected({ tuples: [["A"], ["B"]] }), "zh-CN")).toBe("A和B");
+    expect(chartSelectedScopeLabel(selected({ tuples: [["A"], ["B"]] }), "de-DE")).toBe("A und B");
+    expect(chartSelectedScopeLabel(selected({ tuples: [["A"], ["B"]] }), "not a locale")).toBe("A, B");
+  });
+  it("reads a window as its endpoints and a prepared frame as its frame value", () => {
+    expect(chartSelectedScopeLabel(selected({ window: { lower: "2026-02", upper: "2026-04" } }))).toBe("2026-02 – 2026-04");
+    expect(chartSelectedScopeLabel(selected({ frameKey: "2026-02" }))).toBe("2026-02");
+    expect(chartSelectedScopeLabel(selected({ frameKey: 2026 }))).toBe("2026");
   });
 });

@@ -37,7 +37,7 @@ describe("offline interactive HTML preparation", () => {
     const inner = new DOMParser().parseFromString(outer.querySelector("iframe")!.getAttribute("srcdoc")!, "text/html");
 
     expect(Array.from(inner.querySelectorAll("a, area"), (link) => link.getAttribute("href"))).toEqual([
-      "about:srcdoc#details", "about:srcdoc#caf%C3%A9", "about:srcdoc#", "about:srcdoc#details",
+      "#details", "  #caf%C3%A9  ", "#", "#details",
     ]);
     expect(inner.querySelector("use")?.getAttribute("href")).toBe("#icon");
     expect(prepared.externalResources).toBe(false);

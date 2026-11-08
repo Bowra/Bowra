@@ -119,6 +119,22 @@ class ResponseKind(StrEnum):
     CANVAS = "canvas"
 
 
+@dataclass(frozen=True)
+class ScheduledRunRef:
+    """The scheduled task run a Turn executes, as the server started it.
+
+    ``run_id`` is the run's Turn id, the identity scheduled notifications already use
+    (``routine.delivered``, ``routine.needs_input``).
+    """
+
+    job_id: str
+    run_id: str
+    owner_id: str
+    workspace_id: str
+    job_name: str
+    session_id: str
+
+
 @dataclass
 class TurnRequest:
     """用户发起一个 turn 的输入."""
@@ -186,6 +202,7 @@ class TurnRequest:
     datarc_helper_switch_resolution: DatarcHelperSwitchResolution | None = field(default=None, repr=False, compare=False)
     # Server-bound current-viewer projection for chart authoring; never model input.
     chart_authoring_projection: Any = field(default=None, repr=False, compare=False)
+    report_read_access: Any | None = field(default=None, repr=False)
     # scheduled-recipe-runs S1: solidified workflow bound to this turn (``workflow_binding.BoundWorkflow``).
     # **Server-prefetched**: runner already checked parsing/fingerprint/admission; Lead executes it directly,
     # without rereading by name (bypasses all checks; Lead structurally lacks skill_read).
@@ -200,6 +217,10 @@ class TurnRequest:
         repr=False,
         compare=False,
     )
+    # Set only by the scheduled runner (``_scheduled_runner.run_scheduled_turn``): which scheduled
+    # task run this Turn is. Its presence is the positive signal that admits ``routine_notify``;
+    # never decoded from a browser, resume context or model input.
+    scheduled_run: ScheduledRunRef | None = field(default=None, repr=False, compare=False)
     # Server-only initial-reference adapter state; never decoded from resume or
     # untrusted model arguments. The runtime rechecks the persisted lease.
     reference_scope: ReferenceScope | None = field(default=None, repr=False, compare=False)
@@ -392,6 +413,9 @@ class ToolInvocation:
     started_at: str = field(default_factory=utc_now_iso)
     ended_at: str = ""
     duration_ms: int = 0
+    # Host-owned native references are independent of model-authored result fields.
+    material_refs = None
+    material_readers = ()
     # For `subagent_spawn`, nested holds the subagent's internal tool list.
     # After compose_answer flattens it, mapper sees the actual bi_ask_question /
     # bi_attribute data (fixes subagent_spawn swallowing 18 tool-data results).

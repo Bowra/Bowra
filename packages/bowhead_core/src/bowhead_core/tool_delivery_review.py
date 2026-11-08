@@ -122,6 +122,10 @@ def review_guidance(invocations: Sequence[Any], *, include_call_context: bool = 
         else "In a terminal payload include delivery_review with requirements "
     )
     guidance = (
+        "Fix requirement scope before filling evidence IDs. A merely optional sub-result refusal belongs only in the covered issue explanation, "
+        "never an extra success or negative-test requirement. failed_calls includes partial issues: expected_outcome=failure requires "
+        "the cited whole call to have known state=failure, never partial or unknown. Preserve genuine unmet requirements. "
+        "Reassess explicit completion after correction: keep partial for remaining required gaps, not for an earlier mixed batch. "
         "Before finishing, check the current user request and confirmed scope against actual delivered results. "
         "Account for every failed call below. Do not repeat confirmed writes. A later success with the same "
         "Tool name is not proof of recovery. Resolve missing required work within the existing budget, or "

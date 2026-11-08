@@ -476,8 +476,7 @@ describe("Chat upload context", () => {
     await act(async () => {});
     expect(uploadFile).not.toHaveBeenCalled();
     expect(view.container.querySelector(".v2-chip")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "tools_title" }));
-    expect((screen.getByRole("button", { name: "upload_file" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "附件" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it.each(["space", "session", "identity"])("aborts and ignores old progress/results after changing %s", async (change) => {
@@ -2103,6 +2102,18 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       expect(textarea.value).toBe("stale local intent");
     });
 
+    it("announces a pending question through the polite status region without taking focus", () => {
+      const view = render(<V2Composer onSend={() => {}} />);
+      const textarea = screen.getByRole("textbox");
+      textarea.focus();
+      expect(screen.getByTestId("composer-action-status").textContent).toBe("");
+      view.rerender(<V2Composer onSend={() => {}} awaitingAnswer />);
+      expect(screen.getByTestId("composer-action-status").textContent).toBe("awaiting_answer_status");
+      expect(document.activeElement).toBe(textarea);
+      view.rerender(<V2Composer onSend={() => {}} />);
+      expect(screen.getByTestId("composer-action-status").textContent).toBe("");
+    });
+
     it("keeps the draft editable but blocks submit while Stop awaits durable ack", async () => {
       let resolveCancel!: () => void;
       const onCancel = vi.fn(() => new Promise<void>((resolve) => {
@@ -2495,7 +2506,7 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       fireEvent.change(input, { target: { value: "Keep my exact question" } });
       view.rerender(<V2Composer onSend={vi.fn()} prefillText="Explain B" prefillAttachments={[{ ...attachment, selectedContext: { ...selectedContext, tuples: [["B"]] } }]} />);
       await waitFor(() => expect(input.value).toBe("Keep my exact question"));
-      expect(screen.getByText("data.csv").closest(".v2-chip")?.getAttribute("title")).toContain('[["B"]]');
+      expect(screen.getByText("data.csv").closest(".v2-chip")?.getAttribute("title")).toMatch(/Selected: B$/);
     });
     it("onSteer: when running+onSteer set, Enter fires onSteer (not onSend)", () => {
       const onSend = vi.fn();
@@ -2507,6 +2518,28 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       fireEvent.change(ta, { target: { value: "nudge" } });
       fireEvent.keyDown(ta, { key: "Enter", shiftKey: false });
       expect(onSteer).toHaveBeenCalledWith("nudge", undefined);
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it("mid-run, a typed instruction takes the primary slot and Stop moves beside it, still visible", () => {
+      const onSend = vi.fn();
+      const onSteer = vi.fn();
+      const onCancel = vi.fn();
+      const { container } = render(<V2Composer onSend={onSend} onSteer={onSteer} onCancel={onCancel} running />);
+      const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(ta.getAttribute("aria-label")).toBe("steer_placeholder");
+      // Empty draft: Stop keeps the primary slot.
+      expect(screen.queryByRole("button", { name: "steer_send_label" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+      fireEvent.change(ta, { target: { value: "only East China" } });
+      const add = screen.getByRole("button", { name: "steer_send_label" });
+      const stop = screen.getByRole("button", { name: "Stop" });
+      const actions = Array.from(container.querySelectorAll(".composer-v2__actions > button"));
+      expect(actions).toEqual([stop, add]);
+      fireEvent.click(add);
+      expect(onSteer).toHaveBeenCalledWith("only East China", undefined);
+      expect(onCancel).not.toHaveBeenCalled();
       expect(onSend).not.toHaveBeenCalled();
     });
 
@@ -2644,35 +2677,75 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
       expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
-    it("compact mode exposes the translated tools button with the wide-plus glyph", () => {
-      render(<V2Composer onSend={() => {}} />);
-      const toolsButton = screen.getByRole("button", { name: "tools_title" });
-      expect(toolsButton.textContent).toBe("＋");
+    it("opens the native upload picker directly in the compact composer", async () => {
+      const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
+      const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      const pick = vi.spyOn(input, "click");
+      const trigger = screen.getByRole("button", { name: "附件" });
+      await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(trigger);
+      expect(pick).toHaveBeenCalledTimes(1);
     });
 
-    it("tools sheet opens as a modal labelled by the trigger and closes on Escape", () => {
-      render(<V2Composer onSend={() => {}} />);
-      const toolsButton = screen.getByRole("button", { name: "tools_title" });
-      toolsButton.focus();
-      fireEvent.click(toolsButton);
-
-      const sheet = screen.getByRole("dialog", { name: "tools_title" });
-      expect(sheet.getAttribute("aria-modal")).toBe("true");
-      expect(sheet.id).toBe(toolsButton.getAttribute("aria-controls"));
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "tools_close" }));
-
+    it("uses the source menu for upload and restores focus on Escape", async () => {
+      authSessionMock = { me: { capabilities: { google_workspace: true } } };
+      const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
+      const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      const pick = vi.spyOn(input, "click");
+      const trigger = screen.getByRole("button", { name: "add_menu_label" });
+      await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+      trigger.focus();
+      fireEvent.click(trigger);
       fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-      expect(screen.queryByRole("dialog", { name: "tools_title" })).toBeNull();
-      expect(toolsButton.getAttribute("aria-expanded")).toBe("false");
-      expect(document.activeElement).toBe(toolsButton);
+      await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+      expect(document.activeElement).toBe(trigger);
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole("menuitem", { name: "upload_file" }));
+      expect(pick).toHaveBeenCalledTimes(1);
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it.each(["recoveryLocked", "hidden", "readOnly"] as const)("closes the source menu when %s", async (state) => {
+      authSessionMock = { me: { capabilities: { google_workspace: true } } };
+      const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
+      const trigger = screen.getByRole("button", { name: "add_menu_label" });
+      await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(trigger);
+      expect(screen.getByRole("menu")).toBeTruthy();
+      view.rerender(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} {...{ [state]: true }} />);
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      expect(googlePickerMocks.pickDriveFiles).not.toHaveBeenCalled();
+    });
+
+    it("keeps upload unavailable until the draft scope resolves in the source menu", () => {
+      authSessionMock = { me: { capabilities: { google_workspace: true } } };
+      const view = render(<V2Composer onSend={() => {}} />);
+      const pick = vi.spyOn(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, "click");
+      fireEvent.click(screen.getByRole("button", { name: "add_menu_label" }));
+      const upload = screen.getByRole("menuitem", { name: /upload_file/ });
+      expect(upload.getAttribute("aria-disabled")).toBe("true");
+      expect(upload.getAttribute("aria-describedby")).toBeTruthy();
+      fireEvent.click(upload);
+      expect(pick).not.toHaveBeenCalled();
+    });
+
+    it("closes the source menu during native composition without starting an upload", async () => {
+      authSessionMock = { me: { capabilities: { google_workspace: true } } };
+      const view = render(<V2Composer onSend={() => {}} draftPersistenceScope={DRAFT_SCOPE} />);
+      const trigger = screen.getByRole("button", { name: "add_menu_label" });
+      await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+      const pick = vi.spyOn(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, "click");
+      fireEvent.click(trigger);
+      fireEvent.compositionStart(screen.getByRole("textbox"));
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      expect((trigger as HTMLButtonElement).disabled).toBe(true);
+      expect(pick).not.toHaveBeenCalled();
     });
 
     it("offers Google Drive selection only with the capability and inserts plain name-link lines", async () => {
       authSessionMock = { me: { capabilities: { google_workspace: false } } };
       const { rerender } = render(<V2Composer onSend={() => {}} />);
-      fireEvent.click(screen.getByRole("button", { name: "tools_title" }));
-      expect(screen.queryByRole("button", { name: /composer_entry/ })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "tools_close" }));
+      expect(screen.getByRole("button", { name: "附件" })).toBeTruthy();
 
       authSessionMock = { me: { capabilities: { google_workspace: true } } };
       rerender(<V2Composer onSend={() => {}} />);
@@ -2682,8 +2755,8 @@ describe("V2Composer prop-preservation matrix (Phase 1.7-D)", () => {
         { id: "a1", name: "季度报告", mimeType: "application/vnd.google-apps.document", url: "https://docs.google.com/document/d/a1/edit" },
         { id: "b2", name: "预算", mimeType: "application/vnd.google-apps.spreadsheet", url: "https://docs.google.com/spreadsheets/d/b2/edit" },
       ]);
-      fireEvent.click(screen.getByRole("button", { name: "tools_title" }));
-      fireEvent.click(screen.getByRole("button", { name: /composer_entry/ }));
+      fireEvent.click(screen.getByRole("button", { name: "add_menu_label" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /composer_entry/ }));
 
       await waitFor(() =>
         expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(

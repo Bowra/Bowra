@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import anyio
+import httpx2
 import pytest
 from bowhead_core.access_control import AccessControlStore
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
@@ -20,6 +23,7 @@ from bowhead_core.results_read_model import (
 )
 from bowhead_core.share_service import add_grant, set_audience
 from bowhead_core.user_store import UserStore
+from bowhead_gateway.artifact_representations import AuthoringExecutor, PresentationPreviewCoordinator
 from bowhead_gateway.error_handler import register_error_handlers
 from bowhead_gateway.results_contracts import ResultsFiltersV1
 from bowhead_gateway.results_cursor import ResultsCursorBinding, ResultsCursorCodec
@@ -1139,3 +1143,75 @@ def test_ownerless_report_reference_requires_recipient_source_membership(tmp_pat
     assert client.get(path).content == b"source members only"
     _run(env.users.remove_member(env.ws_id, env.bob.id))
     assert client.get(path).status_code == 404
+
+
+@pytest.mark.parametrize("revoke", [False, True])
+def test_report_ppt_readers_share_conversion_and_recheck_the_original_grant(tmp_path, monkeypatch, revoke):
+    env = _Env(tmp_path)
+    report = env.seed_report()
+    source = b"exact presentation source"
+    art = _run(
+        env.artifacts.put_bytes(
+            content=source,
+            filename="board.pptx",
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            source="upload",
+            created_by=env.alice.id,
+            workspace_id=env.ws_id,
+        )
+    )
+    _run(env.canvas.append_section(canvas_id=report.id, kind="artifact", payload={"artifact_id": art.id}))
+    grant = env.share_report("ses_1", env.bob)
+    app = env.client(env.bob).app
+    app.state.document_service = SimpleNamespace(
+        executor=lambda: SimpleNamespace(root=env.artifacts.backend.root_dir, url="http://executor", token="test")
+    )
+    path = f"{_BASE}/by-session/ses_1/artifacts/{art.id}/representations/pptx-pdf"
+
+    async def scenario():
+        coordinator = PresentationPreviewCoordinator()
+        app.state.presentation_previews = coordinator
+        started, release, joined = anyio.Event(), anyio.Event(), anyio.Event()
+        inputs = []
+        original_head = env.artifacts.backend.head
+
+        async def head(path):
+            result = await original_head(path)
+            if asyncio.current_task().get_name() == "report-second-preview":
+                joined.set()
+            return result
+
+        async def render(self, content):
+            inputs.append(content)
+            started.set()
+            await release.wait()
+            return b"%PDF-1.7\nshared preview"
+
+        monkeypatch.setattr(env.artifacts.backend, "head", head)
+        monkeypatch.setattr(AuthoringExecutor, "view_presentation", render)
+        async with httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://app", headers={"X-Bowhead-User-Id": env.bob.id}
+        ) as client:
+            requests = [asyncio.create_task(client.get(path))]
+            try:
+                with anyio.fail_after(5):
+                    await started.wait()
+                requests.append(asyncio.create_task(client.get(path), name="report-second-preview"))
+                with anyio.fail_after(5):
+                    await joined.wait()
+                if revoke:
+                    await env.access.revoke_resource_grant(env.team.id, grant.id)
+                release.set()
+                responses = await asyncio.gather(*requests)
+                assert inputs == [source]
+                assert [response.status_code for response in responses] == [404 if revoke else 200] * 2
+                if revoke:
+                    assert all(response.json()["detail"]["error"]["code"] == "artifact_scope_unavailable" for response in responses)
+                else:
+                    assert all(response.content == b"%PDF-1.7\nshared preview" for response in responses)
+            finally:
+                release.set()
+                await coordinator.close()
+                await asyncio.gather(*requests, return_exceptions=True)
+
+    _run(scenario())

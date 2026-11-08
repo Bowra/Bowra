@@ -262,3 +262,54 @@ test("HTML cannot read sign-in cookies or borrow host requests, and status flood
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+for (const prefix of ["", "/bowhead", "/nested/bowhead"]) {
+  test(`fragment scripts and native jumps preserve the original attributes under ${prefix || "root"}`, async ({ page }) => {
+    const raw = `<!doctype html><html><body>
+      <nav style="position:fixed;top:0;background:white"><a id="jump" href="#destination">Jump</a>
+        <a id="encoded" href="#caf%C3%A9">Encoded</a><a id="top" href="#">Top</a>
+        <a id="cancel" href="#cancelled">Cancel jump</a><a id="custom" href="#destination">Custom jump</a></nav>
+      <section id="destination" style="margin-top:1200px">Destination</section>
+      <section id="café" style="margin-top:1200px">Encoded destination</section>
+      <section id="cancelled" style="margin-top:1200px">Cancelled destination</section>
+      <script>
+        const links = Array.from(document.querySelectorAll('a[href]:not([href="#"]):not(#encoded)'));
+        const sections = links.map(link => document.querySelector(link.getAttribute('href')));
+        document.getElementById('cancel').onclick = event => { event.preventDefault(); document.body.dataset.cancelled='yes'; };
+        document.getElementById('custom').onclick = event => { event.preventDefault(); document.querySelector(event.currentTarget.getAttribute('href')).scrollIntoView(); document.body.dataset.custom='yes'; };
+        document.body.dataset.initialized=String(sections.length);
+      </script></body></html>`;
+    const prepared = await buildInteractiveHtmlDocument(raw);
+    await page.route("**/__fragment_preview", route => route.fulfill({ contentType: "text/html; charset=utf-8", body:
+      `<!doctype html><meta charset="utf-8"><iframe title="outer" style="width:95vw;height:90vh" sandbox="${INTERACTIVE_HTML_SANDBOX}" allow="${INTERACTIVE_HTML_PERMISSIONS}" srcdoc="${escape(prepared.document)}"></iframe>` }));
+    await page.goto(`${prefix}/__fragment_preview`);
+    const frame = page.frameLocator('iframe[title="outer"]').frameLocator('iframe[title="HTML content"]');
+    await expect(frame.locator("body")).toHaveAttribute("data-initialized", "3");
+    await expect(frame.locator("#jump")).toHaveAttribute("href", "#destination");
+    const hostUrl = page.url();
+    await frame.locator("#jump").click();
+    await expect(frame.locator("#destination")).toBeInViewport();
+    expect(await frame.locator("body").evaluate(body => body.ownerDocument.URL)).toBe("about:srcdoc#destination");
+    await frame.locator("#top").click();
+    await expect.poll(() => frame.locator("body").evaluate(body => body.ownerDocument.defaultView!.scrollY)).toBe(0);
+    await frame.locator("#jump").click();
+    await expect(frame.locator("#destination")).toBeInViewport();
+    await frame.locator("#destination").evaluate(element => element.ownerDocument.defaultView!.scrollTo(0, 0));
+    await frame.locator("#jump").click();
+    await expect(frame.locator("#destination")).toBeInViewport();
+    await frame.locator("#top").click();
+    await frame.locator("#jump").press("Enter");
+    await expect(frame.locator("#destination")).toBeInViewport();
+    await frame.locator("#encoded").click();
+    await expect(frame.locator('[id="café"]')).toBeInViewport();
+    const urlBeforeCancel = await frame.locator("body").evaluate(body => body.ownerDocument.URL);
+    await frame.locator("#cancel").click();
+    await expect(frame.locator("body")).toHaveAttribute("data-cancelled", "yes");
+    expect(await frame.locator("body").evaluate(body => body.ownerDocument.URL)).toBe(urlBeforeCancel);
+    await frame.locator("#custom").click();
+    await expect(frame.locator("body")).toHaveAttribute("data-custom", "yes");
+    await expect(frame.locator("#destination")).toBeInViewport();
+    expect(page.url()).toBe(hostUrl);
+    expect(raw).toContain('id="jump" href="#destination"');
+  });
+}

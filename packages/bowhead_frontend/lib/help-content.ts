@@ -13,7 +13,15 @@ export type HelpArticleGroup =
   | "reference";
 
 /** `/me` capabilities that can gate a Help article. */
-export type HelpArticleCapability = "access_requests" | "google_workspace_feature" | "shopify_plugin" | "account_deletion" | "agent_eval_alignment";
+export type HelpArticleCapability =
+  | "access_requests"
+  | "google_workspace_feature"
+  | "shopify_plugin"
+  | "account_deletion"
+  | "agent_eval_alignment"
+  | "notification_reach"
+  | "routine_notify"
+  | "notification_delivery";
 
 export interface HelpArticle {
   id: string;
@@ -175,6 +183,39 @@ export const HELP_ARTICLE_DEFINITIONS: readonly HelpArticleDefinition[] = [
      "fr-FR": "Modifier, télécharger et supprimer depuis le menu de ligne ; listes sur téléphone", },
     group: "interface",
     source: "row-actions.zh-CN.md",
+  },
+  {
+    id: "notification-center",
+    title: { "zh-CN": "通知", "en-US": "Notifications" },
+    description: {
+      "zh-CN": "待处理与更新、按钮和团队标签、弹出提醒与浏览器通知",
+      "en-US": "Action and updates, buttons and team labels, pop-ups and browser notifications",
+    },
+    group: "interface",
+    source: "notification-center.zh-CN.md",
+    requiresCapability: "notification_reach",
+  },
+  {
+    id: "scheduled-task-alerts",
+    title: { "zh-CN": "定时任务提醒与推送", "en-US": "Task alerts and delivery" },
+    description: {
+      "zh-CN": "任务如何提醒你，以及只在标记时推送结果",
+      "en-US": "How a task alerts you, and delivering results only when flagged",
+    },
+    group: "interface",
+    source: "scheduled-task-alerts.zh-CN.md",
+    requiresCapability: "routine_notify",
+  },
+  {
+    id: "notification-emails",
+    title: { "zh-CN": "提醒邮件", "en-US": "Reminder emails" },
+    description: {
+      "zh-CN": "何时收到提醒、如何关闭，以及查看任务邮件是否发出",
+      "en-US": "When you get a reminder, how to turn it off, and whether a task's email went out",
+    },
+    group: "interface",
+    source: "notification-emails.zh-CN.md",
+    requiresCapability: "notification_delivery",
   },
   {
     id: "conversation-workbench",

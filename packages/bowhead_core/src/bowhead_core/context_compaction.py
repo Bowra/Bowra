@@ -137,6 +137,16 @@ def summary_request(request: LLMRequest, span: CompactionSpan, *, output_tokens:
         raise CompactionPreparationError("context_summary_output_invalid")
     if len(request.messages) not in balanced_boundaries(request.messages):
         raise CompactionPreparationError("context_summary_pending_tool_call")
+    from bowhead_core.result_material_history import SUPPLEMENT_NAME
+
+    # Runtime discovery is not summary evidence. Keep message positions stable
+    # without reusing a base request's pointer disclosure in another model call.
+    messages = [
+        replace(message, name=None, content="Temporary material discovery metadata omitted for summarization.")
+        if message.role == "user" and message.name == SUPPLEMENT_NAME
+        else message
+        for message in request.messages
+    ]
     directive = (
         SUMMARY_INSTRUCTION
         + f"\nCovered range: zero-based messages [{span.start}, {span.end}), out of {span.source_count}.\n"
@@ -144,7 +154,7 @@ def summary_request(request: LLMRequest, span: CompactionSpan, *, output_tokens:
     )
     return replace(
         request,
-        messages=[*request.messages, Message(role="user", content=directive)],
+        messages=[*messages, Message(role="user", content=directive)],
         metadata={**request.metadata, "context_operation": SUMMARY_PROMPT_VERSION},
         max_output_tokens=output_tokens,
         tool_choice="none",

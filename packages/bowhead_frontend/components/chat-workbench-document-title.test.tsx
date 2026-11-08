@@ -1,6 +1,6 @@
 /** The browser tab follows the open session's display title, so a rename shows at once (116 dogfood 1.5.25). */
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const canvasState = {
@@ -121,5 +121,18 @@ describe("ChatWorkbench tab title", () => {
   it("falls back to the canvas title when the page gives no session title", () => {
     renderIntl(workbench(null));
     expect(getPageTitleSnapshot()).toBe("Canvas title");
+  });
+
+  it("leads with 'needs your answer' while a question card waits, then returns to the session title", () => {
+    const pending = { ...runner, clarificationPending: { clarificationId: "c-1", candidates: [], questions: [] } };
+    const view = (state: typeof runner) => (
+      <NextIntlClientProvider locale="zh-CN" messages={zhMessages}>
+        <ChatWorkbench runner={state as never} onSend={vi.fn()} onCancel={vi.fn()} readOnly={false} documentTitle="Q3 营收" />
+      </NextIntlClientProvider>
+    );
+    const { rerender } = render(view(pending));
+    expect(getPageTitleSnapshot()).toBe("需要你回答 · Q3 营收");
+    rerender(view(runner));
+    expect(getPageTitleSnapshot()).toBe("Q3 营收");
   });
 });

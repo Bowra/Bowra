@@ -38,8 +38,9 @@ class ProviderConfig:
     type: str
     base_url: str | None = None
     api_key_ref: str | None = None
-    api_key: str | None = None
-    default_headers: dict[str, str] = field(default_factory=dict)
+    # Secrets stay out of repr: exception logs and error messages may render this object.
+    api_key: str | None = field(default=None, repr=False)
+    default_headers: dict[str, str] = field(default_factory=dict, repr=False)
     timeout_sec: int = 60
     supports: dict[str, bool] = field(default_factory=dict)
     models: list[Any] = field(default_factory=list)

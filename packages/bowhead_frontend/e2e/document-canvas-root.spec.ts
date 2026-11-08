@@ -14,7 +14,7 @@ const png = Buffer.from(
 );
 const t = messages.documents;
 
-/** A finished turn collapses its run into one summary row; failed step reasons sit behind “Expand trace”. */
+/** A finished turn collapses its run into one summary row; failed step reasons sit behind “View trace”. */
 async function expandTrace(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
 }
@@ -397,6 +397,55 @@ async function openDocument(page: Page, name: string) {
   await expect(
     page.getByRole("img", { name: t.page.replace("{page}", "1").replace("{total}", "1"), exact: true }),
   ).toBeVisible();
+}
+
+for (const action of ["session switch", "New work"] as const) {
+  test(`${action} clears the private document route and its original link still opens`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const data = await mockDocuments(page);
+    await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, (route) => route.fulfill({ json: {
+      groups: [{ id: "today", label: "Today", items: [
+        { id: "s_browser", title: "Document work", state: "done" },
+        { id: "s_other", title: "Other document work", state: "done" },
+      ] }], next_cursor: null,
+    } }));
+    await page.route("**/api/v1/sessions/s_other", (route) => route.fulfill({ json: {
+      session: { id: "s_other", workspace_id: "ws_smoke", title: "Other document work", status: "completed" },
+      turns: [],
+      chat_execution: { write_protocol: "legacy_v0", config_generation: "test", readiness_generation: "test" },
+    } }));
+    const foreignDraftReads: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v1/sessions/s_other/documents/djob_a") {
+        foreignDraftReads.push(request.url());
+      }
+    });
+    const originalLink = "/?session=s_browser&canvas_document=djob_a&canvas_doc_session=s_browser"
+      + "&canvas_doc_user=u_smoke&canvas_doc_team=team_smoke&canvas_doc_space=ws_smoke&canvas_doc_view=editor";
+    await page.goto(originalLink);
+    await expect(documentTab(page, "Quarterly A")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("img", { name: t.page.replace("{page}", "1").replace("{total}", "1"), exact: true })).toBeVisible();
+    if (action === "session switch") {
+      const recent = page.getByRole("button", { name: messages.sidebar.recent_work, exact: true });
+      if (!(await recent.isVisible())) {
+        await page.getByRole("button", { name: messages.sidebar.collapse_sidebar, exact: true }).click();
+      }
+      await recent.click();
+      await page.getByRole("button", { name: /^Other document work/ }).click();
+      await expect(page).toHaveURL(/\?session=s_other$/);
+    } else {
+      await page.getByRole("button", { name: messages.sidebar.new_work, exact: true }).click();
+      await expect(page).toHaveURL("/");
+    }
+    await expect(documentTab(page, "Quarterly A")).toHaveCount(0);
+    expect(foreignDraftReads).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath("document-route-cleared.png") });
+    await page.goto(originalLink);
+    await expect(documentTab(page, "Quarterly A")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("img", { name: t.page.replace("{page}", "1").replace("{total}", "1"), exact: true })).toBeVisible();
+    expect(data.posts).toEqual([]);
+    expect(data.commands).toEqual([]);
+  });
 }
 
 for (const width of [412, 1440]) {

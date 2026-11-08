@@ -15,11 +15,23 @@ from uuid import uuid4
 
 import anyio
 import httpx2
+from pydantic import ValidationError
 
 from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_CONTRACT, WORD_PROFILE, source_name
-from bowhead_core.documents.authoring_protocol import CONTRACT, MAX_VIEW_PDF, PROFILE, control, digest, identity, read_file
+from bowhead_core.documents.authoring_protocol import (
+    COMPUTE_CONTRACT,
+    CONTRACT,
+    MAX_COMPUTE_OUTPUT,
+    MAX_VIEW_PDF,
+    PROFILE,
+    control,
+    digest,
+    identity,
+    read_file,
+)
 from bowhead_core.documents.executor import DocumentExecutor, WorkerInput, WorkerResult
 from bowhead_core.documents.package_io import OfficePackageError
+from bowhead_core.read_receipts import ReadInfo
 
 
 @dataclass(frozen=True)
@@ -52,7 +64,13 @@ def _raise_fixed_error(record, *, control_sha256, source_sha256, profile=PROFILE
             or re.fullmatch(r"[a-z][a-z0-9_]{1,100}", code) is None
         ):
             raise OfficePackageError("document_authoring_output_invalid")
-        raise OfficePackageError(code)
+        metadata = None
+        if "read_info" in record:
+            try:
+                metadata = ReadInfo.model_validate(record["read_info"]).model_dump(mode="json")
+            except ValidationError as error:
+                raise OfficePackageError("document_authoring_output_invalid") from error
+        raise OfficePackageError(code, read_info=metadata)
 
 
 def read_preview(directory: Path, *, image_id: str, control_sha256: str, candidate: ScriptCandidate, profile: str = PROFILE) -> WorkerResult:
@@ -119,6 +137,57 @@ class AuthoringExecutor(DocumentExecutor):
             raise OfficePackageError("document_authoring_profile_invalid")
         self.profile = profile
 
+    async def compute(self, *, run_id: str, source: bytes, code: str, expected_image_id: str, data: tuple[WorkerInput, ...] = ()) -> dict:
+        """Return executor-owned observations without collecting script-written files."""
+        script = code.encode("utf-8")
+        encoded = control("compute", (source, script, *(item.content for item in data)), parent_sha256=digest(source), profile=self.profile)
+        _, execution = await self._dispatch(
+            run_id,
+            (WorkerInput(source_name(self.profile), "source", source), WorkerInput("script.py", "code", script), *data),
+            encoded,
+            expected_image_id=expected_image_id,
+            profile=self.profile,
+            return_failed=True,
+        )
+        if execution.get("compute_contract") != COMPUTE_CONTRACT:
+            raise OfficePackageError("document_authoring_output_invalid")
+        exit_code = execution.get("exit_code")
+        error = execution.get("error_code")
+        if error == "document_worker_outcome_unavailable":
+            raise OfficePackageError(error)
+        if (
+            (type(exit_code) is not int and not (exit_code is None and error == "document_worker_timeout"))
+            or (execution["status"] == "completed") != (exit_code == 0)
+            or error not in {None, "document_worker_timeout", "document_worker_memory_limit"}
+        ):
+            raise OfficePackageError("document_authoring_output_invalid")
+        output = execution.get("compute_output")
+        capture_error = execution.get("compute_output_error")
+        if output is None:
+            if capture_error != "document_compute_output_unavailable":
+                raise OfficePackageError("document_authoring_output_invalid")
+        elif (
+            not isinstance(output, dict)
+            or set(output) != {"text", "truncated", "limit_bytes"}
+            or not isinstance(output["text"], str)
+            or len(output["text"].encode("utf-8")) > MAX_COMPUTE_OUTPUT
+            or type(output["truncated"]) is not bool
+            or type(output["limit_bytes"]) is not int
+            or output["limit_bytes"] != MAX_COMPUTE_OUTPUT
+            or capture_error is not None
+        ):
+            raise OfficePackageError("document_authoring_output_invalid")
+        return {
+            "outcome": "completed" if execution["status"] == "completed" else "known_failed",
+            "run_id": run_id,
+            "control_sha256": digest(encoded),
+            "code_sha256": digest(script),
+            "exit_code": exit_code,
+            "output": output,
+            "error": error or capture_error or ("python_execution_failed" if exit_code else None),
+            "input_aliases": ["source", *(f"data-{index}" for index in range(len(data)))],
+        }
+
     async def read_material(self, *, run_id: str, item: WorkerInput, expected_image_id: str) -> dict:
         query = json.dumps({"filename": item.name}, sort_keys=True).encode()
         encoded = control("material", (item.content, query), parent_sha256=digest(item.content), profile=self.profile)
@@ -136,7 +205,13 @@ class AuthoringExecutor(DocumentExecutor):
             or not isinstance(record.get("content_json"), str)
         ):
             raise OfficePackageError("document_authoring_output_invalid")
-        return {"source_sha256": digest(item.content), "filename": item.name, "content_json": record["content_json"]}
+        result = {"source_sha256": digest(item.content), "filename": item.name, "content_json": record["content_json"]}
+        if "read_info" in record:
+            try:
+                result["read_info"] = ReadInfo.model_validate(record["read_info"]).model_dump(mode="json")
+            except ValidationError as error:
+                raise OfficePackageError("document_authoring_output_invalid") from error
+        return result
 
     async def inspect_source(
         self,

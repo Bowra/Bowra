@@ -133,7 +133,7 @@ async def test_material_dependencies_repeat_original_readers_after_restoring_sum
     calls = []
     record = {"kind": "sandbox", "skills": [], "artifacts": [], "tool": "python_exec"}
 
-    async def read(ctx, tools, *, contract):
+    async def read(ctx, tools, *, contract, historical_skills=False):
         calls.append((ctx.turn_id, tools, contract))
         if not readable:
             raise OrdinaryContinuationUnavailable()
@@ -324,7 +324,7 @@ async def test_compaction_material_bytes_do_not_hold_the_shared_writer_lock(coll
 
     checks = []
 
-    async def read(ctx, tools, *, contract):
+    async def read(ctx, tools, *, contract, historical_skills=False):
         # A byte read may be slow. Another writer must remain able to proceed.
         async with open_shared_ctx(collab.path) as concurrent:
             await concurrent.execute("PRAGMA busy_timeout=25")
@@ -378,7 +378,7 @@ async def test_ancestry_revalidates_each_material_once_per_adoption_and_never_re
     allowed = True
     checked = []
 
-    async def metadata(ctx, db, material, *, contract):
+    async def metadata(ctx, db, material, *, contract, historical_skills=False):
         if not allowed:
             raise OrdinaryContinuationUnavailable()
         checked.extend(record["revision"] for record in material["tools"])
@@ -456,7 +456,7 @@ async def test_adoption_observes_source_revocation_in_its_own_transaction(collab
         await db.execute("INSERT INTO context_source_access VALUES (1)")
         await db.commit()
 
-    async def metadata(ctx, db, material, *, contract):
+    async def metadata(ctx, db, material, *, contract, historical_skills=False):
         async with db.execute("SELECT allowed FROM context_source_access") as cursor:
             if not (await cursor.fetchone())[0]:
                 raise OrdinaryContinuationUnavailable()
@@ -465,6 +465,7 @@ async def test_adoption_observes_source_revocation_in_its_own_transaction(collab
     monkeypatch.setattr(ordinary_lead_material, "revalidate_material_authority_in_connection", metadata)
     ctx = SimpleNamespace(
         session_id=collab.worker.session_id,
+        turn_id=collab.worker.turn_id,
         session_store=SimpleNamespace(db_path=collab.path),
         knowledge_scope=None,
         knowledge_source_uses={},

@@ -21,6 +21,10 @@ const PDF_PAGES_PER_BATCH = 10;
 const MAX_PDF_PREVIEW_BYTES = 25 * 1024 * 1024;
 const MAX_DOCX_PREVIEW_BYTES = 15 * 1024 * 1024;
 
+class PresentationPreviewBusyError extends ResultsWorkspaceError {
+  constructor() { super("unavailable"); }
+}
+
 async function fetchDocumentBytes(href: string, maxBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
   let response: Response;
   try {
@@ -30,6 +34,14 @@ async function fetchDocumentBytes(href: string, maxBytes: number, signal?: Abort
     throw new ResultsWorkspaceError(errorClass);
   }
   if (!response.ok) {
+    if (response.status === 503) {
+      let code: unknown;
+      try {
+        const refusal = await response.json() as { detail?: { error?: { code?: unknown } } };
+        code = refusal?.detail?.error?.code;
+      } catch { /* Non-JSON refusals retain their original status classification. */ }
+      if (code === "artifact_representation_busy") throw new PresentationPreviewBusyError();
+    }
     throw new ResultsWorkspaceError(classifyResultsResponse(response.status));
   }
   const length = Number(response.headers.get("content-length"));
@@ -123,7 +135,7 @@ function PdfArtifactPreview({
   const [loadingMore, setLoadingMore] = useState(false);
   const [pageCount, setPageCount] = useState(0);
   const [renderedThru, setRenderedThru] = useState(0);
-  const [error, setError] = useState<"too_large" | "load_failed" | null>(null);
+  const [error, setError] = useState<"too_large" | "load_failed" | "busy" | null>(null);
   const [retry, setRetry] = useState(0);
   const loadingMessage = t(presentation ? "presentation_loading" : "document_loading_pdf");
 
@@ -133,13 +145,13 @@ function PdfArtifactPreview({
     let loadingTask: PDFDocumentLoadingTask | undefined;
     cancelledRef.current = false;
     const fail = (
-      code: "too_large" | "load_failed",
+      code: "too_large" | "load_failed" | "busy",
       errorClass: ResultsWorkspaceErrorClass,
     ) => {
       if (cancelled) return;
       setError(code);
       setLoading(false);
-      onError?.(errorClass);
+      if (code !== "busy") onError?.(errorClass);
     };
 
     if (sizeBytes != null && sizeBytes > MAX_PDF_PREVIEW_BYTES) {
@@ -182,8 +194,12 @@ function PdfArtifactPreview({
           setRenderedThru(end);
         }
       } catch (cause) {
+        if (presentation && cause instanceof PresentationPreviewBusyError) {
+          fail("busy", "unavailable");
+          return;
+        }
         const classified = classifyResultsError(cause);
-        const errorClass = classified === "unknown" ? "corrupt" : classified;
+        const errorClass = classified === "unknown" && !(cause instanceof ResultsWorkspaceError) ? "corrupt" : classified;
         fail(errorClass === "too_large" ? "too_large" : "load_failed", errorClass);
       }
     })();
@@ -227,9 +243,9 @@ function PdfArtifactPreview({
 
   if (error) {
     return (
-      <div className="artifact-viewer-note error" role="alert">
-        {t(error === "too_large" ? "document_too_large" : presentation ? "presentation_preview_failed" : "document_load_failed")}
-        {presentation && error === "load_failed" ? <button type="button" onClick={() => {
+      <div className={`artifact-viewer-note${error === "busy" ? "" : " error"}`} role={error === "busy" ? "status" : "alert"}>
+        {t(error === "busy" ? "presentation_preview_busy" : error === "too_large" ? "document_too_large" : presentation ? "presentation_preview_failed" : "document_load_failed")}
+        {presentation && error !== "too_large" ? <button type="button" onClick={() => {
           cacheRef.current.pdfData = undefined;
           cacheRef.current.pdfRenderedThru = undefined;
           setError(null);

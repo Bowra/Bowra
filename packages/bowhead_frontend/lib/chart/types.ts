@@ -47,6 +47,8 @@ export interface ChartColumn {
   currency_code?: string;
   display?: NumericDisplay;
   date_pattern?: string;
+  /** A slot in the server-validated palette; omitted inherits the series default. */
+  color_index?: number;
   /** Only declared percentage shape or canonical percent input establishes scaling. */
   percent_scale?: ChartPercentScale;
   percent_shape_unknown?: boolean;

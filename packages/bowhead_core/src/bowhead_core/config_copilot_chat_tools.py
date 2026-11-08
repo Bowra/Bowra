@@ -1103,6 +1103,34 @@ async def _propose_handler(
     return out
 
 
+async def emit_saved_card(ctx: ToolExecutionContext, draft: Any) -> bool:
+    """Show a suggestion the Configuration Agent already saved, so the Chat card offers Undo.
+
+    The payload repeats the stored suggestion; ``status`` only renders the card before its receipt loads.
+    """
+    bus = getattr(ctx, "parent_bus", None)
+    payload = draft.payload if isinstance(draft.payload, dict) else {}
+    if bus is None or not isinstance(payload.get("rows"), list):
+        return False
+    event_payload = {
+        "proposal_id": draft.id,
+        "turn_id": getattr(ctx, "turn_id", "") or "",
+        "form_id": draft.form_id,
+        "workspace_id": draft.workspace_id,
+        "team_id": getattr(ctx, "team_id", "") or "",
+        "workspace_name": payload.get("workspace_name"),
+        "rows": payload["rows"],
+        "notes": payload.get("notes") or {},
+        "status": "applied",
+    }
+    try:
+        return await bus.emit(make_event(_EVENT, event_payload["turn_id"], event_payload)) is not False
+    except Exception as exc:
+        # The setting is already saved; a lost card only removes Chat Undo, never the save receipt.
+        logger.warning("config_apply.saved_card_failed form=%s error=%s", draft.form_id, type(exc).__name__)
+        return False
+
+
 def roster_scoped_tool_schemas(schemas: list[ToolSchema], ctx: object) -> list[ToolSchema]:
     """Advertise legacy config Tools with copy matching this Turn's roster.
 

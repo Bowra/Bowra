@@ -240,8 +240,17 @@ describe("HelpCenterPage capability-gated articles", () => {
     expect(visibleHelpArticles(all, { access_requests: false })).toEqual(ungated);
     expect(visibleHelpArticles(all, undefined)).toEqual(ungated);
     expect(
-      visibleHelpArticles(all, { access_requests: true, google_workspace_feature: true, shopify_plugin: true, agent_eval_alignment: true, account_deletion: true }).map(({ id }) => id),
+      visibleHelpArticles(all, { access_requests: true, google_workspace_feature: true, shopify_plugin: true, agent_eval_alignment: true, account_deletion: true, notification_reach: true, routine_notify: true, notification_delivery: true }).map(({ id }) => id),
     ).toEqual(all.map(({ id }) => id));
+  });
+
+  it("shows the Notifications article only while notification reach is switched on", () => {
+    const all = loadHelpArticles(undefined, "en-US");
+    const ids = (capabilities: Parameters<typeof visibleHelpArticles>[1]) =>
+      visibleHelpArticles(all, capabilities).map(({ id }) => id);
+
+    expect(ids({ notification_reach: false })).not.toContain("notification-center");
+    expect(ids({ notification_reach: true })).toContain("notification-center");
   });
 
   it("shows the Google Workspace article only while the feature is switched on", () => {

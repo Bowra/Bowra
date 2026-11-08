@@ -385,9 +385,10 @@ class DocumentStore:
             await db.execute("BEGIN")
             await _authorize(db, scope, write=True)
             source = await _live_source(db, scope, turn_id)
-            if isinstance(proposal, DocumentTaskGenerationArguments) and not task_sources_enabled():
+            current_arguments = isinstance(proposal, DocumentTaskGenerationArguments)
+            if current_arguments and not task_sources_enabled():
                 raise DocumentRequestError("document_task_source_disabled", field="task_source")
-            proposal = generation_proposal(proposal, source)
+            proposal = generation_proposal(proposal, source, preserve_task_source=True)
             if source.document_revision_target is not None:
                 if parent_job_id is not None or not isinstance(proposal, UserQuote):
                     raise DocumentRequestError("document_revision_required")
@@ -426,7 +427,16 @@ class DocumentStore:
                     snapshot = material[0]
                     original, _ = await read_task_source_in_tx(db, current=source, snapshot=snapshot, quote=proposal.task_source)
                 else:
-                    snapshot, original = await resolve_task_source_in_tx(db, current=source, quote=proposal.task_source)
+                    try:
+                        snapshot, original = await resolve_task_source_in_tx(db, current=source, quote=proposal.task_source)
+                    except DocumentRequestError as exc:
+                        if not current_arguments or exc.code != "document_task_source_unavailable":
+                            raise
+                        try:
+                            proposal.task_source.verify(source.user_text, field="task_source")
+                        except DocumentRequestError:
+                            raise exc from None
+                        proposal = proposal.model_copy(update={"task_source": None})
             proposal = resolve_proposal_positions(DocumentProposal.model_validate_json(proposal.model_dump_json()), source, task_source=original)
             await _validate_inputs(db, scope, source, proposal, answer=answer, task_source=original)
             return PreparedDocumentSubmission(proposal, answer, task_source=snapshot)

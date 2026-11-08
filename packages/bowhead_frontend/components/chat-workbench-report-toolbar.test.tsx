@@ -78,7 +78,7 @@ vi.mock("@/components/share/share-dialog", () => ({
 import { renderIntl } from "@/__tests__/intl-render";
 
 import { ChatWorkbench } from "./chat-workbench";
-import { requestChartFollowup } from "@/lib/chart/chart-followup";
+import { requestChartFollowup, useChartFollowupAvailable } from "@/lib/chart/chart-followup";
 
 function renderWorkbench(opts: { reportOnly?: boolean; readOnly?: boolean; runner?: Record<string, unknown>; onSend?: ComponentProps<typeof ChatWorkbench>["onSend"] } = {}) {
   const runner = {
@@ -174,10 +174,67 @@ describe("chart reference draft admission", () => {
     expect(onSend.mock.calls[0][0]).toContain("2026-02");
     expect(onSend.mock.calls[0][0]).not.toContain("2026-01");
   });
-  it.each([{ readOnly: true }, { reportOnly: true }])("retains existing entry guards: %j", (opts) => {
+  const selection = (patch: Record<string, unknown>) => ({ version: 1 as const, sectionId: "sec", sectionRev: 2, viewId: "trend", bindingId: "time.month", datasetDigest: "a".repeat(64), measureKeys: ["revenue"], ...patch });
+  const composerText = () => document.querySelector<HTMLTextAreaElement>(".composer-v2 textarea")?.value ?? "";
+  it("shows the same readable scope in the chip and the prefill", async () => {
+    chartReferences.read.mockResolvedValue(reference);
+    renderWorkbench();
+    act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ tuples: [["West"]] }) }); });
+    await waitFor(() => expect(screen.getByText("选中：West")).toBeInTheDocument());
+    expect(composerText()).toContain("选择范围：West。");
+    expect(composerText()).not.toContain("[[");
+  });
+  it("fills a prepared-frame selection with its frame value instead of failing", async () => {
+    chartReferences.read.mockResolvedValue(reference);
+    renderWorkbench();
+    act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ frameKey: "2026-02" }) }); });
+    await waitFor(() => expect(screen.getByText("选中：2026-02")).toBeInTheDocument());
+    expect(composerText()).toContain("选择范围：2026-02。");
+  });
+  it("reveals and focuses the Composer when Results is maximized", async () => {
+    chartReferences.read.mockResolvedValue(reference);
+    const { container } = renderIntl(<ChatWorkbench runner={{ turnId: "t_1", sessionId: "s_1", started: true, messages: [], traceSteps: [], citations: [], steerAcks: [], artifacts: [], status: "idle" } as never} onSend={vi.fn()} onCancel={vi.fn()} readOnly={false} startMaximized />);
+    await waitFor(() => expect(container.querySelector(".v2-workspace.canvas-maxed")).not.toBeNull());
+    act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ tuples: [["West"]] }) }); });
+    await waitFor(() => expect(container.querySelector(".v2-workspace.canvas-maxed")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".composer-v2 textarea")));
+  });
+  it("keeps the chat-only layout, so a follow-up from a chart in chat does not open Results", async () => {
+    chartReferences.read.mockResolvedValue(reference);
+    const { container } = renderWorkbench();
+    fireEvent.click(await screen.findByRole("button", { name: /返回对话独占视图/ }));
+    await waitFor(() => expect(container.querySelector(".v2-ws-edge--canvas")).not.toBeNull());
+    act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ tuples: [["West"]] }) }); });
+    await waitFor(() => expect(composerText()).toContain("选择范围：West。"));
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".composer-v2 textarea")));
+    expect(container.querySelector(".v2-ws-edge--canvas")).not.toBeNull();
+  });
+  it("keeps an existing draft while attaching the selected file", async () => {
+    chartReferences.read.mockResolvedValue(reference);
+    renderWorkbench();
+    const input = await waitFor(() => document.querySelector<HTMLTextAreaElement>(".composer-v2 textarea")!);
+    fireEvent.change(input, { target: { value: "My own question" } });
+    act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId, selectedContext: selection({ tuples: [["West"]] }) }); });
+    await waitFor(() => expect(screen.getByText("选中：West")).toBeInTheDocument());
+    expect(composerText()).toBe("My own question");
+  });
+  it.each([{ readOnly: true }, { reportOnly: true }])("retains existing entry guards and offers no follow-up: %j", (opts) => {
+    let available: boolean | null = null;
+    function Probe() { available = useChartFollowupAvailable(); return null; }
+    renderIntl(<Probe />);
     renderWorkbench(opts);
+    expect(available).toBe(false);
     act(() => { requestChartFollowup({ title: "Quarterly results", dataArtifactId: reference.fileId }); });
     expect(chartReferences.read).not.toHaveBeenCalled();
+  });
+  it("offers the follow-up while a writable workbench is mounted", () => {
+    let available: boolean | null = null;
+    function Probe() { available = useChartFollowupAvailable(); return null; }
+    renderIntl(<Probe />);
+    const { unmount } = renderWorkbench();
+    expect(available).toBe(true);
+    unmount();
+    expect(available).toBe(false);
   });
   it("aborts and fences a late metadata reply when the same mounted workbench changes session", async () => {
     let resolve!: (value: typeof reference) => void;

@@ -96,6 +96,7 @@ RECALL = "recall"
 REMEMBER = "remember"
 REMOVE_CHART = "remove_chart"
 RENDER_DECK = "render_deck"
+ROUTINE_NOTIFY = "routine_notify"
 SEND_EMAIL = "send_email"
 SKILL_INVOKE = "skill_invoke"
 SKILL_LIST = "skill_list"
@@ -206,6 +207,7 @@ ALL_TOOL_NAMES: frozenset[str] = frozenset({
     "remember",
     "remove_chart",
     "render_deck",
+    "routine_notify",
     "send_email",
     "skill_invoke",
     "skill_list",

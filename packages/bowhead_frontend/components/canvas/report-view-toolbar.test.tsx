@@ -7,8 +7,10 @@
  */
 import "@testing-library/jest-dom/vitest";
 
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
+import { NextIntlClientProvider } from "next-intl";
+import zhMessages from "@/messages/zh-CN.json";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
@@ -54,6 +56,27 @@ afterEach(() => {
 const article = () => document.querySelector<HTMLElement>("article.canvas-report-article");
 
 describe("with a toolbar status group", () => {
+  it("preserves completion announcements when the toolbar host moves", async () => {
+    const nextHost = document.createElement("div");
+    document.body.appendChild(nextHost);
+    const view = (target: HTMLElement | null, streaming: boolean) => (
+      <NextIntlClientProvider locale="zh-CN" messages={zhMessages}>
+        <ReportView sections={SECTIONS} canvasId="cv_1" statusHost={target} isStreaming={streaming}
+          turnTerminalStatus={streaming ? null : "completed"} />
+      </NextIntlClientProvider>
+    );
+    const { rerender, unmount } = render(view(host, true));
+    try {
+      await waitFor(() => expect(host.querySelector("[data-testid='report-toolbar-announcer']")).not.toBeNull());
+      rerender(view(null, true));
+      rerender(view(nextHost, false));
+      await waitFor(() => expect(nextHost.querySelector("[data-testid='report-toolbar-announcer']")).toHaveTextContent("报告已更新"));
+    } finally {
+      unmount();
+      nextHost.remove();
+    }
+  });
+
   it("moves the existing source summary into its toolbar host without duplicating it", async () => {
     const sourceHost = document.createElement("div");
     document.body.appendChild(sourceHost);

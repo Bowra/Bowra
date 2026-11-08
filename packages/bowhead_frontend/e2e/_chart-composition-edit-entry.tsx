@@ -1,5 +1,5 @@
 import "./_process-shim";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { ReportView, type ReportViewHandle } from "../components/canvas/report-view";
@@ -10,6 +10,7 @@ import zh from "../messages/zh-CN.json";
 import de from "../messages/de-DE.json";
 import fr from "../messages/fr-FR.json";
 import { ChartThemePreviewProvider, chartThemeBaseForMode, resolveChartThemeForStyle } from "../lib/chart-theme";
+import { onChartFollowup } from "../lib/chart/chart-followup";
 import "../styles/report-canvas.css";
 import "../styles/ui-refresh-canvas.css";
 import { Chart as ChartJS, PointElement, BarElement } from "chart.js";
@@ -44,6 +45,8 @@ function Host() {
   const [prose, setProse] = useState("Before the figure");
   const [missing, setMissing] = useState(false);
   const reportRef = useRef<ReportViewHandle>(null);
+  // Stands in for the workbench Composer, so follow-up entries render; specs record the event itself.
+  useEffect(() => onChartFollowup(() => {}), []);
   window.chartCompositionHost = {
     companions: setCompanions,
     configure: (options) => { if (options.locale) document.documentElement.lang = options.locale; setConfiguration((value) => ({ ...value, ...options })); if (options.mode) document.documentElement.dataset.theme = options.mode; },

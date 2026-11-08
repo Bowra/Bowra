@@ -376,9 +376,10 @@ function StepFromView({ s }: StepFromViewProps) {
     <div className="stp-output-artifacts">
       {s.outputArtifacts.map((artifact, index) => {
         const filename = artifact.filename || `${tResults("evidence")} ${index + 1}`;
-        const displayName = artifact.title && artifact.title !== filename ? `${artifact.title} · ${filename}` : filename;
+        // Historical receipts may contain crossed model-authored labels. Use the
+        // native filename for every file action, including replay and tooltips.
         if (artifact.dataRole === "stdout") {
-          const downloadLabel = tResults("download_object", { filename: displayName });
+          const downloadLabel = tResults("download_object", { filename });
           return (
             <a
               key={artifact.artifactId}
@@ -386,14 +387,14 @@ function StepFromView({ s }: StepFromViewProps) {
               href={appPath(`/api/v1/files/${encodeURIComponent(artifact.artifactId)}`)}
               download={filename}
               aria-label={downloadLabel}
-              title={artifact.description || downloadLabel}
+              title={downloadLabel}
             >
               <span aria-hidden><CharIcon ch="↓" aria-hidden /></span>
-              <span>{displayName}</span>
+              <span>{filename}</span>
             </a>
           );
         }
-        const openLabel = tResults("open_object", { filename: displayName });
+        const openLabel = tResults("open_object", { filename });
         return (
           <button
             key={artifact.artifactId}
@@ -403,10 +404,10 @@ function StepFromView({ s }: StepFromViewProps) {
               entryPoint: "chat",
             })}
             aria-label={openLabel}
-            title={artifact.description || openLabel}
+            title={openLabel}
           >
             <span aria-hidden><CharIcon ch="→" aria-hidden /></span>
-            <span>{displayName}</span>
+            <span>{filename}</span>
           </button>
         );
       })}

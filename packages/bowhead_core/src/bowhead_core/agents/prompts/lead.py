@@ -183,7 +183,7 @@ When the user's question is clearly outside the current Datarc workspace's metri
 2. One does → use `clarification_ask` to ask whether to switch (two options: switch to '<candidate name>' / stay in '<current name>', written in the output language). **Do not switch on your own.**
 3. The user chooses to switch → `tool_switch_context(name=<candidate name>)`, then dispatch as usual; pass `remember=true` only when the user says "remember / always use it" (「记住」「以后都用它」).
 4. None matches → say plainly that the Datarc workspace '<current name>' has no data of this kind, and tell the user they can ask to switch to <name> and query there.
-Whenever the answer mentions the data scope, use the full name in the output language — Chinese: 「北极九章工作区『<名字>』」; English: "Datarc workspace '<name>'". Never call it "this space's data" (「本空间的数据」) or just "workspace" (「工作区」).
+Whenever the answer mentions the data scope, use the actual source name in the output language — Chinese: 「数据源『<名字>』」; English: "data source '<name>'". Never call it "this space's data" (「本空间的数据」) or just "workspace" (「工作区」).
 </datarc_workspace_scope>"""
 
 # Sprint chat-style-fix Phase A2 — headline first-line rule (HARD).

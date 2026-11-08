@@ -345,3 +345,46 @@ export async function deleteSource(
   });
   await _check(r);
 }
+
+// ── tool categories (FEATURE_TEAM_TOOL_CONFIRMATION) ─────────────────────────
+
+export type TeamToolCategory = "read" | "external_write" | "destructive";
+
+export interface SourceToolCategoryItem {
+  name: string;
+  description: string;
+  imported: boolean;
+  /** What the service's annotations imply; "unknown" when it marked nothing usable. */
+  annotation_category: TeamToolCategory | "unknown";
+  confirmed_category: TeamToolCategory | null;
+  effective_category: TeamToolCategory | "unknown";
+  /** A confirmation exists but the service changed this tool's definition since. */
+  needs_reconfirmation: boolean;
+  confirmed_at: string | null;
+}
+
+export interface SourceToolCategories {
+  enabled: boolean;
+  items: SourceToolCategoryItem[];
+  updated_at: string;
+}
+
+export async function getSourceToolCategories(id: string): Promise<SourceToolCategories> {
+  const r = await apiFetch(`${BASE}/${encodeURIComponent(id)}/tool-categories`);
+  await _check(r);
+  return (await r.json()) as SourceToolCategories;
+}
+
+/** Send changed tools only: a category confirms it, null removes the confirmation. */
+export async function saveSourceToolCategories(
+  id: string,
+  categories: Record<string, TeamToolCategory | null>,
+): Promise<SourceToolCategories> {
+  const r = await apiFetch(`${BASE}/${encodeURIComponent(id)}/tool-categories`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ categories }),
+  });
+  await _check(r);
+  return (await r.json()) as SourceToolCategories;
+}

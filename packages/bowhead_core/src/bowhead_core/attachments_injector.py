@@ -24,10 +24,12 @@ import json
 import logging
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from bowhead_core.documents.package_io import defer_office_content
+from bowhead_core.pptx_reading import MAX_ATTACHMENT_PPTX_PAGES, AttachmentReadQueryError, pptx_read_info, validate_pptx_slides
 
 if TYPE_CHECKING:
     from pptx.shapes.base import BaseShape
@@ -73,6 +75,8 @@ class PreparedAttachment:
     # Hash of the exact blob used for this parse. A resumed reference task can
     # prove that a later read still denotes the original user material.
     content_hash: str | None = None
+    # Parser facts only; the authorized reader binds any continuation to its source.
+    read_info: dict[str, Any] | None = None
 
 
 def _office_metadata_stub(art: _ArtLike) -> PreparedAttachment:
@@ -244,8 +248,8 @@ class _ArtLike(Protocol):
     size: int
 
 
-def _extract_one(art: _ArtLike, data: bytes) -> PreparedAttachment:
-    """mime → 抽取方法. 失败返回带 error 的 record, 不抛."""
+def _extract_one(art: _ArtLike, data: bytes, *, pptx_query: dict | None = None) -> PreparedAttachment:
+    """Extract bounded source content, preserving known query refusals."""
     try:
         if art.mime.startswith("text/") or art.mime == "application/json":
             text = _extract_text_plain(data)
@@ -253,10 +257,27 @@ def _extract_one(art: _ArtLike, data: bytes) -> PreparedAttachment:
             text, note = _extract_pdf(data)
             return _finalize(art, text, note=note)
         elif "presentationml" in art.mime or art.filename.lower().endswith((".pptx",)):
-            text, note = _extract_pptx(data)
-            return _finalize(art, text, note=note)
+            text, note, info = _extract_pptx_read(data, **(pptx_query or {}))
+            result = _finalize(art, text, note=note)
+            result.read_info = info
+            return result
         elif "wordprocessingml" in art.mime or art.filename.lower().endswith((".docx",)):
+            from bowhead_core.read_receipts import ReadLimit, ReadRecovery, read_info
+
             text = _extract_docx(data)
+            result = _finalize(art, text)
+            total = len(text.strip())
+            result.read_info = read_info(
+                view="partial" if result.truncated else "complete",
+                unit="characters",
+                returned=len(text.strip()[:MAX_INLINE_CHARS].rstrip()),
+                total=total,
+                limit=ReadLimit(scope="model_preview", kind="output_characters", actual=total, maximum=MAX_INLINE_CHARS, unit="characters")
+                if result.truncated
+                else None,
+                recovery=ReadRecovery(),
+            )
+            return result
         elif "spreadsheetml" in art.mime or art.mime == "application/vnd.ms-excel" or art.filename.lower().endswith((".xlsx", ".xls")):
             text, note = _extract_xlsx(data)
             return _finalize(art, text, note=note)
@@ -295,6 +316,10 @@ def _extract_one(art: _ArtLike, data: bytes) -> PreparedAttachment:
                 error=f"unsupported mime {art.mime}; agent 可尝试 skill_invoke",
             )
         return _finalize(art, text)
+    except AttachmentReadQueryError as error:
+        result = _err_record(art, "attachment_read_query_invalid")
+        result.note = str(error)
+        return result
     except Exception as e:
         logger.warning("attachments.extract_failed aid=%s mime=%s err=%s", art.id, art.mime, e)
         return PreparedAttachment(
@@ -370,16 +395,16 @@ def _extract_zip_inventory(art: _ArtLike, data: bytes) -> PreparedAttachment:
     )
 
 
-def _extract_from_parts(*, mime: str, filename: str, artifact_id: str, size: int, data: bytes) -> PreparedAttachment:
-    return _extract_one(_ArtShim(artifact_id, mime, filename, size), data)
+def _extract_from_parts(*, mime: str, filename: str, artifact_id: str, size: int, data: bytes, pptx_query: dict | None = None) -> PreparedAttachment:
+    return _extract_one(_ArtShim(artifact_id, mime, filename, size), data, pptx_query=pptx_query)
 
 
-def extract_parts_to_dict(*, mime: str, filename: str, artifact_id: str, size: int, data: bytes) -> dict[str, Any]:
+def extract_parts_to_dict(*, mime: str, filename: str, artifact_id: str, size: int, data: bytes, pptx_query: dict | None = None) -> dict[str, Any]:
     """Worker-side entry (``untrusted_parse_worker``): parse untrusted bytes and
     return a JSON-serializable ``PreparedAttachment`` dict."""
     from dataclasses import asdict
 
-    return asdict(_extract_from_parts(mime=mime, filename=filename, artifact_id=artifact_id, size=size, data=data))
+    return asdict(_extract_from_parts(mime=mime, filename=filename, artifact_id=artifact_id, size=size, data=data, pptx_query=pptx_query))
 
 
 _WORKER_FAIL_MSG = {
@@ -402,7 +427,7 @@ def _err_record(art: _ArtLike, msg: str) -> PreparedAttachment:
     )
 
 
-async def extract_attachment_bounded(art: _ArtLike, data: bytes) -> PreparedAttachment:
+async def extract_attachment_bounded(art: _ArtLike, data: bytes, *, pptx_query: dict | None = None) -> PreparedAttachment:
     """Resource-bounded extraction — the single seam every untrusted-attachment
     parse routes through (skill-multiruntime S3 follow-up, cluster A).
 
@@ -432,6 +457,8 @@ async def extract_attachment_bounded(art: _ArtLike, data: bytes) -> PreparedAtta
     # metadata size.
     if bounded_parse_enabled() and should_subprocess(art.mime, art.filename, len(data)):
         control = {"mime": art.mime, "filename": art.filename, "artifact_id": art.id, "size": art.size}
+        if pptx_query is not None:
+            control["pptx_query"] = pptx_query
         res, why = await run_worker_json("attachment", control, data=data)
         if res is not None:
             return PreparedAttachment(**res)
@@ -440,7 +467,7 @@ async def extract_attachment_bounded(art: _ArtLike, data: bytes) -> PreparedAtta
         return _err_record(art, _WORKER_FAIL_MSG.get(why, "extraction failed"))
 
     # Tier-1 default: offload to a worker thread (keeps the event loop responsive).
-    return await asyncio.to_thread(_extract_one, art, data)
+    return await asyncio.to_thread(_extract_one, art, data, pptx_query=pptx_query)
 
 
 def _finalize(
@@ -517,20 +544,56 @@ def _pptx_shape_text(shapes: Iterable[BaseShape]) -> Iterator[str]:
 
 
 def _extract_pptx(data: bytes) -> tuple[str, str | None]:
+    text, note, _ = _extract_pptx_read(data)
+    return text, note
+
+
+def _extract_pptx_read(data: bytes, *, slides: list[int] | None = None, detail: str = "content") -> tuple[str, str, dict]:
     from pptx import Presentation
+
+    from bowhead_core.read_receipts import ReadLimit
 
     p = Presentation(io.BytesIO(data))
     n = len(p.slides)
+    if slides is not None:
+        validate_pptx_slides(slides, total=n, maximum=MAX_ATTACHMENT_PPTX_PAGES)
+    if detail not in {"index", "content"}:
+        raise AttachmentReadQueryError("detail must be index or content.")
+    selected = slides if slides is not None else list(range(1, min(n, MAX_ATTACHMENT_PPTX_PAGES) + 1))
     blocks: list[str] = []
-    for i, slide in enumerate(p.slides):
-        if i >= 30:
-            blocks.append(f"\n[... {n - 30} remaining slides not extracted ...]")
-            break
-        parts = list(_pptx_shape_text(slide.shapes))
-        if parts:
-            blocks.append(f"--- slide.{i + 1} ---\n" + "\n".join(parts))
-    note = f"PPTX: {n} slides; extracted text and table rows from {min(n, 30)} slides, including groups. Images and charts are not extracted."
-    return "\n\n".join(blocks), note
+    boundaries: list[tuple[int, int, int]] = []
+    length = 0
+    for page in selected:
+        parts = _pptx_shape_text(p.slides[page - 1].shapes)
+        values = [part[:120] for part in islice(parts, 4)] if detail == "index" else list(parts)
+        block = f"--- slide.{page} ---" + ("\n" + "\n".join(values) if values else "")
+        start = length + (2 if blocks else 0)
+        length = start + len(block)
+        boundaries.append((page, start, length))
+        blocks.append(block)
+    text = "\n\n".join(blocks)
+    if slides is None and n > MAX_ATTACHMENT_PPTX_PAGES:
+        text += f"\n\n[... {n - MAX_ATTACHMENT_PPTX_PAGES} remaining slides not extracted ...]"
+    returned = [page for page, start, _ in boundaries if start < MAX_INLINE_CHARS]
+    complete = [page for page, _, end in boundaries if end <= MAX_INLINE_CHARS]
+    limit = (
+        ReadLimit(scope="model_preview", kind="output_characters", actual=len(text), maximum=MAX_INLINE_CHARS, unit="characters")
+        if len(text) > MAX_INLINE_CHARS
+        else None
+    )
+    info = pptx_read_info(
+        total_pages=n,
+        requested_pages=slides,
+        returned_pages=returned,
+        complete_pages=complete,
+        detail=detail,
+        content_kind="index" if detail == "index" else "text_and_tables",
+        limit=limit,
+    )
+    note = f"PPTX: {n} slides; selected {len(selected)} slides in {detail} mode, including groups. Images and charts are not extracted."
+    if detail == "index":
+        note += " Index entries contain at most four text/table snippets of 120 characters each, not complete page content."
+    return text, note, info
 
 
 def _extract_docx(data: bytes) -> str:

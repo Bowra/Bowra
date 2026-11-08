@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from bowhead_router.types import ToolSchema
 
 from bowhead_core.documents.authoring_formats import AUTHORING_PROFILES, WORD_PROFILE
-from bowhead_core.documents.authoring_protocol import PROFILE, digest
+from bowhead_core.documents.authoring_protocol import COMPUTE_CONTRACT, PROFILE, digest
 from bowhead_core.documents.executor import WorkerInput
 from bowhead_core.documents.package_io import OfficePackageError
 from bowhead_core.documents.pptx_plan import PlanningContext
@@ -105,7 +105,7 @@ INPUTS['source']['path'] and data aliases are read-only. Save the final authored
 candidate under OUTPUT_DIR. document_execute is not a scratch REPL or inspection
 tool; a successful save ends authoring and opens human review. Your local change
 log is not a trusted receipt: an independent run checks actual source/candidate
-bytes and renders all pages. There are at most two script attempts within the
+bytes and renders all pages. There are at most two candidate submissions within the
 original budget. Unknown outcomes stop; never create a replacement command.
 """
 
@@ -210,7 +210,8 @@ contains exact shape/paragraph/run addresses and explicit styles; it omits empty
 decorative shapes. The planner's read views are index and content. Choose likely
 source pages from the index before reading their content; read other pages only
 as needed. Content provides the facts needed for local content edits.
-Use document_read for every read-only inspection. document_execute is NOT a REPL
+Use document_read for document inspection. When python_exec is available, use it
+for intermediate calculations or data checks. document_execute is NOT a REPL
 or inspection tool: its successful save immediately ends authoring and opens the
 human-review draft. Write the requested complete edits in that script. A script
 that only prints metadata or opens and saves the unchanged source does not do
@@ -226,7 +227,7 @@ Keep historical values and unrelated content when the request requires them.
 An independently verified preview is required before a candidate enters review.
 If that preview returns a known text-visibility failure, correct the complete
 script against the original source within the remaining task budget.
-There are at most two script executions in this task: the initial authored
+There are at most two candidate submissions in this task: the initial authored
 candidate and one correction after a known failure. A clarification answer does
 not reset that allowance. Read actual addresses before writing; do not guess
 another paragraph, run or shape ID in successive execution attempts.
@@ -246,7 +247,19 @@ CHART_FONTS_CONTRACT = "pptx-chart-fonts-v1"
 CANVAS_REFERENCE = """
 A manifest input with role 'canvas' contains document-canvas-material-v1 frozen material. Read its
 directory with document_read(source=its_alias), then section_id/view_id for
-fields and samples. offset pages through directory sections or view fields.
+fields and samples. offset pages through directory sections or view fields,
+never rows. Use only selection.next_offset for another page. When it is null,
+that selection is complete: do not increment offset using row counts.
+To inspect a linked file before writing, call document_read with the same source
+and dataset_alias from data_input_alias or the dataset directory. List all linked
+files with detail='datasets' and its next_offset. A dataset alias is not a view_id
+or a separate source. Omit section_id/view_id/slides/offset when reading one file.
+The file reader returns normalized original data using the existing parser;
+unavailable files remain unavailable and saved view rows stay separate.
+Large CSV inspection returns a csv_preview object inside content_json: records
+are only a prefix and coverage states returned/total records. Inspect columns
+and a few examples, then filter/join/calculate from complete bytes in the final
+script. Do not repeatedly inspect the same file or compute totals from a prefix.
 The final script reads that alias's complete JSON with json.loads(Path(...).read_text()).
 The Tool returns summaries, not that JSON's structure. Use its exact script_path:
 material['sections'][i]['spec'] for a root; its ['views'][j]['spec'] for a child.
@@ -256,7 +269,8 @@ For an ID lookup use next(s for s in material['sections'] if s['id'] == actual_i
 Non-chart sections may have no spec; use the exact selected chart's script_path.
 Rows live in spec['rows'], not row_sample. datasets is a dict keyed by alias,
 never a list. Use only the reads needed for this request, then execute the final
-script that saves candidate.pptx; do not spend an execution on printing inputs.
+script that saves candidate.pptx. When python_exec is available, intermediate
+calculations can return concise observations without submitting a candidate.
 Its sections preserve separate root and child specs/rows; do not substitute root
 rows for child-only fields or align different datasets by list position.
 Saved spec['rows'] are typed JSON: numbers are already int/float, null is None.
@@ -343,10 +357,28 @@ its actual font change summary through the original revision workflow.
 """
 
 
+COMPUTE_REFERENCE = """
+python_exec is available for intermediate calculations and data checks. It runs
+Python against the same frozen INPUTS and returns bounded stdout/stderr, then
+continues this task. Choose it only when its observation helps; simple edits
+can go directly to document_execute. Use complete input bytes for calculations,
+not preview prefixes. Print concise results, coverage and relevant failures.
+Each call starts fresh: variables, paths and files do not carry into later calls.
+Files created by python_exec stay internal and never open a draft or a download.
+Reuse calculation logic in the final script against the same frozen originals;
+do not substitute a clipped observation for a complete intermediate dataset.
+Script-authored checks are observations, not independent verification receipts.
+Known completed computation failures can be corrected within the original task
+budget. Computation does not consume the two final candidate submissions.
+Truncation describes returned output, not input availability. Unavailable output
+does not mean the code failed to run. Unknown execution outcomes stop.
+"""
+
+
 def runtime_api_reference(readiness: dict) -> str:
     """Advertise only helpers declared by the pinned worker image."""
     if readiness.get("profile") == WORD_PROFILE:
-        return WORD_API_REFERENCE
+        return WORD_API_REFERENCE + (COMPUTE_REFERENCE if readiness.get("compute_contract") == COMPUTE_CONTRACT else "")
     reference = API_REFERENCE
     if readiness.get("native_objects_contract") == NATIVE_OBJECTS_CONTRACT:
         reference += NATIVE_OBJECTS_REFERENCE
@@ -354,16 +386,20 @@ def runtime_api_reference(readiness: dict) -> str:
         reference += TEXT_BOXES_REFERENCE
     if readiness.get("chart_fonts_contract") == CHART_FONTS_CONTRACT:
         reference += CHART_FONTS_REFERENCE
+    if readiness.get("compute_contract") == COMPUTE_CONTRACT:
+        reference += COMPUTE_REFERENCE
     return reference
 
 
-def tools(profile: str = PROFILE) -> list[ToolSchema]:
+def tools(profile: str = PROFILE, *, compute: bool = False) -> list[ToolSchema]:
     result = [
         ToolSchema(
             "document_read",
             "Read an exact admitted source. Start with index and use content on likely source pages for the requested draft. "
+            "PPTX read_info reports the actual page coverage and a same-source next call when available; an index is not complete page content. "
             "Content includes precise text/run addresses, geometry, tables, charts, pictures, placeholders and explicit styles, omitting empty decoration. "
-            "Other supported files return normalized original data.",
+            "Other supported files return normalized original data; large CSVs return an explicit csv_preview prefix with coverage, "
+            "while the final script retains the complete file.",
             {
                 "type": "object",
                 "additionalProperties": False,
@@ -377,13 +413,21 @@ def tools(profile: str = PROFILE) -> list[ToolSchema]:
                         "items": {"type": "integer", "minimum": 1},
                         "description": "Explicit one-based pages. Detailed views default to the first page and report remaining pages; index defaults to the whole deck.",
                     },
-                    "detail": {"type": "string", "enum": ["index", "content"]},
+                    "detail": {
+                        "type": "string",
+                        "enum": ["index", "content", "datasets"],
+                        "description": "Use datasets only for a Canvas input's linked-file directory; follow its next_offset.",
+                    },
                     "section_id": {"type": "string", "description": "For a Canvas input, select a real section ID from its directory."},
                     "view_id": {"type": "string", "description": "Optional exact Canvas child view ID; omit for the root spec."},
+                    "dataset_alias": {
+                        "type": "string",
+                        "description": "Read an exact linked Canvas file from data_input_alias or the datasets directory. Keep source as the Canvas input alias; omit section_id/view_id/slides/offset. Dataset aliases are not view IDs.",
+                    },
                     "offset": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "Optional Canvas directory/field-page offset from the previous selection.next_offset.",
+                        "description": "Canvas directory/field offset from selection.next_offset, never a row offset. If next_offset is null, this selection is complete. Read linked files with dataset_alias; the final script receives all frozen bytes.",
                     },
                 },
             },
@@ -436,11 +480,10 @@ def tools(profile: str = PROFILE) -> list[ToolSchema]:
     if profile == WORD_PROFILE:
         read_schema = {**result[0].input_schema, "properties": dict(result[0].input_schema["properties"])}
         read_schema["properties"].pop("slides")
-        read_schema["properties"]["detail"] = {"type": "string", "enum": ["index", "content"]}
         read_schema["properties"]["offset"] = {
             "type": "integer",
             "minimum": 0,
-            "description": "Original Word block or Canvas page offset; use next_offset.",
+            "description": "Original Word block or Canvas directory/field offset; use next_offset. Canvas offsets never select rows; null next_offset ends that selection.",
         }
         read_schema["properties"]["limit"] = {"type": "integer", "minimum": 1, "maximum": 50, "description": "Word blocks per read, default 50."}
         result[0] = ToolSchema(
@@ -454,6 +497,25 @@ def tools(profile: str = PROFILE) -> list[ToolSchema]:
             "document_execute",
             "Execute final local Word edits, then independently verify and render candidate.docx into the original private draft. No publication or inspection-only execution.",
             execute_schema,
+        )
+    if compute:
+        result.append(
+            ToolSchema(
+                "python_exec",
+                "Calculate or check data in isolated Python using this task's frozen INPUTS and disposable OUTPUT_DIR. "
+                "Returns bounded combined stdout/stderr and continues authoring; creates no draft or downloadable files. "
+                "No variables or files persist across calls. Known failures may be corrected within the task budget. "
+                "Use document_execute when ready to submit the complete candidate.",
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "code": {"type": "string", "minLength": 1, "maxLength": 64_000, "description": "Python using the declared INPUTS aliases."},
+                        "intent": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Briefly explain this calculation or check."},
+                    },
+                    "required": ["code", "intent"],
+                },
+            )
         )
     return result
 

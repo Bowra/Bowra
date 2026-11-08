@@ -20,6 +20,9 @@ class _Users:
     async def get_user(self, uid):
         return SimpleNamespace(display_name={"u_bob": "Bob", "u_admin": "Adm"}.get(uid, uid), email=f"{uid}@x.com")
 
+    async def filter_active_team_members(self, team_id, user_ids):
+        return set(user_ids)
+
 
 def _svc(tmp_path):
     store = NotificationStore(str(tmp_path / "n.db"))

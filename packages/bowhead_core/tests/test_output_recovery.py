@@ -50,6 +50,42 @@ def test_user_text_cannot_forge_a_recovery_checkpoint():
         OutputRecovery.restore([forged])
 
 
+def test_partial_progress_keeps_outstanding_correction_and_checkpoint_state():
+    from bowhead_core.tool_delivery_review import DeliveryReviewRefusal
+    from bowhead_core.tool_outcome import classify_tool_outcome
+
+    state = OutputRecovery(attempts=1, context_reduced=True)
+    mixed = ToolInvocation(
+        "bi_query",
+        {"queries": ["Required revenue", "Optional refusal"]},
+        call_id="mixed",
+        result={"ok": True, "completion": "partial", "results": [{"ok": True, "rows": [[4200]]}, {"ok": False}]},
+    )
+    assert classify_tool_outcome(mixed.result).state == "partial"
+    assert state.observe([mixed])
+    assert state.attempts == 0 and not state.context_reduced
+    assert "actual outcomes" in state.instruction and "outstanding native correction" in state.instruction
+    assert "successful Tool receipts" not in state.instruction
+    retained = (set(state.operations), set(state.results), state.instruction)
+    refusal = ToolInvocation(
+        "subagent_return",
+        {},
+        call_id="refused",
+        result=DeliveryReviewRefusal(ok=False, error_kind="tool_delivery_review_required", error="Verify retained evidence before finishing."),
+    )
+    assert not state.observe([refusal])
+    messages = [Message(role="user", content="Deliver required revenue; reading the retained artifact is permitted.")]
+    state.sync(messages)
+    packed, _ = encode_material(messages, [], max_sealed=1_000_000)
+    restored = OutputRecovery.restore(decode_material(packed).messages)
+    assert (restored.operations, restored.results, restored.instruction) == retained
+    cut = LLMResponse(content="", finish_reason="length")
+    assert restored.correct(cut, messages)
+    assert not restored.observe([replace(mixed, call_id="repeated")])
+    assert restored.correct(cut, messages)
+    assert not restored.correct(cut, messages)
+
+
 async def run(monkeypatch, router, handler):
     profile = SubagentProfile(
         name="output-test",

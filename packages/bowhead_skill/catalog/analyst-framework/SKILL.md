@@ -33,7 +33,7 @@ category: analysis
 
 **铁律**：有附件就用附件，**不要**跨源去查 datarc BI（那是工作区数据库 ≠ 用户上传的表）.
 
-**先调一次 `bi_schema()` 拿 workspace 的 schema**（measures 含 sort/别名/描述 + 可查维度；`data_source.context_name` 是当前北极九章工作区名）。同一任务调一次即可，结果留在对话里。
+**Call `bi_schema()` once to inspect the source workspace's schema** (measures include sort order, aliases, descriptions, and queryable dimensions; `data_source.context_name` identifies the current data source). Once per task is sufficient; retain the result in the conversation.
 
 ### 0.2 有附件时第一步：schema 探测
 

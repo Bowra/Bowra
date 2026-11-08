@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 import aiosqlite
 
+from bowhead_core import notification_types
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.audit_actions import AuditAction
 from bowhead_core.notification_store import NotificationStore
@@ -267,6 +268,7 @@ class AgentReleaseNotificationOutbox:
 
     async def _project(self, delivery: AgentReleaseOutboxDelivery) -> None:
         projection = _notification_projection(delivery)
+        notification_types.validate(delivery.notification_type, projection["priority"])
         if delivery.candidate_id and delivery.event_type in {
             "candidate.rejected",
             "candidate.withdrawn",

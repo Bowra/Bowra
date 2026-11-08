@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import aiosqlite
 
+from bowhead_core import notification_types
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_quality import answer_quality, quality_summary
 from bowhead_core.agent_eval_store import (
@@ -916,11 +917,13 @@ class AgentEvalProductStore:
     ) -> None:
         notification = claim.notification
         url = f"/agents/manage/?agent_id={notification.agent_id}"
+        priority = "p1" if notification.critical_failure else "p2"
+        notification_types.validate("agent.eval.regression_failed", priority)
         await notification_store.upsert_item_with_recipients(
             team_id=notification.team_id,
             category="action",
             type="agent.eval.regression_failed",
-            priority="p1" if notification.critical_failure else "p2",
+            priority=priority,
             title="Agent regression needs attention",
             body=("A version-bound automatic evaluation did not pass. Review the Agent and its current quality evidence."),
             subject_type="agent_eval_run",

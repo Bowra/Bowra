@@ -1,6 +1,6 @@
 """Per-turn removal of disabled Plugins and Tools.
 
-docs/design/capability-center-plugins-tech-design.md §8: disabling a Plugin removes only what that
+docs/drafts/agents/capability-center-plugins-tech-design.md §8: disabling a Plugin removes only what that
 Plugin contributed, while disabling a Tool removes it from every source. This module is pure: callers
 supply where each Tool came from (provenance) and the disable state read from settings.
 """

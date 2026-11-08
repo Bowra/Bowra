@@ -63,9 +63,10 @@ EVENT_SECTION_MAX_CHARS = 600
 
 def partial_directive(stop_reason: StopReason) -> str:
     """What Lead must do with a partial result (phase 2 §4)."""
-    reason = _REASON_TEXT.get(stop_reason, "a run limit")
+    reason = _REASON_TEXT.get(stop_reason)
+    opening = f"This helper stopped at {reason} and returned partial work." if reason else "This helper returned partial work."
     return (
-        f"This helper stopped at {reason} and returned partial work. Tell the user the task is only partially "
+        f"{opening} Tell the user the task is only partially "
         "complete and why, give the finished results from `done`, list what remains from `remaining`, and say "
         "continuation is available only if this result includes a supported checkpoint. "
         "Never present it as complete. Do not dispatch this task again in this turn."

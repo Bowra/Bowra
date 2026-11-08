@@ -1,5 +1,6 @@
 """Real Office upload and ordinary helper read survive the original question."""
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import replace
@@ -44,6 +45,7 @@ pytestmark = [
     [
         ("docx", "resume", 1),
         ("pptx", "recreated", 2),
+        ("pptx", "selected", 1),
         ("docx", "unknown", 1),
         *[("docx", boundary, 1) for boundary in ("bytes", "deleted", "confirmation", "binding", "owner", "space", "confirmation_race")],
     ],
@@ -63,10 +65,11 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
     await artifacts.initialize()
     orch.artifact_store = case.app.state.artifact_store = artifacts
     case.client.headers.pop("Content-Type", None)
+    content = office_bytes(kind, pages=31 if boundary == "selected" else 1)
     uploaded = await case.client.post(
         "/api/v1/files/upload",
         headers={"X-Space-Id": scope.workspace_id},
-        files={"file": ("profit." + kind, office_bytes(kind), OFFICE_MIMES["." + kind])},
+        files={"file": ("profit." + kind, content, OFFICE_MIMES["." + kind])},
     )
     assert uploaded.status_code == 200, uploaded.text
     attachment = uploaded.json()
@@ -76,9 +79,9 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
     parses, lead_calls, helper_calls = [], [], []
     extract = attachment_read.extract_attachment_bounded
 
-    async def parse(*args):
+    async def parse(*args, **kwargs):
         parses.append(args[0].id)
-        return await extract(*args)
+        return await extract(*args, **kwargs)
 
     monkeypatch.setattr(attachment_read, "extract_attachment_bounded", parse)
     question = {"question": "Which audience?", "type": "free_text", "options": []}
@@ -97,6 +100,7 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
                         "profile": case.fixture.case.args["reference_start"].profile_name,
                         "task": "Read the attached Office document and report its text.",
                         "delegation_role": "helper",
+                        "required_source_urls": [],
                     },
                 )
             elif index == helper_count + 1:
@@ -108,7 +112,10 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
         if "attachment_read" in names:
             helper_calls.append(body)
             if len(helper_calls) % 2:
-                message = call("read-office", "attachment_read", {"artifact_id": artifact.id})
+                arguments = {"artifact_id": artifact.id}
+                if boundary == "selected":
+                    arguments.update(slides=[31], detail="content", expected_content_hash="sha256:" + hashlib.sha256(content).hexdigest())
+                message = call("read-office", "attachment_read", arguments)
             else:
                 assert "Original Office profit is 42." in json.dumps(body)
                 if boundary == "unknown":
@@ -141,7 +148,7 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
         async with open_shared_ctx(case.path) as db:
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card_id))
-        assert checkpoint.contract == "ordinary-lead-loop.v9"
+        assert checkpoint.contract == "ordinary-lead-loop.v12"
         if boundary == "resume":
             for mutation in ("legacy", "other_attachment", "missing_proof"):
                 value = json.loads(checkpoint.encode())
@@ -213,7 +220,7 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
             case.app.state.session_store = orch.session_store
             case.app.state.clarification_store = orch.clarification_store
             monkeypatch.setattr(events, "_default_registry", orch.event_registry)
-        elif boundary not in {"resume", "unknown"}:
+        elif boundary not in {"resume", "unknown", "selected"}:
             await change_material()
         orch.artifact_store = ArtifactStore(str(case.path), artifacts.backend)
         monkeypatch.setenv("FEATURE_CHAT_MULTI_HELPER_QUESTION", "0")
@@ -221,12 +228,26 @@ async def test_native_attachment_read_continues_without_reparsing(http_start, mo
             f"/api/v1/clarifications/{card_id}/resolve",
             json={"answers": [{"question": question["question"], "source": "custom", "answer": "Board members"}]},
         )
-        success = boundary in {"resume", "recreated", "unknown"}
+        success = boundary in {"resume", "recreated", "unknown", "selected"}
         assert answered.status_code == (200 if success or boundary == "confirmation_race" else 409), answered.text
         if answered.status_code == 200:
             await settled(turn_id)
         turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
         assert turn["status"] == ("completed" if success else "failed" if boundary == "confirmation_race" else "clarification_pending")
-        assert len(lead_calls) == helper_count + 1 + int(success)
+        assert len(lead_calls) == helper_count + 1 + 2 * int(success)
+        if success:
+            reviews = [
+                message["content"]
+                for message in lead_calls[-1]["messages"]
+                if message["role"] == "user"
+                and isinstance(message.get("content"), str)
+                and "Fix requirement scope before filling evidence IDs." in message["content"]
+            ]
+            assert len(reviews) == 1
+            review = json.JSONDecoder().raw_decode(reviews[0].split("review_context (JSON data): ", 1)[1])[0]
+            assert len(review["failed_calls"]) == int(boundary == "unknown")
+            before_calls = [item for message in lead_calls[-2]["messages"] for item in message.get("tool_calls", [])]
+            after_calls = [item for message in lead_calls[-1]["messages"] for item in message.get("tool_calls", [])]
+            assert before_calls == after_calls
         assert len(helper_calls) == 2 * helper_count
         assert parses == [artifact.id] * helper_count

@@ -240,3 +240,24 @@ describe("Profile settings: after Coach edits", () => {
     expect(screen.queryByRole("region", { name: "有未保存的更改" })).toBeNull();
   });
 });
+
+describe("个人设置 · 提醒邮件 (FEATURE_NOTIFICATION_DELIVERY)", () => {
+  it("is shown only with recorded deliveries on, and saves on selection", async () => {
+    fetchMe.mockResolvedValue({ ...me, capabilities: { notification_delivery: true } });
+    renderIntl(<SettingsProfile />);
+
+    const button = await screen.findByTestId("reminder-emails-button");
+    await waitFor(() => expect(button).toHaveTextContent("开启"));
+    fireEvent.click(button);
+    const menu = await screen.findByTestId("reminder-emails-button-menu");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "关闭" }));
+
+    await waitFor(() => expect(setUserSetting).toHaveBeenCalledWith("notification_email_reminders", "off"));
+  });
+
+  it("is absent without the switch", async () => {
+    renderIntl(<SettingsProfile />);
+    await screen.findByTestId("coach-after-edit-button");
+    expect(screen.queryByTestId("reminder-emails-button")).toBeNull();
+  });
+});

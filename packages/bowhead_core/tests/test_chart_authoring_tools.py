@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from bowhead_core.canvas_store import CanvasStore
-from bowhead_core.canvas_tools import _add_chart, _remove_chart
+from bowhead_core.canvas_tools import _add_chart, _add_image, _remove_chart
 from bowhead_core.chart.authoring_tools import _simple_chart_kinds, edit_chart, read_chart
 from test_add_chart_validation import _FakeArtifact, _RichArtifactStore, _StubCtx
 
@@ -100,6 +100,7 @@ async def test_failed_chart_edit_blocks_replacement_and_report_rewrite_across_pe
     assert (await read_chart({"section_id": section_id}, ctx))["error"] == "chart_source_projection_unavailable"
     peer = copy.copy(ctx)
     assert (await _add_chart({"data_artifact_id": "art_aaaaaaaaaaaa", "title": "Replacement"}, peer))["error"] == "chart_edit_incomplete"
+    assert (await _add_image({"artifact_id": "art_aaaaaaaaaaaa"}, peer))["error"] == "chart_edit_incomplete"
     assert (await _remove_chart({"section_ids": [section_id], "reason": "replaced"}, peer))["error"] == "chart_edit_incomplete"
     assert (await _write_report({"content": "Replacement report"}, peer))["error"] == "chart_edit_incomplete"
     after = (await store.list_sections(result["canvas_id"]))[0]
@@ -156,6 +157,7 @@ async def test_registered_chart_operations_wait_for_inflight_failed_read_or_edit
         asyncio.create_task(registry.execute("add_chart", {"data_artifact_id": "art_aaaaaaaaaaaa", "title": "Replacement"}, peer)),
         asyncio.create_task(registry.execute("remove_chart", {"section_ids": [result["section_id"]], "reason": "replaced"}, peer)),
         asyncio.create_task(registry.execute("write_report", {"content": "Replacement report"}, peer)),
+        asyncio.create_task(registry.execute("add_image", {"artifact_id": "art_aaaaaaaaaaaa"}, peer)),
     ]
     await asyncio.sleep(0)
     assert all(not task.done() for task in writes)
@@ -602,3 +604,63 @@ async def test_registered_edit_settles_in_durable_execution(chart, tmp_path):
         assert connection.execute("SELECT state, non_retriable FROM turn_effect_attempts").fetchone() == ("settled", 1)
         assert connection.execute("SELECT outcome FROM turn_effect_settlements").fetchone() == ("confirmed_applied",)
         assert connection.execute("SELECT COUNT(*) FROM turn_events WHERE event_type='canvas.section_patched'").fetchone() == (1,)
+
+
+async def test_palette_edit_and_reset_keep_native_identity_rows_and_source(chart):
+    store, ctx, created = chart
+
+    async def palette():
+        return [{"index": i, "light": c, "dark": c} for i, c in enumerate(["#2563A7", "#2F7F87", "#52607B", "#B06B33", "#718356", "#3B4654"])]
+
+    ctx.report_read_access = SimpleNamespace(chart_palette=palette)
+    args = {"section_id": created["section_id"]}
+    before = (await store.list_sections(created["canvas_id"]))[0]
+    read = await read_chart(args, ctx)
+    assert read["views"][0]["editable_color_series"] == [{"key": "value", "label": "value", "color_index": None}]
+    assert read["color_options"][4]["light"] == "#718356"
+    edited = await edit_chart({**args, "expected_rev": before.rev, "changes": {"series_colors": {"value": 4}}}, ctx)
+    after = (await store.list_sections(created["canvas_id"]))[0]
+    assert edited["rev"] == before.rev + 1
+    assert edited["series_colors"] == {"value": 4}
+    assert after.id == before.id
+    assert after.payload["spec"]["rows"] == before.payload["spec"]["rows"]
+    assert after.payload["spec"]["source_meta"] == before.payload["spec"]["source_meta"]
+    assert after.payload["spec"]["columns"][1]["color_index"] == 4
+    reset = await edit_chart({**args, "expected_rev": after.rev, "changes": {}, "reset": {"series_colors": ["value"]}}, ctx)
+    assert reset["series_colors"] == {"value": None}
+    assert "color_index" not in ((await store.list_sections(created["canvas_id"]))[0]).payload["spec"]["columns"][1]
+
+
+@pytest.mark.parametrize("value", [True, -1, 6, "green", "#008000", {"backgroundColor": "green"}])
+async def test_color_edits_reject_unoffered_values_without_writing(chart, value):
+    store, ctx, created = chart
+
+    async def palette():
+        return [{"index": i, "light": "#718356", "dark": "#718356"} for i in range(6)]
+
+    ctx.report_read_access = SimpleNamespace(chart_palette=palette)
+    before = (await store.list_sections(created["canvas_id"]))[0]
+    result = await edit_chart({"section_id": before.id, "expected_rev": before.rev, "changes": {"series_colors": {"value": value}}}, ctx)
+    assert result["error"] == "invalid_chart_change"
+    assert ((await store.list_sections(created["canvas_id"]))[0]).payload == before.payload
+    assert ((await store.list_sections(created["canvas_id"]))[0]).rev == before.rev
+
+
+async def test_chart_tools_use_scoped_report_access_without_relying_on_http_projection(chart):
+    _, ctx, created = chart
+    project = ctx.chart_authoring_projection
+    ctx.chart_authoring_projection = None
+    ctx.report_read_access = SimpleNamespace(
+        session_id=ctx.session_id,
+        workspace_id=ctx.workspace_id,
+        team_id=getattr(ctx, "team_id", None),
+        user_id=ctx.user_id,
+        project_chart=project,
+    )
+    read = await read_chart({"section_id": created["section_id"]}, ctx)
+    assert "error" not in read
+    assert read["section_id"] == created["section_id"]
+    assert read["views"][0]["sample"]
+    ctx.report_read_access.user_id = "another-user"
+    denied = await read_chart({"section_id": created["section_id"]}, ctx)
+    assert denied["error"] == "chart_source_projection_unavailable"

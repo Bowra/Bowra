@@ -32,7 +32,7 @@
       "forms": [
         "user_language"
       ],
-      "reason": "Answer language is supported; account name, interface language, style and Coach preferences remain manual."
+      "reason": "Answer language is supported; account name, interface language, style, Coach and reminder-email preferences remain manual."
     },
     "/settings/security/": {
       "status": "manual",

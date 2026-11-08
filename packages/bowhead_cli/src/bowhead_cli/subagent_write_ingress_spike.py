@@ -85,10 +85,12 @@ _REVISION_STORE_PATH = "packages/bowhead_core/src/bowhead_core/agent_revision_st
 # removals fail readiness). Within its own BEGIN IMMEDIATE, AgentVersionService reuses the revision store's
 # `_*_conn` primitives and checks (owner / qualified reviewer / owner still active / lifecycle; see _activate and
 # submit_for_review; create_override only writes audit records, reviewer_projection only reads); AgentChangeProposalStore
-# only reuses the behavior authoring service. These accesses neither handle the transaction token nor directly call AccessControlStore authorization primitives.
+# reuses behavior authoring and validates knowledge-write authorization in the existing transaction.
+# These accesses neither handle the transaction token nor bypass AccessControlStore authorization.
 _REGISTERED_REVISION_STORE_PRIVATE_ACCESS: frozenset[str] = frozenset(
     {
         "packages/bowhead_core/src/bowhead_core/agent_change_proposal_store.py:AgentChangeProposalStore.__init__:_behavior_authoring",
+        "packages/bowhead_core/src/bowhead_core/agent_change_proposal_store.py:AgentChangeProposalStore._write_working_conn:_validate_knowledge_write",
         "packages/bowhead_core/src/bowhead_core/agent_version_service.py:AgentVersionService._activate:_activate_conn",
         "packages/bowhead_core/src/bowhead_core/agent_version_service.py:AgentVersionService._activate:_aggregate_conn",
         "packages/bowhead_core/src/bowhead_core/agent_version_service.py:AgentVersionService._activate:_candidate_conn",

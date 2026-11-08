@@ -196,7 +196,8 @@ describe("保存键为灰时，理由长在按钮旁边", () => {
 
     const save = [...document.querySelectorAll("button")]
       .find((b) => b.textContent?.includes("common.save"));
-    expect(save?.getAttribute("aria-describedby")).toBe("connect-save-blocked");
+    expect(save?.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(save!.getAttribute("aria-describedby")!)?.textContent).toContain("connect.blocked_capability_missing");
     expect(save?.disabled).toBe(true);
   });
 
@@ -249,7 +250,7 @@ describe("地址提示跟着部署模式走", () => {
   // key alone renders missing wording as key itself; wording alone may coincidentally pass despite wrong wiring.
   const hint = () =>
     document.querySelector('label[for="mset-provider-base-url"]')
-      ?.parentElement?.querySelector(".hint")?.textContent ?? "";
+      ?.closest(".fld")?.querySelector(".hint")?.textContent ?? "";
 
   it("★ local（私有化部署的默认）用 local 那句", () => {
     renderPanel({}, { deploymentMode: "local" });

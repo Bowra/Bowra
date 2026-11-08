@@ -29,8 +29,8 @@ class PresentationItem(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     artifact_id: str = Field(min_length=1, max_length=128, pattern=r"^art_[A-Za-z0-9_-]+$")
-    title: str | None = Field(default=None, max_length=120)
-    description: str | None = Field(default=None, max_length=256)
+    title: str | None = Field(default=None, max_length=120, description="Legacy audit label only. File actions display the original filename.")
+    description: str | None = Field(default=None, max_length=256, description="Legacy audit text only. Not displayed on file actions.")
 
 
 class PresentationArguments(BaseModel):
@@ -199,23 +199,16 @@ async def present_artifacts(arguments: dict, ctx) -> dict:
         outputs = []
         for item in items:
             artifact = await available_artifact(ctx, item["artifact_id"])
-            output = {**item, "name": artifact.filename, "mime": artifact.mime, "size": artifact.size}
+            output = {"artifact_id": artifact.id, "name": artifact.filename, "mime": artifact.mime, "size": artifact.size}
             if (inspection := await inspect_retained_html(ctx.artifact_store, artifact)) is not None:
                 output["html_static_check"] = inspection
             outputs.append(output)
         await _require_scope(ctx)
-        names = {output["name"] for output in outputs}
-        label_conflicts = [
-            {"artifact_id": output["artifact_id"], "code": "title_names_another_artifact"}
-            for output in outputs
-            if output.get("title") in names and output["title"] != output["name"]
-        ]
         return NativePresentationResult(
             {
                 "ok": True,
-                "artifacts": items,
+                "artifacts": [{"artifact_id": item["artifact_id"]} for item in items],
                 "output_artifacts": outputs,
-                **({"label_conflicts": label_conflicts} if label_conflicts else {}),
             },
             declaration=declaration,
             receipt=receipt,
@@ -316,7 +309,7 @@ def register_artifact_presentation(registry) -> None:
                     "File names, MIME types and sizes come from the original files. Never infer their identity from list order or supplied titles. "
                     "For recovery, supply IDs only and use output_artifacts as the authoritative identity table. "
                     "The runtime renders the file list and download links; avoid repeating unrequested raw IDs in prose. "
-                    "Supply 1–16 files per call; optional title is at most 120 characters and description at most 256."
+                    "Supply 1–16 files per call. Legacy titles and descriptions are retained for audit only, never as file action labels."
                 ),
                 input_schema=PresentationArguments.model_json_schema(),
             ),

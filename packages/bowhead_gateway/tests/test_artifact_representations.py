@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend, S3Backend
 from bowhead_core.session_store import SessionStore
-from bowhead_gateway.artifact_representations import RAW_LIMIT, AuthoringExecutor, build_representation
+from bowhead_gateway.artifact_representations import RAW_LIMIT, AuthoringExecutor, PresentationPreviewCoordinator, build_representation
 from bowhead_gateway.routes import files
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -171,6 +171,7 @@ async def test_pptx_visual_representation_reads_exact_bytes_and_rechecks_visibil
     app.state.artifact_store = store
     app.state.settings = SimpleNamespace(dev_default_user="owner", auth_mode="dev")
     app.state.document_service = SimpleNamespace(executor=lambda: SimpleNamespace(root=store.backend.root_dir, url="http://executor", token="test"))
+    app.state.presentation_previews = PresentationPreviewCoordinator()
     client = TestClient(app)
     path = f"/api/v1/files/{art.id}/representations/pptx-pdf"
     assert client.get(path, headers={"X-Bowhead-User-Id": "other"}).status_code == 404

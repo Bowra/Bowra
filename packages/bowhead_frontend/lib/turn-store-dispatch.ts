@@ -5,6 +5,7 @@ import { parseContextMaintenanceAction } from "./context-maintenance";
 import { projectCoachResourceOpen } from "./coach-resource-editors";
 import { projectCoachCaseEffects, projectCoachOperationOpen } from "./coach-operations";
 import { projectCoachAlignmentCard } from "./coach-alignment-cards";
+import { sandboxInputArtifactIds } from "./final-deliverables";
 /**
  * turn-store-dispatch — route raw SSE event payloads into lib/turn-store
  * mutators. Lives next to use-turn-runner.ts so the dual-emit window
@@ -58,10 +59,12 @@ import {
   applyModelRetryScheduled,
   applyNarrativeAppend,
   applyNarrativeSuperseded,
+  applyNarrativeWithdrawn,
   applyPeerAgentAttribution,
   applyPeerName,
   applyPeerProse,
   applyPeerProseKey,
+  applyPeerProseWithdrawn,
   applyPeerRestart,
   applyPeerTerminal,
   applyStepDone,
@@ -82,7 +85,7 @@ import {
 } from "./turn-store";
 import { applyDraftEvent } from "./config-copilot-draft";
 import { projectConfigurationCanvasOpen, projectConfigurationCanvasProposal } from "./configuration-canvas-events";
-import { applyLiteProposal } from "./config-copilot-lite";
+import { applyLiteProposal, showAgentSavedAppearance } from "./config-copilot-lite";
 import type { ConfigDraftUpdatedPayload, ConfigLiteProposePayload } from "./types";
 import {
   applyPlanProposed,
@@ -107,7 +110,7 @@ import type {
   WireStepError,
   WireSubStep,
 } from "./sse-events";
-import { normalizeStepError, normalizeStepState } from "./sse-events";
+import { normalizeStepError, normalizeStepState, parseStreamRestartWithdrawal } from "./sse-events";
 
 /**
  * Phase 1.7-A — per-turn narrative cursor. A contiguous run of
@@ -236,7 +239,7 @@ export function dispatchToTurnStore(
   // A pending model retry is a transient running status: the next model output
   // or terminal event clears it. Live SSE and replay share this rule, so a
   // replayed finished turn always ends without it.
-  if (eventName !== "llm.retry_scheduled" && !MODEL_RETRY_PRESERVING_EVENTS.has(eventName)) {
+  if (eventName !== "llm.retry_scheduled" && !preservesModelRetry(eventName, payload)) {
     const retryTurnId = cardId ?? pickTurnId(payload) ?? streamTurnId;
     const eventSeq = typeof payload.seq === "number" && Number.isFinite(payload.seq) ? payload.seq : undefined;
     if (retryTurnId) clearModelRetry(retryTurnId, eventSeq);
@@ -250,6 +253,30 @@ export function dispatchToTurnStore(
       if (shouldSkipAppliedSeq(turnId, payload)) return true;
       const status = parseModelRetryStatus(payload);
       if (status) applyModelRetryScheduled(turnId, status);
+      return true;
+    }
+
+    case "llm.stream_restarted": {
+      // The Router restarted a model attempt after part of its output was streamed:
+      // withdraw exactly that output from the end of the agent's streamed text. The
+      // seq guard keeps a reconnect replay from withdrawing it twice. Routed like
+      // llm.retry_scheduled (live frames may omit card_id).
+      const turnId = cardId ?? pickTurnId(payload) ?? streamTurnId ?? null;
+      if (!turnId) return false;
+      if (shouldSkipAppliedSeq(turnId, payload)) return true;
+      const withdrawal = parseStreamRestartWithdrawal(payload);
+      if (withdrawal.parentAgentId) {
+        applyPeerProseWithdrawn(turnId, withdrawal.parentAgentId, withdrawal.partialAnswerChars);
+      }
+      // Narrative characters apply whatever the scope: a reference primary streams Lead
+      // narrative from a helper-scoped stream; an ordinary helper reports zero.
+      if (withdrawal.narrativeChars > 0) {
+        const dropped = applyNarrativeWithdrawn(turnId, withdrawal.narrativeChars);
+        // The retried attempt's first delta must not reuse the segId of a beat that
+        // no longer exists; when the open segment was dropped, start a fresh one.
+        const cursor = _narrativeCursor.get(turnId);
+        if (cursor?.active && dropped.includes(cursor.segId)) _invalidateNarrativeSeg(turnId);
+      }
       return true;
     }
 
@@ -368,7 +395,7 @@ export function dispatchToTurnStore(
         startedAt: ev.started_at,
         callId: ev.call_id ?? null,
         subagentId: ev.subagent_id ?? null,
-        codeInput: mapCodeInput(ev.code_input),
+        codeInput: mapCodeInput(ev.code_input, ev.tool_name === "python_sandbox" ? payload.arguments_preview : undefined),
         evtSeq: readEvtSeq(payload),
       });
       return true;
@@ -460,7 +487,9 @@ export function dispatchToTurnStore(
           : {}),
         rows: rows as ConfigLiteProposePayload["rows"],
         notes: (payload.notes && typeof payload.notes === "object" ? payload.notes : {}) as Record<string, string>,
+        ...(payload.status === "applied" ? { status: "applied" as const } : {}),
       });
+      if (source === "live") showAgentSavedAppearance(proposalId);
       projectConfigurationCanvasProposal(turnId, proposalId);
       pushLiteBeat(turnId, proposalId);
       return true;
@@ -952,15 +981,26 @@ export function dispatchToTurnStore(
 /**
  * Events that are not model output and must not clear a pending retry status:
  * content-free bookkeeping (the retried attempt's own physical-send marker
- * included) and user/collaboration decorations.
+ * included), the withdrawal of the failed attempt's output, and user/collaboration
+ * decorations.
  */
 const MODEL_RETRY_PRESERVING_EVENTS: ReadonlySet<string> = new Set([
   "turn.llm_invocation",
   "turn.effect_disclosure_settled",
+  "llm.stream_restarted",
   "agent.collaboration",
   "agent.context",
   "emoji_ack",
 ]);
+
+function preservesModelRetry(eventName: string, payload: Record<string, unknown>): boolean {
+  if (MODEL_RETRY_PRESERVING_EVENTS.has(eventName)) return true;
+  // Closing a Lead writing step carries no new output: its code already streamed as
+  // step_progress. The backend closes the writing steps of a withdrawn attempt
+  // around `llm.stream_restarted`, while the retry is still pending; the retried
+  // attempt's own output always precedes the close of any step it starts.
+  return eventName === "step_done" && payload.step_type === "lead_thinking_writing";
+}
 
 export function parseModelRetryStatus(payload: Record<string, unknown>): ModelRetryStatus | null {
   const retry = payload.retry;
@@ -1076,7 +1116,7 @@ function mapSubSteps(wire: WireSubStep[] | null | undefined): SubStepResult[] | 
   }));
 }
 
-function mapCodeInput(value: unknown): StepCodeInput | null {
+function mapCodeInput(value: unknown, preview?: unknown): StepCodeInput | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   if (
@@ -1085,10 +1125,12 @@ function mapCodeInput(value: unknown): StepCodeInput | null {
     || input.code.length === 0
     || typeof input.truncated !== "boolean"
   ) return null;
+  const inputIds = sandboxInputArtifactIds(input, preview);
   return {
     language: "python",
     code: input.code,
     truncated: input.truncated,
+    ...(inputIds.length ? { inputArtifactIds: inputIds } : {}),
   };
 }
 

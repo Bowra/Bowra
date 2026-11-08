@@ -3207,6 +3207,59 @@ textarea {
   color: var(--c-ink);
   background: var(--c-surface-2);
 }
+/* FEATURE_NOTIFICATION_REACH: Team label, action links and the help link. */
+.notification-row.has-actions .notification-row__archive {
+  grid-row: 1 / span 2;
+}
+.notification-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.notification-row__team {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+  background: var(--c-surface-2);
+  color: var(--c-ink-2);
+  font-size: 0.65625rem;
+}
+.notification-row__actions {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px 10px 31px;
+}
+.notification-row__action {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--c-line);
+  font-size: 0.75rem;
+  color: var(--c-ink-2);
+  background: var(--c-surface);
+}
+.notification-row__action:hover {
+  background: var(--c-surface-2);
+  color: var(--c-ink);
+}
+.notification-row__action.primary {
+  border-color: transparent;
+  background: var(--c-accent);
+  color: var(--c-surface);
+}
+.notification-row__action.primary:hover {
+  background: color-mix(in srgb, var(--c-accent) 88%, var(--c-ink));
+  color: var(--c-surface);
+}
+.notification-panel__help {
+  margin-left: auto;
+}
 .notification-empty {
   min-height: 138px;
   display: flex;
@@ -4610,6 +4663,8 @@ textarea {
  * Container on this scroll layer, not `.v2-ws-left`: container-type adds containment,
  * riskier on flex parent. */
 .v2-ws-left-body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -10405,6 +10460,31 @@ textarea {
   max-width: none;
   padding: 0;
 }
+/* Standalone HTML uses the Results pane's remaining height at every level. */
+.v2-ws-right-body.results-body--artifact:has(.safe-html-preview) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.results-body--artifact > .results-object-surface--artifact:has(.safe-html-preview),
+.results-body--artifact .result-file-viewer.standalone:has(.safe-html-preview),
+.results-body--artifact .artifact-viewer:has(> .safe-html-preview):not(.artifact-viewer--fullscreen) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.results-body--artifact .safe-html-preview {
+  flex: 1;
+  min-height: 0;
+}
+.results-body--artifact .safe-html-preview-frame {
+  min-height: 0;
+}
+.results-body--artifact .safe-html-preview-status,
+.results-body--artifact .safe-html-preview-hint {
+  flex-shrink: 0;
+}
 .v2-ws-right-body.results-body--code {
   max-width: none;
   padding: 16px;
@@ -16099,8 +16179,8 @@ textarea {
 /* ═══════════════════════════════════════════════════════════════════════════
    Sprint τ — chat layout overhaul (real Claude Design styles-chat-overhaul.css)
 
-   Replaces σ-2's hand-derived ~400 lines. Source of truth:
-   `docs/sprints/rho-chat-experience/design/styles-chat-overhaul.css` (610 lines).
+   Historical input: the retired styles-chat-overhaul.css design snapshot.
+   Current contract: docs/design/component-design-spec/README.md; code is authoritative.
 
    ★ Adaptation from design source ★
    - `.chat-panel { width: 640px }` is FIXED in design but our workspace has
@@ -17089,7 +17169,7 @@ textarea {
   margin: 0;
   color: var(--c-ink-2);
   font-family: var(--f-mono);
-  font-size: 0.5625rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -22601,18 +22681,9 @@ textarea {
   font: 400 0.65625rem var(--font-v2-mono, ui-monospace, Menlo, monospace);
   font-variant-numeric: tabular-nums;
 }
-.bh-band__row--h1 .bh-band__lab {
-  opacity: 0.48;
-}
-.bh-band__row--h1 .bh-band__rmeta {
-  opacity: 0.62;
-}
+/* History rows recede by ink step in ui-refresh-workbench.css, not by opacity: opacity took 12px text below 4.5:1. */
 .bh-band__row--h1 .bh-band__glyph {
   opacity: 0.9;
-}
-.bh-band__row--h2 .bh-band__lab,
-.bh-band__row--h2 .bh-band__rmeta {
-  opacity: 0.76;
 }
 
 .bh-band__row--ghost {
@@ -23579,8 +23650,9 @@ textarea {
 }
 
 /* Canvas reading: expose existing evidence interactions without adding chrome. */
-.chart-keyboard-hint { display: none; margin-block: 8px; }
-.v2-chart-canvas-wrap:focus-visible + .chart-keyboard-hint { display: block; }
+/* Keep pointer targets stable when focus leaves keyboard chart guidance. */
+.chart-keyboard-hint { visibility: hidden; margin-block: 8px; }
+.v2-chart-canvas-wrap:focus-visible + .chart-keyboard-hint { visibility: visible; }
 .chart-annotation-action { font-style: normal; gap: 8px; }
 .chart-annotation-action[aria-pressed="true"] { background: var(--c-bg-2); }
 .chart-annotation-details { text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }

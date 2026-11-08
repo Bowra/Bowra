@@ -18,9 +18,12 @@ from typing import Any
 import aiosqlite
 
 from bowhead_core.account_deletion import AccountDeletionError
-from bowhead_core.sqlite_domains import TABLE_DOMAINS
+from bowhead_core.sqlite_domains import APPENDED_TABLES, TABLE_DOMAINS
 
 _POLICY = json.loads(Path(__file__).with_name("account_erasure_policy.json").read_text())
+# Tables created by revisions after the domain split, by the attached schema that holds them. A
+# legacy single-file database predates them, so their absence there is not an incomplete schema.
+_DOMAIN_ONLY_TABLES = {table: f"domain_{domain}" for table, (domain, _revision) in APPENDED_TABLES.items()}
 _INFRASTRUCTURE = {
     "alembic_version",
     "_phase0_probe",
@@ -116,6 +119,9 @@ async def reviewed_schema(db: aiosqlite.Connection) -> dict[str, list[str]]:
     primary: dict[str, list[str]] = {}
     for table, policy in _POLICY["tables"].items():
         if table == "terminal_authority_scope_epochs" and "domain_execution" not in schemas and table not in names:
+            continue
+        # Tables appended after the domain split exist only in the domain layout.
+        if table in _DOMAIN_ONLY_TABLES and _DOMAIN_ONLY_TABLES[table] not in schemas and table not in names:
             continue
         if table not in names:
             raise AccountDeletionError("account_erasure_schema_incomplete")

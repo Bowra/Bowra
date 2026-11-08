@@ -3,6 +3,7 @@
 import { ShopifyContentConfirmations } from "@/components/chat/shopify-content-confirmations";
 import { EmailSendConfirmations } from "@/components/chat/email-send-confirmations";
 import { PersonalMcpConfirmations } from "@/components/chat/personal-mcp-confirmations";
+import { TeamToolConfirmations } from "@/components/chat/team-tool-confirmations";
 
 import { usePathname } from "next/navigation";
 
@@ -47,6 +48,7 @@ export function AuthenticatedAppRoot({
             <PersonalMcpConfirmations />
             <EmailSendConfirmations />
             <ShopifyContentConfirmations />
+            <TeamToolConfirmations />
           </AuthenticatedAppChrome>
         </AuthenticatedAppBoundary>
       </AuthSessionProvider>

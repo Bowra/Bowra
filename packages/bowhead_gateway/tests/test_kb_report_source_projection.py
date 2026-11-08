@@ -91,7 +91,9 @@ def _membership(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "synthetic-kb-projection-jwt-secret-32bytes")
     member_of = {"ws_kb"}
 
-    async def fake_build(request: object, *, user: object, workspace_id: str, allow_missing_workspace: bool, operation: object) -> object:
+    async def fake_build(
+        request: object, *, user: object, workspace_id: str, allow_missing_workspace: bool, operation: object, expected_team_id: str | None = None
+    ) -> object:
         if workspace_id and workspace_id not in member_of:
             raise PermissionError("not a member")
         return SimpleNamespace(workspace_id=workspace_id)

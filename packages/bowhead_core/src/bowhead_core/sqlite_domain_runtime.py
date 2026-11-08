@@ -101,6 +101,7 @@ def _busy() -> sqlite3.OperationalError:
     error = sqlite3.OperationalError("database is locked: SQLite authority lease is busy; retry the complete transaction")
     error.sqlite_errorcode = sqlite3.SQLITE_BUSY
     error.sqlite_errorname = "SQLITE_BUSY"
+    error.bowhead_authority_busy = True
     return error
 
 
@@ -496,6 +497,9 @@ class DomainCursor(DiagnosticCursor):
         return result
 
     def close(self) -> None:
+        # Deferred cleanup can run after an earlier worker job closed the connection.
+        if getattr(self, "_domain_closed", False):
+            return
         super().close()
         self._domain_closed = True
         connection = self.connection

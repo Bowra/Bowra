@@ -37,6 +37,7 @@ import {
   SourceToolSelectionDialog,
   type ToolSelectionSaved,
 } from "@/components/settings/tools/source-tool-selection-dialog";
+import { SourceToolCategoryDialog } from "@/components/settings/tools/source-tool-category-dialog";
 import type { ToolSourceRefreshResult } from "@/lib/team-tool-source-refresh-api";
 import {
   configureTavily,
@@ -281,6 +282,7 @@ function SourceCard({
   onValidate,
   onRefresh,
   onChooseTools,
+  onConfirmCategories,
   onAuthorize,
   onEdit,
   onDelete,
@@ -300,6 +302,8 @@ function SourceCard({
   onRefresh: (returnFocusTo: HTMLElement | null) => void;
   /** Open Choose Tools; `returnFocusTo` is the control that gets focus back on close. */
   onChooseTools: (returnFocusTo: HTMLElement | null) => void;
+  /** Confirm tool categories; present only when requester confirmation is enabled. */
+  onConfirmCategories?: (returnFocusTo: HTMLElement | null) => void;
   onAuthorize: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -419,6 +423,14 @@ function SourceCard({
                     label: t("action_choose_tools"),
                     disabled: busy,
                     onSelect: () => onChooseTools(managementActionsRef.current?.querySelector<HTMLElement>(".ui-row-more") ?? null),
+                  }]
+                  : []),
+                ...(canChooseTools && onConfirmCategories
+                  ? [{
+                    id: "confirm-categories",
+                    label: t("category_action"),
+                    disabled: busy,
+                    onSelect: () => onConfirmCategories(managementActionsRef.current?.querySelector<HTMLElement>(".ui-row-more") ?? null),
                   }]
                   : []),
                 { id: "edit", label: t("action_edit"), disabled: busy, onSelect: onEdit },
@@ -712,10 +724,17 @@ export function ToolsManager() {
   const [builtinPickerOpen, setBuiltinPickerOpen] = useState(false);
   const shopifyText = useTranslations("shopify_tool");
   const [shopifyEnabled, setShopifyEnabled] = useState(false);
+  const [toolConfirmationEnabled, setToolConfirmationEnabled] = useState(false);
   const [shopifyCreateRequest, setShopifyCreateRequest] = useState(0);
   useEffect(() => {
     let active = true;
-    void fetchMe().then((me) => { if (active) setShopifyEnabled(Boolean(me.capabilities?.shopify_plugin)); }).catch(() => undefined);
+    void fetchMe()
+      .then((me) => {
+        if (!active) return;
+        setShopifyEnabled(Boolean(me.capabilities?.shopify_plugin));
+        setToolConfirmationEnabled(me.capabilities?.team_tool_confirmations === true);
+      })
+      .catch(() => undefined);
     return () => { active = false; };
   }, []);
   const [powerbiCreateRequest, setPowerbiCreateRequest] = useState(0);
@@ -758,6 +777,9 @@ export function ToolsManager() {
   } | null>(null);
   const [chooseTarget, setChooseTarget] = useState<{ source: TeamToolSourcePublic; highlight: string[] } | null>(null);
   const chooseReturnFocusRef = useRef<HTMLElement | null>(null);
+  const [categoryTarget, setCategoryTarget] = useState<TeamToolSourcePublic | null>(null);
+  const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
+  const categoryReturnFocusRef = useRef<HTMLElement | null>(null);
   const [chooseNotice, setChooseNotice] = useState<{ name: string; result: ToolSelectionSaved } | null>(null);
   const [oauthNotice, setOauthNotice] = useState<"success" | "error" | null>(null);
   const [usageTarget, setUsageTarget] = useState<{
@@ -1218,6 +1240,12 @@ export function ToolsManager() {
         </div>
       ) : null}
 
+      {categoryNotice ? (
+        <div className="legacy-ai-mb12">
+          <Notice tone="success">{t("category_saved", { name: categoryNotice })}</Notice>
+        </div>
+      ) : null}
+
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       {busy && !data ? (
@@ -1255,6 +1283,13 @@ export function ToolsManager() {
                 setRefreshTarget(s);
               }}
               onChooseTools={(returnFocusTo) => openChooseTools(s, returnFocusTo)}
+              onConfirmCategories={toolConfirmationEnabled
+                ? (returnFocusTo) => {
+                  categoryReturnFocusRef.current = returnFocusTo;
+                  setCategoryNotice(null);
+                  setCategoryTarget(s);
+                }
+                : undefined}
               onAuthorize={() => void onAuthorize(s)}
               onEdit={() => setEditTarget(s)}
               onDelete={() => {
@@ -1358,6 +1393,19 @@ export function ToolsManager() {
           returnFocusRef={chooseReturnFocusRef}
           onClose={() => setChooseTarget(null)}
           onSaved={(result) => void onChooseToolsSaved(chooseTarget.source, result)}
+        />
+      ) : null}
+
+      {categoryTarget ? (
+        <SourceToolCategoryDialog
+          source={categoryTarget}
+          returnFocusRef={categoryReturnFocusRef}
+          onClose={() => setCategoryTarget(null)}
+          onSaved={() => {
+            setCategoryNotice(categoryTarget.name);
+            setCategoryTarget(null);
+            void refresh();
+          }}
         />
       ) : null}
 

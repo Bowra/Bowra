@@ -5,8 +5,11 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import traceback
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 
 from bowhead_router.types import ToolSchema
@@ -29,8 +32,14 @@ FORM_SKILLS = {name: domain.skill for name, domain in DOMAINS.items()}
 SUPPORTED_FORMS: Final = frozenset(FORM_SKILLS)
 # Forms bound to the current Space: they need a Space in the target and their proposals stay on it.
 SPACE_FORMS: Final = frozenset({"workspace_i18n", "workspace_metadata", "space_instructions"})
+# Reversible personal choices that a server-grounded explicit request saves without a confirmation card.
+DIRECT_SAVE_FORMS: Final = frozenset({"user_language", "personal_appearance"})
 _EVENT_CANVAS_OPEN: Final = "configuration.canvas_open"
 _BINDING_ATTR = "_configuration_agent_binding"
+_LIST_UNAVAILABLE_MESSAGE: Final = (
+    "Some settings could not be checked because of a service problem; they are not denied. "
+    "Ask the user to try again shortly and to give the diagnostic reference to an administrator if it keeps failing."
+)
 AccessResolver = Callable[[ToolExecutionContext, str, bool], Awaitable[dict[str, Any]]]
 
 
@@ -83,6 +92,26 @@ class ConfigurationAgentBinding:
     finished: bool = False
     message: str = ""
     read_skills: set[str] = field(default_factory=set)
+
+
+def _saves_directly(binding: ConfigurationAgentBinding, form_id: str) -> bool:
+    """An explicit request quoted from this turn saves these forms; every other change waits for confirmation."""
+    return form_id in DIRECT_SAVE_FORMS and bool(binding.intent_quote)
+
+
+def _actions(form_id: str, reg: Any, binding: ConfigurationAgentBinding, editable: bool) -> list[str]:
+    actions = ["read"]
+    if editable:
+        actions += ["propose", "apply" if _saves_directly(binding, form_id) else "review" if reg.review_page else "confirm"]
+        if form_id in {"workspace_i18n", "workspace_metadata"}:
+            actions.append("open")
+    return actions
+
+
+def _save_policy(form_id: str, binding: ConfigurationAgentBinding) -> str:
+    if form_id == "user_language":
+        return "explicit_persistent_language_request"
+    return "explicit_appearance_request" if _saves_directly(binding, form_id) else "user_confirmation"
 
 
 def form_plugin_disabled(ctx: object, form_id: str) -> bool:
@@ -224,11 +253,7 @@ async def _read(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, An
     if form_id == "user_language" and "output_language" in choices and not german_ai_output_enabled():
         choices["output_language"] = [value for value in choices.get("output_language", []) if value != "de-DE"]
     schema = _read_schema(reg, fields, choices)
-    actions = ["read"]
-    if editable:
-        actions += ["propose", "apply" if form_id == "user_language" else "review" if reg.review_page else "confirm"]
-        if form_id in {"workspace_i18n", "workspace_metadata"}:
-            actions.append("open")
+    actions = _actions(form_id, reg, binding, editable)
     return {
         "ok": True,
         "form_id": form_id,
@@ -253,7 +278,7 @@ async def _read(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str, An
         "field_constraints": _field_constraints(schema),
         "allowed_values": choices,
         "editable_fields": sorted(fields) if editable else [],
-        "save_policy": "explicit_persistent_language_request" if form_id == "user_language" else "user_confirmation",
+        "save_policy": _save_policy(form_id, binding),
         "actions": actions,
         "required_skill": FORM_SKILLS[form_id],
         "target": {
@@ -326,7 +351,7 @@ async def _propose(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str,
     if requirement := _require_skill(binding, form_id):
         return requirement
     receipt = await _propose_handler(
-        args, ctx, expected_data=binding.baselines[form_id], prepare_only=True, emit_confirmation=form_id != "user_language"
+        args, ctx, expected_data=binding.baselines[form_id], prepare_only=True, emit_confirmation=not _saves_directly(binding, form_id)
     )
     receipt = {**receipt, "form_id": form_id, "saved": False}
     if receipt.get("ok"):
@@ -336,7 +361,7 @@ async def _propose(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str,
 
 
 async def _result(args: dict[str, Any], ctx: ToolExecutionContext, *, apply: bool = False) -> dict[str, Any]:
-    from bowhead_core.config_copilot_chat_tools import _form_context, _proposal_writer_provider
+    from bowhead_core.config_copilot_chat_tools import _form_context, _proposal_writer_provider, emit_saved_card
     from bowhead_core.config_draft_store import KIND_LITE_PROPOSAL
 
     binding = _binding(ctx)
@@ -348,8 +373,9 @@ async def _result(args: dict[str, Any], ctx: ToolExecutionContext, *, apply: boo
         return {"ok": False, "error": "configuration_proposal_not_found"}
     if draft.form_id in SPACE_FORMS and draft.workspace_id != ctx.workspace_id:
         return {"ok": False, "error": "configuration_target_mismatch"}
+    card_delivered: bool | None = None
     if apply:
-        if draft.form_id != "user_language":
+        if draft.form_id != "user_language" and not _saves_directly(binding, draft.form_id):
             return {"ok": False, "error": "user_confirmation_required", "proposal_id": draft.id, "status": draft.status}
         if not binding.intent_quote or draft.id not in binding.proposals:
             return {"ok": False, "error": "persistent_intent_required"}
@@ -369,7 +395,12 @@ async def _result(args: dict[str, Any], ctx: ToolExecutionContext, *, apply: boo
             if transition.outcome not in {"ok", "replay"}:
                 return {"ok": False, "error": "configuration_receipt_conflict", "status": "unknown"}
             draft = await store.get_draft(draft.id, team_id=ctx.team_id, owner_user_id=ctx.user_id)
+            if draft.form_id == "personal_appearance" and draft.status == "applied":
+                # The saved card is the user's Undo; its own receipt read stays authoritative.
+                card_delivered = await emit_saved_card(ctx, draft)
     receipt = {"ok": True, "proposal_id": draft.id, "form_id": draft.form_id, "status": draft.status, "saved": draft.status == "applied"}
+    if card_delivered is not None:
+        receipt["undo_card_emitted"] = card_delivered
     return receipt
 
 
@@ -443,9 +474,32 @@ def _compact_receipt(receipt: dict[str, Any], form_id: str | None) -> dict[str, 
     return receipt
 
 
+def _is_access_denial(exc: BaseException) -> bool:
+    """Denials from the access resolver: permission, entitlement or a 4xx domain refusal. Anything else is a service fault."""
+    from bowhead_core.entitlements import EntitlementDenied
+
+    status = getattr(exc, "status_code", None)
+    return isinstance(exc, (PermissionError, EntitlementDenied)) or (isinstance(status, int) and 400 <= status < 500)
+
+
+def _log_failure(event: str, form_id: str, tool: str, exc: BaseException) -> str:
+    """Log a safe failure record and return its diagnostic reference.
+
+    Only the exception type and innermost call site are logged, never the message, which may carry stored values.
+    A SQLite failure keeps the reference its own diagnostic log already used.
+    """
+    diagnostic_id = getattr(exc, "bowhead_diagnostic_id", None) or uuid.uuid4().hex
+    frames = traceback.extract_tb(exc.__traceback__)
+    callsite = f"{Path(frames[-1].filename).name}:{frames[-1].lineno}" if frames else "unknown"
+    logger.error(
+        "%s tool=%s form=%s exception_type=%s callsite=%s diagnostic_id=%s", event, tool, form_id, type(exc).__name__, callsite, diagnostic_id
+    )
+    return diagnostic_id
+
+
 def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolver: AccessResolver | None = None) -> None:
 
-    def guarded(handler, *, write=False, record=False):
+    def guarded(handler, *, write=False, record=False, tool=""):
         async def execute(args, ctx):
             binding = _binding(ctx)
             form_id = args.get("form_id")
@@ -468,14 +522,34 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
                 return {"ok": False, "error": "configuration_access_unavailable"}
             try:
                 ctx.access_context = await access_resolver(ctx, form_id, write)
-            except Exception:
-                return {"ok": False, "error": "configuration_access_denied"}
+            except Exception as exc:
+                if _is_access_denial(exc):
+                    return {"ok": False, "error": "configuration_access_denied"}
+                return {
+                    "ok": False,
+                    "error": "configuration_access_unavailable",
+                    "diagnostic_id": _log_failure("configuration_agent.access_check_failed", form_id, tool, exc),
+                    "message": (
+                        "Settings permissions could not be checked because of a service problem; this is not a permission denial. "
+                        "No setting changed. Ask the user to try again shortly and to give the diagnostic reference to an "
+                        "administrator if it keeps failing."
+                    ),
+                }
             if write and ctx.access_context.get("configuration_readonly"):
                 return {"ok": False, "error": "permission_denied"}
             try:
                 return await handler(args, ctx)
-            except Exception:
-                return {"ok": False, "error": "configuration_operation_failed", "status": "unknown"}
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": "configuration_operation_failed",
+                    "status": "unknown",
+                    "diagnostic_id": _log_failure("configuration_agent.operation_failed", form_id, tool, exc),
+                    "message": (
+                        "This operation stopped with an internal error, so its effect is unknown. Ask the user to check the "
+                        "setting before trying again and to give the diagnostic reference to an administrator if it keeps failing."
+                    ),
+                }
 
         async def with_receipt(args, ctx):
             receipt = await execute(args, ctx)
@@ -491,6 +565,7 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
         if binding is None:
             return {"ok": False, "error": "configuration_execution_not_admitted"}
         entries = []
+        unavailable = []
         for form_id, domain in DOMAINS.items():
             if (binding.form_id and binding.form_id != form_id) or form_plugin_disabled(ctx, form_id):
                 continue
@@ -499,12 +574,11 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
 
             # Reuse the exact read admission without changing execution baselines or requiring a method read.
             async def describe(_args, scoped, form_id=form_id, domain=domain):
-                from bowhead_core.config_copilot_chat_tools import _allowed_values, _proposable, _readable
+                from bowhead_core.config_copilot_chat_tools import _proposable, _readable
 
                 reg = get_form(form_id)
                 if not _readable(reg, scoped.access_context)[0]:
                     return {"ok": False}
-                fields = dict.fromkeys(configuration_form_fields(form_id))
                 editable = (
                     _proposable(reg, scoped.access_context)
                     and not scoped.access_context.get("configuration_readonly")
@@ -514,11 +588,7 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
                     editable = False
                 if form_id == "space_instructions" and not scoped.access_context.get("space_instructions_editable"):
                     editable = False
-                actions = ["read"]
-                if editable:
-                    actions += ["propose", "apply" if form_id == "user_language" else "review" if reg.review_page else "confirm"]
-                    if form_id in {"workspace_i18n", "workspace_metadata"}:
-                        actions.append("open")
+                actions = _actions(form_id, reg, binding, editable)
                 return {
                     "ok": True,
                     "form_id": form_id,
@@ -526,27 +596,34 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
                     "page": domain.page,
                     "description": domain.description,
                     "required_skill": domain.skill,
-                    "schema": _read_schema(reg, fields, _allowed_values(reg)),
+                    # Field names only: the JSON Schema with descriptions and limits comes from configuration_read.
+                    "fields": sorted(configuration_form_fields(form_id)),
                     "guidance": reg.guidance,
                     "review_page": reg.review_page,
                     "reset": {"fields": sorted(reg.reset_fields), "all": reg.reset_all},
                     "actions": actions,
                 }
 
-            result = await guarded(describe)({"form_id": form_id}, ctx)
+            result = await guarded(describe, tool="configuration_list")({"form_id": form_id}, ctx)
             if result.get("ok"):
                 entries.append(result)
+            elif result.get("error") == "configuration_access_unavailable" and "diagnostic_id" in result:
+                # A service fault is not a denial; report it instead of silently dropping the form.
+                unavailable.append({"form_id": form_id, "error": result["error"], "diagnostic_id": result["diagnostic_id"]})
+        if unavailable:
+            return {"ok": True, "forms": entries, "unavailable": unavailable, "message": _LIST_UNAVAILABLE_MESSAGE}
         return {"ok": True, "forms": entries}
 
     form = {
         "type": "string",
         "enum": sorted(SUPPORTED_FORMS),
-        "description": ("Use configuration_list to discover current caller-authorized domains and schemas. A selected original page fixes the form."),
+        "description": ("Use configuration_list to discover current caller-authorized domains. A selected original page fixes the form."),
     }
     specs = [
         (
             "configuration_list",
-            "Discover available configuration domains, schemas, field descriptions, original pages and permissions for the actual caller.",
+            "Discover available configuration domains, field names, guidance, original pages and permissions for the actual caller. "
+            "Read a form for its schema, field descriptions and limits.",
             {},
             [],
             discover,
@@ -558,14 +635,14 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
             "Do not read unrelated settings to handle an unsupported interface-language request or an unspecified language request.",
             {"form_id": form},
             ["form_id"],
-            guarded(_read, record=True),
+            guarded(_read, record=True, tool="configuration_read"),
         ),
         (
             "configuration_open",
             "Request the original authorized settings editor in Canvas. Event delivery does not acknowledge browser rendering or save settings.",
             {"form_id": form},
             ["form_id"],
-            guarded(_open, write=True, record=True),
+            guarded(_open, write=True, record=True, tool="configuration_open"),
         ),
         (
             "configuration_propose",
@@ -577,21 +654,21 @@ def register_configuration_agent_tools(registry: ToolRegistry, *, access_resolve
                 "reset_all": {"type": "boolean"},
             },
             ["form_id"],
-            guarded(_propose, write=True, record=True),
+            guarded(_propose, write=True, record=True, tool="configuration_propose"),
         ),
         (
             "configuration_apply",
             "Save an explicitly requested persistent language preference. Other domains require the user's confirmation.",
             {"form_id": form, "proposal_id": {"type": "string"}},
             ["form_id", "proposal_id"],
-            guarded(lambda args, ctx: _result(args, ctx, apply=True), write=True, record=True),
+            guarded(lambda args, ctx: _result(args, ctx, apply=True), write=True, record=True, tool="configuration_apply"),
         ),
         (
             "configuration_result",
             "Read the caller-owned proposal's actual status. Proposed does not mean saved.",
             {"form_id": form, "proposal_id": {"type": "string"}},
             ["form_id", "proposal_id"],
-            guarded(_result, record=True),
+            guarded(_result, record=True, tool="configuration_result"),
         ),
         (
             TOOL_SUBMIT,

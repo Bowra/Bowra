@@ -1237,9 +1237,9 @@ async def test_bus_fanout_emit_after_terminal_is_noop(monkeypatch) -> None:
 
 
 @pytest.mark.integration
-async def test_worker_crash_path_marks_failed_and_emits_failure_then_done(monkeypatch) -> None:
-    """_run_turn_and_cleanup crash 分支 (r3 收窄版): run_turn 抛异常 →
-    status 复查后 mark_failed + emit error 进 bus + 守卫式 close."""
+@pytest.mark.parametrize("unknown", ["none", "direct", "mixed"])
+async def test_worker_crash_path_marks_failed_and_emits_failure_then_done(monkeypatch, unknown: str) -> None:
+    """Persist the failure before delivery and preserve unknown-outcome safety."""
     monkeypatch.setenv("BOWHEAD_SSE_FANOUT", "1")
     from bowhead_gateway.routes import chat as chat_mod
 
@@ -1261,6 +1261,12 @@ async def test_worker_crash_path_marks_failed_and_emits_failure_then_done(monkey
         session_store = _Store()
 
         async def run_turn(self, req):
+            from bowhead_router.errors import InvocationOutcomeUnknownError
+
+            if unknown == "direct":
+                raise InvocationOutcomeUnknownError()
+            if unknown == "mixed":
+                raise ExceptionGroup("mixed", [InvocationOutcomeUnknownError(), RuntimeError("cleanup failed")])
             raise RuntimeError("boom")
 
     req = SimpleNamespace(
@@ -1304,6 +1310,8 @@ async def test_worker_crash_path_marks_failed_and_emits_failure_then_done(monkey
     assert evs[0].payload["diagnostics"] == evs[1].payload["diagnostics"]
     assert evs[0].payload["diagnostics"]["diagnostic_code"] == "chat_turn_failed"
     assert evs[0].payload["diagnostics"]["turn_id"] == "t_crash_ut"
+    assert evs[0].payload["recovery_action"] == evs[1].payload["recovery_action"] == ("retry" if unknown == "none" else "copy_diagnostics")
+    assert evs[0].payload["diagnostics"]["retryable"] is (unknown == "none")
     assert "boom" not in str(evs[0].payload) + str(evs[1].payload)
     assert bus._closed, "error 终态后 bus 应已关闭"
 

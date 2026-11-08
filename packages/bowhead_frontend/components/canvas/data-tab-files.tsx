@@ -298,7 +298,7 @@ export function DataTabFiles({
   useEffect(() => {
     let failure: ResultsWorkspaceErrorClass | null = null;
     if (viewerOnly && err) failure = err;
-    else if (viewerOnly && items && focusArtifactId && !visibleSelected) {
+    else if (viewerOnly && items && focusArtifactId && !items.some((item) => item.id === focusArtifactId)) {
       failure = "unavailable";
     }
     const key = failure ? `${focusArtifactId ?? "list"}:${failure}` : null;
@@ -309,7 +309,7 @@ export function DataTabFiles({
     if (reportedOpenFailureRef.current === key) return;
     reportedOpenFailureRef.current = key;
     onOpenFailed?.(failure as ResultsWorkspaceErrorClass);
-  }, [err, focusArtifactId, items, onOpenFailed, viewerOnly, visibleSelected]);
+  }, [err, focusArtifactId, items, onOpenFailed, viewerOnly]);
 
   useFocusedItemScroll({
     focusId: focusArtifactId,

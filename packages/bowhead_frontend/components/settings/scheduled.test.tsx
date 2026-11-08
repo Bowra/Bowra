@@ -39,6 +39,12 @@ vi.mock("@/lib/api", () => ({
     fetchBindableWorkflowsMock(...args),
 }));
 
+const authSession = vi.hoisted(() => ({ value: null as null | { me: { capabilities: { routine_notify?: boolean } } } }));
+vi.mock("@/lib/auth/auth-session-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/auth-session-context")>()),
+  useOptionalAuthSession: () => authSession.value,
+}));
+
 vi.mock("@/lib/use-space", () => ({
   readSpaces: (...args: unknown[]) => readSpacesMock(...args),
 }));
@@ -75,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  authSession.value = null;
   window.history.replaceState({}, "", "/");
 });
 
@@ -492,6 +499,72 @@ describe("SettingsScheduled 绑定固化流程选择器", () => {
     fireEvent.click(screen.getByText("保存"));
     await waitFor(() => expect(patchScheduledJobMock).toHaveBeenCalled());
     expect(patchScheduledJobMock.mock.calls[0][1].recipe_ref).toEqual({ unbind: true });
+  });
+});
+
+describe("SettingsScheduled run deliveries (FEATURE_NOTIFICATION_DELIVERY)", () => {
+  it("shows what happened to each run's email and how to fix a failure", async () => {
+    fetchScheduledJobsMock.mockResolvedValue({ items: [JOB] });
+    fetchScheduledJobRunsMock.mockResolvedValue({
+      items: [
+        {
+          id: "run_1",
+          job_id: JOB.id,
+          started_at: "2026-07-30T01:00:00+00:00",
+          finished_at: "2026-07-30T01:00:01+00:00",
+          status: "success",
+          deliveries: [
+            { kind: "result", status: "sent", attempts: 1 },
+            { kind: "alert", status: "skipped", outcome_code: "smtp_unconfigured", diagnostic_ref: "ndg_abc", attempts: 0 },
+          ],
+        },
+      ],
+    });
+    readSpacesMock.mockResolvedValue({ items: [] });
+
+    renderIntl(<SettingsScheduled />);
+    expect((await screen.findAllByText("Daily review")).length).toBe(2);
+    fireEvent.click(screen.getByTitle("运行历史"));
+
+    expect(await screen.findByText("结果邮件：已发送")).toBeTruthy();
+    const failed = screen.getByText(/提醒邮件：未发送/);
+    expect(failed.textContent).toContain("团队尚未配置邮件服务");
+    expect(failed.textContent).toContain("ndg_abc");
+  });
+});
+
+describe("SettingsScheduled delivery mode (FEATURE_ROUTINE_NOTIFY)", () => {
+  const delivering = { ...JOB, notify_channels: { email: [], deliver_on_success: true } };
+
+  it("offers only-when-flagged delivery and saves it", async () => {
+    authSession.value = { me: { capabilities: { routine_notify: true } } };
+    fetchScheduledJobsMock.mockResolvedValue({ items: [delivering] });
+    readSpacesMock.mockResolvedValue(SPACES);
+    patchScheduledJobMock.mockResolvedValue(delivering);
+
+    renderIntl(<SettingsScheduled />);
+    await chooseRowAction("Daily review 的更多操作", "编辑");
+    fireEvent.click(await screen.findByText("仅在标记时"));
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(patchScheduledJobMock).toHaveBeenCalled());
+    expect(patchScheduledJobMock.mock.calls[0][1].notify_channels).toEqual({ email: [], deliver_on_success: true, deliver: "on_alert" });
+  });
+
+  it("without the switch shows no choice and keeps a saved mode", async () => {
+    const flagged = { ...JOB, notify_channels: { email: [], deliver_on_success: true, deliver: "on_alert" as const } };
+    fetchScheduledJobsMock.mockResolvedValue({ items: [flagged] });
+    readSpacesMock.mockResolvedValue(SPACES);
+    patchScheduledJobMock.mockResolvedValue(flagged);
+
+    renderIntl(<SettingsScheduled />);
+    await chooseRowAction("Daily review 的更多操作", "编辑");
+    await screen.findByText("保存");
+    expect(screen.queryByText("仅在标记时")).toBeNull();
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(patchScheduledJobMock).toHaveBeenCalled());
+    expect(patchScheduledJobMock.mock.calls[0][1].notify_channels.deliver).toBe("on_alert");
   });
 });
 

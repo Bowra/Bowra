@@ -114,10 +114,11 @@ class AnthropicCompatibleAdapter:
     supports_input_admission: ClassVar[bool] = True
 
     base_url: str
-    api_key: str
+    # Secrets stay out of repr: exception logs and error messages may render this object.
+    api_key: str = field(repr=False)
     provider_name: str = "anthropic_compat"
     timeout_sec: int = 60
-    default_headers: dict[str, str] = field(default_factory=dict)
+    default_headers: dict[str, str] = field(default_factory=dict, repr=False)
     anthropic_version: str = "2023-06-01"
     # Proxy mode: append /v1 if base_url lacks it; otherwise leave it unchanged.
     # Defaults to /v1/messages; some proxies may use /messages.
@@ -400,7 +401,7 @@ class AnthropicCompatibleAdapter:
             input_family="anthropic",
         )
         attempt_settled = False
-        # Any yielded output makes a later transport failure unknown, never retried.
+        # Transport-failure settlement evidence records whether output was yielded.
         output_started = False
         # Per-content-block accumulators (keyed by index).
         # Each entry: {"id": str, "name": str, "json_buf": str}

@@ -125,7 +125,7 @@ describe("content type scale (P2 Icons & Type Spec)", () => {
       "text-autospace": "normal",
     });
     expect(rule(`.canvas-report-article ${PROSE} :is(p, ol, ul, blockquote)`)).toEqual({ "max-width": "var(--report-content-measure, calc(var(--content-measure) * 1.5))" });
-    expect(rule(".canvas-report-article p.rc-fig-caption:not(.v2-report-deck)")).toMatchObject({
+    expect(rule(".canvas-report-article p.rc-fig-caption:not(.v2-report-deck):not([data-chart-unit-note])")).toMatchObject({
       color: "var(--c-ink-3)",
       "font-size": "var(--fs-content-caption)",
     });
@@ -166,6 +166,13 @@ describe("content type scale (P2 Icons & Type Spec)", () => {
       "font-size": "var(--fs-content-subsection)",
       "font-weight": "600",
     });
+  });
+
+  it("keeps list markers in model output, which the base reset removes", () => {
+    expect(rule(".v2-md ul")).toEqual({ "list-style": "disc" });
+    expect(rule(".v2-md ol")).toEqual({ "list-style": "decimal" });
+    expect(rule(".v2-md :is(ul, ol) ul")).toEqual({ "list-style": "circle" });
+    expect(rule(".v2-md li::marker")).toEqual({ color: "var(--c-ink-3)" });
   });
 
   it("sets Help articles without text-autospace (hand-written copy keeps its own spaces)", () => {

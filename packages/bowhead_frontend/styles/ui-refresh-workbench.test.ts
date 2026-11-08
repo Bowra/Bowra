@@ -110,6 +110,11 @@ describe("运行状态带外框（对话卡片规格 D1：与对话卡片同一�
     expect(rule(".bh-band__row.is-warn .bh-band__glyph")).toEqual({ color: "var(--c-warn-ink)" });
     expect(rule(".bh-band__row.is-fail .bh-band__glyph")).toEqual({ color: "var(--c-err)" });
     expect(rule(".bh-band__foot")).toMatchObject({ "font-family": "var(--font-control)", "font-size": "var(--fs-sm)" });
+    // History rows recede by ink step (4.5:1 or better on the band surface), never by opacity on the text.
+    expect(rule(".bh-band__row--h1 :is(.bh-band__lab, .bh-band__rmeta)")).toEqual({ color: "var(--c-ink-4)" });
+    expect(rule(".bh-band__row--h2 :is(.bh-band__lab, .bh-band__rmeta)")).toEqual({ color: "var(--c-ink-3)" });
+    const globals = stripComments(read("app/globals.css"));
+    expect(globals).not.toMatch(/\.bh-band__row--h[12] \.bh-band__(lab|rmeta)[^{]*\{[^}]*opacity/);
     // Constant height relies on three rows/original line height: this sheet neither changes .bh-band__row min-height nor hides any row.
     expect(rule(".bh-band__row")).toEqual({ "font-size": "var(--fs-sm)" });
     expect(RULES.filter((r) => /bh-band/.test(r.selector) && /display:\s*none/.test(r.body))).toEqual([]);

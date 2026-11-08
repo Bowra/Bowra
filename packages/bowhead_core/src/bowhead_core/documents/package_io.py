@@ -41,9 +41,10 @@ OFFICE_TEXT_MIMES = frozenset(OFFICE_MIMES[suffix] for suffix in (".docx", ".ppt
 class OfficePackageError(ValueError):
     """Stable, content-free reason suitable for an API error code."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, read_info: dict | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.read_info = read_info
 
 
 @dataclass(frozen=True)

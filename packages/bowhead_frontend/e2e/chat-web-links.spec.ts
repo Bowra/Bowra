@@ -125,6 +125,13 @@ for (const width of [412, 1440]) {
       await composer.locator("textarea").fill(QUESTION);
       await composer.locator(".v2-send-btn").click();
       await assertLinks();
+      const scrollLayout = await page.locator(".v2-messages").evaluate((element) => ({
+        messageHeight: element.clientHeight,
+        parentHeight: element.parentElement!.clientHeight,
+        parentOverflow: element.parentElement!.scrollHeight - element.parentElement!.clientHeight,
+      }));
+      expect(scrollLayout.messageHeight).toBeLessThanOrEqual(scrollLayout.parentHeight);
+      expect(scrollLayout.parentOverflow).toBeLessThanOrEqual(1);
       expect(sourceRequests).toBe(0);
       await links.first().hover();
       await links.first().focus();

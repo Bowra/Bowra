@@ -282,6 +282,25 @@ describe("内容深搜", () => {
     expect(cards[1]).not.toHaveClass("hit");
   });
 
+  it("names the hit location in text on the narrow two-line row, which has no snippet", async () => {
+    mediaMatches = { "(max-width: 640px)": true, "(max-width: 1280px)": true };
+    mocks.searchKb.mockResolvedValue({ chunks: [hit()], total_candidates: 1, rerank_used: true, latency_ms: 1 });
+    renderManager();
+    await deepSearch("门店");
+    const list = await screen.findByTestId("kb-files-list");
+    await waitFor(() => expect(within(list).getByTestId("kb-hit-loc")).toHaveTextContent("第 3 页 · 搜索命中"));
+    expect(within(list).getByTestId("kb-files-row")).toHaveClass("hit");
+  });
+
+  it("still names a narrow-row hit that has no page, section or paragraph", async () => {
+    mediaMatches = { "(max-width: 640px)": true, "(max-width: 1280px)": true };
+    mocks.searchKb.mockResolvedValue({ chunks: [hit({ page: null, section_title: null, chunk_index: null })], total_candidates: 1, rerank_used: true, latency_ms: 1 });
+    renderManager();
+    await deepSearch("门店");
+    const list = await screen.findByTestId("kb-files-list");
+    await waitFor(() => expect(within(list).getByTestId("kb-hit-loc")).toHaveTextContent(/^搜索命中$/));
+  });
+
   it("从普通列表打开抽屉时不置顶任何片段（对照）", async () => {
     renderManager();
     fireEvent.click(await screen.findByTestId("kb-files-row"));

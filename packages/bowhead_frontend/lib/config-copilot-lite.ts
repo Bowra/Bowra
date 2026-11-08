@@ -192,6 +192,15 @@ export async function performLiteAction(proposal: ConfigLiteProposePayload, op: 
   return receipt;
 }
 
+/** The Configuration Agent saved an explicit appearance request on the server: show the new look now.
+ *  Live events only; a replayed card already matches the theme loaded with the page. */
+export function showAgentSavedAppearance(proposalId: string): void {
+  const proposal = _proposals.get(proposalId);
+  if (proposal?.status !== "applied" || proposal.form_id !== "personal_appearance" || !proposal.team_id) return;
+  notifyPersonalAppearanceSaved(proposal.team_id);
+  void refreshEffectiveTheme(proposal.team_id).catch(() => undefined);
+}
+
 /** Ignore: forward POST; failure silently retains propose (no side effects, click again). */
 export function ignoreLiteProposal(proposalId: string): void {
   void apiJson<ProposalDto>(`/api/v1/config-proposals/${proposalId}/ignore`, {

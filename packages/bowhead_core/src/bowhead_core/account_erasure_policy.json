@@ -6148,6 +6148,37 @@
         }
       ]
     },
+    "notification_deliveries": {
+      "columns": [
+        "id",
+        "notification_id",
+        "user_id",
+        "channel",
+        "status",
+        "not_before",
+        "attempts",
+        "lease_owner",
+        "lease_expires_at",
+        "outcome_code",
+        "diagnostic_ref",
+        "created_at",
+        "updated_at"
+      ],
+      "owner_columns": [
+        "user_id"
+      ],
+      "containment_foreign_keys": [
+        {
+          "parent": "notification_items",
+          "columns": [
+            [
+              "notification_id",
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
     "oauth_state": {
       "columns": [
         "state",

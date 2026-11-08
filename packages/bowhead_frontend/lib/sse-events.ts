@@ -78,6 +78,7 @@ export interface StepStartedEvent {
     language: "python";
     code: string;
     truncated: boolean;
+    input_artifact_ids?: string[];
   } | null;
   kind?: string | null;
   display_category?: string | null;
@@ -147,6 +148,48 @@ export interface TurnFollowUpEvent {
 export interface NarrativeDeltaEvent {
   card_id: string;
   delta: string;
+}
+
+/**
+ * llm.stream_restarted — the Router restarted a model attempt after part of its
+ * output was already streamed; emitted after `llm.retry_scheduled` and before the
+ * retried attempt's output. Character counts are Unicode code points (Python `len`).
+ * Like `llm.retry_scheduled`, live frames may omit `card_id`; replay backfills it.
+ */
+export interface LlmStreamRestartedEvent {
+  card_id?: string;
+  subagent_id: string;
+  profile: string | null;
+  /** Present for peers/helpers: the same id their `partial_answer.parent_agent_id` carries. */
+  parent_agent_id?: string | null;
+  /** Lead only: trailing `narrative.delta` characters to withdraw. */
+  discarded_narrative_chars: number;
+  /** Peers only: trailing `partial_answer` characters of that peer to withdraw. */
+  discarded_partial_answer_chars: number;
+  /** Writing steps started in the withdrawn attempt; the backend also closes them with step_done. */
+  discarded_step_ids: string[];
+}
+
+/** Parsed `llm.stream_restarted` withdrawal; malformed counts read as nothing to withdraw. */
+export interface StreamRestartWithdrawal {
+  parentAgentId: string | null;
+  narrativeChars: number;
+  partialAnswerChars: number;
+}
+
+function _nonNegativeCount(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+export function parseStreamRestartWithdrawal(
+  payload: Record<string, unknown>,
+): StreamRestartWithdrawal {
+  const parent = payload.parent_agent_id;
+  return {
+    parentAgentId: typeof parent === "string" && parent ? parent : null,
+    narrativeChars: _nonNegativeCount(payload.discarded_narrative_chars),
+    partialAnswerChars: _nonNegativeCount(payload.discarded_partial_answer_chars),
+  };
 }
 
 /**

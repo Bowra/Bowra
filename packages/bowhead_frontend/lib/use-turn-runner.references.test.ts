@@ -283,6 +283,8 @@ it("captures input, parameters and cleanup scope before the persistence await", 
 
 it.each([
   ["marked not started", { code: "resource_unavailable", admission: "not_started" }, 1],
+  ["routing failed before admission", { code: "reference_receiver_selection_failed", admission: "not_started" }, 1],
+  ["routing failure without proof", { code: "reference_receiver_selection_failed" }, 0],
   ["unmarked (may follow a committed Turn)", { code: "resource_unavailable" }, 0],
 ] as const)("releases the submission journal only for a rejection the server marked %s", async (_label, error, clears) => {
   globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { error } }), { status: 409 }));

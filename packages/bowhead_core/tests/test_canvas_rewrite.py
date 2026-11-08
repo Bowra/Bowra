@@ -97,7 +97,7 @@ class _FakeRouter:
         self._deltas = deltas
         self.calls: list[tuple[str, object]] = []
 
-    async def stream(self, agent_type, req, profile=None, user_pref=None):
+    async def stream(self, agent_type, req, profile=None, user_pref=None, **kwargs):
         from bowhead_router import LLMChunk
 
         self.calls.append((agent_type, req))
@@ -151,7 +151,7 @@ def test_exhausted_rewrite_never_emits_success(diagnostic_only) -> None:
     from bowhead_router import LLMChunk
 
     class Router:
-        async def stream(self, agent_type, req):
+        async def stream(self, agent_type, req, **kwargs):
             yield LLMChunk(delta="Incomplete rewrite")
             yield LLMChunk(
                 finish_reason="stop" if diagnostic_only else "length",
@@ -168,7 +168,7 @@ def test_exhausted_rewrite_never_emits_success(diagnostic_only) -> None:
 class _ExplodingRouter:
     """stream() 直接抛异常的替身 — 验证运行期错误帧不泄漏异常类名/内部细节."""
 
-    async def stream(self, agent_type, req, profile=None, user_pref=None):
+    async def stream(self, agent_type, req, profile=None, user_pref=None, **kwargs):
         raise RuntimeError("secret-internal-detail sk-abc123")
         yield  # pragma: no cover - make this an async generator.
 
@@ -236,3 +236,26 @@ def test_rewrite_checks_scale_changes_and_repeated_citation_counts() -> None:
 def test_cited_values_follow_frontend_cjk_and_scientific_notation_boundaries() -> None:
     assert "962.7亿元 [1]" in _detect_value_drift("营收962.7亿元 [1]", "营收999.9亿元 [1]")
     assert "1.2e-4 千万美元 [1]" in _detect_value_drift("1.2e-4 千万美元 [1]", "1.3e-4 千万美元 [1]")
+
+
+def test_rewrite_discards_text_from_a_restarted_attempt() -> None:
+    """A Router retry after output withdraws the interrupted attempt's text."""
+    from bowhead_router import LLMChunk
+
+    class Router:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, object] = {}
+
+        async def stream(self, agent_type, req, **kwargs):
+            self.kwargs = kwargs
+            yield LLMChunk(delta="Interrupted draft ")
+            yield LLMChunk(stream_restart=True)
+            yield LLMChunk(delta="Revenue grew [1]")
+            yield LLMChunk(finish_reason="stop")
+
+    router = Router()
+    sse = _collect_sse(stream_rewrite(router=router, selection_text="Revenue grew [1]", preset="concise"))
+    assert router.kwargs == {"allow_restart": True}
+    done = json.loads(sse.split("event: done\ndata: ", 1)[1].split("\n\n", 1)[0])
+    assert done["final_text"] == "Revenue grew [1]"
+    assert "restart" not in sse.replace("event: chunk", "")

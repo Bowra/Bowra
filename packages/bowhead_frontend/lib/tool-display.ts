@@ -81,7 +81,7 @@ export const TOOL_DISPLAY_TABLE = TOOL_DISPLAY;
  * Built-in Tools shown in the catalog are the manifest entries with `kind: "tool"`; system parts
  * (`kind: "part"`, such as subagent_return, python_exec, skill_*, agent_* and configuration_*) are never
  * listed. Never reuse NATIVE_ALLOWLIST: it governs granting a Tool to an Agent, not what the product can do.
- * See docs/design/capability-center-plugins-tech-design.md §4.
+ * See docs/drafts/agents/capability-center-plugins-tech-design.md §4.
  */
 
 export interface BuiltinTool {

@@ -2298,6 +2298,7 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
             artifact_store=orchestrator.artifact_store,
             skill_catalog=getattr(orchestrator, "skill_catalog", None),
             canvas_store=getattr(orchestrator, "canvas_store", None),
+            report_read_access=getattr(turn_req, "report_read_access", None),
             team_id=turn_req.team_id,
             user_id=turn_req.user_id,
             workspace_id=turn_req.workspace_id,

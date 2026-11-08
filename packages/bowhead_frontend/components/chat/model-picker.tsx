@@ -29,25 +29,10 @@ import { CharIcon } from "@/components/char-icon";
 /** Menu width (px); useMenu narrows to available width on narrow screens. */
 const MODEL_MENU_WIDTH = 252;
 
-/** API types supported by team model configuration (backend `team_llm_config.SUPPORTED_PROVIDER_TYPES`). */
-const KNOWN_PROVIDER_TYPES = new Set([
-  "openai_compatible",
-  "anthropic_compatible",
-  "azure_openai",
-  "custom_http",
-]);
-
-/** Small API-type labels beside group headings (Menus Spec section 1:「OpenAI 兼容」「Anthropic 兼容」).
- *  Catalog `type` is raw configuration data, never user-facing; unknown values use neutral「其他接口」. */
-function providerTypeLabelKey(providerType: string): string {
-  return KNOWN_PROVIDER_TYPES.has(providerType) ? providerType : "other";
-}
-
 interface PickEntry {
   providerId: string;
   providerName: string;
   model: string;
-  providerType?: string;
 }
 
 function ModelMenuItem({
@@ -93,8 +78,6 @@ export function ModelPicker({
 }) {
   const t = useTranslations("model_picker");
   const session = useOptionalAuthSession();
-  // Share API-type copy with team model configuration (settings.llm.provider_types).
-  const tProviderType = useTranslations("settings.llm.provider_types");
   const tooltipId = `composer-model-${useId().replaceAll(":", "")}`;
   const { parsed, select, clear } = usePreferredModel();
   const [catalog, setCatalog] = useState<LlmCatalog | null>(null);
@@ -127,7 +110,6 @@ export function ModelPicker({
       providerId: p.id,
       providerName: p.display_name || p.id,
       model: m,
-      providerType: p.type,
     })),
   );
   const hasAny = entries.length > 0;
@@ -270,18 +252,13 @@ export function ModelPicker({
           </ModelMenuItem>
 
           {/* Render groups by provider, with one header each. */}
-          {groups.map(({ providerId, providerName, providerType, models }) => (
+          {groups.map(({ providerId, providerName, models }) => (
             <div key={providerId} className="legacy-menu-model-group">
               {/* The base layer shows uppercase names; the refreshed styles show original names per spec. Render both, hiding one by the hook attribute
                   (display: none); screen readers read only the visible version, preserving legacy screen-reader content. */}
               <div className="legacy-menu-model-group-title">
                 <span className="legacy-menu-model-provider-upper">{providerName.toUpperCase()}</span>
                 <span className="legacy-menu-model-provider-name">{providerName}</span>
-                {providerType ? (
-                  <span className="legacy-menu-model-tag">
-                    {tProviderType(providerTypeLabelKey(providerType))}
-                  </span>
-                ) : null}
               </div>
               {models.map((m) => {
                 const active = parsed?.providerId === providerId && parsed?.model === m;
@@ -317,15 +294,14 @@ export function ModelPicker({
 }
 
 function groupByProvider(entries: PickEntry[]): Array<{
-  providerId: string; providerName: string; providerType?: string; models: string[];
+  providerId: string; providerName: string; models: string[];
 }> {
-  const map = new Map<string, { providerName: string; providerType?: string; models: string[] }>();
+  const map = new Map<string, { providerName: string; models: string[] }>();
   for (const e of entries) {
     const cur = map.get(e.providerId);
     if (cur) cur.models.push(e.model);
     else map.set(e.providerId, {
       providerName: e.providerName,
-      providerType: e.providerType,
       models: [e.model],
     });
   }

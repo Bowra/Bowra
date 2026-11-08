@@ -105,6 +105,7 @@ TOOL_KINDS: dict[str, ToolKind] = {
     "remember": "part",
     "remove_chart": "tool",
     "render_deck": "part",
+    "routine_notify": "part",
     "send_email": "tool",
     "skill_invoke": "part",
     "skill_list": "part",

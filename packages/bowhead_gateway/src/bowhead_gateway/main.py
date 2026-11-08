@@ -41,6 +41,7 @@ from bowhead_core import (
     build_default_registry,
     get_event_registry,
 )
+from bowhead_gateway.logging_config import configure_logging
 from bowhead_gateway.product_identity import product_name
 from bowhead_gateway.routes import (
     approvals as approvals_routes,
@@ -110,26 +111,6 @@ def _legacy_untracked_orphan_min_age_minutes() -> int | None:
     if not math.isfinite(hard_cap_s):
         return None
     return max(60, math.ceil((2 * hard_cap_s) / 60))
-
-
-def _configure_logging(log_level: str, log_format: str) -> None:
-    logging.basicConfig(level=log_level.upper())
-    processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    if log_format == "json":
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
-
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, log_level.upper())),
-        cache_logger_on_first_use=True,
-    )
 
 
 def _load_dotenv_into_process(log: structlog.types.FilteringBoundLogger) -> None:
@@ -285,7 +266,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 @asynccontextmanager
 async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    _configure_logging(settings.log_level, settings.log_format)
+    configure_logging(settings.log_level, settings.log_format)
     log = structlog.get_logger()
     _load_dotenv_into_process(log)
     from bowhead_core.agent_run_limits import get_runtime_controls
@@ -1505,6 +1486,17 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         store_provider=lambda: getattr(app.state, "user_store", None),
     )
 
+    from bowhead_core.routine_notify_tool import register_routine_notify_tool
+
+    from bowhead_gateway._scheduled_runner import send_routine_alert_email
+
+    # FEATURE_ROUTINE_NOTIFY: a scheduled run may flag its result for the task owner (registered only with the switch on).
+    register_routine_notify_tool(
+        tool_registry,
+        service_provider=lambda: getattr(app.state, "notification_service", None),
+        urgent_email=lambda run, item: send_routine_alert_email(app, run, item),
+    )
+
     from bowhead_core.google_delivery_tool import register_google_delivery_tools
 
     # Google Workspace delivery (Lead-only, same shape as send_email): always registered, unadvertised without enabled team connection/present user.
@@ -2438,10 +2430,14 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     from bowhead_core.approval_gate import ApprovalGate
     from bowhead_core.notification_service import NotificationService
 
+    from bowhead_gateway.notification_delivery_worker import notification_delivery_enabled
+
     notification_service = NotificationService(
         store=notification_store,
         user_store=user_store,
         enabled=notification_enabled,
+        # FEATURE_NOTIFICATION_DELIVERY: escalations and configured emails become recorded deliveries.
+        delivery_enabled=notification_enabled and notification_delivery_enabled(),
     )
     approval_gate = ApprovalGate(
         approval_store=approval_store,
@@ -3410,12 +3406,27 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
                 store=notification_store,
                 notification_service=notification_service,
                 approval_store=approval_store,
+                access_request_store=getattr(app.state, "access_request_store", None),
+                scheduled_store=getattr(app.state, "scheduled_store", None),
+                user_store=user_store,
                 interval_s=notification_sweeper_interval_s(),
                 retention_days=env_retention_days(),
             ),
             name="notification_sweeper",
         )
         log.info("notification_sweeper.enabled")
+
+    # FEATURE_NOTIFICATION_DELIVERY: send recorded notification emails (one worker per gateway).
+    _notification_delivery_task: asyncio.Task | None = None
+    if notification_service.delivery_enabled:
+        from bowhead_gateway.notification_delivery_worker import env_interval_s as delivery_interval_s
+        from bowhead_gateway.notification_delivery_worker import run_notification_delivery_worker
+
+        _notification_delivery_task = asyncio.create_task(
+            run_notification_delivery_worker(app, store=notification_store, interval_s=delivery_interval_s()),
+            name="notification_delivery",
+        )
+        log.info("notification_delivery.enabled")
 
     # Access-request lifecycle sweeper (expiry + 72h escalation).
     _access_request_sweeper_task: asyncio.Task | None = None
@@ -3564,8 +3575,10 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reference_mcp_metadata = reference_mcp_metadata
     orchestrator.reference_mcp_metadata = reference_mcp_metadata
     reference_mcp_metadata_task = asyncio.create_task(reference_mcp_metadata.run(), name="reference-mcp-metadata")
+    from bowhead_gateway.artifact_representations import PresentationPreviewCoordinator
     from bowhead_gateway.document_service import DocumentService
 
+    app.state.presentation_previews = PresentationPreviewCoordinator()
     app.state.document_service = DocumentService(app.state)
     orchestrator.document_service = app.state.document_service
     document_task = asyncio.create_task(app.state.document_service.run(), name="template-document-jobs")
@@ -3573,6 +3586,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         orchestrator._gateway_turns_stopping = True
+        await app.state.presentation_previews.close()
         document_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await document_task
@@ -3687,6 +3701,10 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
             _notification_sweeper_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await _notification_sweeper_task
+        if _notification_delivery_task is not None:
+            _notification_delivery_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await _notification_delivery_task
         if _access_request_sweeper_task is not None:
             _access_request_sweeper_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
@@ -4097,6 +4115,10 @@ def create_app() -> FastAPI:
     from bowhead_gateway.routes import shopify_content_confirmations as shopify_content_confirmation_routes
 
     app.include_router(shopify_content_confirmation_routes.router, prefix="/api/v1/shopify-content-confirmations", tags=["chat"])
+    # Requesters confirm non-read team MCP calls when FEATURE_TEAM_TOOL_CONFIRMATION is on (the queue is empty otherwise).
+    from bowhead_gateway.routes import team_tool_confirmations as team_tool_confirmation_routes
+
+    app.include_router(team_tool_confirmation_routes.router, prefix="/api/v1/team-tool-confirmations", tags=["chat"])
     # P4.5.1 auth
     from bowhead_gateway.routes import auth as auth_routes
 

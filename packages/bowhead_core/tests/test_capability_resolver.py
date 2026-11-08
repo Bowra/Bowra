@@ -424,7 +424,8 @@ async def test_resolve_unconfigured_capability_tools_matrix() -> None:
     from bowhead_core.google_delivery_tool import TOOL_NAMES as google_delivery
 
     # Google delivery tools also count as unconfigured when team connection is disabled (feature flag off here), and are not advertised.
-    google = frozenset(google_delivery)
+    # A Turn that is not a scheduled task run never offers routine_notify either.
+    google = frozenset(google_delivery) | {"routine_notify"}
     req = SimpleNamespace(team_id="t1", config_lite_supported=True)
 
     # Configured → only disabled Google delivery remains.

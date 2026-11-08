@@ -96,7 +96,7 @@ describe("图注版式必须压过通用段落规则", () => {
     const old = specificity(".canvas-report-article .rc-fig-caption");
     const paragraph = specificity(paragraphSelector);
     expect(old).toEqual([0, 2, 0]);
-    expect(paragraph).toEqual([0, 2, 1]);
+    expect(paragraph).toEqual([0, 3, 1]);
     expect(compare(old, paragraph)).toBeLessThan(0);
   });
 });

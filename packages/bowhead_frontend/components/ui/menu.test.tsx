@@ -102,6 +102,23 @@ describe("useMenu appearance hook", () => {
 });
 
 describe("useMenu keyboard", () => {
+  it("retains focus inside the menu when its focused action is removed", async () => {
+    let removeAction = () => {};
+    function UpdatingMenu() {
+      const [items, setItems] = useState([{ label: "Retry" }, { label: "Leave" }]);
+      removeAction = () => setItems([{ label: "Leave" }]);
+      return <TestMenu items={items} />;
+    }
+    renderIntl(<UpdatingMenu />);
+    await openByKeyboard();
+    act(() => {
+      // Browsers dispatch focusout when the focused node is removed; jsdom does not.
+      fireEvent.focusOut(document.activeElement!, { relatedTarget: null });
+      removeAction();
+    });
+    await waitFor(() => expect(screen.getByRole("menu").contains(document.activeElement)).toBe(true));
+  });
+
   it("focuses the first item after a keyboard open and the container after a pointer open", async () => {
     renderIntl(<TestMenu items={ABC} />);
     await openByKeyboard();

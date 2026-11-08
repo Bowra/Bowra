@@ -65,6 +65,8 @@ _TOOL_KIND_MAP: Final[dict[str, str]] = {
     "subagent_return": "spawn",
     "get_current_user": "lookup",
     "send_email": "write",
+    # Flags a scheduled run for its owner; no numeric result to summarize.
+    "routine_notify": "write",
     "google_doc_write": "write",
     "google_slides_write": "write",
     # Native PPTX rendering produces a deliverable file, like google_slides_write; no numbers to summarize.

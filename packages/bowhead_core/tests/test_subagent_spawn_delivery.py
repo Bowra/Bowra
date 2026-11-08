@@ -7,6 +7,7 @@ Lead 拿主意（chat=聊天短答 / report=画布报告），经 spawn 参数�
 
 from __future__ import annotations
 
+import pytest
 from bowhead_core.subagent import SubagentResult, register_subagent_tool
 from bowhead_core.tool_registry import ToolExecutionContext, build_default_registry
 
@@ -22,12 +23,13 @@ def test_spawn_schema_advertises_delivery() -> None:
 class _CapturingRunner:
     """假 runner：只捕获 extra_instructions，返回最小成功结果。"""
 
-    def __init__(self) -> None:
+    def __init__(self, result: SubagentResult | None = None) -> None:
         self.kwargs: dict = {}
+        self.result = result
 
     async def run(self, **kwargs):
         self.kwargs = kwargs
-        return SubagentResult(
+        return self.result or SubagentResult(
             profile=str(kwargs.get("profile_name") or "compute"),
             subagent_id="sub_test",
             ok=True,
@@ -38,6 +40,37 @@ class _CapturingRunner:
 class _FakeBus:
     async def emit(self, ev) -> None:  # noqa: ARG002
         return None
+
+
+@pytest.mark.parametrize("stop_reason", [None, "step_limit"])
+async def test_partial_receipt_preserves_text_and_actual_stop_reason(stop_reason: str | None) -> None:
+    registry = build_default_registry()
+    register_subagent_tool(registry)
+    partial = SubagentResult(
+        profile="compute",
+        subagent_id="sub_partial",
+        ok=True,
+        completion="partial",
+        final_answer="Revenue is 4200; required profit is not delivered.",
+        stop_reason=stop_reason,
+        partial_done="Revenue is 4200." if stop_reason else None,
+    )
+    ctx = ToolExecutionContext(
+        workspace_id="ws_test",
+        member_uid="member",
+        user_id="user",
+        turn_id="t_partial",
+        datarc=None,
+        subagent_runner=_CapturingRunner(partial),
+        parent_bus=_FakeBus(),
+    )
+    invocation = await registry.execute("subagent_spawn", {"profile": "compute", "task": "Deliver revenue and profit."}, ctx)
+    receipt = invocation.result
+    assert receipt["completion"] == "partial"
+    assert receipt["stop_reason"] == stop_reason
+    assert receipt["done"] == (partial.partial_done or partial.final_answer)
+    assert ("stopped at" in receipt["directive"]) is bool(stop_reason)
+    assert "a run limit" not in receipt["directive"]
 
 
 async def _spawn_with(args: dict, bus: _FakeBus | None = None) -> _CapturingRunner:

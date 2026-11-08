@@ -17,7 +17,7 @@ async function load(page: Page, query = "?seed=1", prefix = "") {
     }
     window.EventSource = QuietEventSource as unknown as typeof EventSource;
   });
-  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { id: "u_v2_reference", team_id: "team_ref", workspaces: [], capabilities: { composer: { model_panel_v2: false, thinking_effort: false, reference_input: !query.includes("auth_off") }, planning: false } } }));
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { id: "u_v2_reference", team_id: "team_ref", workspaces: [], capabilities: { composer: { model_panel_v2: false, thinking_effort: false, reference_input: !query.includes("auth_off") }, planning: false, google_workspace: query.includes("drive") } } }));
   await installReferenceComponent(page, prefix, "_composer-reference-v2-entry.tsx");
   await page.goto(`${prefix}/__reference_component_test${query}`);
   try { await expect(page.getByRole(query.includes("auth_off") ? "textbox" : "combobox")).toBeVisible(); }
@@ -413,3 +413,111 @@ for (const width of [412, 1280]) {
     });
   }
 }
+
+for (const trigger of ["/", "@"] as const) {
+  for (const width of [390, 1280]) {
+    test(`reference menu chooses space outside the full Composer for ${trigger} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 850 });
+      await load(page, "?locale=en");
+      const response = structuredClone(catalogFixtures.cases.find((item) => item.name === (trigger === "/" ? "builtin_skill" : "team_agent"))!.response) as any;
+      for (const cell of response.entry_support.filter((cell: any) => ["agent", "skill"].includes(cell.resource_kind))) Object.assign(cell, { adapter_id: "initial-agent-skill", adapter_version: 1, supported: true, reason_code: null });
+      const original = response.groups[0].items[0];
+      response.groups[0].items = Array.from({ length: 12 }, (_, index) => ({ ...original, id: `${original.id}_${index}`, resource: { ...original.resource, id: `${original.resource.id}_${index}` }, label: `Reference choice ${index}`, availability: "baseline", reason_code: null }));
+      await page.route("**/api/v1/chat/references/catalog", (route) => route.fulfill({ json: response }));
+      // Exercise the production Composer and its toolbar, not an editor-only anchor.
+      await page.addStyleTag({ content: ".test-composer{position:fixed;top:80px;left:16px;right:16px;width:auto;margin:0;max-width:none}" });
+      const input = page.getByRole("combobox");
+      await input.pressSequentially(trigger);
+      await expect(page.getByRole("option")).toHaveCount(12);
+      const menu = page.locator(".composer-reference-menu");
+      const composer = page.locator(".v2-composer");
+      const fits = async (side: "above" | "below") => {
+        const popup = await menu.boundingBox();
+        const anchor = await composer.boundingBox();
+        const viewport = page.viewportSize()!;
+        return Boolean(popup && anchor && popup.height >= 250 && popup.x >= 7 && popup.x + popup.width <= viewport.width - 7 && popup.y >= 7 && popup.y + popup.height <= viewport.height - 7 && (side === "below" ? popup.y >= anchor.y + anchor.height + 7 : popup.y + popup.height <= anchor.y - 7));
+      };
+      await expect.poll(() => fits("below")).toBe(true);
+      await expect(input).toBeFocused();
+      // Reposition while open, then resize: stale max-height must not pin the list above.
+      await page.addStyleTag({ content: ".test-composer{top:auto;bottom:16px}" });
+      await expect.poll(() => fits("above")).toBe(true);
+      await page.setViewportSize({ width, height: 650 });
+      await expect.poll(() => fits("above")).toBe(true);
+      await input.press("End");
+      await expect(input).toHaveAttribute("aria-activedescendant", (await page.getByRole("option").last().getAttribute("id"))!);
+      await input.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await expect(input).toBeFocused();
+      expect(await page.evaluate(() => window.referenceV2.calls)).toEqual([]);
+    });
+  }
+}
+
+for (const drive of [false, true]) {
+  for (const [viewport, composerWidth] of [[1280, 720], [1280, 400], [390, 350], [320, 280]]) {
+    test(`Add opens the native upload picker with Drive=${drive} at ${viewport}/${composerWidth}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 844 });
+      // External Google authorization is outside this upload-menu regression.
+      await page.route("https://accounts.google.com/**", (route) => route.abort());
+      await page.route("https://apis.google.com/**", (route) => route.abort());
+      const errors = await load(page, `?auth=1&auth_off=1&locale=en${drive ? "&drive=1" : ""}`);
+      const container = page.locator(".test-composer");
+      await container.evaluate((node, width) => { node.style.width = `${width}px`; node.style.marginTop = "40px"; }, composerWidth);
+      const composer = page.locator("[data-composer-layout-v2]");
+      await expect(composer).toHaveAttribute("data-layout-mode", composerWidth >= 560 ? "comfortable" : composerWidth >= 360 ? "compact" : "ultra");
+      const trigger = page.locator(".composer-v2__tool-button");
+      await expect(trigger).toBeEnabled();
+      const select = async () => {
+        const chooser = page.waitForEvent("filechooser");
+        await trigger.click();
+        if (drive) {
+          const menu = page.getByRole("menu");
+          await expect(menu).toBeVisible();
+          const box = (await menu.boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(viewport);
+          expect(box.y + box.height).toBeLessThanOrEqual(844);
+          expect(await composer.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+          await page.getByRole("menuitem", { name: "Upload File", exact: true }).click();
+          await expect(trigger).toHaveAttribute("aria-expanded", "false");
+        }
+        return chooser;
+      };
+      await (await select()).setFiles([]);
+      let uploads = 0;
+      await page.route("**/api/v1/files/upload", (route) => {
+        uploads += 1;
+        expect(route.request().headers()["x-space-id"]).toBe("ws_ref");
+        return route.fulfill({ json: { file_id: "art_add", filename: "add-evidence.txt", size: 8, mime: "text/plain", url: "/api/v1/files/art_add" } });
+      });
+      await (await select()).setFiles({ name: "add-evidence.txt", mimeType: "text/plain", buffer: Buffer.from("evidence") });
+      await expect(page.locator(".v2-chip")).toContainText("add-evidence.txt");
+      await expect.poll(() => uploads).toBe(1);
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+test("Add source menu retains keyboard focus across a desktop column resize", async ({ page }) => {
+  await page.route("https://accounts.google.com/**", (route) => route.abort());
+  await page.route("https://apis.google.com/**", (route) => route.abort());
+  await load(page, "?auth=1&auth_off=1&locale=en&drive=1");
+  const trigger = page.locator(".composer-v2__tool-button");
+  await expect(trigger).toBeEnabled();
+  await trigger.focus();
+  await page.keyboard.press("ArrowDown");
+  const upload = page.getByRole("menuitem", { name: "Upload File", exact: true });
+  await expect(upload).toBeFocused();
+  await page.locator(".test-composer").evaluate((node) => { node.style.width = "400px"; });
+  await expect(page.locator("[data-composer-layout-v2]")).toHaveAttribute("data-layout-mode", "compact");
+  await expect(upload).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /Google Drive/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.locator("body").click({ position: { x: 4, y: 4 } });
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+});

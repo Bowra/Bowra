@@ -101,12 +101,20 @@ async def test_default_peer_exchange_and_clarification_resume_keep_original_work
                 message = call(
                     "original-helper",
                     "subagent_spawn",
-                    {"profile": profile, "task": "Confirm the assigned refund definition with Lead.", "delegation_role": "helper"},
+                    {
+                        "required_source_urls": [],
+                        "profile": profile,
+                        "task": "Confirm the assigned refund definition with Lead.",
+                        "delegation_role": "helper",
+                    },
                 )
             elif len(lead_calls) == 2:
                 message = call("original-question", "clarification_ask", {"questions": [question]})
             else:
-                assert len(lead_calls) == 3
+                assert len(lead_calls) in {3, 4}
+                if len(lead_calls) == 4:
+                    reviews = [m for m in body["messages"] if "review_context (JSON data): " in str(m.get("content"))]
+                    assert len(reviews) == 1
                 return response(body, {"role": "assistant", "content": "The verified definition is ready for the requested audience."}, "stop")
         elif "subagent_return" in names:
             helper_calls.append(body)
@@ -197,7 +205,7 @@ async def test_default_peer_exchange_and_clarification_resume_keep_original_work
         )
         assert resolved.status_code == 200, resolved.text
         await settled(turn_id)
-        assert len(lead_calls) == 3 and len(helper_calls) == 4 + int(premature_return) and len(coordination_calls) == 1
+        assert len(lead_calls) == 4 and len(helper_calls) == 4 + int(premature_return) and len(coordination_calls) == 1
         assert [row["id"] for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id] == executions
         assert [
             row["id"] for row in rows(case, "agent_collaboration_operation") if row["action"] in {"ask", "reply", "resolve", "wait"}
@@ -248,12 +256,22 @@ async def test_default_collaboration_allows_live_siblings_in_one_helper_batch(ht
                 first = call(
                     "calculation",
                     "subagent_spawn",
-                    {"profile": "compute", "task": "Calculate using the assigned policy specialist's rule.", "delegation_role": "helper"},
+                    {
+                        "required_source_urls": [],
+                        "profile": "compute",
+                        "task": "Calculate using the assigned policy specialist's rule.",
+                        "delegation_role": "helper",
+                    },
                 )
                 second = call(
                     "policy",
                     "subagent_spawn",
-                    {"profile": helper_profile, "task": "Answer the calculation specialist's refund question.", "delegation_role": "helper"},
+                    {
+                        "required_source_urls": [],
+                        "profile": helper_profile,
+                        "task": "Answer the calculation specialist's refund question.",
+                        "delegation_role": "helper",
+                    },
                 )
                 second["tool_calls"][0]["index"] = 1
                 return response(body, {"role": "assistant", "content": "", "tool_calls": first["tool_calls"] + second["tool_calls"]}, "tool_calls")
@@ -324,5 +342,5 @@ async def test_default_collaboration_allows_live_siblings_in_one_helper_batch(ht
         await settled(turn_id)
     operations = [row for row in rows(case, "agent_collaboration_operation") if row["turn_id"] == turn_id and row["action"] == "ask"]
     assert len(operations) == 1 and operations[0]["dependency_status"] == "resolved"
-    assert counts == {"lead": 2, "compute": 4, helper_profile: 2}
+    assert counts == {"lead": 3, "compute": 4, helper_profile: 2}
     assert next(row for row in rows(case, "turns") if row["id"] == turn_id)["status"] == "completed"

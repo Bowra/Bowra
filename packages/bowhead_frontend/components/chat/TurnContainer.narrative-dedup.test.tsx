@@ -26,6 +26,7 @@ import {
   applyNarrativeSuperseded,
 } from "@/lib/turn-store";
 import type { TurnRunnerState } from "@/lib/types";
+import { dispatchToTurnStore } from "@/lib/turn-store-dispatch";
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -70,6 +71,31 @@ function runner(over: Partial<TurnRunnerState> = {}): TurnRunnerState {
 
 describe("TurnContainer · narrative-vs-answer dedup (0.39.8 #5)", () => {
   beforeEach(() => _resetAllTurnsForTesting());
+
+  it.each([false, true])("renders only the corrected file card in the current and archived answer (archived=%s)", (archived) => {
+    const turnId = "t_file_revision";
+    const answer = "The corrected file is ready.";
+    const finalPayload = { inline_artifacts: ["art_draft", "art_final"].map((id) => ({
+      kind: "file", id, filename: "fibonacci.html", mime: "text/html", download_url: `/api/v1/files/${id}`, size_bytes: id === "art_final" ? 18656 : 19042,
+    })) };
+    applyCardCreated({ turnId });
+    dispatchToTurnStore("step_started", {
+      card_id: turnId, step_id: "revision", step_type: "tool_run", tool_name: "python_sandbox", header_zh: "Run code",
+      started_at: "2026-11-06T12:00:00Z",
+      code_input: { language: "python", code: "print('revision')", truncated: false, input_artifact_ids: ["art_draft"] },
+    });
+    dispatchToTurnStore("step_done", {
+      card_id: turnId, step_id: "revision", state: "success",
+      result_meta: { output_artifacts: [{ artifact_id: "art_final", filename: "fibonacci.html", mime: "text/html" }] },
+    });
+    applyFinalAnswer({ turnId, text: answer, payload: { ...finalPayload, turnId } });
+    const { container } = render(<TurnContainer runner={runner(archived ? {
+      archivedTurns: [{ turnId, user: "Create HTML", userAttachments: [], answer, traceSteps: [], peersDispatched: [], errorReason: null, finalPayload, archivedAt: 0 }],
+    } : { turnId, user: "Create HTML", answer, finalPayload })} />);
+    expect(container.querySelectorAll('[data-testid="chat-inline-file"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="chat-inline-file"]')?.textContent).toContain("18.2 KB");
+    expect(container.textContent).toContain("fibonacci.html");
+  });
 
   it("keeps rejected protocol hidden while the original question resumes", () => {
     applyCardCreated({ turnId: "t-resume-superseded" });

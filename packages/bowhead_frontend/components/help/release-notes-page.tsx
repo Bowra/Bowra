@@ -1,5 +1,7 @@
 "use client";
 
+import { withoutNextRouterHistoryMarkers } from "@/lib/url-session-nav";
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import { unified } from "unified";
@@ -386,7 +388,7 @@ export function ReleaseNotesPage({ article }: { article: HelpArticle }) {
       setTargetId("");
       const url = new URL(window.location.href);
       url.hash = saved.hash;
-      window.history.replaceState(window.history.state, "", url);
+      window.history.replaceState(withoutNextRouterHistoryMarkers(window.history.state), "", url);
       beforeSearch.current = null;
     }
   }, [query]);

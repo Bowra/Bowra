@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import anyio
 
 from bowhead_core import sqlite_capacity
 from bowhead_core.sqlite_diagnostics import clear_diagnostics, diagnostic_snapshot
@@ -63,7 +64,7 @@ from bowhead_core.sqlite_domain_runtime import DomainConnection, reset_domain_co
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
 # Module-level bootstrap-done dict. Single-process gateway (Dockerfile.app
 # uvicorn CMD lacks --workers — verified Phase 0 SRE seat r3.1) so this is
@@ -158,6 +159,47 @@ async def open_shared_ctx(path: str) -> AsyncIterator[aiosqlite.Connection]:
     """
     async with _borrow(str(path), _shared_pools, _SHARED_POOL_MAX_IDLE, _open_pooled_shared, _scrub_for_reuse) as conn:
         yield conn
+
+
+async def run_sqlite_authority_write[T](path: str | Path, operation: Callable[[aiosqlite.Connection], Awaitable[T]]) -> T:
+    """Run an explicitly admitted, database-only idempotent write transaction.
+
+    The callback must not commit, perform external effects, or return live cursors.
+    Only marked authority conflicts inside the callback can repeat, after full
+    rollback and connection release, within the original busy-timeout budget.
+    """
+    deadline = None
+    delay = 0.01
+    while True:
+        retryable = False
+        try:
+            async with open_shared_ctx(str(path)) as db:
+                if deadline is None:
+                    async with db.execute("PRAGMA busy_timeout") as cursor:
+                        timeout_ms = (await cursor.fetchone())[0]
+                    deadline = time.monotonic() + timeout_ms / 1000
+                else:
+                    remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                    await db.execute(f"PRAGMA busy_timeout={remaining_ms}")
+                await db.execute("BEGIN IMMEDIATE")
+                try:
+                    result = await operation(db)
+                except BaseException as error:
+                    await db.rollback()
+                    retryable = isinstance(error, sqlite3.OperationalError) and getattr(error, "bowhead_authority_busy", False) is True
+                    raise
+                await db.commit()
+                return result
+        except sqlite3.OperationalError:
+            if not retryable or deadline is None:
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            await anyio.sleep(min(delay, remaining))
+            if time.monotonic() >= deadline:
+                raise
+            delay = min(delay * 2, 0.1)
 
 
 # ── Connection pools ──────────────────────────────────────────────────────

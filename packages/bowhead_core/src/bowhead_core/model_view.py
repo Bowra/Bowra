@@ -158,7 +158,7 @@ def project_tool_result(
                 "Presentation labels are model-authored, not independent evidence. Use native diagnostics only for their stated checks. "
                 "Not checked does not mean absent. runtime_checked=false describes this checker, not prior network activity."
                 " Copy each file's ID, name, MIME and size from the same output_artifacts entry. "
-                "A label_conflicts entry identifies a supplied title naming another file; use its canonical filename. "
+                "File actions display only the canonical filename, never caller-authored titles or descriptions. "
                 "The native file list provides download links. Do not repeat raw artifact IDs in prose unless explicitly requested."
             )
     if tool_name in _FIGURE_ANCHOR_TOOLS:

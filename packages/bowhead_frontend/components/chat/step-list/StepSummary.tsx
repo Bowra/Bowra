@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, CircleAlert, ListTree } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, ListTree } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 
 import { LucideGlyph } from "@/components/icon-refresh";
 import { ChatCard } from "@/components/ui/card";
@@ -33,23 +34,43 @@ export interface StepSummaryProps {
   failed?: { plannedTotal?: number | null } | null;
   /** Click handler — expands back to full step list. */
   onExpand: () => void;
+  /** The trace below is open. The row then stays as the control that folds it again. */
+  expanded?: boolean;
+  /** Folds the trace again. Required for the row to act as a collapse control while `expanded`. */
+  onCollapse?: () => void;
 }
 
 /**
  * StepSummary — the folded trace of a finished turn (Chat Cards Spec §8, D6): a row ChatCard whose whole row
- * is the "Expand trace" button. Execution ended, participating Agents and wall-clock duration.
+ * is the trace disclosure. Execution ended, participating Agents and wall-clock duration.
  * The original final answer owns delivery caveats. Agent colour badges are
  * replaced by the Agent count. State lives in the parent (TurnContainer / ArchivedTurnView).
+ *
+ * The row is one persistent disclosure button, like the running band's bar: expanding keeps it above the trace
+ * with `aria-expanded`, so keyboard focus is not lost and the reader can fold the trace again. Its accessible name
+ * is the visible row text, so the outcome ("Execution ended · 2 s") is announced with the action.
  */
-export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpand }: StepSummaryProps) {
+export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpand, expanded = false, onCollapse }: StepSummaryProps) {
   const tStep = useTranslations("step_list");
+  const open = Boolean(expanded && onCollapse);
+  const toggle = open ? onCollapse! : onExpand;
+  const toggleTrailing = (
+    <span className="ui-card__trailing-label">
+      {/* The row's accessible name is its text: keep the outcome and the action apart when it is read aloud. */}
+      <span className="sr-only">, </span>
+      {tStep(open ? "collapse_trace" : "expand_trace")}
+      <LucideGlyph icon={open ? ChevronUp : ChevronDown} size={14} aria-hidden="true" />
+    </span>
+  );
   if (failed) {
     return (
       <FailedStepSummary
         steps={steps}
         plannedTotal={failed.plannedTotal}
         durText={formatDurationText(totalDurationMs, tStep) ?? deriveTotalDurationText(steps, tStep)}
-        onExpand={onExpand}
+        onToggle={toggle}
+        open={open}
+        trailing={toggleTrailing}
       />
     );
   }
@@ -69,8 +90,8 @@ export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpan
       iconTone="muted"
       data-testid="step-summary"
       data-state={hasPeerStep ? "peer" : undefined}
-      onActivate={onExpand}
-      activateLabel={tStep("expand_trace")}
+      onActivate={toggle}
+      activateExpanded={open}
       title={lead}
       meta={
         <>
@@ -78,12 +99,7 @@ export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpan
         </>
       }
       // Action copy and arrow are one item: split, the arrow could wrap alone onto a second line.
-      trailing={
-        <span className="ui-card__trailing-label">
-          {tStep("expand_trace")}
-          <LucideGlyph icon={ChevronDown} size={14} aria-hidden="true" />
-        </span>
-      }
+      trailing={toggleTrailing}
     />
   );
 }
@@ -92,11 +108,13 @@ export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpan
  * The folded trace of a turn that ended without an answer: one line, never the expanded trace with tool names
  * and repeated reasons (the failure card above already says what went wrong and what to do).
  */
-function FailedStepSummary({ steps, plannedTotal, durText, onExpand }: {
+function FailedStepSummary({ steps, plannedTotal, durText, onToggle, open, trailing }: {
   steps: StepView[];
   plannedTotal?: number | null;
   durText: string | undefined;
-  onExpand: () => void;
+  onToggle: () => void;
+  open: boolean;
+  trailing: ReactNode;
 }) {
   const tStep = useTranslations("step_list");
   const done = steps.filter((step) => step.state === "done").length;
@@ -113,8 +131,8 @@ function FailedStepSummary({ steps, plannedTotal, durText, onExpand }: {
       icon={CircleAlert}
       data-testid="step-summary"
       data-state="failed"
-      onActivate={onExpand}
-      activateLabel={steps.length <= 1 ? tStep("expand_trace") : tStep("expand_trace_steps", { count: steps.length })}
+      onActivate={onToggle}
+      activateExpanded={open}
       title={tStep.rich("summary_not_finished", { b: (chunks) => <b>{chunks}</b> })}
       meta={
         <>
@@ -122,12 +140,7 @@ function FailedStepSummary({ steps, plannedTotal, durText, onExpand }: {
           {durText ? <span data-testid="step-summary-duration">{` · ${durText}`}</span> : null}
         </>
       }
-      trailing={
-        <span className="ui-card__trailing-label">
-          {tStep("expand_trace")}
-          <LucideGlyph icon={ChevronDown} size={14} aria-hidden="true" />
-        </span>
-      }
+      trailing={trailing}
     />
   );
 }

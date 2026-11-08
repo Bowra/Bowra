@@ -61,7 +61,7 @@ def test_cli_reports_ready_safe_read_only_admission(tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["ready"] is True
     assert payload["candidate_compatible"] is True
     assert payload["live_instances"] == 1
@@ -106,7 +106,7 @@ def test_cli_returns_gate_exit_for_candidate_below_floor(tmp_path) -> None:
     )
 
     assert result.exit_code == 2
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["candidate_reader_version"] == "0001"
     assert payload["candidate_compatible"] is False
     assert payload["ready"] is False
@@ -127,7 +127,7 @@ def test_cli_defers_missing_metadata_to_alembic(tmp_path) -> None:
         ],
     )
     assert missing.exit_code == 0, missing.output
-    payload = json.loads(missing.output)
+    payload = json.loads(missing.stdout)
     assert payload["ready"] is True
     assert payload["migration_pending"] is True
     assert payload["schema_version"] is None
@@ -190,7 +190,7 @@ def test_cli_default_candidate_matches_runtime_registration(tmp_path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["candidate_reader_version"] == AGENT_RELEASE_COMPATIBILITY_VERSION
     assert payload["candidate_writer_version"] == AGENT_RELEASE_COMPATIBILITY_VERSION
 

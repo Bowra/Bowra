@@ -240,6 +240,40 @@ describe("KbFileDrawer · 从回答引用打开", () => {
     await screen.findByText("第一段正文");
     expect(document.body.textContent).not.toContain("回答引用");
   });
+
+  it("keeps the cited passage in view while sections above it finish loading, until the reader scrolls", async () => {
+    const observers: { callback: () => void; active: boolean }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      entry: { callback: () => void; active: boolean };
+      constructor(callback: () => void) { this.entry = { callback, active: true }; observers.push(this.entry); }
+      observe() {}
+      unobserve() {}
+      disconnect() { this.entry.active = false; }
+    });
+    let hitTop = 100;
+    const offsetTop = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.hit === "true" ? hitTop : 0;
+    });
+    const settle = () => observers.filter((entry) => entry.active).forEach((entry) => entry.callback());
+    try {
+      await renderCited("chunk_3");
+      await screen.findByText(/回答引用/);
+      const body = document.querySelector<HTMLElement>(".dr-bd")!;
+      await waitFor(() => expect(body.scrollTop).toBe(88));
+      // Source navigation finishes loading above the chunks and pushes the passage down.
+      hitTop = 500;
+      settle();
+      expect(body.scrollTop).toBe(488);
+      // Once the reader scrolls, later layout changes leave their position alone.
+      fireEvent.wheel(body);
+      hitTop = 900;
+      settle();
+      expect(body.scrollTop).toBe(488);
+    } finally {
+      offsetTop.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("KbFileDrawer · 叠层的 Esc 与焦点", () => {

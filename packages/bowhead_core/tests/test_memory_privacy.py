@@ -219,44 +219,42 @@ async def test_full_delete_redacts_only_the_users_memory_notifications(
     user_id = "usr_notifications"
     notifications = NotificationStore(str(stores["db_path"]))
     await notifications.initialize()
-    memory_item = await notifications.upsert_item(
-        team_id="team_1",
-        category="memory",
-        type="memory.candidate",
-        priority="p2",
-        title="有新的记忆建议待确认",
-        body="私密候选预览",
-        subject_type="memory_candidates",
-        subject_id=user_id,
-        actor_user_id=None,
-        action_url="/memory",
-        actions=[],
-        metadata={"createdCount": 1},
-        dedupe_key=f"memory.candidate:{user_id}",
-    )
-    unrelated_item = await notifications.upsert_item(
-        team_id="team_1",
-        category="system",
-        type="scheduled.failed",
-        priority="p1",
-        title="任务失败",
-        body="unrelated body",
-        subject_type="scheduled_job",
-        subject_id="sj_keep",
-        actor_user_id=None,
-        action_url="/scheduled",
-        actions=[],
-        metadata={"keep": True},
-        dedupe_key="scheduled.failed:sj_keep",
-    )
-    await notifications.add_recipients(
-        memory_item.id,
-        [(user_id, "owner")],
-    )
-    await notifications.add_recipients(
-        unrelated_item.id,
-        [(user_id, "owner")],
-    )
+    memory_item = (
+        await notifications.write(
+            team_id="team_1",
+            category="memory",
+            type="memory.candidate",
+            priority="p2",
+            title="有新的记忆建议待确认",
+            body="私密候选预览",
+            subject_type="memory_candidates",
+            subject_id=user_id,
+            actor_user_id=None,
+            action_url="/memory",
+            actions=[],
+            metadata={"createdCount": 1},
+            dedupe_key=f"memory.candidate:{user_id}",
+            recipients=[(user_id, "owner")],
+        )
+    ).item
+    unrelated_item = (
+        await notifications.write(
+            team_id="team_1",
+            category="system",
+            type="scheduled.failed",
+            priority="p1",
+            title="任务失败",
+            body="unrelated body",
+            subject_type="scheduled_job",
+            subject_id="sj_keep",
+            actor_user_id=None,
+            action_url="/scheduled",
+            actions=[],
+            metadata={"keep": True},
+            dedupe_key="scheduled.failed:sj_keep",
+            recipients=[(user_id, "owner")],
+        )
+    ).item
 
     await stores["privacy"].permanent_delete_all(
         user_id=user_id,

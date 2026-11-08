@@ -153,6 +153,32 @@ async def test_undo_preserves_a_later_manual_change(settings_ctx, client):
     assert client.get("/api/v1/theme/personal", cookies=_as(settings_ctx.member)).json()["overrides"] == {"mode": "light"}
 
 
+async def test_explicit_appearance_request_saves_directly_and_keeps_undo(settings_ctx, client):
+    lead = _lead(settings_ctx, user_text="Please switch me to dark mode.")
+    child, _ = await prepare_configuration_agent(lead, form_id="personal_appearance", intent_quote="switch me to dark mode")
+    read = await _call(settings_ctx, child, "configuration_read", form_id="personal_appearance")
+    assert read["save_policy"] == "explicit_appearance_request" and "apply" in read["actions"] and "confirm" not in read["actions"]
+    staged = await _call(settings_ctx, child, "configuration_propose", form_id="personal_appearance", patch={"mode": "dark"})
+    assert staged["ok"] and staged["confirmation_event_emitted"] is False
+    assert not lead.parent_bus.snapshot()
+    assert (await settings_ctx.personal_store.read(settings_ctx.member.id)).config_raw is None
+
+    receipt = await _call(settings_ctx, child, "configuration_apply", form_id="personal_appearance", proposal_id=staged["proposal_id"])
+    assert receipt["saved"] and receipt["undo_card_emitted"] is True
+    assert client.get("/api/v1/theme/personal", cookies=_as(settings_ctx.member)).json()["overrides"] == {"mode": "dark"}
+    [event] = lead.parent_bus.snapshot()
+    assert event.event_type == "config.lite_propose"
+    assert event.payload["proposal_id"] == staged["proposal_id"] and event.payload["status"] == "applied"
+    assert event.payload["rows"] == staged["rows"]
+    # A repeated apply replays the receipt without a second card.
+    replay = await _call(settings_ctx, child, "configuration_apply", form_id="personal_appearance", proposal_id=staged["proposal_id"])
+    assert replay["saved"] and "undo_card_emitted" not in replay and len(lead.parent_bus.snapshot()) == 1
+
+    undone = client.post(f"/api/v1/config-proposals/{staged['proposal_id']}/undo", cookies=_as(settings_ctx.member))
+    assert undone.status_code == 200, undone.text
+    assert client.get("/api/v1/theme/personal", cookies=_as(settings_ctx.member)).json()["overrides"] == {}
+
+
 async def test_persistent_language_staging_is_zero_write_then_specialist_applies(settings_ctx):
     lead = _lead(settings_ctx, user_text="From now on, always answer in English.")
     child, instructions = await prepare_configuration_agent(lead, form_id="user_language", intent_quote=lead.user_text)

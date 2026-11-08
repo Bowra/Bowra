@@ -105,7 +105,6 @@ async def sweep_expired_receipts(
                     final_state="expired",
                     decided_at=cand.updated_at,
                     recipient_ids=recipients,
-                    reopen_resolved=False,
                 )
             except Exception:
                 log.exception("feedback_casework.expired_receipt_failed id=%s", cand.id)

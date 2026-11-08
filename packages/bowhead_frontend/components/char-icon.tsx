@@ -29,6 +29,7 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   Ban,
+  Bell,
   BookOpen,
   Bot,
   Brain,
@@ -135,6 +136,7 @@ export const CHAR_ICON_MAP: Readonly<Record<string, LucideIcon>> = {
   "⋯": Ellipsis,
   // objects and actions
   "⚡": Zap,
+  "🔔": Bell,
   "✦": Sparkle,
   "✨": Sparkles,
   "⚙": Settings,

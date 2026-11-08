@@ -39,9 +39,9 @@ def task_source_guidance() -> str:
         return ""
     return (
         "For generate, provide inputs with artifact_id and role, requested_outputs, and original_request_quote. "
-        "Use original_request_quote=null when the active canonical request contains the requirements, including a native question resume. "
-        "A quotation matching that active request also reuses it directly. For a new ordinary follow-up to an earlier task, "
+        "For a new ordinary follow-up to an earlier task, "
         "copy a short unique exact phrase from the EARLIER USER request into original_request_quote, not the current reply. "
+        "The current reply is already included automatically. Use null only when the current request contains the complete requirements, including a native question resume. "
         "Use the original template artifact for a continued edit unless the user asks to change templates. "
         "The service supplies the user messages and confirmed answers from that task through the current request. "
         "Copy the quotation exactly and omit evidence fields for generate. "
@@ -130,12 +130,16 @@ async def resolve_task_source_in_tx(db, *, current: ChatTurnUserSource, quote: U
     if not task_sources_enabled():
         raise DocumentRequestError("document_task_source_disabled", field="task_source")
     async with db.execute(
-        "SELECT u.turn_id " + _EARLIER_SOURCES + " AND instr(u.user_text,?)>0 ORDER BY t.seq DESC LIMIT 2",
-        (current.turn_id, current.session_id, current.user_id, current.workspace_id, quote.text),
+        "SELECT u.turn_id,u.user_text=? AS exact_match "
+        + _EARLIER_SOURCES
+        + " AND instr(u.user_text,?)>0 ORDER BY exact_match DESC,t.seq DESC LIMIT 2",
+        (quote.text, current.turn_id, current.session_id, current.user_id, current.workspace_id, quote.text),
     ) as cursor:
         rows = await cursor.fetchall()
     if not rows:
         raise DocumentRequestError("document_task_source_unavailable", field="task_source")
+    if rows[0][1]:
+        rows = [row for row in rows if row[1]]
     if len(rows) != 1:
         raise DocumentRequestError("document_task_source_ambiguous", field="task_source")
     source = await _read_earlier(db, current=current, turn_id=rows[0][0])

@@ -545,7 +545,16 @@ async def create_share_grant(
         res,
         {"grant_id": grant.id, "principal_type": body.principal_type, "principal_id": pid, "permission": grant.permission},
     )
-    await _notify_share(request, user=user, store=store, access_store=access_store, res=res, principal_type=body.principal_type, principal_id=pid)
+    await _notify_share(
+        request,
+        user=user,
+        store=store,
+        access_store=access_store,
+        res=res,
+        principal_type=body.principal_type,
+        principal_id=pid,
+        grant_id=grant.id,
+    )
     # wave 2: a direct user share auto-resolves that user's pending access request.
     if body.principal_type == "user":
         from bowhead_gateway.routes.access_requests import resolve_request_after_grant
@@ -572,13 +581,17 @@ async def _notify_share(
     res: ResolvedShareable,
     principal_type: str,
     principal_id: str,
+    grant_id: str,
 ) -> None:
     """direct 分享通知（PRD §5.4：仅 direct;team_wide 切换不推送;撤销不推送）。
     group → 展开当前 active 成员（双过滤:membership active ∧ user active）;
-    后入组不补发。best-effort,失败吞掉（与审计同策略）。"""
+    后入组不补发。best-effort,失败吞掉（与审计同策略）。
+
+    One item per grant: sharing the same resource with another principal is a new event with its
+    own time, and must not rewrite the item an earlier recipient already has."""
     try:
-        ns = getattr(request.app.state, "notification_store", None)
-        if ns is None:
+        service = getattr(request.app.state, "notification_service", None)
+        if service is None:
             return
         if principal_type == "user":
             recipients = [principal_id]
@@ -591,30 +604,17 @@ async def _notify_share(
                 u = await store.get_user(m.principal_id)
                 if u is not None and u.status == "active":
                     recipients.append(u.id)
-        recipients = [r for r in recipients if r != user.id]
-        if not recipients:
-            return
-        item = await ns.upsert_item(
+        await service.emit_content_shared(
             team_id=user.team_id,
-            category="share",
-            type="content_shared",
-            priority="normal",
-            title=f"{user.display_name or user.email} 分享了「{res.label}」",
-            body=None,
-            subject_type=res.kind,
-            subject_id=res.resource_id,
             actor_user_id=user.id,
+            actor_name=user.display_name or user.email,
+            kind=res.kind,
+            resource_id=res.resource_id,
+            resource_label=res.label,
             action_url=_SHARE_ACTION_URL[res.kind].format(rid=res.resource_id),
-            actions=None,
-            metadata={
-                "kind": res.kind,
-                "resource_id": res.resource_id,
-                "actorName": user.display_name or user.email,
-                "resourceLabel": res.label,
-            },
-            dedupe_key=f"share:{res.kind}:{res.resource_id}",
+            grant_id=grant_id,
+            recipient_ids=recipients,
         )
-        await ns.add_recipients(item.id, [(r, None) for r in recipients])
     except Exception:  # Notification failures do not block sharing.
         return
 

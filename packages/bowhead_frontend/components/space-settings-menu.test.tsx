@@ -81,9 +81,9 @@ describe("Space settings submenu and self-exit", () => {
   it("retries a failed eligibility check without granting access", async () => {
     vi.mocked(apiJson).mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ can_leave: true });
     renderIntl(<SpacePicker />);
-    const leave = await openSettings();
+    await openSettings();
     fireEvent.click(await screen.findByRole("menuitem", { name: "重试检查" }));
-    await waitFor(() => expect(leave).not.toHaveAttribute("aria-disabled", "true"));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "退出当前空间…" })).not.toHaveAttribute("aria-disabled", "true"));
     expect(apiVoid).not.toHaveBeenCalled();
   });
   it("retains access when an unsaved editor cancels leaving", async () => {

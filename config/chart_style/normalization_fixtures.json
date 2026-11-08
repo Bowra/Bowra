@@ -125,6 +125,62 @@
         "flags": { "stacked": true, "crossesZero": true, "hasMissingValues": true },
         "barStackEdges": { "positiveOuterSeriesIndexByCategory": [0, 0, 1, null], "negativeOuterSeriesIndexByCategory": [null, null, null, 1] }
       }
+    },
+    {
+      "name": "explicit-measure-palette-slot",
+      "rawSpec": {
+        "kind": "bar",
+        "title": "Selected measure color",
+        "row_count": 2,
+        "columns": [
+          {
+            "key": "month",
+            "header": "Month",
+            "type": "categorical"
+          },
+          {
+            "key": "amount",
+            "header": "Amount",
+            "type": "numeric",
+            "color_index": 4
+          }
+        ],
+        "rows": [
+          {
+            "month": "Jan",
+            "amount": 25
+          },
+          {
+            "month": "Feb",
+            "amount": 21
+          }
+        ]
+      },
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "bar",
+        "family": "comparison",
+        "rowCount": 2,
+        "categoryCount": 2,
+        "seriesCount": 1,
+        "longestLabelGraphemes": 3,
+        "series": [
+          {
+            "key": "bar:0",
+            "role": "bar",
+            "pointCount": 2,
+            "stackKey": null,
+            "hasPositive": true,
+            "hasNegative": false,
+            "paletteIndex": 4
+          }
+        ],
+        "flags": {
+          "stacked": false,
+          "crossesZero": false,
+          "hasMissingValues": false
+        }
+      }
     }
   ]
 }

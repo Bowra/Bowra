@@ -67,7 +67,7 @@ export function SteerMessage({
           <span
             style={{
               fontFamily: "var(--f-mono)",
-              fontSize: "0.65625rem",
+              fontSize: "0.6875rem",
               color: "var(--c-ink-4)",
               letterSpacing: "0.02em",
             }}
@@ -79,7 +79,7 @@ export function SteerMessage({
       <div
         style={{
           fontFamily: "var(--f-mono)",
-          fontSize: "0.65625rem",
+          fontSize: "0.6875rem",
           color: "var(--c-ink-4)",
           letterSpacing: "0.04em",
           marginBottom: 4,

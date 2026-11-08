@@ -12,6 +12,8 @@ Open **Skills and workflows → My Skills** to manage your personal version. Onc
 
 To make a Skill a persistent Agent dependency, configure it directly or through a selected Plugin. A personal Skill requires the Agent to be set to **Only me**. To configure it for an Agent shared with colleagues, submit it to the team using the steps below. Once approved, enabled and available to the entire team, choose the team version in the Agent's configuration, then save and apply or publish the Agent version. Team approval does not add the Skill to Agents automatically.
 
+To use a method for one task, select it from `/` in the message box; it does not need to be a saved dependency of the Agent. You can choose an Agent with `@`, or let Bowhead choose a compatible one. If automatic selection fails, your draft is preserved: select an Agent with `@` and send again. The method shares the selected model's context capacity with the rest of the conversation. If the task exceeds that capacity, shorten the input, compact the conversation or select a suitable larger model before resending. Method selection grants no additional script or Tool permissions.
+
 ## First submission
 
 1. Open **My Skills** and finish editing and saving your personal version.

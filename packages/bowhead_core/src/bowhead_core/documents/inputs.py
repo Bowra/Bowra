@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 import aiosqlite
 import structlog
 
-from bowhead_core._db import open_shared_ctx
+from bowhead_core._db import open_shared_ctx, run_sqlite_authority_write
 from bowhead_core.artifact_purge import purge_artifacts
 from bowhead_core.artifact_store import ArtifactStore
 from bowhead_core.chat_turn_source import chat_turn_user_source_projection
@@ -112,6 +112,7 @@ class DocumentInputStore:
 
         Blob/DB failures propagate; a retry resumes the persisted candidate set.
         """
+        split = domain_layout_active(self.artifacts.db_path)
         async with open_shared_ctx(self._execution_db_path) as db:
             await db.execute("BEGIN")
             job, originals = await _authorized_inputs(db, scope, job_id, write=True)
@@ -141,14 +142,14 @@ class DocumentInputStore:
                     raise DocumentRequestError("document_input_changed")
                 identities.append(identity)
                 del content
-            prepared_candidates = []
-            if domain_layout_active(self.artifacts.db_path):
-                now = datetime.now(UTC).isoformat()
-                async with open_shared_ctx(self.artifacts.db_path) as content_db:
-                    for original, (size, _sha) in zip(originals, identities, strict=True):
-                        aid = f"art_{uuid.uuid4().hex}"
-                        path = self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)
-                        await content_db.execute(
+            candidates = [(f"art_{uuid.uuid4().hex}", self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)) for _ in originals]
+            reserved_at = datetime.now(UTC).isoformat()
+            cleanup_after = time.time() + RECOVERY_SECONDS
+            if split:
+
+                async def stage(db: aiosqlite.Connection) -> None:
+                    for original, (size, _sha), (aid, path) in zip(originals, identities, candidates, strict=True):
+                        await db.execute(
                             "INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id) "
                             "VALUES (?,?,?,?,'document_input',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)",
                             (
@@ -158,32 +159,27 @@ class DocumentInputStore:
                                 size,
                                 path,
                                 scope.user_id,
-                                now,
+                                reserved_at,
                                 INTERNAL_PRODUCER,
                                 scope.workspace_id or None,
                             ),
                         )
-                        prepared_candidates.append((aid, path))
-                    await content_db.commit()
-            async with open_shared_ctx(self._execution_db_path) as db:
-                await db.execute("BEGIN IMMEDIATE")
+
+                await run_sqlite_authority_write(self.artifacts.db_path, stage)
+
+            async def reserve(db: aiosqlite.Connection) -> list[aiosqlite.Row]:
                 _, current = await _authorized_inputs(db, scope, job_id, write=True)
-                copies = await _copies(db, job_id)
-                if not copies:
+                saved = await _copies(db, job_id)
+                if not saved:
                     if any(a["path"] != b["path"] for a, b in zip(originals, current, strict=True)):
                         raise DocumentRequestError("document_input_changed")
-                    now = datetime.now(UTC).isoformat()
                     await db.execute(
                         "INSERT INTO document_input_sets(job_id,team_id,workspace_id,owner_user_id,request_hash,input_count,created_at) VALUES (?,?,?,?,?,?,?)",
-                        (job_id, *scope.sql_params(), job["request_hash"], len(originals), now),
+                        (job_id, *scope.sql_params(), job["request_hash"], len(originals), reserved_at),
                     )
                     for index, (original, (size, sha), item) in enumerate(zip(originals, identities, _job(job).proposal.inputs, strict=True)):
-                        if prepared_candidates:
-                            aid, path = prepared_candidates[index]
-                        else:
-                            aid = f"art_{uuid.uuid4().hex}"
-                            path = self.artifacts.backend.immutable_upload_path(uuid.uuid4().hex)
-                        if not prepared_candidates:
+                        aid, path = candidates[index]
+                        if not split:
                             await db.execute(
                                 """INSERT INTO artifacts(id,filename,mime,size,source,path,created_by,created_at,kind,scope,inject,trust,producer_kind,status,workspace_id)
                                 VALUES (?,?,?,?,'document_input',?,?,?,'tool_data','user','list','untrusted',?,'document_staging',?)""",
@@ -196,7 +192,7 @@ class DocumentInputStore:
                                     size,
                                     path,
                                     scope.user_id,
-                                    now,
+                                    reserved_at,
                                     INTERNAL_PRODUCER,
                                     scope.workspace_id or None,
                                 ),
@@ -216,7 +212,7 @@ class DocumentInputStore:
                                 size,
                                 sha,
                                 item.role,
-                                time.time() + RECOVERY_SECONDS,
+                                cleanup_after,
                             ),
                         )
                         await db.execute(
@@ -224,8 +220,10 @@ class DocumentInputStore:
                             VALUES (?,?,?,'job',?,?,?,?,'execution')""",
                             (*scope.sql_params(), job_id, f"input:{original['id']}", aid, sha),
                         )
-                    copies = await _copies(db, job_id)
-                    await db.commit()
+                    saved = await _copies(db, job_id)
+                return saved
+
+            copies = await run_sqlite_authority_write(self._execution_db_path, reserve)
             # Reservation is durable before any candidate PUT. Recovery below
             # rereads the exact SHA; no collection of file buffers spans SQL.
         for copy in copies:
@@ -245,27 +243,31 @@ class DocumentInputStore:
                 # False/unknown PUT responses never establish byte identity.
                 content = await self.artifacts.backend.read_bounded(copy["path"], limit=MAX_INPUT_BYTES)
             self._verify(copy, content)
-            async with open_shared_ctx(self._execution_db_path) as db:
-                await db.execute("BEGIN IMMEDIATE")
+            verified_at = datetime.now(UTC).isoformat()
+
+            async def verify(db: aiosqlite.Connection, *, artifact_id: str = copy["artifact_id"], timestamp: str = verified_at) -> None:
                 await _authorized_inputs(db, scope, job_id, write=True)
                 await db.execute(
                     "UPDATE document_input_copies SET verified_at=? WHERE artifact_id=? AND verified_at IS NULL AND cleanup_claimed_at IS NULL",
-                    (datetime.now(UTC).isoformat(), copy["artifact_id"]),
+                    (timestamp, artifact_id),
                 )
-                if not domain_layout_active(self.artifacts.db_path):
-                    await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (copy["artifact_id"],))
-                await db.commit()
-            if domain_layout_active(self.artifacts.db_path):
-                async with open_shared_ctx(self.artifacts.db_path) as content_db:
-                    await content_db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (copy["artifact_id"],))
-                    await content_db.commit()
-        async with open_shared_ctx(self._execution_db_path) as db:
-            await db.execute("BEGIN IMMEDIATE")
+                if not split:
+                    await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (artifact_id,))
+
+            await run_sqlite_authority_write(self._execution_db_path, verify)
+            if split:
+
+                async def ready(db: aiosqlite.Connection, *, artifact_id: str = copy["artifact_id"]) -> None:
+                    await db.execute("UPDATE artifacts SET status='ready' WHERE id=? AND status='document_staging'", (artifact_id,))
+
+                await run_sqlite_authority_write(self.artifacts.db_path, ready)
+        frozen_at = datetime.now(UTC).isoformat()
+
+        async def freeze_metadata(db: aiosqlite.Connection) -> None:
             await _authorized_inputs(db, scope, job_id, write=True)
-            await db.execute(
-                "UPDATE document_input_sets SET frozen_at=? WHERE job_id=? AND frozen_at IS NULL", (datetime.now(UTC).isoformat(), job_id)
-            )
-            await db.commit()
+            await db.execute("UPDATE document_input_sets SET frozen_at=? WHERE job_id=? AND frozen_at IS NULL", (frozen_at, job_id))
+
+        await run_sqlite_authority_write(self._execution_db_path, freeze_metadata)
         return tuple(
             FrozenInput(
                 artifact_id=copy["artifact_id"],

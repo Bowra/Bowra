@@ -308,7 +308,8 @@ async def test_temporary_method_cannot_bypass_existing_source_and_admission_fenc
 
 
 @pytest.mark.parametrize("receiver_case", ["admission"], indirect=True)
-async def test_automatic_selection_uses_the_same_production_descriptor_eligibility(http_start):
+@pytest.mark.parametrize("routing", ["complete", "truncated", "invalid", "unavailable", "length_complete"])
+async def test_automatic_selection_uses_the_same_production_descriptor_eligibility(http_start, routing):
     from types import SimpleNamespace
 
     import httpx2
@@ -340,20 +341,43 @@ async def test_automatic_selection_uses_the_same_production_descriptor_eligibili
         sent = json.loads(request.content)
         requests.append(sent)
         if len(requests) == 1:
+            if routing == "unavailable":
+                return httpx2.Response(400, json={"error": {"message": "Synthetic upstream rejection", "type": "invalid_request_error"}})
             choices = json.loads(sent["messages"][-1]["content"])["candidates"]
             selected = next(item["candidate_index"] for item in choices if item["name"] == agent["label"])
             return httpx2.Response(
                 200,
                 json={
-                    "choices": [{"message": {"role": "assistant", "content": json.dumps({"candidate_index": selected})}, "finish_reason": "stop"}],
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "not-json"
+                                if routing == "invalid"
+                                else '{"candidate_index":'
+                                if routing == "truncated"
+                                else json.dumps({"candidate_index": selected}),
+                            },
+                            "finish_reason": "length" if routing in {"truncated", "length_complete"} else "stop",
+                        }
+                    ],
                     "usage": {"prompt_tokens": 20, "completion_tokens": 5},
                 },
             )
         return answer_response(request)
 
+    from test_reference_http_start import acceptance_counts
+
+    before = acceptance_counts(case)
     with respx.mock() as mock:
         mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
         accepted = await case.client.post("/api/v1/chat/send", json=body)
+        if routing not in {"complete", "length_complete"}:
+            assert accepted.status_code == 409, accepted.text
+            assert accepted.json()["detail"]["error"] == {"code": "reference_receiver_selection_failed", "admission": "not_started"}
+            assert acceptance_counts(case) == before
+            assert len(requests) == 1
+            return
         assert accepted.status_code == 200, accepted.text
         await settled(accepted.json()["turn_id"])
     turn = await case.fixture.case.store.get_turn(accepted.json()["turn_id"])
@@ -418,3 +442,70 @@ async def test_production_system_method_keeps_its_descriptor_and_original_questi
     with sqlite3.connect(case.path) as db:
         (raw,) = db.execute("SELECT descriptor_json FROM system_agent_revision_behavior WHERE revision_id=?", (resource["version"],)).fetchone()
     assert json.loads(raw)["verification_state"] == "blocked"
+
+
+@pytest.mark.parametrize("receiver_case", ["admission"], indirect=True)
+@pytest.mark.parametrize("automatic", [False, True], ids=["explicit", "automatic"])
+@pytest.mark.parametrize("window", [1000000, 5000], ids=["fits", "insufficient-context"])
+async def test_uploaded_method_uses_the_target_context_budget_and_persists_capacity_failure(http_start, automatic, window):
+    from bowhead_core.chat_references import SkillResourceRef
+    from bowhead_core.skill_instance_store import SkillInstanceStore
+    from bowhead_core.skill_upload import bundle_sha256
+
+    case = http_start
+    root = case.fixture.root / "html_method"
+    root.mkdir()
+    method_text = "Synthetic HTML method: " + "\u4e2d\u6587\u62a5\u544a\u6392\u7248\u65b9\u6cd5\u3002" * 420
+    (root / "SKILL.md").write_text("---\nname: html_method\ndescription: Synthetic HTML method\n---\n" + method_text)
+    record = await SkillInstanceStore(case.path).upsert(
+        user_id=case.fixture.scope.user_id, name="html_method", source_type="user_upload", source_path=str(root)
+    )
+    method = SkillResourceRef(kind="skill", source_kind="user", id=record.id, version="sha256:" + bundle_sha256(root))
+    from types import SimpleNamespace
+
+    from bowhead_core.uploaded_skill_reference_metadata import build_uploaded_skill_metadata
+
+    index = await build_uploaded_skill_metadata(case.path)
+    case.app.state.uploaded_skill_reference_metadata = SimpleNamespace(current=lambda: index)
+    body = payload(case, skills=False)
+    if automatic:
+        body["input_document"]["nodes"] = [node for node in body["input_document"]["nodes"] if node.get("resource", {}).get("kind") != "agent"]
+    body["input_document"]["nodes"].append(
+        {"type": "reference", "node_id": str(uuid4()), "resource": method.model_dump(mode="json"), "label": "HTML method", "parameters": {}}
+    )
+    body["message"] = InputDocument.model_validate(body["input_document"]).display_text()
+    case.app.state.orchestrator.router.set_context_windows({("primary", "large"): window})
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return answer_response(request)
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        accepted = await case.client.post("/api/v1/chat/send", json=body)
+        assert accepted.status_code == 200, accepted.text
+        turn_id = accepted.json()["turn_id"]
+        await settled(turn_id)
+    turn = await case.fixture.case.store.get_turn(turn_id)
+    events = await case.app.state.turn_log_store.list_events(turn_id)
+    if window == 1000000:
+        assert turn.status == "completed", turn.error_kind
+        assert len(requests) == 1
+        projected = [
+            json.JSONDecoder().raw_decode(message["content"].split("\n", 1)[1])[0]
+            for request in requests
+            for message in request["messages"]
+            if isinstance(message.get("content"), str) and message["content"].startswith("Required selected method data")
+        ]
+        assert any(file["text"] == method_text for document in projected for skill in document["skills"] for file in skill["files"])
+    else:
+        assert turn.status == "failed" and turn.error_kind == "llm_failed"
+        assert requests == []
+        failed = [event for event in events if event.event_type == "turn_failed"]
+        assert len(failed) == 1
+        assert failed[0].payload["reason"] == "llm_context_overflow"
+        from bowhead_core.published_diagnostics import chat_recovery_action
+
+        assert chat_recovery_action(failed[0].payload["reason"]) == "edit_and_resend"
+        assert "attempts=0" in failed[0].payload["diagnostics"]["safe_detail"]

@@ -22,6 +22,7 @@ from bowhead_core.custom_subagent_store import (
     DESTRUCTIVE_TOOL_PREFIXES,
     REPORT_WRITE_TOOLS,
 )
+from bowhead_core.team_tool_confirmation import resolve_team_mcp_category, team_tool_confirmation_enabled
 from bowhead_core.team_tool_loader import load_team_tool_entries
 from bowhead_core.tool_registry import build_default_registry
 
@@ -37,6 +38,7 @@ RiskSource = Literal[
     "native_registry",
     "openapi_method",
     "mcp_annotation",
+    "admin_override",
     "unknown_default",
 ]
 
@@ -460,6 +462,9 @@ class SubagentAuthoringCatalogService:
             dependency_guard.append(
                 (source_id, str(getattr(source, "updated_at", "") or "")),
             )
+        # Requester confirmation runs each non-read team MCP call (team_tool_registry_view), so those
+        # tools need no administrator approval executor; unknown tools stay locked until categorized.
+        requester_confirms_mcp = team_tool_confirmation_enabled()
         for entry in sorted(entries, key=lambda item: item.advertised_name):
             source = sources.get(entry.source_id)
             source_name = _safe_label(
@@ -471,6 +476,14 @@ class SubagentAuthoringCatalogService:
                 risk, risk_source = classify_openapi_risk(entry.op.method)
                 method = entry.op.method.upper()
                 path = entry.op.path
+            elif requester_confirms_mcp:
+                risk, risk_source = resolve_team_mcp_category(
+                    read_only=entry.read_only_hint,
+                    destructive=entry.destructive_hint,
+                    admin_category=entry.admin_category,
+                )
+                method = None
+                path = None
             else:
                 risk, risk_source = classify_mcp_risk(
                     read_only=entry.read_only_hint,
@@ -485,10 +498,9 @@ class SubagentAuthoringCatalogService:
                 locked_reason = "mcp_feature_unlicensed"
             elif risk == "unknown":
                 locked_reason = "risk_metadata_unknown"
-            approval_required = risk in {"external_write", "destructive"}
-            confirmation = (
-                f"{source_name} · {_safe_label(entry.dispatch_name, fallback='operation', limit=80)} · {risk}" if approval_required else None
-            )
+            writes = risk in {"external_write", "destructive"}
+            approval_required = writes and not (requester_confirms_mcp and entry.op is None)
+            confirmation = f"{source_name} · {_safe_label(entry.dispatch_name, fallback='operation', limit=80)} · {risk}" if writes else None
             revision = str(getattr(source, "updated_at", "") or "")
             team_tools_list.append(
                 AuthoringTool(

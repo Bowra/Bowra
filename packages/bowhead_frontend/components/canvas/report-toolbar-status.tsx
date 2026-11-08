@@ -17,6 +17,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
 import { useStreamingActivity } from "./streaming-banner";
@@ -216,6 +217,7 @@ export function StreamingToolbarStatus({
 
 /** Toolbar status group: writing progress while streaming, otherwise `idle` (status badge); screen-reader region permanent. */
 export function ReportToolbarStatusGroup({
+  host,
   isStreaming,
   turnId,
   onCancel,
@@ -226,6 +228,7 @@ export function ReportToolbarStatusGroup({
   onRefresh,
   sectionsSaved = null,
 }: {
+  host?: HTMLElement | null;
   isStreaming: boolean;
   turnId: string | null;
   onCancel?: () => void;
@@ -297,7 +300,7 @@ export function ReportToolbarStatusGroup({
       </span>
     );
   }
-  return (
+  const content = (
     <>
       {isStreaming && !lost ? (
         <StreamingToolbarStatus
@@ -317,4 +320,5 @@ export function ReportToolbarStatusGroup({
       </span>
     </>
   );
+  return host === undefined ? content : host ? createPortal(content, host) : null;
 }

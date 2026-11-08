@@ -370,3 +370,30 @@ describe("presentation resolver and Chart.js adapter", () => {
     expect(samples[Math.floor(samples.length / 2)]).toBeLessThan(50);
   });
 });
+
+it.each(["bar", "hbar", "line", "area_stacked", "combo", "dual_axis"] as const)("uses the selected validated palette slot in native %s and static export", (kind) => {
+  const spec: ChartSpec = { kind, title: "Palette selection", row_count: 2,
+    columns: [{ key: "month", header: "Month", type: "categorical" }, { key: "value", header: "Value", type: "numeric", color_index: 4 }],
+    rows: [{ month: "Jan", value: 12 }, { month: "Feb", value: 21 }] };
+  const theme = themeFor(kind);
+  if (kind === "combo" || kind === "dual_axis") {
+    spec.columns.push({ key: "other", header: "Other", type: "numeric", y_axis_id: 1 });
+    spec.rows!.forEach((row) => { row.other = 10; });
+  }
+  for (const surface of ["canvas", "chat", "export"] as const) {
+    const config = buildChartJSConfig(spec, theme, { surface });
+    expect(config.data.datasets[0]!.borderColor).toBe(theme.chartStyleV2!.categoricalSeriesPalette[4]);
+    expect(normalizeChartForRenderingV1(spec).shape.series[0]!.paletteIndex).toBe(4);
+  }
+  expect(spec.rows![0]!.value).toBe(12);
+});
+
+it("keeps two requested green series distinguishable with existing non-color encodings", () => {
+  const spec: ChartSpec = { kind: "line", title: "Two measures", row_count: 2,
+    columns: [{ key: "month", header: "Month", type: "categorical" }, { key: "a", header: "A", type: "numeric", color_index: 4 }, { key: "b", header: "B", type: "numeric", color_index: 4 }],
+    rows: [{ month: "Jan", a: 2, b: 4 }, { month: "Feb", a: 3, b: 5 }] };
+  const theme = themeFor("line");
+  const presentation = resolveChartPresentation(normalizeChartForRenderingV1(spec).shape, theme, context());
+  expect(presentation.effective.series.map((series) => series.paletteIndex)).toEqual([4, 4]);
+  expect(presentation.effective.series[0]!.lineDash).not.toEqual(presentation.effective.series[1]!.lineDash);
+});

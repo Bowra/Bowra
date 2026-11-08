@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import aiosqlite
 import structlog
@@ -15,11 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.artifact_store import ArtifactStore
+from bowhead_core.canvas_export_projection import build_canvas_content_projection, build_canvas_surface_projection
 from bowhead_core.documents.canvas_material import FILENAME, MAX_BYTES
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope, Identity
 from bowhead_core.documents.retention import INTERNAL_PRODUCER
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active
 from bowhead_core.sqlite_readable_schema import readable_table_exists
+
+if TYPE_CHECKING:
+    from bowhead_core.canvas_export_projection import CanvasContentProjection
+    from bowhead_core.canvas_store import Section
 
 log = structlog.get_logger(__name__)
 
@@ -53,12 +58,21 @@ class CanvasInputAdmission:
     content_prepared: bool = False
 
 
+def default_canvas_section_ids(projection: CanvasContentProjection, sections: Sequence[Section]) -> set[str]:
+    """Use the existing report/Data surfaces; Code remains explicitly selectable."""
+    surface = build_canvas_surface_projection(content_projection=projection, sections=sections)
+    return {item.section_id for item in surface.entries if item.placement != "code_tab"}
+
+
 async def continuation_canvas_sections_in_tx(
     db: aiosqlite.Connection, *, scope: DocumentScope, session_id: str, original_turn_id: str, current_turn_id: str
 ) -> tuple[str, ...]:
-    """Select current visible Canvas content produced within the quoted task span."""
+    """Select report/Data content produced within the quoted task span."""
+    from bowhead_core.canvas_store import _row_to_section
+
+    db.row_factory = aiosqlite.Row
     async with db.execute(
-        """SELECT c.id FROM canvas_sections c
+        """SELECT c.* FROM canvas_sections c
         JOIN canvases a ON a.id=c.canvas_id
         JOIN turns origin ON origin.id=? AND origin.session_id=a.session_id
         JOIN turns current_turn ON current_turn.id=? AND current_turn.session_id=a.session_id
@@ -66,17 +80,19 @@ async def continuation_canvas_sections_in_tx(
         WHERE a.session_id=? AND a.user_id=? AND a.workspace_id=?
           AND producer.seq BETWEEN origin.seq AND current_turn.seq
           AND c.quarantined=0 AND c.hidden_for_chat_mode=0 AND c.superseded=0
-        ORDER BY c.seq,c.id LIMIT 65""",
+        ORDER BY c.seq,c.id""",
         (original_turn_id, current_turn_id, session_id, scope.user_id, scope.workspace_id),
     ) as cursor:
-        ids = tuple(row[0] for row in await cursor.fetchall())
+        sections = [_row_to_section(row) for row in await cursor.fetchall()]
+    projection = build_canvas_content_projection(title=None, sections=sections)
+    selected = default_canvas_section_ids(projection, sections)
+    ids = tuple(item.section_id for item in projection.sections if item.section_id in selected)
     if len(ids) > 64:
         raise DocumentRequestError("document_canvas_selection_invalid")
     return ids
 
 
 async def validate_current_canvas_in_tx(db: aiosqlite.Connection, *, scope: DocumentScope, manifest: CanvasInputManifest, section_ids) -> None:
-    from bowhead_core.canvas_export_projection import build_canvas_content_projection
     from bowhead_core.canvas_store import _row_to_canvas, _row_to_section
 
     db.row_factory = aiosqlite.Row
@@ -92,7 +108,8 @@ async def validate_current_canvas_in_tx(db: aiosqlite.Connection, *, scope: Docu
         sections = [_row_to_section(item) for item in await cursor.fetchall()]
     projection = build_canvas_content_projection(title=canvas.title, sections=sections)
     visible = [item for item in projection.sections if not item.quarantined]
-    selected = [item for item in visible if section_ids is None or item.section_id in section_ids]
+    selected_ids = default_canvas_section_ids(projection, sections) if section_ids is None else section_ids
+    selected = [item for item in visible if item.section_id in selected_ids]
     if (
         projection.projection_token != manifest.projection_token
         or tuple((item.section_id, item.rev) for item in selected) != tuple((item.section_id, item.rev) for item in manifest.sections)

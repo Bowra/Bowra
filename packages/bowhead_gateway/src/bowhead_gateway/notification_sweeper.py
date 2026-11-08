@@ -1,9 +1,13 @@
-"""Notification Center archive-retention sweeper.
+"""Notification Center retention and reconciliation sweeper.
 
-Runs in the gateway lifespan when Notification Center is enabled. It prunes
-only archived recipient rows older than the configured retention period, then
-removes orphan notification_items. Active action items and unread updates are
-never eligible for this cleanup path.
+Runs in the gateway lifespan when Notification Center is enabled. Each tick:
+
+1. closes open action items whose subject no longer asks for anything (approvals, access
+   requests, scheduled pauses and failures, waiting runs, Skill submissions);
+2. prunes history older than the retention period: archived rows, read rows of anything but an
+   open action item, then items left without recipients (`NotificationStore.prune_expired`).
+
+Open action items and unread rows are never pruned.
 """
 
 from __future__ import annotations
@@ -12,12 +16,14 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bowhead_core.approval_store import ApprovalStore
     from bowhead_core.notification_service import NotificationService
     from bowhead_core.notification_store import NotificationStore
+
+from bowhead_gateway.notification_reconcilers import build_reconcile_checks
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +46,9 @@ async def sweep_notification_archive_once(
     store: NotificationStore,
     notification_service: NotificationService | None = None,
     approval_store: ApprovalStore | None = None,
+    access_request_store: Any | None = None,
+    scheduled_store: Any | None = None,
+    user_store: Any | None = None,
     retention_days: int = _DEFAULT_RETENTION_DAYS,
     limit: int = _BATCH_LIMIT,
     now: datetime | None = None,
@@ -54,8 +63,21 @@ async def sweep_notification_archive_once(
         )
         if reconciled:
             log.info("notification_sweeper.reconciled approval_required=%s", reconciled)
+    if notification_service is not None:
+        checks = build_reconcile_checks(
+            access_request_store=access_request_store,
+            scheduled_store=scheduled_store,
+            user_store=user_store,
+        )
+        try:
+            closed = await notification_service.reconcile_open_actions(checks, limit=limit)
+        except Exception as exc:
+            log.warning("notification_sweeper.reconcile_failed err=%s", exc)
+        else:
+            if closed:
+                log.info("notification_sweeper.reconciled %s", " ".join(f"{k}={v}" for k, v in sorted(closed.items())))
     try:
-        counts = await store.prune_archived(older_than=cutoff, limit=limit)
+        counts = await store.prune_expired(older_than=cutoff, limit=limit)
     except Exception:
         _metric_inc(
             "bowhead_notification_sweeper_runs_total",
@@ -95,6 +117,9 @@ async def run_notification_sweeper(
     store: NotificationStore,
     notification_service: NotificationService | None = None,
     approval_store: ApprovalStore | None = None,
+    access_request_store: Any | None = None,
+    scheduled_store: Any | None = None,
+    user_store: Any | None = None,
     interval_s: int = _DEFAULT_INTERVAL_S,
     retention_days: int = _DEFAULT_RETENTION_DAYS,
     stop_event: asyncio.Event | None = None,
@@ -111,6 +136,9 @@ async def run_notification_sweeper(
                     store=store,
                     notification_service=notification_service,
                     approval_store=approval_store,
+                    access_request_store=access_request_store,
+                    scheduled_store=scheduled_store,
+                    user_store=user_store,
                     retention_days=retention_days,
                 )
             except Exception as exc:

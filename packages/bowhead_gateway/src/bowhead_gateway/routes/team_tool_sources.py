@@ -20,7 +20,7 @@ import os
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiosqlite
@@ -59,6 +59,15 @@ from bowhead_core.resource_usage_projection import (
 from bowhead_core.scrub import scrub
 from bowhead_core.secret_redaction import extract_secrets
 from bowhead_core.ssrf_guard import SsrfBlocked, validate_url
+from bowhead_core.team_tool_categories import (
+    CONFIRMABLE,
+    annotation_category,
+    effective_admin_category,
+    load_team_tool_categories,
+    lowers_annotation,
+    save_team_tool_categories,
+)
+from bowhead_core.team_tool_confirmation import team_tool_confirmation_enabled
 from bowhead_core.user_store import TeamToolSource, User, UserStore, _id, _now, _row_to_team_tool_source
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -116,15 +125,18 @@ def _query_auth_warnings(ops: list[OpenApiOp]) -> list[dict[str, str]]:
     ]
 
 
-def _approval_execution(source_id: str, operation_id: str, *, is_write: bool) -> bool | None:
+def _approval_execution(source_id: str, operation_id: str, *, is_write: bool, kind: str = "openapi") -> bool | None:
     """Project the execution gate into the authoring picker without inventing a second policy.
 
     ``None`` means approval is not applicable (a read operation).  Write operations are evaluated
     against their exact eventual ``teammcp.<source>.<operation>`` identity, so the picker follows
-    the execution gate automatically when support changes.
+    the execution gate automatically when support changes. Remote MCP writes run after the
+    requester's confirmation when ``FEATURE_TEAM_TOOL_CONFIRMATION`` is on.
     """
     if not is_write:
         return None
+    if kind == "mcp" and team_tool_confirmation_enabled():
+        return True
     return approval_gate.approval_executable(op_tool_name(source_id, operation_id))
 
 
@@ -256,6 +268,7 @@ def _mcp_tools_as_ops(tools: list[dict[str, Any]], source_id: str) -> list[dict[
                 source_id,
                 str(t.get("name")),
                 is_write=bool(t.get("destructive")),
+                kind="mcp",
             ),
             "tags": [],
         }
@@ -1209,7 +1222,7 @@ async def create_source(
         overrides = _sanitize_tool_overrides(body.tool_overrides, set(selected))
         selected_set = set(selected)
         approval_unavailable_count = sum(
-            _approval_execution(source_id, str(tool.get("name")), is_write=bool(tool.get("destructive"))) is False
+            _approval_execution(source_id, str(tool.get("name")), is_write=bool(tool.get("destructive")), kind="mcp") is False
             for tool in tools
             if str(tool.get("name")) in selected_set
         )
@@ -1462,6 +1475,120 @@ async def list_source_tools(
         "items": items,
         "updated_at": src.updated_at,
     }
+
+
+_MAX_CATEGORY_CHANGES = 512
+
+
+class ToolCategoriesBody(BaseModel):
+    """Changed tools only: a category confirms it, ``null`` removes the confirmation."""
+
+    categories: dict[str, Literal["read", "external_write", "destructive"] | None] = Field(default_factory=dict)
+
+
+def _category_error(status: int, code: str, **details: Any) -> HTTPException:
+    error: dict[str, Any] = {"code": code}
+    if details:
+        error["details"] = details
+    return HTTPException(status, detail={"error": error})
+
+
+async def _tool_categories_view(store: UserStore, src: TeamToolSource) -> dict[str, Any]:
+    records = (await load_team_tool_categories(store.db_path, src.team_id)).get(src.id, {})
+    explicit = set(src.selected_op_ids or [])
+    items: list[dict[str, Any]] = []
+    for meta in src.tools_schema or []:
+        name = str(meta.get("name") or "")
+        if not name:
+            continue
+        record = records.get(name)
+        confirmed = effective_admin_category(meta, record)
+        marked = annotation_category(meta)
+        items.append(
+            {
+                "name": name,
+                "description": str(meta.get("description") or "")[:_MAX_TOOL_DESC],
+                "imported": not explicit or name in explicit,
+                "annotation_category": marked,
+                "confirmed_category": confirmed,
+                "effective_category": confirmed or marked,
+                # A confirmation that no longer applies: the server changed this tool's definition.
+                "needs_reconfirmation": isinstance(record, dict) and confirmed is None,
+                "confirmed_at": record.get("confirmed_at") if confirmed and isinstance(record, dict) else None,
+            }
+        )
+    return {"enabled": team_tool_confirmation_enabled(), "items": items, "updated_at": src.updated_at}
+
+
+@router.get("/{source_id}/tool-categories")
+async def get_tool_categories(
+    source_id: str,
+    response: Response,
+    user: User = Depends(_REQUIRE_TEAM_ADMIN),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Each tool's category from its annotations and any administrator confirmation (remote MCP only)."""
+    response.headers["Cache-Control"] = "private, no-store"
+    src = await store.get_team_tool_source(user.team_id, source_id)
+    if src is None:
+        raise HTTPException(404, "source not found")
+    if src.kind != "mcp":
+        raise _category_error(422, "team_tool_category_mcp_only")
+    return await _tool_categories_view(store, src)
+
+
+@router.put("/{source_id}/tool-categories", dependencies=[Depends(require_not_readonly), Depends(require_feature_licensed("mcp"))])
+async def put_tool_categories(
+    source_id: str,
+    body: ToolCategoriesBody,
+    response: Response,
+    user: User = Depends(_REQUIRE_TEAM_ADMIN),
+    store: UserStore = Depends(_store),
+) -> dict[str, Any]:
+    """Confirm or remove categories. A confirmation never lowers what the server marked and
+    applies only while the tool's definition is unchanged; it takes effect from the next Turn."""
+    response.headers["Cache-Control"] = "private, no-store"
+    if not team_tool_confirmation_enabled():
+        raise _category_error(409, "team_tool_category_unavailable")
+    src = await store.get_team_tool_source(user.team_id, source_id)
+    if src is None:
+        raise HTTPException(404, "source not found")
+    if src.kind != "mcp":
+        raise _category_error(422, "team_tool_category_mcp_only")
+    if not body.categories:
+        return await _tool_categories_view(store, src)
+    if len(body.categories) > _MAX_CATEGORY_CHANGES:
+        raise _category_error(422, "team_tool_category_too_many", limit=_MAX_CATEGORY_CHANGES)
+    tools = {str(meta.get("name")): meta for meta in src.tools_schema or [] if meta.get("name")}
+    unknown = sorted(name for name in body.categories if name not in tools)
+    if unknown:
+        raise _category_error(422, "team_tool_category_unknown_tool", tools=unknown[:20])
+    for name, category in sorted(body.categories.items()):
+        if category is not None and (category not in CONFIRMABLE or lowers_annotation(category, tools[name])):
+            raise _category_error(422, "team_tool_category_below_annotation", tool=name, annotation_category=annotation_category(tools[name]))
+    stored = await save_team_tool_categories(
+        store.db_path,
+        team_id=user.team_id,
+        source_id=source_id,
+        changes=body.categories,
+        tools=tools,
+        actor_user_id=user.id,
+    )
+    if stored is None:
+        raise HTTPException(404, "source not found")
+    with contextlib.suppress(Exception):
+        await store.write_admin_audit_log(
+            actor_user_id=user.id,
+            team_id=user.team_id,
+            action=AuditAction.TEAM_TOOL_CATEGORY_CHANGED,
+            target_kind="team_tool_source",
+            target_id=source_id,
+            target_team_id=user.team_id,
+            scope="team",
+            payload={"changes": [{"tool": name, "category": category} for name, category in sorted(body.categories.items())]},
+        )
+    fresh = await store.get_team_tool_source(user.team_id, source_id)
+    return await _tool_categories_view(store, fresh or src)
 
 
 @router.post("/{source_id}/impact-preview")

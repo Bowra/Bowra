@@ -35,7 +35,7 @@ async def _grant_allows(request: Any, access_ctx: Any, resource_kind: str, resou
     return bool(decision.get("allowed")) or not resource_grants_enforce_enabled()
 
 
-async def _judge(request: Any, user: Any, files_store: Any, file_id: str) -> KbFileAccess:
+async def _judge(request: Any, user: Any, files_store: Any, file_id: str, *, expected_team_id: str | None = None) -> KbFileAccess:
     file = await files_store.get(file_id)
     if file is None or getattr(file, "soft_deleted_at", None):
         return _MISSING
@@ -52,7 +52,7 @@ async def _judge(request: Any, user: Any, files_store: Any, file_id: str) -> KbF
         space_id = scope_id
         workspace_for_grants = scope_id
     elif scope == "team":
-        if not scope_id or scope_id != getattr(user, "team_id", None):
+        if not scope_id or scope_id != (expected_team_id if expected_team_id is not None else getattr(user, "team_id", None)):
             return _FORBIDDEN
         space_id = None
         workspace_for_grants = ""
@@ -65,6 +65,7 @@ async def _judge(request: Any, user: Any, files_store: Any, file_id: str) -> KbF
             workspace_id=workspace_for_grants,
             allow_missing_workspace=not workspace_for_grants,
             operation=SpaceOperation.READ_HISTORY,
+            expected_team_id=expected_team_id,
         )
     except Exception:
         # Nonmember / archived space / unavailable authorization service: always restricted.
@@ -123,18 +124,18 @@ async def _resolve_request_user(request: Any) -> Any | None:
     return user
 
 
-def kb_file_access_for_user(app: Any, user: Any) -> Callable[[str], Awaitable[KbFileAccess]] | None:
-    """没有 HTTP 请求的上下文（飞书 / Teams 推送）：以指定用户为看的人，同一套判定。"""
+def kb_file_access_for_user(app: Any, user: Any, *, expected_team_id: str | None = None) -> Callable[[str], Awaitable[KbFileAccess]] | None:
+    """Bind a viewer and optional operation Team; recheck membership on every read."""
     files_store = getattr(app.state, "kb_files_store", None)
     if user is None or files_store is None:
         return None
     request = SimpleNamespace(app=app, state=SimpleNamespace(bowhead_user=user), headers={}, url=SimpleNamespace(path="/im"))
-    return _bind(request, user, files_store)
+    return _bind(request, user, files_store, expected_team_id=expected_team_id)
 
 
-def _bind(request: Any, user: Any, files_store: Any) -> Callable[[str], Awaitable[KbFileAccess]]:
+def _bind(request: Any, user: Any, files_store: Any, *, expected_team_id: str | None = None) -> Callable[[str], Awaitable[KbFileAccess]]:
 
     async def check(file_id: str) -> KbFileAccess:
-        return await _judge(request, user, files_store, file_id)
+        return await _judge(request, user, files_store, file_id, expected_team_id=expected_team_id)
 
     return check

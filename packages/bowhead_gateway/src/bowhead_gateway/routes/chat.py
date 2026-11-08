@@ -3297,7 +3297,10 @@ async def _send_impl(
 
         return await project_chart_for_authoring(request, session_id, section)
 
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
     turn_req = TurnRequest(
+        report_read_access=ReportReadAccess(request, session_id, body.workspace_id, resolved_team_id or "", resolved_user_id),
         context_maintenance=body.context_maintenance,
         chart_authoring_projection=_chart_authoring_projection,
         document_revision_target=body.document_revision_target,
@@ -6423,7 +6426,23 @@ async def _run_turn_and_cleanup(
             # and settle this generation's terminal projection.
             raise
         except Exception as e:
-            log.exception("orchestrator.unhandled_exception", turn_id=req.turn_id, error=str(e))
+            from bowhead_core.llm_failure import project_llm_failure
+
+            projection = project_llm_failure(e)
+            if projection is not None:
+                log.exception(
+                    "orchestrator.llm_failed",
+                    turn_id=req.turn_id,
+                    reason_code=projection.reason_code,
+                    failure_class=projection.failure_class,
+                    provider_family=projection.provider_family,
+                    phase=projection.phase,
+                    http_status=projection.http_status,
+                    stream_state=projection.stream_state,
+                    outcome_unknown=projection.outcome_unknown,
+                )
+            else:
+                log.exception("orchestrator.unhandled_exception", turn_id=req.turn_id, error=str(e))
             # Previously logging alone left status running; stream's synthetic-done guard saw no terminal,
             # stranding FE running until its 10min give-up. Best effort: persist terminal status before emitting error,
             # matching Orchestrator's emit-done-AFTER-persist P0-1 ordering. Before mark_failed, recheck that
@@ -6465,6 +6484,23 @@ async def _run_turn_and_cleanup(
                         error=type(_te).__name__,
                     )
             else:
+                from bowhead_core.published_diagnostics import (
+                    build_chat_llm_failure,
+                    build_chat_turn_failure,
+                    chat_failure_error_kind,
+                )
+                from bowhead_router.errors import InvocationOutcomeUnknownError
+
+                outcome_unknown = isinstance(e, InvocationOutcomeUnknownError) or (
+                    isinstance(e, BaseExceptionGroup) and e.subgroup(InvocationOutcomeUnknownError) is not None
+                )
+                failure = (
+                    build_chat_llm_failure(projection=projection, turn_id=req.turn_id)
+                    if projection is not None
+                    else build_chat_turn_failure(reason_code="lead_internal_error", turn_id=req.turn_id, outcome_unknown=outcome_unknown)
+                )
+                recovery_action = failure.recovery_action
+                failure_message = failure.reason_code if projection is not None else "internal_error"
                 terminal_fact_confirmed = False
                 failure_marked = False
                 try:
@@ -6474,8 +6510,8 @@ async def _run_turn_and_cleanup(
                         failure_marked = bool(
                             await orchestrator.session_store.mark_failed(
                                 turn_id=req.turn_id,
-                                error=str(e) or "unknown_error",
-                                error_kind="lead_internal_error",
+                                error=failure.reason_code,
+                                error_kind=chat_failure_error_kind(failure.reason_code),
                             )
                         )
                         terminal_fact_confirmed = failure_marked
@@ -6492,12 +6528,6 @@ async def _run_turn_and_cleanup(
                 if failure_marked:
                     try:
                         from bowhead_core.events import OrchestratorEvent
-                        from bowhead_core.published_diagnostics import build_chat_turn_failure
-
-                        failure = build_chat_turn_failure(
-                            reason_code="lead_internal_error",
-                            turn_id=req.turn_id,
-                        )
 
                         await _worker_bus.emit(
                             OrchestratorEvent(
@@ -6505,9 +6535,10 @@ async def _run_turn_and_cleanup(
                                 turn_id=req.turn_id,
                                 payload={
                                     "turn_id": req.turn_id,
-                                    "message": "internal_error",
+                                    "message": failure_message,
                                     "reason_code": failure.reason_code,
                                     "diagnostics": failure.diagnostics,
+                                    "recovery_action": recovery_action,
                                 },
                                 persist_before_delivery=True,
                             )
@@ -6519,10 +6550,11 @@ async def _run_turn_and_cleanup(
                                 payload={
                                     "turn_id": req.turn_id,
                                     "status": "failed",
-                                    "error": "internal_error",
+                                    "error": failure_message,
                                     "error_kind": failure.reason_code,
                                     "reason_code": failure.reason_code,
                                     "diagnostics": failure.diagnostics,
+                                    "recovery_action": recovery_action,
                                 },
                                 persist_before_delivery=True,
                             )

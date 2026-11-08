@@ -9,6 +9,30 @@ The model reads the frontmatter ``description`` and the body, never this text.
 from __future__ import annotations
 
 BUILTIN_LISTING_DESCRIPTIONS: dict[str, dict[str, str]] = {
+    "docx-authoring": {
+        "en-US": "Prepare and revise a private Word draft from your DOCX template and supplied sources, preserving the original formatting for review.",
+        "zh-CN": "基于你的 DOCX 模板和提供的资料创建、修改私有 Word 草稿，保留原有格式供审阅。",
+        "de-DE": "Erstellt und überarbeitet einen privaten Word-Entwurf aus Ihrer DOCX-Vorlage und Ihren Quellen und bewahrt die ursprüngliche Formatierung zur Prüfung.",
+        "fr-FR": "Prépare et révise un brouillon Word privé à partir de votre modèle DOCX et de vos sources, en conservant la mise en forme pour la revue.",
+    },
+    "latex-report": {
+        "en-US": "Create LaTeX source and a compiled PDF report with Chinese or English text, equations, tables and internal references in the isolated XeLaTeX runtime.",
+        "zh-CN": "在隔离的 XeLaTeX 环境中创建 LaTeX 源文件和 PDF 报告，支持中英文、公式、表格和内部引用。",
+        "de-DE": "Erstellt LaTeX-Quelldateien und einen PDF-Bericht mit chinesischem oder englischem Text, Formeln, Tabellen und internen Verweisen in der isolierten XeLaTeX-Umgebung.",
+        "fr-FR": "Crée les sources LaTeX et un rapport PDF avec du texte chinois ou anglais, des équations, des tableaux et des renvois internes dans l’environnement XeLaTeX isolé.",
+    },
+    "pptx-authoring": {
+        "en-US": "Prepare and revise a private PowerPoint draft from your template and supplied sources, preserving the original design for review.",
+        "zh-CN": "基于你的模板和提供的资料创建、修改私有 PowerPoint 草稿，保留原有设计供审阅。",
+        "de-DE": "Erstellt und überarbeitet einen privaten PowerPoint-Entwurf aus Ihrer Vorlage und Ihren Quellen und bewahrt das ursprüngliche Design zur Prüfung.",
+        "fr-FR": "Prépare et révise un brouillon PowerPoint privé à partir de votre modèle et de vos sources, en conservant la présentation d’origine pour la revue.",
+    },
+    "settings-team-administration": {
+        "en-US": "Explain or prepare supported Team execution limits, model parameters, model assignments and retry settings within your permissions. Credentials, connections and model probes use their dedicated workflows.",
+        "zh-CN": "在你的权限范围内解释或准备团队执行限制、模型参数、模型分配和重试设置。凭证、连接及模型验证仍使用各自的专用流程。",
+        "de-DE": "Erklärt oder bereitet unterstützte Team-Ausführungslimits, Modellparameter, Modellzuweisungen und Wiederholungseinstellungen innerhalb Ihrer Berechtigungen vor. Zugangsdaten, Verbindungen und Modellprüfungen nutzen ihre eigenen Abläufe.",
+        "fr-FR": "Explique ou prépare les limites d’exécution de l’Équipe, les paramètres et affectations des modèles et les nouvelles tentatives selon vos droits. Les identifiants, connexions et vérifications des modèles suivent leurs procédures dédiées.",
+    },
     "agent-authoring": {
         "en-US": "Helps set up or change an Agent for you: it finds the resources the Agent can use and prepares changes you review before saving. Pick it for Agents that build or improve other Agents.",
         "zh-CN": "帮你创建或修改智能体：查找智能体可用的资源，并准备好修改供你确认后再保存。适合用来搭建或改进其他智能体的智能体。",

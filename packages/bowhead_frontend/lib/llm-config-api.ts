@@ -99,7 +99,7 @@ export function fetchModelConfigurationProposal(proposalId: string): Promise<{ p
   return apiJson(`/api/v1/config-proposals/${encodeURIComponent(proposalId)}/model-review`);
 }
 
-/** Retries after a model call fails before replying; the server treats an absent value as this default. */
+/** Retries after a failed model call; the server treats an absent value as this default. */
 export const DEFAULT_LLM_MAX_RETRIES = 3;
 export const MIN_LLM_MAX_RETRIES = 0;
 export const MAX_LLM_MAX_RETRIES = 5;

@@ -1779,7 +1779,9 @@ async def file_representation(
     art = await _read_representation_artifact(request, store, artifact_id)
     if representation == "pptx-pdf":
         service = getattr(request.app.state, "document_service", None)
-        view = await build_presentation_view(store, art, getattr(service, "executor", None))
+        view = await build_presentation_view(
+            store, art, getattr(service, "executor", None), getattr(request.app.state, "presentation_previews", None)
+        )
         current = await _read_representation_artifact(request, store, artifact_id)
         if (current.path, current.size) != (art.path, art.size):
             raise representation_error("unavailable")

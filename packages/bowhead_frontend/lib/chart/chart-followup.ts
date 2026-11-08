@@ -10,6 +10,8 @@
  * to chart components.
  */
 
+import { useSyncExternalStore } from "react";
+
 import { canonicalizeChartSelectedContext } from "./selected-context";
 import type { AttachmentRef } from "../types";
 import { readRepresentation, representationPath } from "../use-artifact-representation";
@@ -49,6 +51,24 @@ export function requestChartFollowup(detail: ChartFollowupDetail): boolean {
   );
 }
 
+// Mounted subscribers. The workbench subscribes only where this viewer can start a turn, so charts in read-only,
+// report-only and shared views, in the report or inside chat, never show a follow-up that does nothing.
+let subscriberCount = 0;
+const availabilityListeners = new Set<() => void>();
+function setSubscriberCount(next: number) {
+  subscriberCount = next;
+  availabilityListeners.forEach((notify) => notify());
+}
+function subscribeAvailability(notify: () => void): () => void {
+  availabilityListeners.add(notify);
+  return () => { availabilityListeners.delete(notify); };
+}
+
+/** Whether a follow-up would reach a Composer; entry points render only when it would. */
+export function useChartFollowupAvailable(): boolean {
+  return useSyncExternalStore(subscribeAvailability, () => subscriberCount > 0, () => false);
+}
+
 /** Composer subscription; return unsubscribe function. */
 export function onChartFollowup(handler: (detail: ChartFollowupDetail) => void): () => void {
   if (typeof window === "undefined") return () => {};
@@ -62,5 +82,12 @@ export function onChartFollowup(handler: (detail: ChartFollowupDetail) => void):
     } else handler(detail);
   };
   window.addEventListener(CHART_FOLLOWUP_EVENT, listener);
-  return () => window.removeEventListener(CHART_FOLLOWUP_EVENT, listener);
+  setSubscriberCount(subscriberCount + 1);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    window.removeEventListener(CHART_FOLLOWUP_EVENT, listener);
+    setSubscriberCount(subscriberCount - 1);
+  };
 }

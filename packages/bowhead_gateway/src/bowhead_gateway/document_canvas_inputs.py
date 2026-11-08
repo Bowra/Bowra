@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import copy
 import uuid
-from dataclasses import replace
 from types import SimpleNamespace
 
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.canvas_export_projection import build_canvas_content_projection
 from bowhead_core.documents.authoring_protocol import digest
-from bowhead_core.documents.canvas_inputs import CanvasInputAdmission, CanvasInputManifest, CanvasSectionIdentity
+from bowhead_core.documents.canvas_inputs import CanvasInputAdmission, CanvasInputManifest, CanvasSectionIdentity, default_canvas_section_ids
 from bowhead_core.documents.canvas_material import MAX_BYTES, dataset_record, encode_material
 from bowhead_core.documents.request import CanvasInputSelection, DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _authorize
@@ -32,9 +31,7 @@ class DocumentCanvasInputs:
         user = await self.state.user_store.get_user(scope.user_id)
         if user is None:
             raise DocumentRequestError("document_not_found")
-        # The original Space binding supplies the Team; the legacy user field
-        # cannot replace that binding in current KB permission checks.
-        return replace(user, team_id=scope.team_id)
+        return user
 
     async def _projector(self, *, scope, canvas_id, session_id, sections, source_refs, closure):
         user = await self._actor(scope)
@@ -51,7 +48,7 @@ class DocumentCanvasInputs:
                 source_refs=source_refs,
                 report_artifact_closure=closure,
                 artifact_store=self.state.artifact_store,
-                kb_file_access=kb_file_access_for_user(SimpleNamespace(state=self.state), user),
+                kb_file_access=kb_file_access_for_user(SimpleNamespace(state=self.state), user, expected_team_id=scope.team_id),
             )
         except ViewerSourceProjectionError as error:
             raise DocumentRequestError("document_canvas_access_unavailable") from error
@@ -70,9 +67,8 @@ class DocumentCanvasInputs:
             raise DocumentRequestError("document_canvas_unavailable")
         projection = build_canvas_content_projection(title=canvas.title, sections=sections)
         visible_ids = {item.section_id for item in projection.sections if not item.quarantined}
-        selected = [
-            section for section in sections if section.id in visible_ids and (selection.section_ids is None or section.id in selection.section_ids)
-        ]
+        selected_ids = default_canvas_section_ids(projection, sections) if selection.section_ids is None else selection.section_ids
+        selected = [section for section in sections if section.id in visible_ids and section.id in selected_ids]
         if not selected or len(selected) > 64 or (selection.section_ids is not None and len(selected) != len(selection.section_ids)):
             raise DocumentRequestError("document_canvas_selection_invalid")
         canonical = [section.to_report_section() for section in selected]

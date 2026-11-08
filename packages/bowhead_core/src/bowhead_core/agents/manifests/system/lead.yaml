@@ -20,6 +20,7 @@ tools:
   default_enabled: false
   allow:
     - present_artifacts
+    - read_report
     - bi_schema
     - bi_query
     - kb_list_sources
@@ -45,6 +46,8 @@ tools:
     - clarification_dismiss
     - feedback_escalate
     - send_email
+    # FEATURE_ROUTINE_NOTIFY: in a scheduled task run only, flag the result for the task owner (registered only with the switch on).
+    - routine_notify
     - get_current_user
     - google_doc_write
     - google_slides_write

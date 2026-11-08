@@ -136,7 +136,7 @@ class DocumentTaskGenerationArguments(_FrozenModel):
     action: Literal["generate"]
     inputs: Annotated[tuple[DocumentTaskInput, ...], Field(min_length=1, max_length=32)]
     original_request_quote: Annotated[str, Field(min_length=1, max_length=8000)] | None = Field(
-        description="Use null when the active request contains the task requirements, including native question resumes. You may also quote that active request to use it directly. For an ordinary reply continuing an earlier task, copy a short unique exact phrase from that earlier user request. The service supplies the original request, intervening user supplements and confirmed answers, and current reply."
+        description="For a follow-up continuing an earlier task, copy a unique exact quotation from that earlier USER message. The current reply is already included automatically. The service supplies the selected original request, intervening user supplements and confirmed answers, and current reply. Use null only when the current request contains the complete requirements, including a native question resume."
     )
     requested_outputs: tuple[Literal["source", "pdf"], ...] = ("source",)
     canvas: CanvasInputSelection | None = None

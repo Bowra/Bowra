@@ -23,6 +23,8 @@ Use this page to quickly determine the owner of an action. Team, space, resource
 | Team Plugins                                   | Team owner or administrator                              | Members can browse and select these Tool and Skill bundles for Agents they own.            |
 | External business data                         | Data-system administrator and the member's data identity | Check the data source and the person's authorization separately.                           |
 
+When a member submits a team Skill for review, it waits as a to-do in the team owner's and administrators' notifications and in Home's **To handle** list. It clears by itself once someone approves or rejects it, or the author withdraws or deletes it.
+
 ## Configure built-in Agents
 
 Team owners and administrators can open **Agents → Built-in Agents**. Each row shows a localized purpose summary; choose **Configure** for that Agent to review its full routing description and team overrides. Changing the list language does not rewrite your saved configuration.

@@ -13,6 +13,7 @@ Cet article décrit les zones de la page de conversation qui affichent la progre
 
 - Après l’envoi, le cadre au-dessus de la réponse affiche l’étape actuelle, son numéro et le temps écoulé ; les deux lignes suivantes présentent les étapes terminées et la dernière décrit le travail actuel. La bordure est plus légère, la police est celle de l’interface, les étapes terminées ont une coche grise et les échecs ou nouveaux essais restent signalés par une couleur d’avertissement. Sélectionnez la première ligne pour développer ou réduire le déroulement complet.
 - **Arrêter**, en bas à droite du champ de saisie, est gris et se distingue d’Envoyer. Il affiche **Arrêt en cours…** jusqu’à la fin effective de la tâche.
+- Pendant une réponse, vous pouvez saisir une instruction pour l’ajuster. Dès que vous tapez, le bouton en bas à droite devient **Ajouter l’instruction**, qui met votre texte en attente pour la réponse en cours, et **Arrêter** passe à sa gauche : le bouton habituel n’interrompt donc jamais la réponse. La touche Entrée équivaut à **Ajouter l’instruction**.
 - À la fin, la progression se réduit à « N étapes terminées », qui permet de rouvrir le déroulement. En cas d’échec, le même emplacement affiche la raison et les actions de reprise disponibles.
 
 ## Actions sous une réponse

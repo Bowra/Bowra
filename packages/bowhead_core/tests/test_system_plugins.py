@@ -64,7 +64,7 @@ def test_settings_plugins_keep_their_compiled_resources_and_skill_grant():
 
 def test_every_registered_version_resolves_and_the_configuration_agent_refs_exist():
     refs = [plugin.ref for plugin in builtin_plugins() if plugin.family == "settings"]
-    assert len(refs) == len(set(refs)) == 19
+    assert len(refs) == len(set(refs)) == 21
     for ref in refs:
         tools, _ = resolve_system_plugins([ref], [], [])
         assert tools == CONFIGURATION_RESOURCES
@@ -136,7 +136,7 @@ def test_general_plugins_cover_selectable_visible_tools():
     from bowhead_core.system_plugins import latest_builtin_plugin
 
     general = [latest_builtin_plugin(name) for name in dict.fromkeys(plugin.name for plugin in builtin_plugins() if plugin.family == "general")]
-    assert [plugin.name for plugin in general] == [
+    expected_names = [
         "data-analysis",
         "reports-canvas",
         "designs",
@@ -147,15 +147,22 @@ def test_general_plugins_cover_selectable_visible_tools():
         "image-generation",
         "google-delivery",
         "email",
-        "document-authoring",
     ]
+    from bowhead_core.document_runtime import read_document_profile
+
+    excluded_tools = {"skill_save_generated", "get_current_user"}
+    if read_document_profile() == "legacy":
+        expected_names.append("document-authoring")
+    else:
+        excluded_tools.add("template_document_submit")
+    assert [plugin.name for plugin in general] == expected_names
     tools = [tool for plugin in general for tool in plugin.tools]
     assert len(tools) == len(set(tools))
     from bowhead_core.agents._generated.role_bindings import _PARADIGM_V2_ROLE_MAP
 
     # Requester identity belongs to Lead, outside selectable custom-Agent Plugins.
     assert _PARADIGM_V2_ROLE_MAP["get_current_user"] == frozenset({"lead"})
-    assert set(tools) == USER_VISIBLE_TOOLS - {"skill_save_generated", "get_current_user"}
+    assert set(tools) == USER_VISIBLE_TOOLS - excluded_tools
     assert "tool_switch_context" not in tools
     # Every general Plugin is selectable: choosing Email or Google delivery is the Owner's grant.
     assert all(plugin.selectable for plugin in general)

@@ -17,6 +17,110 @@ from bowhead_router import LLMResponse, ToolCall
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("parallel", [False, True], ids=["serial", "parallel"])
+@pytest.mark.parametrize("case", ["complete", "gap", "ignored", "stale", "feature_off", "denied", "no_delegation"])
+async def test_successful_delegation_reviews_original_required_scope(collab, monkeypatch, tmp_path, parallel, case):
+    from bowhead_core.agents.lead_orchestrator import _emit_event
+    from bowhead_core.events import TurnEventBus
+    from bowhead_core.turn_log_store import TurnLogStore
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "0" if case == "feature_off" else "1")
+    monkeypatch.setenv("BOWHEAD_TOOL_FINDING_ENABLED", "0")
+    monkeypatch.setenv("BOWHEAD_CHI_PARALLEL_EXEC", "1" if parallel else "0")
+    original_request = "Deliver revenue and actual profit. Missing profit is not a delivered profit value."
+    answer = "Revenue is 4200; required profit is unavailable." if case == "gap" else "Revenue is 4200; profit is 900."
+    if case == "no_delegation":
+        original_request = "Explain the difference between revenue and profit."
+        answer = "Revenue is sales income; profit subtracts the relevant costs."
+    requests, corrections, reviews = 0, 0, 0
+    business_calls = []
+    business_ids = []
+    review = None
+
+    async def spawn(args, ctx):
+        business_calls.append(args["profile"])
+        # Legacy helper success omits completion; a softened subtask does not redefine the original request.
+        return {"ok": True, "final_answer": answer}
+
+    async def provider(request):
+        nonlocal requests, corrections, reviews, business_ids, review
+        requests += 1
+        assert any(original_request in message.content for message in request.messages)
+        if requests == 1 and case != "no_delegation":
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id=f"helper-{i}", name="subagent_spawn", arguments={"profile": f"selected-{i}", "task": "Profit may be null."})
+                    for i in range(2)
+                ],
+            )
+        guidance = [message.content for message in request.messages if message.role == "user" and "review_context (JSON data): " in message.content]
+        if guidance:
+            corrections = len(guidance)
+            context = json.loads(guidance[-1].split("review_context (JSON data): ", 1)[1])
+            assert context["failed_calls"] == [], "Successful execution still needs whole-request scope review"
+            business_ids = [item["call_id"] for item in context["successful_calls"]]
+        if case in {"feature_off", "denied", "no_delegation", "ignored"}:
+            return LLMResponse(content=answer)
+        if guidance and reviews == 0:
+            review = {
+                "requirements": [
+                    {"requirement": "Revenue", "status": "fulfilled", "evidence_call_ids": [business_ids[0]]},
+                    {
+                        "requirement": "Actual profit",
+                        "status": "unfulfilled" if case == "gap" else "fulfilled",
+                        "evidence_call_ids": [] if case == "gap" else [business_ids[0]],
+                    },
+                ],
+                "issues": [],
+            }
+            reviews += 1
+            return LLMResponse(
+                content="", tool_calls=[ToolCall(id=f"review-{reviews}", name="review_delivery", arguments={"payload": {"delivery_review": review}})]
+            )
+        if case == "stale" and requests == 4:
+            return LLMResponse(content="", tool_calls=[ToolCall(id="late-helper", name="subagent_spawn", arguments={"profile": "later"})])
+        return LLMResponse(content=answer)
+
+    harness = RunnerFixture(collab, provider)
+    harness.register("subagent_spawn", spawn)
+    store = TurnLogStore(tmp_path / "scope-review.db")
+    await store.initialize()
+    published = []
+
+    async def persist(event):
+        await store.record(turn_id=event.turn_id, event_type=event.event_type, payload=event.payload)
+        published.append(event)
+
+    harness.bus = TurnEventBus(log_sink=persist, persist_before_live=True)
+    try:
+        result = await asyncio.wait_for(
+            harness.run(collab.lead, tool_deny=_LEAD_TOOL_DENY | ({"review_delivery"} if case == "denied" else set()), task=original_request), 15
+        )
+        assert not harness.provider.failures, harness.provider.failures
+        assert result.ok, result.error
+        partial = case in {"gap", "ignored", "stale"}
+        assert result.completion == ("partial" if partial else "complete"), [
+            (inv.tool_name, inv.call_id, inv.result) for inv in result.tool_invocations
+        ]
+        assert result.final_answer.startswith(answer), "Useful results survive bounded closeout"
+        assert corrections == (1 if case in {"complete", "gap", "ignored", "stale"} else 0)
+        assert reviews == (1 if case in {"complete", "gap", "stale"} else 0)
+        assert requests <= 7, "Ignoring review must not create an unbounded correction loop"
+        assert len(business_calls) == (0 if case == "no_delegation" else 3 if case == "stale" else 2)
+        if case == "ignored":
+            assert result.final_answer == answer, "Missing scope review alone adds no generic user warning"
+        assert '"delivery_review"' not in result.final_answer
+        await _emit_event(harness.bus, collab.worker.turn_id, "done", {"status": "completed", **delivery_summary_input(result)})
+        saved = await store.list_events(collab.worker.turn_id)
+        assert [(event.event_type, event.payload) for event in saved] == [(event.event_type, event.payload) for event in published]
+        done = next(event.payload for event in saved if event.event_type == "done")
+        assert done["step_outcome"]["answer_affected"] is partial
+        assert "_delivery_completion" not in done
+    finally:
+        await harness.bus.close()
+
+
 @pytest.mark.parametrize(
     "case", ["complete", "expected_negative", "missing", "corrected_review", "stale", "revoked", "mixed", "malformed_limit", "text_only"]
 )

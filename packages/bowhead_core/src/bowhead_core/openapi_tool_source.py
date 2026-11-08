@@ -546,6 +546,9 @@ class TeamToolEntry:
     # for rolling-reader compatibility; new policy uses these tri-state hints.
     read_only_hint: bool | None = None
     destructive_hint: bool | None = None
+    # A Team administrator's confirmed category, set by the loader only while the confirmation
+    # still matches this tool's cached definition (team_tool_categories). Never from the server.
+    admin_category: str | None = None
 
 
 def openapi_entry(source_id: str, op: OpenApiOp) -> TeamToolEntry:

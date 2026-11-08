@@ -215,8 +215,17 @@ class TerminalPendingExecutionRecovery:
         outcome = await outcome_reader(clarification.request_id) if callable(outcome_reader) else None
         persistence = (outcome or {}).get("tool_context_persistence")
 
+        from bowhead_gateway.report_read_access import ReportReadAccess
+
         turn_request = replace(
             turn_request,
+            report_read_access=ReportReadAccess(
+                SimpleNamespace(app=self._app),
+                context.scope.session_id,
+                clarification.workspace_id,
+                context.scope.team_id,
+                context.principals.requester_ref,
+            ),
             session_id=context.scope.session_id,
             user_id=context.principals.requester_ref,
             workspace_id=clarification.workspace_id,

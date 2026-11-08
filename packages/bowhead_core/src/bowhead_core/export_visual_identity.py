@@ -93,7 +93,8 @@ from bowhead_core.print_theme import (
 # "34" (2026-10-15): ordinary numeric precision, base-unit Table readings and unrounded source verification remain distinct.
 # Version 36: explicit date patterns affect native chart and Table exports.
 # Version 37: Table captions and unit disclosures share resolved column display, including export.
-EXPORT_VISUAL_RENDERER_VERSION = "37"
+# Version 38: explicit native measure palette slots, shared by screen and export.
+EXPORT_VISUAL_RENDERER_VERSION = "38"
 VISUAL_FIELDS: dict[str, tuple[str, ...]] = {
     "image": ("artifact_id", "caption", "alt"),
     "design": (

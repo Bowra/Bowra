@@ -1,7 +1,7 @@
 """Capability-tier model config — the single authority for agent→tier mapping.
 
 模型设置页档位化 sprint (2026-07-22, tech-design
-``docs/models-settings-tier-tech-design-2026-07-22.md``).
+``docs/drafts/legacy/models-settings-tier-tech-design-2026-07-22.md``).
 
 把配置轴从"agent 身份"（lead/echo/judge/...，内部实现名）换成 3 个用户面**能力
 档位**（primary/fast/judge）。``AGENT_TIER_MAP`` 是唯一权威：构建 router 时把每个

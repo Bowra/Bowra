@@ -142,17 +142,12 @@ class ReferenceReadQuestion(BaseModel):
             call = messages[2 * index + 1]["tool_calls"][0]
             result = json.loads(messages[2 * index + 2]["content"])
             arguments = call["arguments"]
-            if (
-                not isinstance(arguments, dict)
-                or set(arguments) != {"artifact_id"}
-                or not isinstance(result, dict)
-                or result.get("ok") is not True
-                or not isinstance(result.get("artifact_id"), str)
-                or result["artifact_id"] != arguments["artifact_id"]
-                or not isinstance(result.get("content_hash"), str)
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", result["content_hash"]) is None
-            ):
-                raise ValueError("reference_continuation_changed")
+            from bowhead_core.pptx_reading import validate_attachment_read_result
+
+            try:
+                validate_attachment_read_result(arguments, result)
+            except ValueError as error:
+                raise ValueError("reference_continuation_changed") from error
             reads.append((result["artifact_id"], result["content_hash"]))
         return reads
 

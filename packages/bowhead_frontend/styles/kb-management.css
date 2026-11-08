@@ -84,8 +84,6 @@
 .kb-row:hover { background: var(--c-surface-2); }
 .kb-row.sel { background: var(--c-accent-tint); }
 .kb-row.sel:hover { background: var(--c-accent-tint); }
-.kb-row.hit { background: color-mix(in srgb, var(--c-warn-soft) 72%, var(--c-surface)); box-shadow: inset 3px 0 0 var(--c-warn); }
-.kb-row.hit:hover { background: color-mix(in srgb, var(--c-warn-soft) 88%, var(--c-surface)); }
 .kb-cell { padding: 11px 14px; font-size: 0.78125rem; min-width: 0; }
 .kb-fname { font-size: 0.8125rem; color: var(--c-ink); font-weight: 500; display:flex; align-items:center; gap: 9px; min-width: 0; }
 .kb-fname .ftext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -276,6 +274,8 @@ button.kb-scope-card .title, button.kb-scope-card .desc { display: block; }
 /* Deep-search hit-location labels */
 .loc { display: inline-block; font-family: var(--font-mono); font-size: 0.625rem; color: var(--c-ink-4); background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: 4px; padding: 0 5px; margin-right: 6px; font-style: normal; white-space: nowrap; }
 .kb-snippet { font-style: normal; }
+/* Hits carry their colour on the location label, not as a row stripe or tint (no left colour bars; keeps <mark> legible). */
+.kb-row.hit .loc, .mrow.hit .loc { background: var(--c-warn-soft); color: var(--c-warn-ink); border-color: transparent; }
 
 /* Empty state: actions and explanations of three scopes */
 .kb-empty-acts { margin-top: 14px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
@@ -312,7 +312,6 @@ button.kb-scope-card .title, button.kb-scope-card .desc { display: block; }
 .kb-drawer-panel .chunk { padding: 9px 12px; background: transparent; border: none; border-radius: 0; line-height: 1.6; color: var(--c-ink-2); }
 .kb-drawer-panel .chunk p { margin: 0; white-space: pre-wrap; }
 .kb-drawer-panel .chunk .loc { margin-bottom: 3px; }
-.kb-drawer-panel .chunk.hit { background: color-mix(in srgb, var(--c-warn-soft) 72%, var(--c-surface)); box-shadow: inset 3px 0 0 var(--c-warn); }
 .kb-drawer-panel .chunk mark { background: var(--c-warn-soft); color: var(--c-warn-ink); padding: 0 2px; border-radius: 2px; }
 .kb-drawer-panel .confirm { border: 1px solid var(--c-err-soft); border-radius: 9px; padding: 12px; }
 .kb-drawer-panel .confirm .t { font-size: 0.78125rem; color: var(--c-ink-2); line-height: 1.6; }
@@ -323,11 +322,12 @@ button.kb-scope-card .title, button.kb-scope-card .desc { display: block; }
 .mlist { border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; background: var(--c-surface); }
 .mrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 11px 12px; border: none; border-bottom: 1px solid var(--c-line-2); background: var(--c-surface); color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
 .mrow:last-child { border-bottom: 0; }
-.mrow.hit { background: color-mix(in srgb, var(--c-warn-soft) 72%, var(--c-surface)); box-shadow: inset 3px 0 0 var(--c-warn); }
 .mrow .kb-ftype { width: max(28px, 2.6em); height: max(28px, 2.6em); font-size: 0.5625rem; }
 .mrow .mbody { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .mrow .nm { font-size: 0.8125rem; font-weight: 500; color: var(--c-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mrow .mt { font-size: 0.6875rem; color: var(--c-ink-4); margin-top: 2px; }
+/* Phone hit location sits on its own line so size and date never break mid-phrase; long section titles truncate. */
+.mrow .mt .loc { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; margin: 0 0 2px; }
 .mrow .st { margin-left: auto; flex: none; }
 
 @media (max-width: 640px) {

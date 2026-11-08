@@ -31,9 +31,9 @@ This is a **source preview**. You can build and initialize the reviewed Communit
 
 Known production dependency advisories remain under review. This source preview does not establish deployment security readiness; follow the [security guidance](SECURITY.md) and review the dependency lock before deployment.
 
-## Source snapshot 1.6.95
+## Source snapshot 1.7.17
 
-This update improves conversation recovery, original file downloads, report KPI choices, temporary Skill references, and overlapping SQLite activity. See the [Community release notes](docs/help/release-notes/releases/v1.6.95.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+This update improves retained material access, chart colors, knowledge citations, file identity and conversation navigation. See the [Community release notes](docs/help/release-notes/releases/v1.7.17.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
 
 SQLite upgrades now coordinate twelve database files and complete recovery archives. Stop every writer and preserve instance keys and the current deletion ledger before upgrading. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

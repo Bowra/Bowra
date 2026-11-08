@@ -238,10 +238,12 @@ def _read_report_schema() -> ToolSchema:
     return ToolSchema(
         name="read_report",
         description=(
-            "读取当前报告文档:顺序段落 + 已有图表(含 id)+ 每段 owner/rev。"
-            "**更新已有段、引用不是你本轮刚画的图、或报告可能已有别人写的段时, 写之前必须先调用它** —— "
-            "知道已有什么、确认你负责写哪段、用真实图 id 引图、拿到更新所需的 rev。"
-            "本轮首次写整篇、且只引你自己 add_chart 刚返回的图 id 时可以不调。报告是共享文档(可能多 agent 同编)。"
+            "Read saved content in the current conversation without changing it. "
+            "The default returns the ordered outline, existing figure IDs, owners and revisions; "
+            "an outline is not the body. Select section_ids for the needed text, or use include_full for a small report. "
+            "Read current IDs/revisions before editing an existing section or citing a previously saved figure. "
+            "A new report using only this run's acknowledged figure IDs does not require a preliminary read. "
+            "Use the returned coverage and unavailable status; do not repeat completed writes to recover content."
         ),
         input_schema={
             "type": "object",
@@ -249,11 +251,11 @@ def _read_report_schema() -> ToolSchema:
                 "section_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "只读这几段;不传=返 outline + figures(默认,最省 context)",
+                    "description": "Existing section IDs to read. Omit to return the outline and figure references.",
                 },
                 "include_full": {
                     "type": "boolean",
-                    "description": "true=连每段正文一起返(大报告慎用)。默认 false",
+                    "description": "Include text for all accessible sections. Default false; select sections for large reports.",
                 },
             },
         },
@@ -261,6 +263,20 @@ def _read_report_schema() -> ToolSchema:
 
 
 async def _read_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    from bowhead_core.report_read_material import note_report_read
+    from bowhead_core.result_materials import recovery_enabled
+
+    access = getattr(ctx, "report_read_access", None)
+    if recovery_enabled() and access is not None:
+        result, observation = await access.read(args, ctx)
+        note_report_read(ctx, args, result, observation)
+        return result
+    if getattr(ctx, "role", None) == "lead":
+        return {"ok": False, "error": "report_reader_unavailable", "message": "The current execution has no authorized report reader."}
+    return await _read_report_snapshot(args, ctx)
+
+
+async def _read_report_snapshot(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     canvas_store = getattr(ctx, "canvas_store", None)
     session_id = getattr(ctx, "session_id", None)
     if canvas_store is None or not session_id:

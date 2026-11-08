@@ -31,7 +31,13 @@ export function prepareHtmlInWorker(raw: string, interactive: boolean, signal: A
 function runPreparation(raw: string, interactive: boolean, signal: AbortSignal): Promise<InteractiveHtmlDocument | null> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new DOMException("HTML preparation cancelled", "AbortError")); return; }
-    const worker = new Worker(new URL("./html-preview.worker.ts", import.meta.url), { type: "module" });
+    // The worker has its own chunk loader: derive its base from its actual URL,
+    // preserving any browser entry prefix without the main window's bootstrap.
+    const worker = new Worker(
+      /* webpackEntryOptions: { publicPath: "auto" } */
+      new URL("./html-preview.worker.ts", import.meta.url),
+      { type: "module" },
+    );
     let settled = false;
     const finish = (error?: Error, result: InteractiveHtmlDocument | null = null) => {
       if (settled) return;

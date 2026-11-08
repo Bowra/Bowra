@@ -34,7 +34,7 @@ from bowhead_router.errors import (
 )
 from bowhead_router.inline_reasoning import InlineReasoningStream, split_inline_reasoning
 from bowhead_router.input_admission import LLMInputAdmissionError, admit_request_input
-from bowhead_router.invocation import physical_invocation_required, physical_observation_active
+from bowhead_router.invocation import is_transport_failure, physical_invocation_required, physical_observation_active
 from bowhead_router.model_clock import model_now
 from bowhead_router.retry import DEFAULT_MAX_RETRIES, RetryNotice, adapter_timeout, admit_retry, attempt_fits
 from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse
@@ -603,11 +603,18 @@ class Router:
         progress_idle: bool = False,
         *,
         target: tuple[str, str] | None = None,
+        allow_restart: bool = False,
     ) -> AsyncIterator[LLMChunk]:
         """流式调用. 见 invoke() 注释 user_pref 语义.
 
-        Fallback 在流式场景更复杂（已 yield 出的 chunk 不能撤回），MVP 策略：
-        "第一 token 前 fallback；之后失败就报错".
+        Retry and fallback admission is the same before and after output. A
+        caller that cannot withdraw yielded chunks (the default) gets
+        ``StreamingInterruptedError`` once a failed attempt had visible output.
+        With ``allow_restart=True`` the Router yields ``LLMChunk(stream_restart=True)``
+        before starting another attempt (retry or fallback target) whenever it
+        has yielded anything since the previous restart; the caller discards
+        that output. Exhaustion after visible output in the last failed attempt
+        still raises ``StreamingInterruptedError``.
         """
         binding = self.resolve(agent_type, profile, user_pref=user_pref)
         targets = [binding.primary, *binding.fallback]
@@ -617,6 +624,9 @@ class Router:
         failures: list[LLMTargetFailure] = []
         policy = retry_policy or RetryPolicy(max_attempts_per_target=self.max_retries + 1)
         last_error: Exception | None = None
+        # Output handed to the caller since the last restart, and whether any of it was visible.
+        yielded_since_restart = False
+        visible_since_restart = False
 
         for target_index, (provider_name, model) in enumerate(targets, start=1):
             if target is not None and target != (provider_name, model):
@@ -649,6 +659,10 @@ class Router:
             # A fallback target is one more attempt: it must fit the same time budget as a retry.
             if target_index > 1 and failures and not attempt_fits(attempt_timeout_s=adapter_timeout(adapter)):
                 break
+            if allow_restart and yielded_since_restart:
+                # The previous target's partial output is withdrawn before the fallback streams.
+                yielded_since_restart = visible_since_restart = False
+                yield LLMChunk(stream_restart=True)
             req_for_attempt = _clone_with_model(req, model, binding)
             req_for_attempt.credit_rates = self.model_credit_rates.get((provider_name, model))
             req_for_attempt.configuration_version = self.configuration_version
@@ -669,9 +683,8 @@ class Router:
                 family=family_for(definition, model),
                 thinking_budget=req_for_attempt.thinking_budget_tokens if req_for_attempt.extended_thinking else 0,
             )
-            # 0.13.2 stream retry: only retry BEFORE first chunk emits (can't
-            # replay yielded chunks). max 2 attempts (1 retry) with 2s backoff
-            # for retryable errors (429 transient bursts).
+            # Retry admission is the same before and after output; only a caller
+            # that can withdraw yielded chunks (allow_restart) is retried after output.
             max_attempts = policy.max_attempts_per_target
             for stream_attempt in range(max_attempts):
                 await admit_request_input(
@@ -686,7 +699,10 @@ class Router:
                 # Usage accounting (credit-billing gap 7): record only the **last observed** usage, once when this attempt finishes.
                 # Never record per chunk: some providers return **cumulative** usage on every chunk, which would inflate usage
                 # by O(number of chunks). Use finally so callers breaking early (async generator aclose) do not escape accounting.
+                # An attempt interrupted by a transport failure is settled not applied and is not charged
+                # (product decision 2026-11-08), even if the provider already reported input usage.
                 _last_usage: object | None = None
+                attempt_error: BaseException | None = None
                 iterator: AsyncIterator[LLMChunk] | None = None
                 try:
                     try:
@@ -718,6 +734,7 @@ class Router:
                                 )
                             if _is_visible_chunk(chunk):
                                 first_visible_chunk_emitted = True
+                                visible_since_restart = True
                             if getattr(chunk, "usage", None) is not None:
                                 _last_usage = chunk.usage
                             if chunk.finish_reason is not None and req_for_attempt.output_budget is not None:
@@ -731,17 +748,22 @@ class Router:
                                         output_budget=req_for_attempt.output_budget,
                                     ),
                                 )
+                            yielded_since_restart = True
                             yield chunk
                         tail, tail_reasoning = inline_reasoning.finish()
                         if tail or tail_reasoning:
+                            yielded_since_restart = visible_since_restart = True
                             yield LLMChunk(delta=tail, thinking_delta=tail_reasoning)
                         return  # stream completed successfully
+                    except BaseException as exc:
+                        attempt_error = exc
+                        raise
                     finally:
                         if iterator is not None and (physical_invocation_required() or physical_observation_active()):
                             close_iterator = getattr(iterator, "aclose", None)
                             if close_iterator is not None:
                                 await close_iterator()
-                        if _last_usage is not None:
+                        if _last_usage is not None and not (attempt_error is not None and is_transport_failure(attempt_error)):
                             record_usage(
                                 agent_type=agent_type,
                                 provider=provider_name,
@@ -785,7 +807,7 @@ class Router:
                         failure.kind.value,
                         failure.status_code,
                     )
-                    if first_visible_chunk_emitted:
+                    if first_visible_chunk_emitted and not allow_restart:
                         raise StreamingInterruptedError(failures) from e
                     retryable = failure.retryable
                     delay = policy.base_delay_s * (2**stream_attempt)
@@ -806,7 +828,7 @@ class Router:
                         )
                     ):
                         _get_logger().warning(
-                            "router.stream_retry provider=%s model=%s attempt=%d/%d delay=%.1fs kind=%s status=%s",
+                            "router.stream_retry provider=%s model=%s attempt=%d/%d delay=%.1fs kind=%s status=%s output_started=%s",
                             provider_name,
                             model,
                             stream_attempt + 1,
@@ -814,11 +836,19 @@ class Router:
                             delay,
                             failure.kind.value,
                             failure.status_code,
+                            first_visible_chunk_emitted,
                         )
+                        if allow_restart and yielded_since_restart:
+                            # Withdraw the failed attempt while the admitted retry is shown.
+                            yielded_since_restart = visible_since_restart = False
+                            yield LLMChunk(stream_restart=True)
                         await asyncio.sleep(delay)
                         continue  # retry same provider
                     break  # exhausted retries OR not retryable → next provider
 
+        if visible_since_restart:
+            # The last failed attempt's visible output was never withdrawn.
+            raise StreamingInterruptedError(failures) from last_error
         if last_error is not None:
             raise StreamingTargetsExhaustedError(failures) from last_error
         raise StreamingTargetsExhaustedError(failures)

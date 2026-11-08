@@ -24,6 +24,7 @@ export function useAgentDraftUrl(args: {
   onStartCreation: (purpose: string | null) => void;
   scope?: { teamId: string | null; workspaceId: string | null; sessionId: string | null };
   onScopeChange?: () => void;
+  onRouteDeselect?: () => void;
 }): { showDraftInUrl: (draftId: string | null) => void; scopeMatches: boolean } {
   const consumedRef = useRef(false);
   const shownDraftRef = useRef<string | null>(null);
@@ -42,6 +43,8 @@ export function useAgentDraftUrl(args: {
   const onStartCreationRef = useRef(args.onStartCreation);
   onRestoreDraftRef.current = args.onRestoreDraft;
   onStartCreationRef.current = args.onStartCreation;
+  const onRouteDeselectRef = useRef(args.onRouteDeselect);
+  onRouteDeselectRef.current = args.onRouteDeselect;
 
   const showDraftInUrl = useCallback((draftId: string | null) => {
     shownDraftRef.current = draftId;
@@ -70,6 +73,12 @@ export function useAgentDraftUrl(args: {
   const { searchParams, authoringEnabled } = args;
   useEffect(() => {
     const savedDraftId = agentCreationDraftId(searchParams);
+    if (!savedDraftId && shownDraftRef.current !== null) {
+      if (agentCreationDraftId(new URLSearchParams(window.location.search))) return;
+      shownDraftRef.current = null;
+      consumedRef.current = false;
+      onRouteDeselectRef.current?.();
+    }
     if (consumedRef.current && !savedDraftId) return;
     if (savedDraftId && savedDraftId === shownDraftRef.current) return;
     // Snapshot may lag (Next synchronizes via transition): after closing the card and clearing its draft ID, the old snapshot's ID

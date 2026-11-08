@@ -191,12 +191,28 @@ export function KbFileDrawer({
 
   // Scroll hit into view. Drawer body is scroll container (position: relative), set scrollTop directly,
   // not scrollIntoView, which would also scroll page itself.
+  // Sections above the chunks (source navigation, health) load on their own and can finish after the hit appears,
+  // pushing it out of view (116, 2026-11-08: 2 of 3 citation opens). Keep the hit in place while they settle,
+  // until the reader scrolls or types in the drawer.
   const hitShown = Boolean(shownChunks?.some((x) => x.hit));
   useEffect(() => {
     if (!hitShown) return;
     const body = bodyRef.current;
-    const el = body?.querySelector<HTMLElement>('[data-hit="true"]');
-    if (body && el) body.scrollTop = Math.max(0, el.offsetTop - 12);
+    if (!body) return;
+    const reveal = () => {
+      const el = body.querySelector<HTMLElement>('[data-hit="true"]');
+      if (el) body.scrollTop = Math.max(0, el.offsetTop - 12);
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    for (const child of Array.from(body.children)) observer.observe(child);
+    const stop = () => {
+      observer.disconnect();
+      for (const type of ["wheel", "touchstart", "pointerdown", "keydown"] as const) body.removeEventListener(type, stop);
+    };
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"] as const) body.addEventListener(type, stop, { passive: true });
+    return stop;
   }, [hitShown]);
 
   const handleDownload = async () => {

@@ -21,6 +21,7 @@ function setup(initial: Props) {
   const onRestoreDraft = vi.fn();
   const onStartCreation = vi.fn();
   const onScopeChange = vi.fn();
+  const onRouteDeselect = vi.fn();
   const hook = renderHook(
     ({ search, cardOpen, scope, authoringEnabled = true }: Props) => useAgentDraftUrl({
       // The page uses Next useSearchParams: after writing a URL without the marker, it follows the URL the page itself wrote.
@@ -31,13 +32,35 @@ function setup(initial: Props) {
       onStartCreation,
       scope,
       onScopeChange,
+      onRouteDeselect,
     }),
     { initialProps: initial },
   );
-  return { hook, onRestoreDraft, onStartCreation, onScopeChange };
+  return { hook, onRestoreDraft, onStartCreation, onScopeChange, onRouteDeselect };
 }
 
 describe("useAgentDraftUrl", () => {
+  it("deselects a history-removed pointer once and restores the same draft on Back", () => {
+    window.history.replaceState(null, "", "/?agent_draft=sad_history");
+    const { hook, onRestoreDraft, onRouteDeselect } = setup({ search: "?agent_draft=sad_history", cardOpen: true });
+    window.history.pushState(null, "", "/");
+    hook.rerender({ search: "", cardOpen: true });
+    hook.rerender({ search: "", cardOpen: true });
+    expect(onRouteDeselect).toHaveBeenCalledOnce();
+    window.history.replaceState(null, "", "/?agent_draft=sad_history");
+    hook.rerender({ search: "?agent_draft=sad_history", cardOpen: true });
+    expect(onRestoreDraft.mock.calls).toEqual([["sad_history"], ["sad_history"]]);
+  });
+
+  it("does not deselect for a stale missing snapshot or an explicit local URL clear", () => {
+    window.history.replaceState(null, "", "/?agent_draft=sad_live");
+    const { hook, onRouteDeselect } = setup({ search: "?agent_draft=sad_live", cardOpen: true });
+    hook.rerender({ search: "", cardOpen: true });
+    expect(onRouteDeselect).not.toHaveBeenCalled();
+    act(() => hook.result.current.showDraftInUrl(null));
+    hook.rerender({ search: "", cardOpen: true });
+    expect(onRouteDeselect).not.toHaveBeenCalled();
+  });
   it("does not treat Strict Mode's initial effect replay as closing a restored draft", () => {
     window.history.replaceState(null, "", "/?agent_draft=sad_strict");
     const onRestoreDraft = vi.fn();

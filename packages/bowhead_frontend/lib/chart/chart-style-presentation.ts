@@ -97,7 +97,7 @@ function tokensFor(theme: ChartTheme, kind: ChartKind): ChartKindPresentationTok
 function baseSeries(shape: NormalizedChartRenderShapeV1): ChartSeriesPresentationV2[] {
   return shape.series.map((series, index) => ({
     key: series.key,
-    paletteIndex: index,
+    paletteIndex: series.paletteIndex ?? index,
     lineDash: [],
     pointStyle: "circle",
     fillPattern: "solid",
@@ -119,6 +119,7 @@ export function colorOnlySeriesCapacity(theme: ChartTheme): number {
 
 export interface SeriesEncodingInput {
   roles: readonly string[];
+  paletteIndices?: readonly number[];
   paletteLength: number;
   capacity: number;
   colorSafe: boolean;
@@ -169,7 +170,7 @@ export function assignSeriesEncodings(input: SeriesEncodingInput): SeriesEncodin
   return input.roles.map((role, index) => {
     const family = FILLED_ROLES.has(role) ? "fill" : "line";
     const variants = family === "fill" ? policy.fillPatterns.length : lineVariants;
-    const color = index % paletteLength;
+    const color = (input.paletteIndices?.[index] ?? index) % paletteLength;
     const key = `${family}:${color}`;
     const taken = used.get(key) ?? new Set<number>();
     used.set(key, taken);
@@ -344,13 +345,15 @@ export function resolveChartPresentation(
     );
   }
 
-  const colorSafe = theme.accessibility?.colorVision === "color-safe" || renderContext.forcedColors;
+  const colorSafe = theme.accessibility?.colorVision === "color-safe" || renderContext.forcedColors
+    || (shape.series.length > 1 && shape.series.some((series) => series.paletteIndex !== undefined));
   const encodings = assignSeriesEncodings({
     roles: shape.series.map((series) => series.role),
     paletteLength: Math.max(1, theme.chartStyleV2?.categoricalSeriesPalette.length ?? theme.palette.length),
     capacity: colorOnlySeriesCapacity(theme),
     colorSafe,
     stacked: shape.flags.stacked,
+    paletteIndices: shape.series.map((series, index) => series.paletteIndex ?? index),
   });
   if (encodings) {
     effective.series = effective.series.map((series, index) => ({ ...series, ...encodings[index]! }));

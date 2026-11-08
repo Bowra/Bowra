@@ -16,6 +16,7 @@ import { composerAgentHandoffAdmitted, takeComposerPrefill, useComposerAgentUseH
 import { resolveAgentReferenceDocument } from "@/lib/agent-reference-document";
 import { randomUuid } from "@/lib/random-id";
 import { useAgentDraftUrl } from "@/lib/use-agent-draft-url";
+import { agentCreationDraftId } from "@/lib/agent-creation-handoff";
 import { useSessionSettleRefresh } from "@/lib/use-session-settle-refresh";
 import { useSettingsCanvas } from "@/lib/use-settings-canvas";
 import { WorkspaceSettingsCanvasProvider, useWorkspaceSettingsCanvasBridge } from "@/components/canvas/workspace-settings-canvas-context";
@@ -2575,6 +2576,11 @@ function CanvasHomeInner() {
       workspaceId: activeWorkspaceId,
     } : null,
     canManageSpace: workspace.items.some((item) => item.id === activeWorkspaceId && item.role === "admin"),
+    onRouteSelectionChange: (selected) => {
+      if (selected) setCanvasResultsSelected(false);
+      else if (activeCanvasSelectionRef.current?.kind === "settings"
+        && !agentCreationDraftId(new URLSearchParams(window.location.search))) setCanvasResultsSelected(true);
+    },
     searchParams: new URLSearchParams(searchParams.toString()),
     sessionId: activeSessionId,
   });
@@ -2654,6 +2660,12 @@ function CanvasHomeInner() {
     },
     onRestoreDraft: (draftId) => {
       void openAgentCanvas({ purpose_hint: null, draft_id: draftId, draft_status: null, draft_title: null });
+    },
+    onRouteDeselect: () => {
+      agentCanvas.select(null);
+      const params = new URLSearchParams(window.location.search);
+      if (activeCanvasSelectionRef.current?.kind === "agent_draft"
+        && !(readSettingsCanvasTarget(params) && readSettingsCanvasSelection(params))) setCanvasResultsSelected(true);
     },
     onStartCreation: (purpose) => {
       canvasOpenIntentRef.current += 1;

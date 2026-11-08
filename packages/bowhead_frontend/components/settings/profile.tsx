@@ -33,7 +33,7 @@ import { FilterMenuButton } from "@/components/ui/filter-menu-button";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
 import { SaveBar } from "@/components/ui/save-bar";
-import { getUserSettingsView, setUserSetting } from "@/lib/api";
+import { getUserSettings, getUserSettingsView, setUserSetting } from "@/lib/api";
 import { apiVoid } from "@/lib/api-client";
 import { AccountDeletionControl } from "@/components/settings/account-deletion";
 import { useCoachAfterEdit, type CoachAfterEdit } from "@/lib/agent-coach-after-edit";
@@ -265,6 +265,7 @@ export function SettingsProfile() {
         >
           <AnswerLanguageMenuButton labelledBy="profile-answer-language" />
         </Row>
+        {me.capabilities?.notification_delivery ? <ReminderEmailsRow /> : null}
       </Section>
 
       <Section title={t("sections.agents")}>
@@ -293,6 +294,55 @@ export function SettingsProfile() {
     </div>
   );
 }
+
+/**
+ * FEATURE_NOTIFICATION_DELIVERY: the personal switch for reminder emails about items still waiting on
+ * you. Saves on selection; unset means on. Emails a task owner configured are not affected.
+ */
+function ReminderEmailsRow() {
+  const t = useTranslations("settings.profile");
+  const [value, setValue] = useState<"on" | "off" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void getUserSettings()
+      .then((settings) => { if (!cancelled) setValue(settings[REMINDER_EMAILS_KEY] === "off" ? "off" : "on"); })
+      .catch(() => { if (!cancelled) setValue("on"); });
+    return () => { cancelled = true; };
+  }, []);
+  const change = async (next: "on" | "off") => {
+    setSaving(true);
+    setFailed(false);
+    try {
+      await setUserSetting(REMINDER_EMAILS_KEY, next);
+      setValue(next);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Row label={t("fields.reminder_emails")} labelId="profile-reminder-emails" hint={t("reminder_emails_hint")}>
+      <FilterMenuButton
+        value={value ?? "on"}
+        options={(["on", "off"] as const).map((option) => ({ value: option, label: t(`reminder_emails_${option}`) }))}
+        onChange={(next) => { void change(next as "on" | "off"); }}
+        format={(next) => next}
+        menuLabel={t("fields.reminder_emails")}
+        active={false}
+        disabled={value === null || saving}
+        labelledBy="profile-reminder-emails"
+        className="ui-language-button"
+        testId="reminder-emails-button"
+      />
+      {failed ? <span className="legacy-profile-hint" role="alert">{t("reminder_emails_failed")}</span> : null}
+    </Row>
+  );
+}
+
+const REMINDER_EMAILS_KEY = "notification_email_reminders";
 
 /** Saves on selection, like the language rows: the setting is independent of the profile save bar. */
 function CoachAfterEditRow() {

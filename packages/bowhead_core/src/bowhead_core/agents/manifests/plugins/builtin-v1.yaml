@@ -521,6 +521,22 @@ plugins:
     tools: []
     parts: *id001
     skill_revision: sha256:6767b13c204c220e930f9729715a7d1b26e6645f29a0950703c6ed3f9e30ec2e
+  - name: settings-personal-appearance
+    version: 5
+    family: settings
+    selectable: false
+    tools: []
+    parts:
+      [
+        "configuration_read",
+        "configuration_open",
+        "configuration_propose",
+        "configuration_apply",
+        "configuration_result",
+        "configuration_submit",
+        "skill_read",
+      ]
+    skill_revision: sha256:a59b33001b7f108463f92d8740ec6738e0f6eae37f7b8cccbe5ff1f4229b6eaa
   - name: settings-team-administration
     version: 1
     family: settings

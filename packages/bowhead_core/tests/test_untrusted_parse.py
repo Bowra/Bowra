@@ -175,6 +175,23 @@ async def test_flag_on_subprocess_pptx(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Via Subprocess" in prep.extracted_text
 
 
+@pytest.mark.integration
+async def test_pptx_selected_query_matches_thread_and_isolated_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import asdict
+
+    data = _pptx_bytes("Selected source")
+    art = _shim(_OOXML_PPTX, "template.pptx", len(data))
+    query = {"slides": [1], "detail": "index"}
+    monkeypatch.setenv("BOWHEAD_BOUNDED_ATTACH_PARSE", "0")
+    threaded = await extract_attachment_bounded(art, data, pptx_query=query)
+    monkeypatch.setenv("BOWHEAD_BOUNDED_ATTACH_PARSE", "1")
+    monkeypatch.setattr(up, "_SUBPROCESS_MIN_BYTES", 0)
+    isolated = await extract_attachment_bounded(art, data, pptx_query=query)
+    assert threaded.error is None and isolated.error is None
+    assert asdict(threaded) == asdict(isolated)
+    assert isolated.read_info["coverage"]["detail"] == "index"
+
+
 async def test_flag_on_subprocess_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOWHEAD_BOUNDED_ATTACH_PARSE", "1")
     monkeypatch.setattr(up, "_SUBPROCESS_MIN_BYTES", 0)
@@ -183,6 +200,19 @@ async def test_flag_on_subprocess_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     prep = await extract_attachment_bounded(art, data)
     assert prep.error is None
     assert "Subprocess docx text" in prep.extracted_text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("case", ["exact", "cut", "trailing_space"])
+def test_docx_character_coverage_does_not_create_page_continuation(case: str) -> None:
+    text, returned = {"exact": ("A" * 5000, 5000), "cut": ("A" * 5001, 5000), "trailing_space": ("A" * 4990 + " " * 10 + "B" * 100, 4990)}[case]
+    data = _docx_bytes(text)
+    parsed = _extract_one(_shim("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "document.docx", len(data)), data)
+    assert parsed.error is None
+    assert parsed.read_info["coverage"] == {"scope": "file", "unit": "characters", "returned": returned, "total": len(text)}
+    assert parsed.extracted_text[:returned] == text[:returned]
+    assert parsed.read_info["view"] == ("complete" if case == "exact" else "partial")
+    assert "continuation" not in parsed.read_info
 
 
 async def test_flag_on_bad_file_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:

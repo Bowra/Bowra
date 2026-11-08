@@ -32,12 +32,14 @@ from bowhead_skill.catalog import builtin_catalog_dir
 # observation: the retained result is the evidence. Tools with a stronger
 # native proof (attachment, skill, sandbox) keep that proof and still refuse
 # when it is missing. Team, MCP and personal Tools have no manifest risk.
-_PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke"})
+_PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke", "read_report"})
 RETAINED_READ_TOOLS = frozenset(name for name, risk in TOOL_RISKS.items() if risk == "read") - _PROOF_BEARING_READS
 
 
-def retained_read_tool(name: str) -> bool:
-    return canonical_tool_name(name) in RETAINED_READ_TOOLS
+def retained_read_tool(name: str, *, legacy_report: bool = False) -> bool:
+    from bowhead_core.result_materials import recovery_enabled
+
+    return canonical_tool_name(name) in RETAINED_READ_TOOLS or (name == "read_report" and (legacy_report or not recovery_enabled()))
 
 
 def material_observations(ctx):
@@ -150,7 +152,9 @@ async def revalidate_skills(ctx, proofs: list[dict]) -> None:
             await sources.revalidate_retained_in_connection(db, proof)
 
 
-async def revalidate_material_authority_in_connection(ctx, db, material: dict, *, contract: str = "ordinary-lead-loop.v3") -> None:
+async def revalidate_material_authority_in_connection(
+    ctx, db, material: dict, *, contract: str = "ordinary-lead-loop.v3", historical_skills: bool = False
+) -> None:
     """Recheck metadata while the final consumption transaction excludes writes.
 
     File bytes were checked immediately before this transaction. Store readers
@@ -158,13 +162,21 @@ async def revalidate_material_authority_in_connection(ctx, db, material: dict, *
     """
     artifacts = []
     for record in material.get("tools", []):
+        if record["kind"] == "report_read":
+            from bowhead_core.report_read_material import validate_report_read
+
+            await validate_report_read(ctx, record)
         if record["kind"] == "attachment_read":
             await _revalidate_attachment_read(ctx, record, contract=contract, read_bytes=False)
         for value in record["skills"]:
             proof = _proof(value)
             if proof.scope != _scope(ctx):
                 raise OrdinaryContinuationUnavailable()
-            await _sources(ctx, proof.resource, proof.name).revalidate_retained_in_connection(db, proof)
+            sources = _sources(ctx, proof.resource, proof.name)
+            if historical_skills:
+                await sources.authorize_history_in_connection(db, proof)
+            else:
+                await sources.revalidate_retained_in_connection(db, proof)
         artifacts.extend(record.get("artifacts", []))
     if "canvas" in material:
         expected = material["canvas"]
@@ -254,9 +266,16 @@ async def artifact_evidence(ctx, artifact_id: str, *, output: bool, contract: st
     }
 
 
-async def revalidate_tool_materials(ctx, records: list[dict], *, contract: str = "ordinary-lead-loop.v3") -> None:
+async def revalidate_tool_materials(ctx, records: list[dict], *, contract: str = "ordinary-lead-loop.v3", historical_skills: bool = False) -> None:
     for record in records:
-        await revalidate_skills(ctx, record["skills"])
+        # Prior-Turn observations retain original content under current source
+        # authority below. Current execution/resume still verifies exact bytes.
+        if not historical_skills:
+            await revalidate_skills(ctx, record["skills"])
+        if record["kind"] == "report_read":
+            from bowhead_core.report_read_material import validate_report_read
+
+            await validate_report_read(ctx, record)
         if record["kind"] == "attachment_read":
             await _revalidate_attachment_read(ctx, record, contract=contract, read_bytes=True)
         if record["kind"] in {"sandbox", "uncertain_sandbox"}:

@@ -61,6 +61,23 @@ def _coded_failure(status_code: int, code: str) -> HTTPException:
     return HTTPException(status_code, detail=detail)
 
 
+_DELIVERY_MODES = frozenset({"always", "on_alert"})
+
+
+def _checked_notify_channels(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Reject an unknown delivery mode. ``deliver`` (FEATURE_ROUTINE_NOTIFY): "always" (the default
+    when absent) delivers every successful run; "on_alert" only runs the task's Agent flagged."""
+    if value is not None and "deliver" in value and value["deliver"] not in _DELIVERY_MODES:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "scheduled_notify_deliver_invalid",
+                "message": 'notify_channels.deliver must be "always" or "on_alert".',
+            },
+        )
+    return value
+
+
 async def _supersede_awaiting_runs(
     request: Request,
     store: ScheduledJobStore,
@@ -564,6 +581,19 @@ class ScheduledJobRunDTO(BaseModel):
     status: str
     error: str | None = None
     error_diagnostics: dict[str, Any] | None = None
+    # FEATURE_NOTIFICATION_DELIVERY: what happened to this run's result and alert emails. No addresses.
+    deliveries: list[ScheduledRunDeliveryDTO] = Field(default_factory=list)
+
+
+class ScheduledRunDeliveryDTO(BaseModel):
+    kind: str  # "result" (routine.delivered) | "alert" (routine.alert)
+    status: str  # pending | sent | skipped | failed | dead
+    outcome_code: str | None = None
+    diagnostic_ref: str | None = None
+    attempts: int = 0
+
+
+ScheduledJobRunDTO.model_rebuild()
 
 
 class ScheduledJobRunListDTO(BaseModel):
@@ -721,7 +751,7 @@ async def create_job(
             tz=body.tz,
             session_strategy=body.session_strategy,
             anchor_session_id=body.anchor_session_id,
-            notify_channels=body.notify_channels,
+            notify_channels=_checked_notify_channels(body.notify_channels) or {},
             datarc_workspace_id=_snapshot_ws,
             public_entry_id=public_entry_id,
             recipe_ref=_recipe_ref,
@@ -1048,7 +1078,7 @@ async def patch_job(
             tz=body.tz,
             session_strategy=body.session_strategy,
             anchor_session_id=body.anchor_session_id,
-            notify_channels=body.notify_channels,
+            notify_channels=_checked_notify_channels(body.notify_channels),
             recipe_ref=_recipe_ref,
             agent_binding=_agent_binding,
             clear_agent_binding=_clear_agent_binding,
@@ -1228,9 +1258,39 @@ async def list_runs(
             sess_map = await sess_store.session_ids_for_turns([r.turn_id for r in runs if r.turn_id])
         except Exception as exc:
             logger.warning("scheduled.run_session_lookup_failed job=%s err=%s", job_id, exc)
-    return ScheduledJobRunListDTO(
-        items=[_run_to_dto(r, sess_map.get(r.turn_id or "")) for r in runs],
-    )
+    items = [_run_to_dto(r, sess_map.get(r.turn_id or "")) for r in runs]
+    await _attach_deliveries(request, job_id, items)
+    return ScheduledJobRunListDTO(items=items)
+
+
+async def _attach_deliveries(request: Request, job_id: str, items: list[ScheduledJobRunDTO]) -> None:
+    """Each run's recorded email outcomes (result and alert), when recorded deliveries are on."""
+    notif = getattr(request.app.state, "notification_service", None)
+    store = getattr(request.app.state, "notification_store", None)
+    if notif is None or store is None or not getattr(notif, "delivery_enabled", False):
+        return
+    by_key: dict[str, ScheduledJobRunDTO] = {}
+    for item in items:
+        if item.turn_id:
+            by_key[f"routine.delivered:{job_id}:{item.turn_id}"] = item
+            by_key[f"routine.alert:{job_id}:{item.turn_id}"] = item
+    try:
+        rows = await store.deliveries_for_dedupe_keys(by_key)
+    except Exception as exc:
+        logger.warning("scheduled.run_deliveries_unavailable job=%s err=%s", job_id, type(exc).__name__)
+        return
+    for row in rows:
+        run = by_key.get(row.item_dedupe_key or "")
+        if run is not None:
+            run.deliveries.append(
+                ScheduledRunDeliveryDTO(
+                    kind="alert" if (row.item_dedupe_key or "").startswith("routine.alert:") else "result",
+                    status=row.status,
+                    outcome_code=row.outcome_code,
+                    diagnostic_ref=row.diagnostic_ref,
+                    attempts=row.attempts,
+                )
+            )
 
 
 class RunNowResultDTO(BaseModel):

@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 import aiosqlite
 
+from bowhead_core import notification_types
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.notification_store import NotificationStore
 from bowhead_core.sqlite_domains import domain_database_path
@@ -298,6 +299,7 @@ class AgentVersionNotificationStore:
             if notice.candidate_id
             else ("team_subagent", notice.agent_id)
         )
+        notification_types.validate(projection.type, projection.priority)
         await notification_store.upsert_item_with_recipients(
             team_id=notice.team_id,
             # Updates, not the action tab: an action item stays open until something resolves it,

@@ -156,6 +156,7 @@ _SOURCE_TO_KIND: dict[str, str] = {
     "user_upload": "user_upload",
     "kb_upload": "user_upload",
     "bi_fetch_rows": "tool_data",
+    "chart_calculation": "tool_data",
     "template_clone_section_data": "tool_data",
     "python_sandbox": "sandbox_output",
     "sandbox_output": "sandbox_output",

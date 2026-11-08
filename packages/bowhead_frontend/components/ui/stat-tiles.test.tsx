@@ -36,7 +36,7 @@ describe("StatTiles", () => {
   it("follows the report KPI rule from one million: magnitude main line, every digit beneath", () => {
     const { container } = render(<StatTiles tiles={[{ id: "profit", label: "利润", value: 8_559_795 }]} />);
     const value = container.querySelector("[data-stat-swapped]")!;
-    expect(value.textContent).toMatch(/^≈/);
+    expect(value.textContent).toBe("855.98万");
     expect(screen.getByText("8,559,795")).toBeInTheDocument();
   });
 

@@ -205,7 +205,7 @@ def render_history_rules_block(
         return ""
     lines = [
         "## Follow-up rules for this session",
-        "When answering a follow-up: **do not clarify what is already known**; when the user wants an existing analysis in another form (PPT / deck / add a chart / rewrite), **reuse that turn's output from the conversation above; do not fetch the data again**.",
+        "When answering a follow-up: **do not clarify what is already known**; when the user wants an existing analysis in another form (PPT / deck / add a chart / rewrite), **reuse that turn's output from the conversation above; do not rerun completed data production merely to recover its output**. Read saved material through a currently available original reader when its content is missing.",
         _TOPIC_CONTINUITY_RULE,
     ]
     if source_continuity and any(isinstance(d.get("answered_via"), dict) and d["answered_via"].get("open_world") for d in rows):
@@ -249,7 +249,7 @@ def render_recent_turns_block(digests: list[dict[str, Any]], *, source_continuit
         lines = [
             "",
             "## Recent turns in this session (oldest first, the last one is the latest)",
-            "When answering a follow-up: **do not clarify what is already known**; when the user wants an existing analysis in another form (PPT / deck / add a chart / rewrite), **reuse the output of the turn below; do not fetch the data again**.",
+            "When answering a follow-up: **do not clarify what is already known**; when the user wants an existing analysis in another form (PPT / deck / add a chart / rewrite), **reuse the output of the turn below; do not rerun completed data production merely to recover its output**. Read saved material through a currently available original reader when its content is missing.",
             # cross-turn TOPIC-continuity (UNGATED — fires for any prior turn, incl. a refusal
             # / no-tool turn): a bare-action follow-up inherits the prior turn's SUBJECT.
             # Without this the Lead re-asks "搜什么?" on "你联网搜索一下" after a weather refusal

@@ -71,7 +71,7 @@ export function PlanSection({ items, defaultCollapsed = false, compact = false }
         <span
           style={{
             fontFamily: "var(--f-mono)",
-            fontSize: "0.65625rem",
+            fontSize: "0.6875rem",
             color: "var(--c-accent)",
             letterSpacing: "0.04em",
             textTransform: "uppercase",

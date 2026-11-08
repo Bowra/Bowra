@@ -58,13 +58,15 @@ def test_p21_no_more_dict_shape_reaction_teaching() -> None:
 
 
 def test_p21_new_workflow_references_bi_concept_resolve() -> None:
-    """peer prompt 必须把 `bi_concept_resolve` 教成消歧入口（live 措辞：起手指引里的
-    「query 含模糊 concept … 直接调 bi_concept_resolve(...)」）。"""
+    """Available dictionary resolution verifies ambiguous terms without guessing."""
     src = _peer_prompt_source()
-    assert "模糊 concept" in src, "起手指引里的消歧触发条件不见了"
-    assert "bi_concept_resolve(" in src
-    assert "只查词表、不猜" in src, "必须教它：词表答不了的概念由它自己解释"
-    assert "next_action_hint" in src, "必须教它看 hint 决定下一步"
+    block = src.split("- **Ambiguous Datarc concepts**", 1)[1].split("\n---", 1)[0]
+    instruction = block.splitlines()[0]
+    assert "when available, call `bi_concept_resolve(tokens=[...])`" in instruction
+    assert "with all ambiguous terms together" in instruction
+    assert "looks up the dictionary without guessing" in instruction
+    assert "If required terms cannot be verified with the available Tools or supplied evidence, report the gap" in instruction
+    assert "next_action_hint" in block
 
 
 def test_p21_teaches_needs_user_input_bail_kind() -> None:
@@ -95,35 +97,30 @@ def test_p21_teaches_advisory_hint_not_directive() -> None:
 
 
 def test_p21_silent_drop_anti_example_preserved() -> None:
-    """「静默换成别的 / 拿 fuzzy 兜底行数当真」这条反例必须还在（dogfood 教训 #768）。
-    live 措辞：`unknown_words` 不空 = 结果范围不是用户问的那个，禁止拿兜底数据当结果（bi-answer-correctness A
-    起不再「一律 bail」：可解析或按常识展开，只用数据里有的值、写明口径）+ caveats 里明说没交付的项，别静默换。
-
-    ⚠ 2026-09-20 116 dogfood 后改口径：不再钉「没有按它筛选」——`$like` 会把不在字典里的值
-    按字面送进查询（实测「省包含江西」），那句话在那一档是假陈述。钉的是「范围不对」。"""
+    """Unknown terms require scope inspection instead of accepting fallback rows."""
     src = _peer_prompt_source()
-    assert "万达店" in src, "battle-tested 的锚点案例（万达店）没了"
     assert "If a requested item cannot be delivered, name it and the reason" in src, "Missing requested items must be explained."
-    assert "unknown_words" in src, "「datarc 没认出的词」这条线索没了"
-    assert "不是用户问的那个" in src, "「没认出的词 ⇒ 结果范围不对」没了"
-    assert "没有按它筛选" not in src, "旧的无条件断言不许回来（$like 会把没认出的值按字面筛）"
-    assert "兜底数据当成结果" in src, "「禁止拿兜底数据当结果」没了"
-    assert "写明口径" in src, "「按常识展开时结论写明口径」没了"
+    block = src.split("- **🔴 每条 result 的 `_parse` 必看**", 1)[1].split("\n- `half_match_values`", 1)[0]
+    assert "`unknown_words` 非空" in block
+    assert "返回未过滤的数据" in block
+    assert "按字面进了查询却一行都匹配不到" in block
+    assert "先核对返回的维度值是不是用户问的范围" in block
+    assert "只用数据里有的值重查，结论里写明口径" in block
+    assert "把没按该词筛选的兜底数据当成结果" in block
 
 
 def test_p21_general_instruction_over_case_list() -> None:
-    """Per user feedback: pattern/general-instruction beats 堆 case list。
-    消歧那一行要教**判据**（什么形状算模糊 → 调后端解析，别凭记忆猜）+ 少量锚点案例，
-    不要退化成长长的案例枚举。"""
+    """Teach ambiguity categories and verification of expanded members and metrics."""
     src = _peer_prompt_source()
-    line = next((ln for ln in src.splitlines() if "模糊 concept" in ln), "")
-    assert line, "消歧触发那一行不见了"
-    # Include the criterion, not just examples: describe the categories of ambiguity.
-    assert "派生 metric" in line or "别名" in line, "消歧行只剩案例、没有判据"
-    # Preserve anchor examples without piling them up.
-    assert "万达店" in line, "锚点案例（万达店）没了"
-    # Currently 230 chars (four criteria + three anchors + next action); allow 40 chars of drift, beyond which examples are piling up again.
-    assert len(line) <= 270, f"消歧行 {len(line)} 字符——又堆成案例清单了，改回「判据 + 1-2 锚点」"
+    block = src.split("- **Ambiguous Datarc concepts**", 1)[1].split("\n---", 1)[0]
+    assert "brands, shortened site names or aliases" in block.splitlines()[0]
+    expansion = next(line for line in block.splitlines() if "词表里没有的概念" in line)
+    assert "展开成成员值" in expansion
+    assert "拆成数据里已有的指标" in expansion
+    assert "传进 `bi_concept_resolve` 核对哪些真在数据里" in expansion
+    assert "**只用核对过的去查**" in expansion
+    assert "在结论里写明口径" in expansion
+    assert "一个都没有就如实说本数据没有" in expansion
 
 
 def test_p21_clarification_payload_shape_taught() -> None:

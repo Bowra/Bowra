@@ -57,6 +57,10 @@ _CLOSE_TAG = "</response_kind>"  # 16 chars
 # value rather than dropping on overflow).
 _HEADLINE_OPEN = "<headline>"
 _HEADLINE_CLOSE = "</headline>"
+# Receiver-only tolerance for the observed model typo; prompts keep canonical spelling.
+_HEADLINE_OPENS = (_HEADLINE_OPEN, "<healine>")
+_HEADLINE_CLOSES = (_HEADLINE_CLOSE, "</healine>")
+_HEADLINE_OPEN_RE = re.compile(r"<(?:headline|healine)>", re.IGNORECASE)
 _MAX_HEADLINE_BUFFER = 200
 # Clean full-form match — `<response_kind>chat</response_kind>` (case-insensitive,
 # whitespace tolerated inside tags). Strict (chat|canvas) enum — Unicode
@@ -127,7 +131,7 @@ class ScannerState:
 # a newline before `</headline>` is prose (for example an XML sample in a code
 # block); the streaming filter and the post-hoc sanitizer share this rule.
 _HEADLINE_FULL_RE = re.compile(
-    r"<headline>([^\n]{0,200}?)</headline>",
+    r"<(?:headline|healine)>([^\n]{0,200}?)</(?:headline|healine)>",
     re.IGNORECASE,
 )
 
@@ -145,7 +149,7 @@ _HEADLINE_FULL_RE = re.compile(
 # tags and non-enum bodies stay as text (same rule as the streaming filter).
 _POST_HOC_SANITIZE_RE = re.compile(
     r"(?:<\s*response_kind\s*>|_kind\s*>)\s*(?:chat|canvas)\s*</\s*(?:response_kind|headline)\s*>"
-    r"|<\s*headline\s*>[^\n]{0,200}?</\s*headline\s*>",
+    r"|<\s*(?:headline|healine)\s*>[^\n]{0,200}?</\s*(?:headline|healine)\s*>",
     re.IGNORECASE,
 )
 # Blank lines directly after a marker that sat on its own line.
@@ -210,7 +214,7 @@ def strip_response_kind_markers(text: str) -> str:
     if not text:
         return text
     lower = text.lower()
-    if "_kind>" not in text and "response_kind" not in lower and "<headline" not in lower:
+    if "_kind>" not in text and "response_kind" not in lower and "<headline" not in lower and "<healine" not in lower:
         return text
     cleaned, removed = _remove_markers(text)
     if not removed:
@@ -428,8 +432,10 @@ def _headline_open_status(state: ScannerState, tail: str) -> str:
     "prose"    — a newline or the cap came first: never a headline. A single-line
                  overflow still records the first chars as a truncated headline (R-2).
     """
-    body = tail[len(_HEADLINE_OPEN) :]
-    close = body.lower().find(_HEADLINE_CLOSE)
+    opening = next(tag for tag in _HEADLINE_OPENS if tail.lower().startswith(tag))
+    body = tail[len(opening) :]
+    closes = [offset for tag in _HEADLINE_CLOSES if (offset := body.lower().find(tag)) >= 0]
+    close = min(closes, default=-1)
     newline = body.find("\n")
     if close != -1 and (newline == -1 or close < newline) and close <= _MAX_HEADLINE_BUFFER:
         return "complete"
@@ -442,7 +448,7 @@ def _headline_open_status(state: ScannerState, tail: str) -> str:
     overflow = body[_MAX_HEADLINE_BUFFER:].lower()
     if len(overflow) < len(_HEADLINE_CLOSE) and newline == -1:
         for split in range(max(0, len(body) - len(_HEADLINE_CLOSE) + 1), _MAX_HEADLINE_BUFFER + 1):
-            if _HEADLINE_CLOSE.startswith(body[split:].lower()):
+            if any(tag.startswith(body[split:].lower()) for tag in _HEADLINE_CLOSES):
                 return "hold"
     if state.headline_text is None:
         state.headline_text = body[:_MAX_HEADLINE_BUFFER]
@@ -453,13 +459,11 @@ def _headline_open_status(state: ScannerState, tail: str) -> str:
 
 def _held_headline_index(state: ScannerState, buf: str) -> int:
     """Index of the first `<headline>` in `buf` that must stay buffered, or -1."""
-    lower = buf.lower()
-    start = lower.find(_HEADLINE_OPEN)
-    while start != -1:
+    for match in _HEADLINE_OPEN_RE.finditer(buf):
+        start = match.start()
         state.headline_seen_open = True
         if _headline_open_status(state, buf[start:]) == "hold":
             return start
-        start = lower.find(_HEADLINE_OPEN, start + 1)
     return -1
 
 
@@ -526,7 +530,7 @@ def _feed_response_kind(
     return safe_text, state
 
 
-_OPEN_PREFIXES = (_OPEN_TAG, _HEADLINE_OPEN)
+_OPEN_PREFIXES = (_OPEN_TAG, *_HEADLINE_OPENS)
 _MISSING_OPEN_PREFIX = "_kind>"
 _KIND_BODY_RE = re.compile(r"\s*(?:chat|canvas)\s*</(?:response_kind|headline)>", re.IGNORECASE)
 _KIND_WORDS = ("chat", "canvas")
@@ -567,7 +571,7 @@ def _classify_angle(state: ScannerState, buf: str, i: int) -> tuple[str, int]:
     if low == _OPEN_TAG:
         action, length = _kind_body_status(tail[len(_OPEN_TAG) :])
         return action, i + len(_OPEN_TAG) + length
-    if tail[: len(_HEADLINE_OPEN)].lower() == _HEADLINE_OPEN:
+    if any(tail.lower().startswith(tag) for tag in _HEADLINE_OPENS):
         state.headline_seen_open = True
         m = _HEADLINE_FULL_RE.match(tail)
         if m:
@@ -697,10 +701,9 @@ def finalize_headline(state: ScannerState) -> ScannerState:
         # R-3: open was emitted but close never arrived → missing-close.
         # Best-effort: surface any body that was captured between open and
         # buffer end (capped at _MAX_HEADLINE_BUFFER).
-        lower = state.headline_buffer.lower()
-        open_idx = lower.find(_HEADLINE_OPEN)
-        if open_idx >= 0:
-            body_start = open_idx + len(_HEADLINE_OPEN)
+        opening = _HEADLINE_OPEN_RE.search(state.headline_buffer)
+        if opening is not None:
+            body_start = opening.end()
             body = state.headline_buffer[body_start : body_start + _MAX_HEADLINE_BUFFER]
             state.headline_text = body if body else None
         state.headline_decision = "missing-close"

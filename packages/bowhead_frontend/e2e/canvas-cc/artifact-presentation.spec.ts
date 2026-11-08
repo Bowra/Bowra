@@ -1,16 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function showFileLink(page: Page) {
-  const expand = page.getByRole("button", { name: /展开运行过程/ });
+  const expand = page.getByRole("button", { name: /查看运行过程/ });
   await expect(expand).toBeVisible({ timeout: 20_000 });
   if (await expand.isVisible()) await expand.click();
-  const link = page.getByRole("button", { name: "在成果中打开 计算说明 · calc.md" });
+  const link = page.getByRole("button", { name: "在成果中打开 calc.md" });
   if (!await link.isVisible()) await page.locator(".stp-head", { hasText: "交付已有文件" }).click();
   await expect(link).toBeVisible();
   return link;
 }
 
-test("retained files keep their identity, title and navigation after replay", async ({ page }) => {
+test("retained files use original names and navigation despite historical labels after replay", async ({ page }) => {
   const apiPort = process.env.PLAYWRIGHT_API_PORT ?? "18080";
   await page.request.post(`http://localhost:${apiPort}/api/v1/_test/reset`);
   await page.addInitScript(() => window.localStorage.setItem("bowhead.feature.results_workspace", "1"));
@@ -20,9 +20,9 @@ test("retained files keep their identity, title and navigation after replay", as
   const streamResponse = page.waitForResponse((response) => response.url().includes("/stream"));
   await composer.fill("presentfiles");
   await composer.press("Enter");
-  await expect(page.getByRole("button", { name: /展开运行过程/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: /查看运行过程/ })).toBeVisible({ timeout: 20_000 });
   const link = await showFileLink(page);
-  await expect(link).toHaveAttribute("title", "复用已保存的原文件");
+  await expect(link).toHaveAttribute("title", "在成果中打开 calc.md");
   await expect(page.locator(".v2-ws-right")).toBeHidden();
   await link.focus();
   await page.keyboard.press("Enter");

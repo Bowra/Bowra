@@ -2,7 +2,7 @@
 
 import { exportHiddenSeriesFor } from "@/lib/chart/export-hidden-series";
 import { useCallback, useId, useRef, useSyncExternalStore, useState, useEffect, useLayoutEffect, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 
 import { useStickToBottom } from "@/lib/use-stick-to-bottom";
@@ -25,6 +25,7 @@ import type {
   ComposerOrdinaryDraft,
 } from "@/lib/composer-ordinary-draft";
 import { chartFollowupReference, onChartFollowup } from "@/lib/chart/chart-followup";
+import { chartSelectedScopeLabel } from "@/lib/chart/selected-context";
 import type {
   ComposerDraftControl,
   ComposerDraftSubmissionContext,
@@ -508,6 +509,13 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // chat-ux-2026-08 batch C: viewport following. enabled is true only while this turn **is still running**:
   // stop forcing bottom alignment when the turn ends; users may be reading, so do not fight them.
   const stick = useStickToBottom(Boolean(runner.running));
+  const sendAndFollow = useCallback(async (...args: Parameters<Props["onSend"]>) => {
+    const accepted = await onSend(...args);
+    if (accepted === false) return false;
+    // Sending a new question restores following even after reading earlier messages.
+    stick.jumpToLatest();
+    return true;
+  }, [onSend, stick.jumpToLatest]);
   // New progress counts steps and answer start, **not character growth**, or the float's count would keep jumping.
   const progressTickRef = useRef<{ steps: number; answered: boolean }>({
     steps: 0,
@@ -1409,6 +1417,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // Inspection pre-fills the existing Composer; only an explicit Send submits analysis.
   // Resolve exact metadata and fence late replies by the original account and draft scope.
   const chartFollowupDraftScope = composerDraftScopeSignature(draftPersistenceScope);
+  const locale = useLocale();
+  // Each follow-up that fills the Composer asks the layout effect below to show and focus it.
+  const [chartFollowupReveal, setChartFollowupReveal] = useState(0);
   useEffect(() => {
     if (readOnly || reportOnly) return;
     let active = true;
@@ -1416,24 +1427,24 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     const stop = onChartFollowup((detail) => {
       pending?.abort();
       const scope = detail.selectedContext;
-      const scopeText = scope ? (scope.tuples ? JSON.stringify(scope.tuples) : `${scope.window!.lower} – ${scope.window!.upper}`) : null;
+      const scopeText = scope ? chartSelectedScopeLabel(scope, locale) : null;
       const question = tChat("chart_followup_prefill", { title: detail.title }) + (scopeText ? "\n" + tChat("chart_followup_scope", { scope: scopeText }) : "");
       // Install selected prose with its reference, so an in-flight lookup cannot pair it with an old scope.
-      if (!scope) setComposerPrefill(question);
+      if (!scope) { setComposerPrefill(question); setChartFollowupReveal((count) => count + 1); }
       if (!detail.dataArtifactId) return;
       if (!runner.sessionId) { toast({ kind: "error", text: tChat("chart_followup_unavailable") }); return; }
       const controller = new AbortController();
       pending = controller;
       void chartFollowupReference(runner.sessionId, detail.dataArtifactId, controller.signal).then((reference) => {
         if (!active || controller.signal.aborted) return;
-        if (scope) { reference = { ...reference, selectedContext: scope }; setComposerPrefill(question); }
+        if (scope) { reference = { ...reference, selectedContext: scope }; setComposerPrefill(question); setChartFollowupReveal((count) => count + 1); }
         setResultReferencePrefills((current) => current.some((ref) => ref.fileId === reference.fileId) ? current.map((ref) => ref.fileId === reference.fileId ? reference : ref) : [...current, reference]);
       }).catch(() => {
         if (active && !controller.signal.aborted) toast({ kind: "error", text: tChat("chart_followup_unavailable") });
       });
     });
     return () => { active = false; pending?.abort(); stop(); };
-  }, [tChat, readOnly, reportOnly, runner.sessionId, authSession?.me?.id, authSession?.me?.team_id, authSession?.me?.auth_session_generation, chartFollowupDraftScope]);
+  }, [tChat, locale, readOnly, reportOnly, runner.sessionId, authSession?.me?.id, authSession?.me?.team_id, authSession?.me?.auth_session_generation, chartFollowupDraftScope]);
   const returnToReport = useCallback(() => {
     if (
       !reportReturnContext
@@ -1907,6 +1918,21 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
     // Only an explicit original-instance handoff requests focus, never a scope change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composerRevealRequest]);
+  // A chart follow-up is an explicit request to write in the Composer. Only a maximized Results pane
+  // (or the Results view on a narrow screen) hides it; leave split and chat-only layouts as they are,
+  // so a follow-up from a chart inside chat never opens Results. The Composer focuses an applied
+  // prefill itself; this also covers a kept draft.
+  useLayoutEffect(() => {
+    if (!chartFollowupReveal || reportOnly) return;
+    const desktop = window.matchMedia(DESKTOP_SPLIT_QUERY).matches;
+    setPanelMode((mode) => (mode === "canvas" ? (desktop ? "split" : "chat") : mode));
+    const frame = requestAnimationFrame(() => {
+      focusComposerFallback(chatColumnRef.current?.querySelector<HTMLElement>(".composer-v2") ?? null);
+    });
+    return () => cancelAnimationFrame(frame);
+    // Only a new follow-up requests the reveal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartFollowupReveal]);
   const maximizeShortcutEnabled = isDesktop && hasResultsPane && !reportOnly && !creationPanelOpen;
   useEffect(() => {
     if (!maximizeShortcutEnabled) return;
@@ -2351,7 +2377,15 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   // The metadata controller composes this raw page title with the active brand. The page passes the session's display
   // title (the one the title bar shows, rename overrides included) so the tab follows a rename at once (116 dogfood
   // 1.5.25: the tab kept the old name until refresh); the canvas title is the fallback.
-  useDocumentTitle(documentTitle?.trim() || canvas.title, "chat-workbench-canvas");
+  // While a question card waits for the user's answer, the tab says so, for readers working in another tab or app.
+  const awaitingAnswer = Boolean(runner.clarificationPending);
+  const baseDocumentTitle = documentTitle?.trim() || canvas.title;
+  useDocumentTitle(
+    awaitingAnswer
+      ? [tComposer("awaiting_answer_title"), baseDocumentTitle].filter(Boolean).join(" · ")
+      : baseDocumentTitle,
+    "chat-workbench-canvas",
+  );
 
   // layout-redesign v10 canvas header — Escape closes whichever header dropdown
   // is open (WAI-ARIA menu pattern; the scrim already handles click-away).
@@ -2887,7 +2921,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
                   the composer, OUTSIDE the BotTurn scroll body. */}
               <TurnStream
                 runner={runner}
-                onSend={onSend}
+                onSend={sendAndFollow}
                 onContinue={readOnly || reportOnly ? undefined : onContinue}
                 onSolidify={onSolidify}
                 onSolidifySession={onSolidifySession}
@@ -2976,7 +3010,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           fileDropTargetRef={chatColumnRef}
           onSend={(text, attachments, draftRevision, submissionContext) => {
             setRestoredDraftNotice(null);
-            return onSend(text, attachments, draftRevision, submissionContext);
+            return sendAndFollow(text, attachments, draftRevision, submissionContext);
           }}
           onSteer={onSteer}
           onResolveDraftSubmissionProtocol={onResolveDraftSubmissionProtocol}
@@ -2984,6 +3018,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
           disabled={runner.running}
           running={runner.running}
           stopRequested={stopRequested}
+          awaitingAnswer={awaitingAnswer}
           readOnly={readOnly}
           recoveryLocked={submissionRecoveryLocked}
           draftPersistenceScope={draftPersistenceScope}

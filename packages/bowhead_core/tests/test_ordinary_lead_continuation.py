@@ -439,3 +439,83 @@ async def test_lease_recovery_only_restores_unconsumed_original_question(ctx, mo
     assert await ctx.sessions.is_turn_resume_ready(original.turn_id) is (not started)
     next_generation = await ctx.sessions.advance_turn_execution_generation(turn_id=original.turn_id, clarification_id=card.request_id)
     assert next_generation is None if started else next_generation == 3
+
+
+async def test_retained_native_receipts_keep_exact_projection_across_question_resume(ctx, monkeypatch):
+    from bowhead_core.result_materials import MaterialOrigin, MaterialReference, bounded_references
+    from bowhead_core.subagent import _serialize
+
+    _, _, _, checkpoint = await prepare(ctx, monkeypatch)
+    invocation = checkpoint.invocations()[0]
+    invocation.material_refs = bounded_references(
+        [
+            MaterialReference(
+                kind="canvas_section",
+                locator={"canvas_id": "cv_saved", "section_id": "sec_saved"},
+                relation="created",
+                origin=MaterialOrigin(kind="tool", turn_id="t_doc", producer_id="child", call_id="write"),
+            )
+        ]
+    )
+    invocation.material_readers = ("read_report",)
+    retained = checkpoint.model_copy(
+        update={
+            "material_receipts": {
+                invocation.call_id: {"references": invocation.material_refs.model_dump(exclude_none=True), "readers": ["read_report"]}
+            }
+        }
+    )
+    decoded = OrdinaryLeadCheckpoint.decode(retained.encode())
+    assert _serialize(decoded.invocations()[0]) == _serialize(invocation)
+    assert "material_receipts" not in json.loads(checkpoint.encode())
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        retained.model_copy(update={"material_receipts": {"unknown-call": retained.material_receipts[invocation.call_id]}}).encode()
+
+
+async def test_root_report_read_checkpoint_requires_the_original_bound_observation(ctx, monkeypatch):
+    from bowhead_core.ordinary_lead_continuation import content_hash
+    from bowhead_core.report_read_material import ReportReadObservation
+
+    _, _, _, checkpoint = await prepare(ctx, monkeypatch)
+    arguments = {"section_ids": ["sec_saved"]}
+    result = {"ok": True, "sections": [{"section_id": "sec_saved", "rev": 1, "content": "Historical conclusion"}]}
+    invocation = ToolInvocation("read_report", arguments, call_id="read", result=result, ended_at="2026-11-05")
+    original = json.loads(checkpoint.messages_json)
+    original[1:1] = [
+        asdict(Message("assistant", "", tool_calls=[ToolCall("read", "read_report", arguments)])),
+        asdict(Message("tool", canonical_json(result), name="read_report", tool_call_id="read")),
+    ]
+    observation = ReportReadObservation(
+        team_id=SCOPE.team_id,
+        user_id=SCOPE.user_id,
+        workspace_id=SCOPE.workspace_id,
+        session_id="s_doc",
+        canvas_id="cv_saved",
+        sections=[],
+        source_sections=[],
+        source_refs=[],
+        result_hash=content_hash(result),
+    )
+    record = {
+        "kind": "report_read",
+        "tool": "read_report",
+        "call_id": "read",
+        "skills": [],
+        "error": None,
+        "arguments_hash": content_hash(arguments),
+        "result_hash": content_hash(result),
+        "observation": observation.model_dump(),
+    }
+    retained = checkpoint.model_copy(
+        update={
+            "messages_json": canonical_json(original),
+            "invocations_json": canonical_json([asdict(invocation), *json.loads(checkpoint.invocations_json)]),
+            "report_reads": [record],
+        }
+    )
+    decoded = OrdinaryLeadCheckpoint.decode(retained.encode())
+    assert decoded.report_reads == [record] and decoded.invocations()[0].result == result
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        retained.model_copy(update={"report_reads": None}).encode()
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        retained.model_copy(update={"report_reads": [{**record, "result_hash": "0" * 64}]}).encode()

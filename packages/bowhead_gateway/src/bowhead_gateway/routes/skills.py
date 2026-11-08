@@ -1847,7 +1847,7 @@ async def upload_skill(
     user: User = Depends(_current_user),
     store: SkillInstanceStore = Depends(_store),
 ) -> SkillDetailDTO:
-    """上传 SKILL.md 或含 SKILL.md 的 zip（PRD Phase 2）. 见 /docs/skill-management-prd.md §4.2."""
+    """Upload SKILL.md or a ZIP containing it; see docs/drafts/legacy/skill-management-prd.md section 4.2."""
     uid = user.id
     await _require_skill_capability_for_request(request, user, permission="write")
     data = await file.read()

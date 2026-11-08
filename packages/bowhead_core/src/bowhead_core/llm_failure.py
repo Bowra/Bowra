@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from bowhead_router.errors import (
+    InvocationOutcomeUnknownError,
     InvocationTargetsExhaustedError,
     LLMTargetFailure,
     ProviderFailureKind,
@@ -137,7 +138,16 @@ class LLMDeliveryFailedError(RuntimeError):
         super().__init__("LLM stream and invoke fallback failed")
 
 
+def _unwrap_single_exception_group(exc: BaseException) -> BaseException:
+    # MCP context managers wrap a body failure in nested TaskGroups. Multiple
+    # leaves may include independent internal failures and cannot be relabeled.
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def target_failures(exc: BaseException) -> tuple[LLMTargetFailure, ...]:
+    """Keep unknown invocation evidence out of context recovery."""
     if isinstance(exc, LLMDeliveryFailedError):
         return (*exc.stream_error.failures, *target_failures(exc.invoke_error))
     if isinstance(exc, RouteTargetsExhaustedError):
@@ -159,6 +169,8 @@ def _pick_terminal(failures: tuple[LLMTargetFailure, ...]) -> LLMTargetFailure |
 
 
 def _terminal_failure(exc: BaseException) -> LLMTargetFailure | None:
+    if isinstance(exc, InvocationOutcomeUnknownError):
+        return exc.failure
     if isinstance(exc, LLMDeliveryFailedError):
         return _pick_terminal(target_failures(exc.invoke_error))
     return _pick_terminal(target_failures(exc))
@@ -173,7 +185,7 @@ def _reason_for(
     # because visible content was already emitted) as "transport interrupted". Observed 10/10 on 116.
     if failure.provider == ORCHESTRATOR_DEADLINE_PROVIDER:
         return "llm_stream_deadline_exceeded", "timeout"
-    if isinstance(exc, StreamingInterruptedError):
+    if isinstance(exc, StreamingInterruptedError) or (isinstance(exc, InvocationOutcomeUnknownError) and failure.first_visible_chunk_emitted):
         return "llm_stream_interrupted", "interrupted"
     match failure.kind:
         case ProviderFailureKind.AUTH | ProviderFailureKind.PERMISSION:
@@ -204,6 +216,7 @@ def project_llm_failure(
 
     from bowhead_router.output_budget import ContextCapacityError
 
+    exc = _unwrap_single_exception_group(exc)
     if isinstance(exc, ContextCapacityError):
         return LLMFailureProjection(
             reason_code="llm_context_overflow",
@@ -222,9 +235,16 @@ def project_llm_failure(
         return None
     reason_code, failure_class = _reason_for(exc, failure)
     is_interrupted = isinstance(exc, StreamingInterruptedError)
-    if isinstance(exc, LLMDeliveryFailedError):
-        phase: Literal["stream", "invoke"] = "invoke"
-        stream_state: Literal["not_started", "pre_visible", "interrupted"] = "pre_visible"
+    outcome_unknown = isinstance(exc, InvocationOutcomeUnknownError)
+    phase: Literal["stream", "invoke"]
+    stream_state: Literal["not_started", "pre_visible", "interrupted"]
+    if outcome_unknown:
+        phase = "stream" if failure.mode == "stream" else "invoke"
+        stream_state = "interrupted" if failure.first_visible_chunk_emitted else "pre_visible" if phase == "stream" else "not_started"
+        resolved_fallback = "not_attempted"
+    elif isinstance(exc, LLMDeliveryFailedError):
+        phase = "invoke"
+        stream_state = "pre_visible"
         resolved_fallback = "failed"
     elif isinstance(exc, StreamingTargetsExhaustedError):
         phase = "stream"
@@ -249,8 +269,9 @@ def project_llm_failure(
         http_status=failure.status_code,
         stream_state=stream_state,
         fallback_state=resolved_fallback,
-        attempts=len(target_failures(exc)),
-        retryable=failure.retryable,
+        attempts=1 if outcome_unknown else len(target_failures(exc)),
+        retryable=False if outcome_unknown else failure.retryable,
+        outcome_unknown=outcome_unknown,
         # Check again, **more strictly than Router** (see `_disclosable`): these three fields enter user-visible
         # diagnostics; an invalid shape must omit only its field, never cause the whole diagnostic to be dropped.
         upstream_error_type=_disclosable(failure.upstream_error_type),

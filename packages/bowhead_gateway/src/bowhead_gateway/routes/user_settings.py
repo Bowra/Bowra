@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/user-settings", tags=["user-settings"])
 
+KEY_NOTIFICATION_EMAIL_REMINDERS = "notification_email_reminders"
+NOTIFICATION_EMAIL_REMINDER_VALUES = frozenset({"on", "off"})
 KEY_KB_FILE_SCOPE = "kb_file_scope"
 # Values of GET /api/v1/kb/files ``scope`` the knowledge-base page may restore.
 KB_FILE_SCOPE_VALUES = frozenset({"all", "personal", "space", "team"})
@@ -61,6 +63,8 @@ _ALLOWED_KEYS = {
     KEY_KB_FILE_SCOPE,
     # What Coach does after writing an Agent draft: run the release check, or ask first.
     KEY_AGENT_COACH_AFTER_EDIT,
+    # FEATURE_NOTIFICATION_DELIVERY: reminder emails for items still waiting on you ("on" | "off"; unset = on).
+    KEY_NOTIFICATION_EMAIL_REMINDERS,
 }
 
 
@@ -105,6 +109,8 @@ def _validate_setting_value(key: str, value: str, request: Request | None = None
             raise HTTPException(400, str(exc)) from exc
     if key == KEY_AGENT_COACH_AFTER_EDIT and value not in AGENT_COACH_AFTER_EDIT_VALUES:
         raise HTTPException(400, f"invalid {KEY_AGENT_COACH_AFTER_EDIT} (allowed: {sorted(AGENT_COACH_AFTER_EDIT_VALUES)})")
+    if key == KEY_NOTIFICATION_EMAIL_REMINDERS and value not in NOTIFICATION_EMAIL_REMINDER_VALUES:
+        raise HTTPException(400, f"invalid {KEY_NOTIFICATION_EMAIL_REMINDERS} (allowed: {sorted(NOTIFICATION_EMAIL_REMINDER_VALUES)})")
     if key == KEY_KB_FILE_SCOPE and value not in KB_FILE_SCOPE_VALUES:
         raise HTTPException(400, f"invalid {KEY_KB_FILE_SCOPE} (allowed: {sorted(KB_FILE_SCOPE_VALUES)})")
     return value

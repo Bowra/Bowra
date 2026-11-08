@@ -65,7 +65,7 @@
 #     they are never registered. Binding roles would leak them into NATIVE_ALLOWLIST as
 #     ghost rows whose selection has no effect (the bi_ask_question example in specification §4).
 #
-# ─── Resource kind and risk (docs/design/capability-center-plugins-tech-design.md §4.1) ───
+# ─── Resource kind and risk (docs/drafts/agents/capability-center-plugins-tech-design.md §4.1) ───
 #   kind: required. `tool` = user-visible built-in Tool (Tools page, Plugins, Agent selection);
 #     `part` = internal system part, never shown, selected or disabled on its own.
 #   risk: required for `kind: tool`; one of read / compute / artifact_write / external_write / destructive.
@@ -956,6 +956,20 @@ tools:
     risk: external_write
     allowed_roles: [lead]
 
+  - canonical: routine_notify
+    display_zh: 提醒任务所有者
+    display_en: Notify Task Owner
+    blurb_zh: "定时任务运行中，把这次结果标记给任务所有者。"
+    blurb_en: "In a scheduled task run, flag this run's result for the task owner."
+    display_de: "Aufgabenbesitzer benachrichtigen"
+    blurb_de: "In einem geplanten Lauf das Ergebnis dieses Laufs für den Besitzer der Aufgabe markieren."
+    display_fr: "Prévenir le propriétaire de la tâche"
+    blurb_fr: "Lors d’une exécution planifiée, signaler le résultat de cette exécution au propriétaire de la tâche."
+    sigil: "🔔"
+    category: orchestrate
+    kind: part
+    allowed_roles: [lead]
+
   - canonical: google_doc_write
     display_zh: 写入 Google 文档
     display_en: Write Google Doc
@@ -1587,7 +1601,7 @@ tools:
     category: canvas
     kind: tool
     risk: read
-    allowed_roles: [analyst]
+    allowed_roles: [lead, analyst]
 
   - canonical: canvas_create_design
     display_zh: 创建设计稿

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import json
 import logging
@@ -46,6 +47,7 @@ from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavaila
 from bowhead_core.published_diagnostics import (
     build_chat_canvas_failure,
     chat_failure_error_kind,
+    get_or_build_chat_llm_failure,
     get_or_build_chat_turn_failure,
 )
 from bowhead_core.tool_delivery_review import delivery_summary_input
@@ -6265,6 +6267,9 @@ async def _lead_loop(
                     except Exception as _sp_e:  # noqa: BLE001 — unavailable inputs do not block turn
                         logger.warning("lead.turn_history_spawns_failed turn=%s err=%s", sctx.turn_id, _sp_e)
                         _spawns_by_turn = None
+                from bowhead_core.result_material_history import load_material_history
+
+                _material_history = await load_material_history(runtime.parent_ctx, [t.id for t in _turns_all if t.id != sctx.turn_id])
                 _th = _build_turn_history(
                     _turns_all,
                     exclude_turn_id=sctx.turn_id,
@@ -6274,6 +6279,7 @@ async def _lead_loop(
                     strip=_hist_strip,
                     spawns=_spawns_by_turn,
                     clarifications=_clarifications_by_turn,
+                    material_refs=_material_history,
                     make_tool_calls_message=lambda calls: _HMessage(
                         role="assistant",
                         content="",
@@ -6463,6 +6469,7 @@ async def _lead_loop(
 
     sd = None
     stream_cb = None
+    stream_restart_cb = None
     _stream_state_reset: Any = None  # r4: defined in stream branch; final gate resets stream state on bounce
     if streaming_enabled:
         # Auto-splitting assembled only when rollback enabled. Default sd None ⇒all downstream
@@ -6574,10 +6581,63 @@ async def _lead_loop(
             _rk_scanner_state = init_per_turn_scanner_state()
             _rk_headline_emit_flag[0] = False
             _rk_metric_emitted[0] = False
+            _attempt_snapshot.clear()
             with contextlib.suppress(Exception):
                 runtime.parent_ctx._lead_narrative_text = ""
 
         _stream_state_reset = _reset_stream_state_for_bounce
+
+        # Narrative state at the first callback of the current model attempt, and the
+        # narrative.delta code points that attempt has emitted. Keyed by the attempt
+        # token, so a later model call or a restart starts a fresh snapshot.
+        _attempt_snapshot: dict[str, Any] = {}
+
+        def _note_stream_attempt() -> None:
+            from bowhead_core.subagent import current_stream_attempt
+
+            token = current_stream_attempt()
+            if token is None or _attempt_snapshot.get("token") is token:
+                return
+            _attempt_snapshot.clear()
+            _attempt_snapshot.update(
+                token=token,
+                scanner=dataclasses.replace(_rk_scanner_state),
+                headline_emitted=_rk_headline_emit_flag[0],
+                metric_emitted=_rk_metric_emitted[0],
+                narrative=getattr(runtime.parent_ctx, "_lead_narrative_text", "") or "",
+                pre_flight=getattr(runtime.parent_ctx, "response_kind_pre_flight", None),
+                emitted_chars=0,
+            )
+
+        async def _withdraw_stream_attempt() -> int:
+            """Return Lead's narrative state to the start of the attempt the Router restarts.
+
+            Returns the narrative.delta code points that attempt emitted, which every
+            view removes from the end of the Lead narrative.
+            """
+            nonlocal _rk_scanner_state
+            from bowhead_core.subagent import current_stream_attempt
+
+            snapshot = dict(_attempt_snapshot)
+            _attempt_snapshot.clear()
+            token = current_stream_attempt()
+            if token is None or snapshot.get("token") is not token:
+                return 0  # This attempt delivered no prose to the callback.
+            _rk_scanner_state = snapshot["scanner"]
+            _rk_headline_emit_flag[0] = snapshot["headline_emitted"]
+            _rk_metric_emitted[0] = snapshot["metric_emitted"]
+            with contextlib.suppress(Exception):
+                runtime.parent_ctx._lead_narrative_text = snapshot["narrative"]
+                runtime.parent_ctx.response_kind_pre_flight = snapshot["pre_flight"]
+            if sd is not None:
+                try:
+                    await sd.abort_open_section(reason="stream_restart")
+                except Exception:
+                    raise_if_terminal_bus_failed(runtime.parent_bus)
+                    logger.warning("lead.stream_restart_section_abort_failed turn=%s", sctx.turn_id, exc_info=True)
+            return int(snapshot["emitted_chars"])
+
+        stream_restart_cb = _withdraw_stream_attempt
 
         # Sprint phase-plan-removal: turn.plan derive + emit block removed.
         # Shape-gate signal now driven by tool_call / agent_spawned / peer_dispatched
@@ -6605,6 +6665,7 @@ async def _lead_loop(
             # that answer or its format; execution progress still uses ordinary events.
             if reference_lead_input is not None and not runtime.parent_ctx._reference_delivery_state["primary_started"]:
                 return
+            _note_stream_attempt()
             # Read env each invocation — Risk+PM + Eng r3.1 P0 fix.
             # Sprint ω 2026-05-12: default flipped ON ("1") after Phase 2.1/2/3
             # 32 UT cover scanner physical guarantee 0 leak + Doubao 20% absent
@@ -6716,11 +6777,15 @@ async def _lead_loop(
                     runtime.parent_ctx._lead_narrative_text = _prev_narr + safe_text
             # Phase 1.6 G3 — narrative.delta emit. Single chokepoint shared
             # with test_narrative_delta_emit so the gate doesn't drift.
-            await _emit_narrative_delta(
+            emitted = await _emit_narrative_delta(
                 runtime.parent_bus,
                 sctx.turn_id,
                 safe_text,
             )
+            from bowhead_core.subagent import current_stream_attempt
+
+            if emitted and _attempt_snapshot and _attempt_snapshot.get("token") is current_stream_attempt():
+                _attempt_snapshot["emitted_chars"] += emitted
             # Auto-splitting removed by default. Narrative above emits **unconditionally**, independently.
             if sd is not None:
                 await sd.feed(safe_text)
@@ -7035,6 +7100,7 @@ async def _lead_loop(
                 parent_bus=runtime.parent_bus,
                 stream_callback=stream_cb,
                 stream_on_tool_call=stream_abort_cb,
+                stream_restart_callback=stream_restart_cb,
                 postdispatch_resume=reference_postdispatch_resume,
             )
         else:
@@ -7055,6 +7121,7 @@ async def _lead_loop(
                 extra_instructions=lead_prompt,
                 stream_callback=stream_cb,
                 stream_on_tool_call=stream_abort_cb,
+                stream_restart_callback=stream_restart_cb,
                 # Batch1 review P0-1: production runner injected/shared—deny/guard only through current
                 # run scope (this lead-profile run); peer spawns omit, unaffected.
                 # **Only effective production wiring** (constructor branch above dead in production).
@@ -7856,15 +7923,19 @@ async def _lead_loop(
         if _reference_continuation_blocked:
             # Chat turn feedback D3: the failure card states this from its public reason.
             result.final_answer = ""
-        reason_code = _public_turn_failure_reason(result.error)
-        # Persist the public reason's failure class instead of defaulting to "llm_failed".
+        # A directly selected primary can return native model-capacity facts
+        # without ever running the Lead model. Preserve that failure projection.
+        if getattr(result, "llm_failure", None) is not None:
+            failure = get_or_build_chat_llm_failure(carrier=runtime.parent_bus, projection=result.llm_failure, turn_id=sctx.turn_id)
+        else:
+            failure = get_or_build_chat_turn_failure(
+                carrier=runtime.parent_bus,
+                reason_code=_public_turn_failure_reason(result.error),
+                turn_id=sctx.turn_id,
+                step_usage=result.step_usage,
+            )
+        reason_code = failure.reason_code
         error_kind = chat_failure_error_kind(reason_code)
-        failure = get_or_build_chat_turn_failure(
-            carrier=runtime.parent_bus,
-            reason_code=reason_code,
-            turn_id=sctx.turn_id,
-            step_usage=result.step_usage,
-        )
         logger.warning(
             "lead_loop subagent not_ok turn_id=%s occurrence_id=%s reason_code=%s",
             sctx.turn_id,
@@ -9225,7 +9296,7 @@ async def _emit_narrative_delta(
     bus: Any,
     turn_id: str,
     safe_text: str,
-) -> None:
+) -> int:
     """Phase 1.6 G3 — narrative.delta emit gate (shared production + test).
 
     Centralized so the production stream callback and the test harness exercise
@@ -9235,9 +9306,12 @@ async def _emit_narrative_delta(
     Skipped for empty / whitespace-only safe_text so the surface stays quiet
     when the LLM is mid-tool-call (no prose tokens). Best-effort emit — never
     raises; instrumentation must not break the streaming pipeline.
+
+    Returns the code points of the emitted ``delta`` (0 when skipped or not
+    emitted), which a Router restart withdraws with ``llm.stream_restarted``.
     """
     if not safe_text or not safe_text.strip():
-        return
+        return 0
     from .prompts.peer_block import replace_internal_peer_names
 
     safe_text = replace_internal_peer_names(
@@ -9259,6 +9333,8 @@ async def _emit_narrative_delta(
     except Exception:
         raise_if_terminal_bus_failed(bus)
         logger.warning("narrative.delta_emit_failed turn=%s", turn_id)
+        return 0
+    return len(safe_text)
 
 
 def build_lookup_minimal_payload(
@@ -9575,7 +9651,20 @@ async def _collect_inline_artifacts(
             try:
                 _delivs = await _art_store.list_deliverables_for_turn(turn_id)
                 _has_deliverable = bool(_delivs)
+                from bowhead_core.final_deliverables import superseded_deliverable_ids
+                from bowhead_core.turn_log_store import TurnLogStore
+
+                identities = {artifact.id: (artifact.filename, artifact.mime) for artifact in _delivs}
+                superseded: set[str] = set()
+                if len(set(identities.values())) < len(identities):
+                    try:
+                        events = await TurnLogStore(str(_art_store.db_path)).list_events(turn_id, event_types=("step_started", "step_done"))
+                        superseded = superseded_deliverable_ids(identities, [(event.event_type, event.payload) for event in events])
+                    except Exception:
+                        logger.warning("inline_artifacts.revision_lookup_failed turn=%s", turn_id, exc_info=True)
                 for _d in _delivs:
+                    if _d.id in superseded:
+                        continue
                     _chip = await _deliverable_inline_artifact(_art_store, _d)
                     if _chip is not None:
                         out.append(_chip)

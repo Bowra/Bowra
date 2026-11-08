@@ -154,6 +154,69 @@ async function inputDraftMessages(page: Page): Promise<string[]> {
   });
 }
 
+for (const width of [412, 1440]) for (const kind of ["agent", "settings"] as const) {
+  test(`history removal deselects ${kind} and Back restores unsaved input at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await mockEditingTargets(page, "legacy_v0");
+    const pointer = kind === "agent" ? "agent_draft=sad_browser"
+      : "canvas_settings=space_general&canvas_user=u_smoke&canvas_team=team_smoke&canvas_space=ws_smoke";
+    await page.goto(`/?session=s_browser&${pointer}`);
+    const input = page.getByRole("textbox", { name: kind === "agent" ? "工作说明" : "Space 名称", exact: true });
+    await expect(input).toBeVisible();
+    await input.fill("Unsaved navigation evidence");
+    await page.evaluate(() => window.history.pushState(null, "", "/?session=s_browser"));
+    await expect(page).toHaveURL("/?session=s_browser");
+    await page.screenshot({ path: test.info().outputPath(`removed-${kind}.png`) });
+    await expect(input).toBeHidden();
+    await page.goBack();
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue("Unsaved navigation evidence");
+    await page.screenshot({ path: test.info().outputPath(`restored-${kind}.png`) });
+    await page.goForward();
+    await expect(input).toBeHidden();
+  });
+}
+
+test("history can select another retained editor without losing unsaved Agent input", async ({ page }) => {
+  await mockEditingTargets(page, "legacy_v0");
+  await page.goto("/?session=s_browser&agent_draft=sad_browser");
+  const input = page.getByRole("textbox", { name: "工作说明", exact: true });
+  await input.fill("Retain the Agent buffer");
+  await page.evaluate(() => window.history.pushState(null, "",
+    "/?session=s_browser&canvas_settings=space_general&canvas_user=u_smoke&canvas_team=team_smoke&canvas_space=ws_smoke"));
+  await expect(page.getByRole("textbox", { name: "Space 名称", exact: true })).toHaveValue("Original Space");
+  await expect(input).toBeHidden();
+  await page.goBack();
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue("Retain the Agent buffer");
+});
+
+test("a refused settings pointer opens when the current Space becomes its authorized scope", async ({ page }) => {
+  await mockEditingTargets(page, "legacy_v0");
+  await page.route("**/api/v1/auth/me/workspaces", (route) => route.fulfill({ json: {
+    items: [
+      { id: "ws_other", workspace_id: "ws_other", name: "Other Space", role: "admin" },
+      { id: "ws_smoke", workspace_id: "ws_smoke", name: "Original Space", role: "admin" },
+    ], active_id: "ws_other",
+  } }));
+  let reads = 0;
+  await page.route("**/api/v1/workspace-settings/ws_smoke/metadata", (route) => {
+    reads += 1;
+    return route.fulfill({ json: { name: "Original Space", description: "", revision: 1 } });
+  });
+  await page.goto("/?canvas_settings=space_general&canvas_user=u_smoke&canvas_team=team_smoke&canvas_space=ws_smoke");
+  const input = page.getByRole("textbox", { name: "Space 名称", exact: true });
+  const picker = page.getByRole("button", { name: /切换空间/ });
+  await expect(picker).toBeVisible();
+  await expect(input).toHaveCount(0);
+  expect(reads).toBe(0);
+  await picker.click();
+  await page.getByRole("menuitemradio", { name: /Original Space/ }).click();
+  await page.screenshot({ path: test.info().outputPath("scope-restored.png") });
+  await expect(input).toHaveValue("Original Space");
+  expect(reads).toBeGreaterThan(0);
+});
+
 test("home capability refresh preserves a competing draft until explicit merge and one Send", async ({ page, context }) => {
   const fixture = await mockEditingTargets(page, "legacy_v0", true);
   await page.goto("/?agent_draft=sad_browser");

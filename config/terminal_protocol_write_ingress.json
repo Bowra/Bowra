@@ -1104,6 +1104,11 @@
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned Counted since 2026-09-30 (occurrences=3): 3 emit sites in this function were re-read when the scanner stopped de-duplicating; all forward the same reviewed event family through the same edge, none constructs a new root outcome.",
       "occurrences": 3
     },
+    "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._stream_invoke._attempt_stream._withdraw_attempt|unresolved": {
+      "owner": "terminal-protocol-reviewers",
+      "reason": "Reviewed nonterminal withdrawal of a model attempt the Router restarts after output: a step_done closing each withdrawn lead_thinking_writing step and one llm.stream_restarted on the original Turn, scoped to the running Lead or helper. Emit failure never cancels the retry; neither closes the root Turn.",
+      "occurrences": 2
+    },
     "root_terminal_emit|packages/bowhead_core/src/bowhead_core/subagent.py|<module>._stream_invoke|unresolved": {
       "owner": "terminal-protocol-reviewers",
       "reason": "Reviewed event forwarding edge; actor scope is resolved at runtime and root close remains protocol-adapter owned"

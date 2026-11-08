@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+from bowhead_core.chart.series_colors import color_index, editable_color_columns
 from bowhead_core.chart_style_registry_generated import CHART_STYLE_PRESENTATION_POLICY
 
 
@@ -404,6 +405,14 @@ def derive_normalized_chart_render_shape_v1(normalized_spec: Mapping[str, Any] |
     dimensions = [column for column in columns if column.get("type") in {"categorical", "date", "geo"}]
     numeric = [column for column in columns if column.get("type") == "numeric"]
     category_count, series, values_by_series = _derive_series(spec)
+    color_columns = editable_color_columns(spec)
+    if color_columns:
+        if spec.get("kind") == "dual_axis":
+            bars, lines = _dual_axis_columns(columns)
+            color_columns = [*bars, *lines]
+        for item, column in zip(series, color_columns, strict=True):
+            if (index := color_index(column.get("color_index"))) is not None:
+                item["paletteIndex"] = index
     analytical = spec.get("_export_analytical", {})
     if analytical.get("preset") == "series_plot":
         category_count = len({json.dumps(row.get(analytical["x_key"]), ensure_ascii=False, separators=(",", ":")) for row in rows})
@@ -532,6 +541,7 @@ def assign_series_encodings(
     capacity: int,
     color_safe: bool,
     stacked: bool,
+    palette_indices: list[int] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Assign every series its (color, second channel) pair, or ``None`` when color alone is enough.
 
@@ -567,7 +577,7 @@ def assign_series_encodings(
     for index, role in enumerate(roles):
         family = "fill" if role in _FILLED_ROLES else "line"
         variants = len(policy["fillPatterns"]) if family == "fill" else line_variants
-        color = index % palette_length
+        color = (palette_indices[index] if palette_indices is not None else index) % palette_length
         taken = used.setdefault((family, color), set())
         if len(taken) >= variants:
             taken.clear()
@@ -613,7 +623,7 @@ def resolve_chart_presentation_v2(
         "series": [
             {
                 "key": item["key"],
-                "paletteIndex": index,
+                "paletteIndex": item.get("paletteIndex", index),
                 "lineDash": [],
                 "pointStyle": "circle",
                 "fillPattern": "solid",
@@ -706,12 +716,14 @@ def resolve_chart_presentation_v2(
     palette_length = max(1, len(categorical_series_palette))
     capacity = palette_length if color_only_series_capacity is None else color_only_series_capacity
     color_safe = accessibility.get("colorVision") == "color-safe" or bool(render_context.get("forcedColors"))
+    color_safe = color_safe or len(shape["series"]) > 1 and any("paletteIndex" in item for item in shape["series"])
     encodings = assign_series_encodings(
         [item["role"] for item in shape["series"]],
         palette_length=palette_length,
         capacity=capacity,
         color_safe=color_safe,
         stacked=bool(shape["flags"]["stacked"]),
+        palette_indices=[item.get("paletteIndex", index) for index, item in enumerate(shape["series"])],
     )
     if encodings is not None:
         effective["series"] = [{**series, **encodings[index]} for index, series in enumerate(effective["series"])]

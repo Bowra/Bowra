@@ -6,7 +6,7 @@ import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 export const COMPOSER_MENU_MAX_HEIGHT = 320;
 
 /**
- * After composer overlays (toolbar menus, ＋ panel) close, the trigger may be disabled (sending, read-only)
+ * After composer overlays (toolbar menus, including Add) close, the trigger may be disabled (sending, read-only)
  * or unmounted with the toolbar, dropping focus to body. Fall back in order: caller-specified element → composer
  * input (textarea or reference editor) / status row / explicitly marked fallback → composer root.
  */
@@ -14,10 +14,12 @@ export function composerFocusFallbackTarget(
   composerRoot: Element | null,
   ...preferred: Array<HTMLElement | null | undefined>
 ): HTMLElement | null {
+  // Query the input on its own: one selector list returns the first match in document order, and the
+  // attachment row's screen-reader status sits before the input once a file is attached.
   const fallback =
-    composerRoot?.querySelector<HTMLElement>(
-      'textarea, [contenteditable], [role="status"], [data-composer-focus-fallback]',
-    ) ?? null;
+    composerRoot?.querySelector<HTMLElement>("textarea, [contenteditable]") ??
+    composerRoot?.querySelector<HTMLElement>('[role="status"], [data-composer-focus-fallback]') ??
+    null;
   return (
     [...preferred.filter((candidate) => candidate !== composerRoot), fallback, composerRoot].find(
       (candidate): candidate is HTMLElement =>

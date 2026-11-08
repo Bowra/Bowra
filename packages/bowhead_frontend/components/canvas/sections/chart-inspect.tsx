@@ -32,8 +32,8 @@ import { snapshotWithAllPointLabels } from "@/lib/chart/capture-canvas";
 import { canCopyImage, copyCanvasToClipboard } from "@/lib/chart/copy-image";
 import { ChartTimeWindowContext } from "@/lib/chart/time-window-context";
 import { ChartFocusContext } from "@/lib/chart/focus-context";
-import { selectedContextForView } from "@/lib/chart/selected-context";
-import { requestChartFollowup } from "@/lib/chart/chart-followup";
+import { observationRangeLabel, observationTupleLabel, selectedContextForView } from "@/lib/chart/selected-context";
+import { requestChartFollowup, useChartFollowupAvailable } from "@/lib/chart/chart-followup";
 import { exportChartCSV, exportChartPNG } from "@/lib/chart/export";
 import { track } from "@/lib/metrics";
 
@@ -70,6 +70,7 @@ export interface ChartInspectProps {
 
 export function ChartInspect({ spec, captionText, onClose, returnFocusRef }: ChartInspectProps) {
   const focus = useContext(ChartFocusContext);
+  const followupAvailable = useChartFollowupAvailable();
   const scope = useContext(ChartTimeWindowContext);
   const t = useTranslations("chart_inspect");
   const unitText = useTranslations("chart_table");
@@ -420,9 +421,11 @@ export function ChartInspect({ spec, captionText, onClose, returnFocusRef }: Cha
               </button>
             )
           ) : null}
-          <button type="button" className="v2-chart-action-btn is-primary" onClick={onFollowup}>
-            {t("followup")}
-          </button>
+          {followupAvailable ? (
+            <button type="button" className="v2-chart-action-btn is-primary" onClick={onFollowup}>
+              {t("followup")}
+            </button>
+          ) : null}
         </span>
       </footer>
     </DialogShell>
@@ -483,11 +486,12 @@ export function ChartObservationDetails({ spec, target, binding, annotation, onC
   const t = useTranslations("chart_block");
   const tInspect = useTranslations("chart_inspect");
   const focus = useContext(ChartFocusContext);
+  const followupAvailable = useChartFollowupAvailable();
   const narrow = useNarrowViewport(true);
   const rows = observationRows(target, spec, binding) ?? [];
   const plan = evidencePlanForViewer(spec.presentation_plan);
   const relevantNotes = plan?.evidence_notes.filter((note) => annotation?.note_ids ? annotation.note_ids.includes(note.id) : note.measure_keys.includes(target.measureKey));
-  const label = target.kind === "point" ? target.tuple.map((value) => value ?? "—").join(" · ") : `${target.lower} – ${target.upper}`;
+  const label = target.kind === "point" ? observationTupleLabel(target.tuple) : observationRangeLabel(target.lower, target.upper);
   const selectedContext = target.kind === "point" ? selectedContextForView(focus?.followupScope, binding, focus?.selection ?? null, { ...spec, rows }) : null;
   const locale = useLocale();
   const analyticalKeys = spec._export_analytical ? new Set([...binding.measure_keys, ...(spec._export_analytical.detail_keys ?? []), ...(spec._export_analytical.summary_keys ?? []), ...[spec._export_analytical.range?.coverage_key, spec._export_analytical.range?.origin_key].filter((key): key is string => !!key)]) : null;
@@ -513,7 +517,7 @@ export function ChartObservationDetails({ spec, target, binding, annotation, onC
       <p className="text-xs text-muted-foreground">{t(annotation?.note_ids ? "observation_cited_context" : "observation_measure_context")}</p>
       <ChartSourceLine source={annotation?.note_ids ? null : spec.source_meta ?? null} notes={relevantNotes} measureLabels={Object.fromEntries(spec.columns.map((column) => [column.key, column.header]))} />
     </div> : null}
-    {selectedContext && spec.data_artifact_id ? <Button variant="plain" size="sm" className="mt-2" onClick={() => {
+    {selectedContext && spec.data_artifact_id && followupAvailable ? <Button variant="plain" size="sm" className="mt-2" onClick={() => {
       requestChartFollowup({ title: spec.title, dataArtifactId: spec.data_artifact_id!, kind: spec.kind, selectedContext });
       onClose();
     }}>{tInspect("followup")}</Button> : null}

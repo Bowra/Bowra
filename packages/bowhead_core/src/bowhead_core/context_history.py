@@ -173,6 +173,9 @@ async def load_conversation_context(ctx) -> ConversationContext:
                 worker.turn_id,
                 turn_ids=tuple(turn.id for turn in turns),
             )
+        from bowhead_core.result_material_history import load_material_history
+
+        materials = await load_material_history(ctx, [turn.id for turn in turns])
         history = build_turn_history(
             turns,
             exclude_turn_id=worker.turn_id,
@@ -181,6 +184,7 @@ async def load_conversation_context(ctx) -> ConversationContext:
             strip=_strip_markers,
             spawns=spawns,
             clarifications=clarifications,
+            material_refs=materials,
             make_tool_calls_message=lambda calls: Message(
                 role="assistant",
                 content="",

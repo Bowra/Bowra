@@ -73,6 +73,48 @@ async def test_completed_turn_atomically_publishes_the_exact_compacted_native_vi
     assert any(message.role == "tool" and message.tool_call_id == "c1" for message in restored.messages)
 
 
+async def test_compaction_counts_request_supplement_without_publishing_it_as_history(collab, context_case, monkeypatch):
+    from dataclasses import replace
+
+    from bowhead_core.chat_reference_storage import ReferenceCipher
+    from bowhead_core.result_material_history import SUPPLEMENT_NAME
+    from bowhead_router.types import Message
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BOWHEAD_FERNET_KEY", key)
+    collab.store.cipher = ReferenceCipher(key)
+    execution = owner(collab, execution_id=collab.lead)
+    canonical = context_case.request.messages
+    note = Message(role="user", name=SUPPLEMENT_NAME, content="Current authorized material pointers; content is omitted.")
+    outgoing = replace(context_case.request, messages=[*canonical, note])
+    result = await execution.prepare(
+        outgoing,
+        router=context_case.router,
+        agent_type="lead",
+        profile="lead",
+        user_pref=None,
+        controller=context_case.args["controller"],
+        current_request=8,
+        canonical_count=len(canonical),
+        timeout=10,
+        max_growth_tokens=12500,
+        stream=True,
+        record_usage=lambda response: None,
+    )
+    assert result.candidate is not None and result.budget.budget.fits
+    assert result.request.messages[-1] == note
+    assert context_case.sent
+    assert all(message.name != SUPPLEMENT_NAME and message.content != note.content for request in context_case.sent for message in request.messages)
+    publication = await execution.conversation_publication(canonical)
+    store = SessionStore(collab.path)
+    assert await store.mark_completed(**completion(collab, publication))
+    await store.finalize_turn(session_id=collab.worker.session_id, current_turn_id=collab.worker.turn_id, next_turn_id=None)
+    restored = await load_conversation_context(await next_context(collab))
+    assert all(message.name != SUPPLEMENT_NAME for message in restored.messages)
+    assert restored.messages[:-1] == result.request.messages[:-1]
+    assert outgoing.messages == [*canonical, note]
+
+
 async def test_terminal_failure_rolls_back_conversation_head_and_keeps_previous_execution_view(collab, context_case, monkeypatch):
     execution = owner(collab, execution_id=collab.lead)
     await prepare(execution, context_case)

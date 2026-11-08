@@ -1167,7 +1167,9 @@ async def get_report_artifact_representation(
         art = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
         if representation == "pptx-pdf":
             service = getattr(request.app.state, "document_service", None)
-            view = await build_presentation_view(_artifact_store(request), art, getattr(service, "executor", None))
+            view = await build_presentation_view(
+                _artifact_store(request), art, getattr(service, "executor", None), getattr(request.app.state, "presentation_previews", None)
+            )
             current = await _get_report_artifact_in_closure(request, session_id, artifact_id, store)
             if (current.path, current.size) != (art.path, art.size):
                 raise representation_error("unavailable")

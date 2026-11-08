@@ -646,6 +646,7 @@ def test_s4_list_partition_fields_and_delete_cascade(tmp_path, monkeypatch):
 
 
 def test_s6_share_notification_and_directory(tmp_path):
+    from bowhead_core.notification_service import NotificationService
     from bowhead_core.notification_store import NotificationStore
     from bowhead_gateway.routes import shares as shares_mod
 
@@ -662,6 +663,7 @@ def test_s6_share_notification_and_directory(tmp_path):
     app.state.access_control_store = env.access
     app.state.canvas_store = env.canvas
     app.state.notification_store = ns
+    app.state.notification_service = NotificationService(store=ns, user_store=env.users)
     app.dependency_overrides[shares_mod._current_user] = lambda: alice
     a = TestClient(app)
 

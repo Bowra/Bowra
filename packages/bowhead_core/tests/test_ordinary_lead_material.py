@@ -35,6 +35,19 @@ async def collect(case, monkeypatch):
     return ctx
 
 
+async def followup_context(ctx, turn_id):
+    from copy import copy
+
+    assert await ctx.session_store.mark_completed(
+        turn_id=ctx.turn_id, intent="chat", final_answer="Saved original result.", tokens_input=1, tokens_output=1, cost_usd=0
+    )
+    await ctx.session_store.finalize_turn(session_id=ctx.session_id, current_turn_id=ctx.turn_id, next_turn_id=None)
+    later = copy(ctx)
+    later.turn_id = turn_id
+    await ctx.session_store.record_turn(turn_id=later.turn_id, session_id=ctx.session_id, user_text="Read the saved result.")
+    return later
+
+
 async def test_observation_cannot_bypass_last_dispatch_authorization(assigned_case, monkeypatch):
     from bowhead_core.ordinary_lead_material import OrdinarySkillObserver
 
@@ -149,6 +162,93 @@ async def test_native_read_retains_exact_personal_source_and_rechecks_it(assigne
 
 
 @pytest.mark.parametrize(
+    "tool,change",
+    [(tool, change) for tool in ("skill_read", "skill_list") for change in ("upgrade", "disabled", "scope")] + [("skill_read", "pending")],
+)
+async def test_new_turn_reads_historical_skill_observations_after_upgrade_with_current_authority(assigned_case, monkeypatch, tool, change):
+    from bowhead_core.context_dependencies import capture_context_dependencies, validate_context_dependencies
+
+    case = assigned_case
+    ctx = await collect(case, monkeypatch)
+    if tool == "skill_list":
+        ctx.skill_runtime_scope = ctx.skill_runtime_grants = None
+    result = await invoke(case, tool=tool, args={"name": "method"} if tool == "skill_read" else {})
+    assert result and ctx.ordinary_lead_state.tool_materials
+    dependencies = capture_context_dependencies(ctx)
+    original = dependencies[0].content
+    # Both personal and built-in packages change during an ordinary upgrade.
+    (case.root / "asset.bin").write_bytes(b"upgraded personal method")
+    (case.base.root / "python_sandbox/scripts/runner.py").write_text("print('upgraded transport')\n")
+    with pytest.raises(ValueError):
+        await validate_context_dependencies(ctx, dependencies)
+    later = await followup_context(ctx, "t_material_followup")
+    if change == "disabled":
+        await case.base.sources.instances.upsert(
+            user_id=ctx.user_id,
+            name="method" if tool == "skill_read" else "python_sandbox",
+            source_type="user_upload" if tool == "skill_read" else "builtin",
+            source_path=str(case.root) if tool == "skill_read" else str(case.base.root / "python_sandbox"),
+            enabled=False,
+        )
+    elif change == "pending":
+        await case.base.sources.instances.set_import_status(user_id=ctx.user_id, name="method", import_status="pending", import_report_json="{}")
+    elif change == "scope":
+        later.workspace_id = "ws_other"
+    for read_bytes in (True, False):
+        if change == "upgrade":
+            await validate_context_dependencies(later, dependencies, read_bytes=read_bytes)
+        else:
+            with pytest.raises(ValueError):
+                await validate_context_dependencies(later, dependencies, read_bytes=read_bytes)
+    assert dependencies[0].content == original
+    assert not case.calls
+
+
+@pytest.mark.parametrize("change", ["upgrade", "deny", "disabled", "deleted"])
+async def test_historical_team_skill_uses_current_authority_after_approved_revision_changes(assigned_case, monkeypatch, change):
+    from bowhead_core.context_dependencies import capture_context_dependencies, validate_context_dependencies
+    from bowhead_core.skill_upload import bundle_sha256
+    from test_assigned_skill_execution import _team_skill_with
+
+    case = assigned_case
+    skill = await _team_skill_with(case)
+    ctx = await collect(case, monkeypatch)
+    result = await invoke(case, tool="skill_read", args={"name": "method"})
+    assert result["body"].strip() == "UPLOADED"
+    dependencies = capture_context_dependencies(ctx)
+    original = dependencies[0].content
+    (case.root / "SKILL.md").write_text("---\nname: method\ndescription: revised approved method\n---\nNEW APPROVED TEXT\n")
+    assert await case.base.sources.users.restamp_team_skill_bundle(
+        ctx.team_id, skill.id, size_bytes=100, description="Revised approved method", risk_report_json=None, approved_sha256=bundle_sha256(case.root)
+    )
+    with pytest.raises(ValueError):
+        await validate_context_dependencies(ctx, dependencies)
+    later = await followup_context(ctx, "t_team_skill_followup")
+    if change == "deny":
+        await case.base.sources.access.create_or_update_resource_grant(
+            team_id=ctx.team_id,
+            resource_kind="team_skill",
+            resource_id=skill.id,
+            principal_type="user",
+            principal_id=ctx.user_id,
+            permission="use",
+            effect="deny",
+        )
+    elif change == "disabled":
+        await case.base.sources.users.update_team_skill_meta(ctx.team_id, skill.id, status="disabled")
+    elif change == "deleted":
+        await case.base.sources.users.delete_team_skill(ctx.team_id, skill.id)
+    for read_bytes in (True, False):
+        if change == "upgrade":
+            await validate_context_dependencies(later, dependencies, read_bytes=read_bytes)
+        else:
+            with pytest.raises(ValueError):
+                await validate_context_dependencies(later, dependencies, read_bytes=read_bytes)
+    assert dependencies[0].content == original
+    assert not case.calls
+
+
+@pytest.mark.parametrize(
     "change",
     [
         "none",
@@ -161,6 +261,7 @@ async def test_native_read_retains_exact_personal_source_and_rechecks_it(assigne
         "output_bytes",
         "subprocess",
         "disabled",
+        "skill_upgrade",
     ],
 )
 async def test_sandbox_requires_actual_input_and_settled_executor_output(assigned_case, monkeypatch, change):
@@ -251,6 +352,22 @@ async def test_sandbox_requires_actual_input_and_settled_executor_output(assigne
         from pathlib import Path
 
         Path(output.path).write_bytes(b"43\n")
+    elif change == "skill_upgrade":
+        from bowhead_core.context_dependencies import capture_context_dependencies, validate_context_dependencies
+
+        dependencies = capture_context_dependencies(ctx)
+        original_body = dependencies[0].content
+        (case.base.root / "python_sandbox/scripts/runner.py").write_text("print('upgraded transport')\n")
+        with pytest.raises(ValueError):
+            await revalidate_tool_materials(ctx, [record])
+        later = await followup_context(ctx, "t_sandbox_followup")
+        await validate_context_dependencies(later, dependencies)
+        assert dependencies[0].content == original_body
+        await store.soft_delete(output.id, user_id=ctx.user_id)
+        with pytest.raises(ValueError):
+            await validate_context_dependencies(later, dependencies)
+        assert len(output_ids) == 1
+        return
     if change == "none":
         await revalidate_tool_materials(ctx, [record])
     else:

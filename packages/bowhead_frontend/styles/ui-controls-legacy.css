@@ -469,13 +469,6 @@
 .legacy-menu-model-provider-name {
   display: none;
 }
-.legacy-menu-model-tag {
-  font-size: 0.5rem;
-  padding: 0 4px;
-  border-radius: 2px;
-  border: 1px solid var(--c-line-2);
-  color: var(--c-ink-3);
-}
 
 /* Space switcher (components/space-picker.tsx) */
 .legacy-menu-space {
@@ -5325,6 +5318,24 @@
 }
 .legacy-sched-notify-desc {
   font-size: 0.6875rem;
+  color: var(--c-ink-4);
+}
+.legacy-sched-deliver-mode {
+  margin-top: 8px;
+}
+.legacy-sched-run-deliveries {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.6875rem;
+  color: var(--c-ink-3);
+}
+.legacy-sched-run-delivery.is-failed,
+.legacy-sched-run-delivery.is-dead {
+  color: var(--c-err);
+}
+.legacy-sched-run-delivery-ref {
+  font-family: var(--font-v2-mono);
   color: var(--c-ink-4);
 }
 .legacy-sched-field-head {

@@ -37,3 +37,24 @@ The list shows every tool from the last saved tool list, with the imported ones 
 If you uncheck tools that are currently imported, Bowra first shows the impact: the tools that will be removed and the Agents, running tasks, and schedules that use this source. Nothing changes until you select **Confirm and save**; **Back** returns to the list. After saving, Agents can't call the removed tools, and affected schedules are paused until their dependencies are confirmed again.
 
 If the source is used by team Agents, running tasks, or schedules, review the impact and repair those dependencies before disabling or deleting it. External services can perform irreversible actions, so confirm your team's data-use requirements and the service permissions before enabling a tool.
+
+## Confirm each call that can change data
+
+When your deployment turns on call confirmation, Bowhead asks the member who started a task before it calls an MCP tool that may change data. The dialog shows the tool source, the tool, its description and the complete arguments that will be sent:
+
+- **Allow This Call** runs this call once with the arguments shown.
+- **Always Allow in This Session** also allows later calls to the same tool in the current session. It ends when the session ends or the tool's definition changes.
+- **Reject and Skip** does not run the call.
+- If nobody decides within two minutes, the call is skipped.
+
+Tools the service marks as read-only run without asking. Tools the service marks as writing or deleting data can then be selected for Agents and are confirmed on every call. Tools with no marking can't be selected for Agents until an owner or administrator confirms their category; when the assistant uses them, every call is confirmed. Each call uses the account the source was connected with, so it acts as that account for every member. Scheduled tasks have nobody to confirm, so their calls to these tools are skipped.
+
+### Confirm a tool's category
+
+Owners and administrators can record what each tool of an MCP source does when the service marks it incorrectly or not at all:
+
+1. Choose **Confirm Tool Categories** from the source's actions (in the **⋯** menu on the right of the card).
+2. For each tool, choose **Read only**, **Writes data** or **Deletes data**. Categories below what the service marked are not offered.
+3. Select **Save**. The change applies from the next task.
+
+A tool confirmed as read-only runs without asking, and an unmarked tool with a confirmed category can be selected for Agents. If the service later changes a tool's definition, its confirmation stops applying and the list asks you to confirm it again. Confirm **Read only** only for tools that cannot change data.

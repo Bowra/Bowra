@@ -1066,6 +1066,8 @@ export interface ConfigLiteProposePayload {
   workspace_name: string | null;
   rows: ConfigLiteProposeRow[];
   notes: Record<string, string>;
+  /** The Configuration Agent already saved an explicit request; this only renders the card before its receipt loads. */
+  status?: "applied";
 }
 
 /** Config copilot batch 1-b: tier-2 configuration draft (ConfigDrawer). Self-contained payload; chip rendering uses

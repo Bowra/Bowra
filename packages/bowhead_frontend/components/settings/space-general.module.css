@@ -22,7 +22,8 @@
   flex-shrink: 0;
 }
 
-:root:root .page > :global(.ui-group) {
+:root:root .page > :global(.ui-group),
+:root:root .page > :global(.ui-group) ~ :global(.ui-group) {
   margin: 0;
 }
 

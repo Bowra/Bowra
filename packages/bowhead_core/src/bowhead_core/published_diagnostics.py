@@ -994,12 +994,13 @@ class ChatTurnFailure:
     reason_code: str
     occurrence_id: str
     diagnostics: dict[str, Any]
+    outcome_unknown: bool = False
 
     @property
     def recovery_action(self) -> str | None:
         """The failure card's primary action; see ``_CHAT_RECOVERY_ACTION_BY_PARENT``."""
 
-        return chat_recovery_action(self.reason_code)
+        return "copy_diagnostics" if self.outcome_unknown else chat_recovery_action(self.reason_code)
 
 
 DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
@@ -1051,6 +1052,7 @@ DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
                 "phase=<finite>",
                 "failure_class=<finite>",
                 "retryable=<finite>",
+                "outcome=unknown?",
             ),
         ),
         "chat_peer_failed": DiagnosticPolicy(
@@ -1235,11 +1237,15 @@ def publish_chat_turn_failure(
     reason_code: str,
     *,
     clarification_stage: Literal["clarification_capture"] | None = None,
+    outcome_unknown: bool = False,
 ) -> PublishedDiagnostic | None:
     """Publish only finite Chat failure facts; exception text is not accepted."""
 
     if reason_code not in CHAT_TURN_FAILURE_CODES:
         _drop("chat_turn_failed", "parent_code")
+        return None
+    if not isinstance(outcome_unknown, bool) or (outcome_unknown and reason_code != "lead_internal_error"):
+        _drop("chat_turn_failed", "outcome_unknown")
         return None
     if clarification_stage is not None and (reason_code != "clarification_resume_unavailable" or clarification_stage != "clarification_capture"):
         _drop("chat_turn_failed", "clarification_stage")
@@ -1249,8 +1255,8 @@ def publish_chat_turn_failure(
     return _render_registered_diagnostic(
         diagnostic_code="chat_turn_failed",
         parent_code=reason_code,
-        safe_detail=f"phase={phase}; failure_class={failure_class}",
-        retryable=_CHAT_RETRYABLE_BY_PARENT[reason_code],
+        safe_detail=f"phase={phase}; failure_class={failure_class}" + ("; outcome=unknown" if outcome_unknown else ""),
+        retryable=False if outcome_unknown else _CHAT_RETRYABLE_BY_PARENT[reason_code],
     )
 
 
@@ -1597,12 +1603,13 @@ def build_chat_turn_failure(
     turn_id: str,
     clarification_stage: Literal["clarification_capture"] | None = None,
     step_usage: dict[str, int] | None = None,
+    outcome_unknown: bool = False,
 ) -> ChatTurnFailure:
     """Create the one correlation object shared by turn_failed and failed done."""
 
     safe_reason = reason_code if reason_code in CHAT_TURN_FAILURE_CODES else "lead_internal_error"
     occurrence_id = uuid.uuid4().hex
-    published = publish_chat_turn_failure(safe_reason, clarification_stage=clarification_stage)
+    published = publish_chat_turn_failure(safe_reason, clarification_stage=clarification_stage, outcome_unknown=outcome_unknown)
     safe_turn_id = turn_id if _OTHER_ID_RE.fullmatch(turn_id) else None
     diagnostics = (
         published.to_wire(
@@ -1626,6 +1633,7 @@ def build_chat_turn_failure(
         reason_code=safe_reason,
         occurrence_id=occurrence_id,
         diagnostics=diagnostics,
+        outcome_unknown=outcome_unknown,
     )
 
 
@@ -1653,6 +1661,7 @@ def build_chat_llm_failure(
         reason_code=projection.reason_code,
         occurrence_id=occurrence_id,
         diagnostics=diagnostics,
+        outcome_unknown=projection.outcome_unknown,
     )
 
 

@@ -1,6 +1,6 @@
-"""Attach complete method data and enforce its budget at each resolved model.
+"""Attach complete method data and verify it at each resolved model.
 
-This is an input integrity/budget gate, not resource authorization or evidence of
+This is an input integrity gate, not resource authorization or evidence of
 successful method use. The mixed runtime must restore/authorize the composition
 before constructing this input and separately revalidate each live invocation.
 """
@@ -13,7 +13,7 @@ import logging
 from base64 import b64decode
 from binascii import Error as Base64Error
 from collections import Counter
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
 from bowhead_router.input_admission import LLMInputAdmissionError
@@ -21,10 +21,6 @@ from bowhead_router.types import LLMRequest, Message
 
 from bowhead_core.skill_read_render import EMPTY_SKILL_SELECTION_DIGEST, SKILL_READ_RENDER_CONTRACT, RenderedSkillReads
 
-MAX_REQUIRED_REFERENCE_TOKENS = 8192
-REFERENCE_INPUT_RESERVE = 1024
-TOKEN_ESTIMATE_CONTRACT = "utf8-bytes-conservative.v1"
-IMAGE_CONTEXT_RESERVE = 32768
 MAX_REFERENCE_IMAGES = 8
 IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 logger = logging.getLogger(__name__)
@@ -69,19 +65,6 @@ def _wire_images(messages: list[dict]) -> list[tuple[str, str, dict, str]]:
 
 
 @dataclass(frozen=True, slots=True)
-class SkillReadModelBudget:
-    provider: str
-    model: str
-    context_window: int
-    base_input_estimate: int
-    output_reserve: int
-    available_input: int
-    reference_limit: int
-    reference_estimate: int
-    estimate_contract: str = TOKEN_ESTIMATE_CONTRACT
-
-
-@dataclass(frozen=True, slots=True)
 class RequiredSkillModelInput:
     requires_declared_context_window: ClassVar[bool] = True
     content: str = field(repr=False)
@@ -121,7 +104,7 @@ class RequiredSkillModelInput:
             request, messages=[*request.messages[:index], Message(role="user", content=self.content), *request.messages[index:]], input_admission=self
         )
 
-    def budget(self, request: LLMRequest, *, provider: str, model: str, context_window: int | None) -> SkillReadModelBudget:
+    def _validate_input(self, request: LLMRequest, *, provider: str, model: str, context_window: int | None) -> None:
         try:
             # Keep the external failure code finite and unchanged, but record
             # which prerequisite failed. The labels reveal no task or Skill data.
@@ -156,69 +139,29 @@ class RequiredSkillModelInput:
             index = next((i for i, message in enumerate(request.messages) if message.role != "system"), None)
             if index is None or request.messages[index] != required:
                 raise LLMInputAdmissionError("reference_model_input_changed")
-            images = _image_refs(request)
-
-            def count(value):
-                return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
-
-            # No provider tokenizer is installed at this boundary. Count every
-            # serialized UTF-8 byte as an estimated token and reserve framing.
-            # This is deliberately conservative, explicitly not exact usage.
-            messages = []
-            for i, message in enumerate(request.messages):
-                if i == index:
-                    continue
-                projected = asdict(message)
-                projected["images"] = [{"mime": image.mime, "base64": "[image]"} for image in message.images]
-                messages.append(projected)
-            base = count(
-                {
-                    "system": request.system,
-                    "messages": messages,
-                    "tools": [asdict(tool) for tool in request.tools],
-                    "response_format": request.response_format,
-                }
-            ) + IMAGE_CONTEXT_RESERVE * len(images)
-            reference = count(asdict(required))
-            output = (
-                request.output_reservation
-                if request.output_reservation is not None
-                else (request.max_output_tokens or 1024) + request.thinking_budget_tokens
-            )
-            available = max(0, context_window - output - REFERENCE_INPUT_RESERVE - base)
-            limit = min(MAX_REQUIRED_REFERENCE_TOKENS, available // 5)
-            if reference > limit:
-                raise LLMInputAdmissionError("reference_context_budget_exceeded")
-            admitted = SkillReadModelBudget(provider, model, context_window, base, output, available, limit, reference)
-            return replace(admitted, estimate_contract="utf8-bytes+image-reserve.v1") if images else admitted
+            _image_refs(request)
+            # Capacity belongs to the adapter's shared final-body accounting.
+            # This gate retains exact protected data, never a second token quota.
         except LLMInputAdmissionError:
             raise
         except Exception:
             raise LLMInputAdmissionError("reference_model_budget_unavailable") from None
 
     async def validate(self, request: LLMRequest, *, provider: str, model: str, context_window: int | None) -> None:
-        self.budget(request, provider=provider, model=model, context_window=context_window)
+        self._validate_input(request, provider=provider, model=model, context_window=context_window)
 
     async def validate_dispatch(self, request: LLMRequest, body: dict, *, provider: str, model: str, family: str) -> None:
-        self.budget(request, provider=provider, model=model, context_window=request.input_admission_window)
+        self._validate_input(request, provider=provider, model=model, context_window=request.input_admission_window)
         self.validate_outbound(request, body, family=family)
 
     def validate_outbound(self, request: LLMRequest, body: dict, *, family: str) -> None:
-        room = self.output_room(request, body, family=family)
-        fields = [key for key in ("max_tokens", "max_output_tokens", "max_completion_tokens") if key in body]
-        if len(fields) != 1 or type(body[fields[0]]) is not int or body[fields[0]] <= 0:
-            raise LLMInputAdmissionError("reference_model_budget_unavailable")
-        if body[fields[0]] > room:
-            raise LLMInputAdmissionError("reference_context_budget_exceeded")
-
-    def output_room(self, request: LLMRequest, body: dict, *, family: str) -> int:
-        """Recheck final wire semantics/reserves after overrides and self-heal.
+        """Verify final wire integrity after shared context/output accounting.
 
         Recognizes the existing chat/Responses/Anthropic body contracts only;
         unknown templated transports cannot claim this input support.
         """
         try:
-            self.budget(request, provider="outbound", model=request.model, context_window=request.input_admission_window)
+            self._validate_input(request, provider="outbound", model=request.model, context_window=request.input_admission_window)
             if family not in {"openai", "openai_responses", "anthropic"} or body.get("model") != request.model:
                 raise LLMInputAdmissionError("reference_model_adapter_unavailable")
             # Work on a detached JSON body; neither conversion nor accounting may
@@ -234,9 +177,6 @@ class RequiredSkillModelInput:
                 raise LLMInputAdmissionError("reference_model_image_changed")
             if any(encoded.count(content) != count for (_mime, content), count in expected_images.items()):
                 raise LLMInputAdmissionError("reference_model_image_changed")
-            for _mime, _content, container, key in actual_images:
-                container[key] = "[image]"
-            encoded_redacted = json.dumps(stripped, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
             slots = []
             for message in messages:
                 if not isinstance(message, dict) or message.get("role") != "user":
@@ -252,24 +192,6 @@ class RequiredSkillModelInput:
             obj, key = found[0]
             if not obj[key].startswith(self.content):
                 raise LLMInputAdmissionError("reference_model_input_changed")
-            obj[key] = obj[key][len(self.content) :]
-            wire_without_required = len(json.dumps(stripped, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
-            base = wire_without_required + IMAGE_CONTEXT_RESERVE * len(actual_images)
-            # Include the required message's framing as well as its actual JSON
-            # escaping, even when an adapter merges adjacent user messages.
-            reference = len(encoded_redacted.encode()) - wire_without_required + 128
-            output_keys = [key for key in ("max_tokens", "max_output_tokens", "max_completion_tokens") if key in body]
-            if len(output_keys) != 1 or type(body[output_keys[0]]) is not int or body[output_keys[0]] <= 0:
-                raise LLMInputAdmissionError("reference_model_budget_unavailable")
-            thinking = body.get("thinking", {})
-            thinking_tokens = thinking.get("budget_tokens", 0) if isinstance(thinking, dict) else 0
-            if type(thinking_tokens) is not int or thinking_tokens < 0:
-                raise LLMInputAdmissionError("reference_model_budget_unavailable")
-            if reference > MAX_REQUIRED_REFERENCE_TOKENS:
-                raise LLMInputAdmissionError("reference_context_budget_exceeded")
-            return (
-                request.input_admission_window - REFERENCE_INPUT_RESERVE - base - reference * 5 - max(request.thinking_budget_tokens, thinking_tokens)
-            )
         except LLMInputAdmissionError:
             raise
         except Exception:

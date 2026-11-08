@@ -107,7 +107,10 @@ class OutputRecovery:
         if progress:
             self.attempts = 0
             self.context_reduced = False
-            self.instruction = "New successful Tool receipts are available. Continue from those results; do not repeat completed actions."
+            self.instruction = (
+                "Continue from retained Tool results and their actual outcomes. "
+                "Follow any outstanding native correction before finishing. Do not repeat completed actions."
+            )
         return progress
 
     def correct(self, response: LLMResponse, messages: list[Message]) -> bool:

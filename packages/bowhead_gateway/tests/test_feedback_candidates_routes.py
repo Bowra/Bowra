@@ -820,13 +820,20 @@ def test_detail_and_list_agree_on_who_is_a_reviewer(casework, monkeypatch):
 # notifications also had 0), whereas all 8 manual decisions in that period occurred on chat inline cards.
 
 
+class _EveryoneIsAMember:
+    """Receipt recipients are filtered to active Team members; these tests are about receipt content."""
+
+    async def filter_active_team_members(self, team_id: str, user_ids: set[str]) -> set[str]:
+        return set(user_ids)
+
+
 def _with_notifications(env, tmp_path: Path) -> NotificationStore:
     """给 env 接一个**真** NotificationStore + 真 service：回执的写与读必须同源。"""
 
     nstore = NotificationStore(db_path=str(tmp_path / "n.db"))
     _run(nstore.initialize())
     env.app.state.notification_store = nstore
-    env.app.state.notification_service = NotificationService(store=nstore, user_store=SimpleNamespace())
+    env.app.state.notification_service = NotificationService(store=nstore, user_store=_EveryoneIsAMember())
     return nstore
 
 
@@ -1004,7 +1011,7 @@ def test_receipt_without_a_readable_candidate_is_dropped_not_rendered_blank(env,
 
 async def _emit_receipt(env, nstore: NotificationStore, cid: str) -> None:
     cand = await env.store.get(cid)
-    service = NotificationService(store=nstore, user_store=SimpleNamespace())
+    service = NotificationService(store=nstore, user_store=_EveryoneIsAMember())
     await service.emit_feedback_candidate_receipt(
         team_id=cand.team_id,
         candidate_id=cand.id,

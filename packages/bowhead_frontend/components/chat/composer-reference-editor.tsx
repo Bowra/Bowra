@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
@@ -14,7 +15,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   autoUpdate,
-  flip,
+  autoPlacement,
   FloatingPortal,
   offset,
   shift,
@@ -89,6 +90,8 @@ type Props = {
   scope: ComposerPersistenceScope | null;
   snapshot: ComposerReferenceEditorSnapshot | null;
   readOnly?: boolean;
+  /** Keep the candidate list outside the complete Composer, including its toolbar. */
+  menuAnchorRef?: RefObject<HTMLElement | null>;
   hasAttachments?: boolean;
   entryMode?: ReferenceEntryMode;
   onChange: (document: InputDocument, scope: ComposerPersistenceScope) => void;
@@ -495,7 +498,11 @@ function ScopedReferenceEditor(
     whileElementsMounted: autoUpdate,
     middleware: [
       offset(8),
-      flip({ padding: 8 }),
+      autoPlacement({
+        alignment: "start",
+        allowedPlacements: ["top-start", "bottom-start"],
+        padding: 8,
+      }),
       shift({ padding: 8 }),
       size({
         padding: 8,
@@ -508,6 +515,9 @@ function ScopedReferenceEditor(
       }),
     ],
   });
+  useLayoutEffect(() => {
+    refs.setPositionReference(props.menuAnchorRef?.current ?? refs.domReference.current);
+  }, [open, props.menuAnchorRef, refs.domReference, refs.setPositionReference]);
   useLayoutEffect(() => {
     if (!editor) return;
     editor.setEditable(!props.readOnly, false);

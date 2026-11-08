@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +25,14 @@ from bowhead_core.config_copilot import (
     reset_registry_for_tests,
 )
 from bowhead_core.config_copilot_chat_tools import register_config_copilot_chat_tools, set_proposal_writer_provider
-from bowhead_core.configuration_agent import AGENT_NAME, TOOL_SUBMIT, configuration_agent_result, prepare_configuration_agent
+from bowhead_core.configuration_agent import (
+    AGENT_NAME,
+    TOOL_SUBMIT,
+    configuration_agent_result,
+    configuration_form_fields,
+    prepare_configuration_agent,
+)
+from bowhead_core.entitlements import EntitlementDenied
 from bowhead_core.events import TurnEventBus
 from bowhead_core.skill_bridge import build_default_skill_stack, register_skill_tools
 from bowhead_core.skill_upload import bundle_sha256
@@ -447,6 +455,73 @@ async def test_caller_scope_and_live_permissions_rechecked(settings):
     assert (await call(child, "configuration_read", form_id="workspace_i18n"))["error"] == "configuration_execution_not_admitted"
 
 
+class _RefusedTarget(Exception):
+    status_code = 404
+
+
+async def _with_access(resolver, child, name, args):
+    registry = build_default_registry()
+    register_config_copilot_chat_tools(registry, configuration_access_resolver=resolver)
+    token = set_current_peer_name(AGENT_NAME)
+    child.role = "analyst"
+    try:
+        return await registry.get(name).handler(args, child)
+    finally:
+        reset_current_peer_name(token)
+
+
+@pytest.mark.parametrize(
+    "denial",
+    [PermissionError("Space admin required"), EntitlementDenied("suspended", 403, "The Team is unavailable."), _RefusedTarget()],
+)
+async def test_access_denials_stay_denials(settings, denial):
+    async def refuse(ctx, form_id, write):
+        raise denial
+
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    read = await _with_access(refuse, child, "configuration_read", {"form_id": "workspace_i18n"})
+    assert read == {"ok": False, "error": "configuration_access_denied"}
+    assert (await _with_access(refuse, child, "configuration_list", {}))["forms"] == []
+
+
+async def test_access_service_fault_is_reported_apart_from_denial(settings, caplog):
+    async def broken(ctx, form_id, write):
+        raise RuntimeError("store offline token=do-not-log")
+
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    with caplog.at_level(logging.ERROR, logger="bowhead_core.configuration_agent"):
+        read = await _with_access(broken, child, "configuration_read", {"form_id": "workspace_i18n"})
+        listing = await _with_access(broken, child, "configuration_list", {})
+    assert read["error"] == "configuration_access_unavailable" and "not a permission denial" in read["message"]
+    assert listing["forms"] == [] and [(row["form_id"], row["error"]) for row in listing["unavailable"]] == [
+        ("workspace_i18n", "configuration_access_unavailable")
+    ]
+    assert read["diagnostic_id"] in caplog.text and listing["unavailable"][0]["diagnostic_id"] in caplog.text
+    assert "RuntimeError" in caplog.text and "do-not-log" not in caplog.text
+
+
+async def test_operation_fault_keeps_unknown_effect_and_logs_a_reference(settings, monkeypatch, caplog):
+    import bowhead_core.config_copilot_chat_tools as chat_tools
+
+    async def failing_read(args, ctx):
+        raise ValueError("stored value do-not-log")
+
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    monkeypatch.setattr(chat_tools, "_read_handler", failing_read)
+    with caplog.at_level(logging.ERROR, logger="bowhead_core.configuration_agent"):
+        result = await call(child, "configuration_read", form_id="workspace_i18n")
+    assert result["error"] == "configuration_operation_failed" and result["status"] == "unknown"
+    assert result["diagnostic_id"] in caplog.text and "configuration_read" in caplog.text and "do-not-log" not in caplog.text
+
+
+async def test_directory_lists_field_names_and_leaves_schemas_to_reads(settings):
+    child, _ = await prepare_configuration_agent(context(), form_id="workspace_i18n")
+    [entry] = (await call(child, "configuration_list"))["forms"]
+    assert "schema" not in entry and entry["fields"] == sorted(configuration_form_fields("workspace_i18n"))
+    read = await call(child, "configuration_read", form_id="workspace_i18n")
+    assert read["schema"]["properties"] and set(read["schema"]["properties"]) <= set(entry["fields"])
+
+
 def lead_context(*, specialist_in_roster: bool):
     """Lead context with the Turn's frozen actor-scoped roster, as _gather_actor_scoped_prompt_peers leaves it."""
     lead = context()
@@ -550,18 +625,44 @@ async def test_lead_direct_receipt_requires_a_complete_settings_only_task(settin
     if scenario == "failed":
         scripted.append(LLMResponse(content=narration))
     scripted.append(LLMResponse(content=narration))
+    if scenario in {"mixed", "prior_work", "unfinished"}:
+        requirements = [
+            {
+                "requirement": "Complete the settings handoff",
+                "status": "unfulfilled" if scenario == "unfinished" else "fulfilled",
+                "evidence_call_ids": [] if scenario == "unfinished" else ["settings"],
+            }
+        ]
+        if scenario in {"mixed", "prior_work"}:
+            requirements.append({"requirement": "Read the business value", "status": "fulfilled", "evidence_call_ids": ["business"]})
+        scripted.extend(
+            [
+                LLMResponse(
+                    content="",
+                    tool_calls=[
+                        ToolCall(
+                            id="scope-review",
+                            name="review_delivery",
+                            arguments={"payload": {"delivery_review": {"requirements": requirements, "issues": []}}},
+                        )
+                    ],
+                ),
+                LLMResponse(content=narration),
+            ]
+        )
     router = _router(*scripted)
     lead = context()
     final = await SubagentRunner(router=router, tool_registry=registry, backend="legacy").run(
         profile_name="lead", task=lead.user_text, parent_turn_id=lead.turn_id, parent_bus=lead.parent_bus, parent_ctx=lead
     )
     assert final.ok
-    if scenario == "failed":
+    if scenario in {"failed", "unfinished"}:
         assert final.final_answer.startswith(narration)
         assert final.completion == "partial"
     else:
         assert final.final_answer == (message if scenario == "only_config" else narration)
-    assert router._registry._adapters["p1"]._script_index == (1 if scenario == "only_config" else 3 if scenario in {"prior_work", "failed"} else 2)
+    expected_calls = {"only_config": 1, "mixed": 4, "prior_work": 5, "unfinished": 4, "failed": 3}
+    assert router._registry._adapters["p1"]._script_index == expected_calls[scenario]
 
 
 async def test_selected_target_is_fixed_and_persisted(settings):

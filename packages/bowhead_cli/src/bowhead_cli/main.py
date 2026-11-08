@@ -801,6 +801,8 @@ def admin_check_subagent_deployment_admission(
     """只读检查目标镜像和已注册 live 实例的 Subagent 兼容性。"""
     import asyncio
     import json
+    import sys
+    from contextlib import redirect_stdout
     from dataclasses import asdict
 
     import aiosqlite
@@ -831,18 +833,19 @@ def admin_check_subagent_deployment_admission(
         candidate_reader_version = AGENT_RELEASE_COMPATIBILITY_VERSION if reader_version is None else reader_version
         candidate_writer_version = AGENT_RELEASE_COMPATIBILITY_VERSION if writer_version is None else writer_version
         database_path = resolve_sqlite_path(db_url)
-        report = asyncio.run(
-            TeamSubagentCompatibilityStore(
-                database_path,
-            ).deployment_admission(
-                reader_version=candidate_reader_version,
-                writer_version=candidate_writer_version,
-                live_window_seconds=live_window_seconds,
-            ),
-        )
-        marketplace_report = asyncio.run(
-            AgentAssignmentStore(database_path).deployment_admission(),
-        )
+        with redirect_stdout(sys.stderr):
+            report = asyncio.run(
+                TeamSubagentCompatibilityStore(
+                    database_path,
+                ).deployment_admission(
+                    reader_version=candidate_reader_version,
+                    writer_version=candidate_writer_version,
+                    live_window_seconds=live_window_seconds,
+                ),
+            )
+            marketplace_report = asyncio.run(
+                AgentAssignmentStore(database_path).deployment_admission(),
+            )
     except TeamSubagentCompatibilityDatabaseError as exc:
         # Distinct from a schema verdict: nothing was learned about the database,
         # so the message must not read like a migration is outstanding.

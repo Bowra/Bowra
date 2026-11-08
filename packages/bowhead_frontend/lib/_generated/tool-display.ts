@@ -656,6 +656,13 @@ export const TOOL_DISPLAY: Record<string, GeneratedToolDisplay> = {
     category: "compute",
     kind: "part",
   },
+  routine_notify: {
+    label: { "zh-CN": "提醒任务所有者", "en-US": "Notify Task Owner", "de-DE": "Aufgabenbesitzer benachrichtigen", "fr-FR": "Prévenir le propriétaire de la tâche" },
+    blurb: { "zh-CN": "定时任务运行中，把这次结果标记给任务所有者。", "en-US": "In a scheduled task run, flag this run's result for the task owner.", "de-DE": "In einem geplanten Lauf das Ergebnis dieses Laufs für den Besitzer der Aufgabe markieren.", "fr-FR": "Lors d’une exécution planifiée, signaler le résultat de cette exécution au propriétaire de la tâche." },
+    sigil: "🔔",
+    category: "orchestrate",
+    kind: "part",
+  },
   send_email: {
     label: { "zh-CN": "发送邮件", "en-US": "Send Email", "de-DE": "E-Mail senden", "fr-FR": "Envoyer un e-mail" },
     blurb: { "zh-CN": "通过团队已配置的邮件服务发送一封邮件。", "en-US": "Send an email through the team's configured email service.", "de-DE": "Eine E-Mail über den vom Team eingerichteten E-Mail-Dienst senden.", "fr-FR": "Envoyer un e-mail via le service de messagerie configuré par l’équipe." },
