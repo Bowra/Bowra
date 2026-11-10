@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * css-tokens — base palette verification.
  *

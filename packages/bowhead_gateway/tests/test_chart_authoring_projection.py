@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import jwt
 import pytest
 from bowhead_core.canvas_store import CanvasStore
+from bowhead_core.chart.authoring_tools import ChartProjectionUnavailable
 from bowhead_gateway.chart_authoring_projection import project_chart_for_authoring
 
 TEST_JWT_SECRET = "synthetic-chart-projection-jwt-secret"
@@ -22,6 +23,12 @@ def viewer_request(store, artifacts):
         headers={"Authorization": "Bearer " + token},
         cookies={},
     )
+
+
+async def refusal(request, section, session="session"):
+    with pytest.raises(ChartProjectionUnavailable) as refused:
+        await project_chart_for_authoring(request, session, section)
+    return refused.value.reason
 
 
 class ArtifactStore:
@@ -62,10 +69,10 @@ async def test_current_projection_denies_missing_source_and_stale_section(tmp_pa
     authorized = await project_chart_for_authoring(request, "session", section)
     assert authorized and authorized["spec"]["rows"] == [{"amount": 42}]
     artifacts.available = False
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "source_access_denied"
     artifacts.available = True
     await store.patch_section(section_id=section.id, patch={"spec": section.payload["spec"]}, expected_rev=section.rev)
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "section_changed"
 
 
 async def test_python_artifact_with_datarc_workspace_context_keeps_source_access_boundary(tmp_path, monkeypatch):
@@ -95,22 +102,22 @@ async def test_python_artifact_with_datarc_workspace_context_keeps_source_access
     assert authorized and authorized["spec"]["rows"] == [{"amount": 42}]
     assert authorized["data_source"]["access_state"] == "linked_unavailable"
     artifacts.available = False
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "source_access_denied"
     artifacts.available = True
     richer_context = await store.append_section(
         canvas_id=canvas.id, kind="chart", payload={"spec": spec, "data_source": {**context, "artifact_id": "art_other"}}
     )
-    assert await project_chart_for_authoring(request, "session", richer_context) is None
+    assert await refusal(request, richer_context) == "section_outside_report_closure"
     datarc_spec = {**spec, "source_meta": {**spec["source_meta"], "tool": "datarc"}}
     datarc = await store.append_section(canvas_id=canvas.id, kind="chart", payload={"spec": datarc_spec, "data_source": context})
-    assert await project_chart_for_authoring(request, "session", datarc) is None
+    assert await refusal(request, datarc) == "section_outside_report_closure"
     with_other_source = await store.append_section(
         canvas_id=canvas.id, kind="chart", payload={"spec": spec, "data_source": context, "source_refs": ["unknown-source"]}
     )
-    assert await project_chart_for_authoring(request, "session", with_other_source) is None
+    assert await refusal(request, with_other_source) == "section_outside_report_closure"
     mismatched_spec = {**spec, "data_artifact_id": "art_different"}
     mismatch = await store.append_section(canvas_id=canvas.id, kind="chart", payload={"spec": mismatched_spec, "data_source": context})
-    assert await project_chart_for_authoring(request, "session", mismatch) is None
+    assert await refusal(request, mismatch) == "provenance_unavailable"
 
 
 async def test_calculated_chart_requires_both_original_and_derived_artifacts(tmp_path, monkeypatch):
@@ -152,19 +159,19 @@ async def test_calculated_chart_requires_both_original_and_derived_artifacts(tmp
     request = viewer_request(store, artifacts)
     assert (await project_chart_for_authoring(request, "session", section))["spec"]["rows"] == [{"amount": 90000}]
     artifacts.available = {original}
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "provenance_unavailable"
     artifacts.available = {derived}
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "source_access_denied"
     artifacts.available = {original, derived}
     artifacts.parent = "art_unrelated"
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "provenance_unavailable"
     artifacts.parent = original
     artifacts.producer = "python_sandbox"
-    assert await project_chart_for_authoring(request, "session", section) is None
+    assert await refusal(request, section) == "provenance_unavailable"
     artifacts.producer = "chart_calculation"
     extra = await store.append_section(
         canvas_id=canvas.id,
         kind="chart",
         payload={"spec": spec, "data_source": {"tool": "datarc", "context_id": "1"}, "source_refs": ["unknown-source"]},
     )
-    assert await project_chart_for_authoring(request, "session", extra) is None
+    assert await refusal(request, extra) == "section_outside_report_closure"

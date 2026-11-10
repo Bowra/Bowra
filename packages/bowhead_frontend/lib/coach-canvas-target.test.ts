@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
 import { captureCoachCanvasBinding, parseCoachCanvasBinding, type CoachCanvasBinding, type CoachEditorSnapshot } from "./coach-canvas-target";
 import { dispatchToTurnStore } from "./turn-store-dispatch";

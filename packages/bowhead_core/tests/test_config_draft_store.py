@@ -22,20 +22,14 @@ from bowhead_core.config_draft_store import (
     ConfigDraftSchemaUnavailableError,
     ConfigDraftStore,
 )
-from bowhead_core.migrations.baseline_schema import initial_schema
-from core_legacy_database import upgrade
+from test_agent_revision_store import _db
 
 _ROWS = [{"field": "mode", "from": "light", "to": "dark", "from_unset": True}]
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
-    path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
-    return str(path)
+    return str(_db(tmp_path))
 
 
 @pytest.fixture

@@ -164,7 +164,7 @@ import { confirmCanvasNavigation } from "@/lib/canvas-navigation-guard";
 import { getSteerTarget } from "@/lib/steer-guard";
 // prod-bug-bash-038 #9: hydrate archivedTurns from /turns/{id}/events replay
 import { getTurnSnapshot, failActiveSteps } from "@/lib/turn-store";
-import { resolveUserMessageTimeMs } from "@/lib/turn-user-time";
+import { parseServerTimeMs, resolveUserMessageTimeMs } from "@/lib/turn-user-time";
 import type { ArchivedTurn } from "@/lib/types";
 
 // prod-bug-bash-039 P1-2: inline concurrency limiter (no new dep). Caps parallel
@@ -673,11 +673,13 @@ function _toArchivedTurn(
     userMsgId: null,
     beats: snapshot?.beats ?? [],
     citations: projection?.citations ?? [],
-    archivedAt: Date.parse(turn.ended_at ?? turn.started_at),
-    // User bubbles display submission time rather than ended_at (observed on 116:「07:46 发送 → 显示 07:53」).
+    // Byline fallbacks until the event log replays `done.ended_at` / the first `turn_started` (see
+    // lib/turn-user-time.ts). The reply time is the persisted end, never the start (116: a resumed Turn read its
+    // start 18:48 instead of its end 18:49); the user time is the server start, never `ended_at`.
+    endedAt: parseServerTimeMs(turn.ended_at),
     userSentAt: resolveUserMessageTimeMs({
       firstTurnStartedAt: snapshot?.startedAt ?? null,
-      submittedAtMs: Date.parse(turn.started_at),
+      persistedStartedAtMs: parseServerTimeMs(turn.started_at),
     }),
   };
 }
@@ -761,6 +763,7 @@ function _buildSessionHydrationBase(
       lastTurnId: lastTurn?.id ?? null,
       lastOperationKind: lastTurn?.operation_kind ?? null,
       lastStartedAt: lastTurn ? Date.parse(lastTurn.started_at) : null,
+      lastEndedAt: lastTurn && lastTurn.status !== "running" ? parseServerTimeMs(lastTurn.ended_at) : null,
       lastTerminalStatus: lastTurn?.status ?? null,
       lastExecutionGeneration: lastTurn?.execution_generation ?? null,
       lastTerminalProtocolVersion:

@@ -14,6 +14,7 @@ import { EffectDisclosureNotice, TurnContainer } from "./TurnContainer";
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/api")>(),
   fetchEffectDisclosure: vi.fn(),
+  listPendingSessionQuestions: vi.fn().mockResolvedValue([]),
 }));
 
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -463,6 +464,7 @@ describe("EffectDisclosureNotice", () => {
       });
     });
 
+    await waitFor(() => expect(latestRunner?.running).toBe(false));
     await waitFor(() => expect(fetchEffectDisclosure).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(
       screen.getAllByTestId("effect-disclosure-notice"),

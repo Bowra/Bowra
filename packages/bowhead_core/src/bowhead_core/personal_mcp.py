@@ -39,9 +39,10 @@ from bowhead_core.openapi_tool_source import connect_remote_mcp
 from bowhead_core.scrub import scrub
 from bowhead_core.sqlite_domains import domain_database_path
 from bowhead_core.ssrf_guard import validate_url
+from bowhead_core.tool_confirmation_events import announce_confirmation, resolve_confirmation
 from bowhead_core.tool_registry import ToolExecutionContext, ToolSpec
 
-CONFIRM_SECONDS = 120
+CONFIRM_SECONDS = 180  # one waiting time for every confirmation kind
 MAX_RESULT_BYTES = 256 * 1024
 MAX_SCHEMA_BYTES = 128 * 1024
 VALIDATION_SECONDS = 3
@@ -848,6 +849,8 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
         async def handler(args: dict[str, Any], call_ctx: ToolExecutionContext) -> dict[str, Any]:
             identity: str | None = None
             dispatched = False
+            # A confirmation card announced on the step must end with exactly one outcome.
+            card_open = False
             started = time.perf_counter()
             try:
                 if getattr(call_ctx, "personal_mcp_execution_id", None) != binding.execution_id:
@@ -877,6 +880,19 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                 if row["status"] == "pending" and (tool["risk"] == "read" or await store.session_allows(owner, call_ctx.session_id, tool)):
                     await store.transition(owner, identity, "pending", "approved")
                     row["status"] = "approved"
+                if row["status"] == "pending":
+                    card_open = True
+                    await announce_confirmation(
+                        call_ctx,
+                        confirmation_id=identity,
+                        kind="personal_mcp",
+                        requester_user_id=owner,
+                        title=_safe(tool["remote_name"]),
+                        source_label=tool["connection_name"],
+                        choices=["reject", "approve", "approve_session"],
+                        expires_at=str(row["expires_at"]),
+                        category="unknown" if tool["risk"] not in {"external_write", "destructive"} else tool["risk"],
+                    )
                 with anyio.move_on_after(CONFIRM_SECONDS):
                     while row["status"] == "pending":
                         await anyio.sleep(0.5)
@@ -886,9 +902,21 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                         row = (await store.rows("SELECT * FROM personal_mcp_invocation WHERE id=? AND owner_user_id=?", (identity, owner)))[0]
                 if row["status"] != "approved":
                     await store.transition(owner, identity, "pending", "expired")
+                    if card_open:
+                        card_open = False
+                        outcome = (
+                            row["status"] if row["status"] in {"rejected", "expired"} else "expired" if row["status"] == "pending" else "unavailable"
+                        )
+                        await resolve_confirmation(call_ctx, confirmation_id=identity, outcome=outcome)
                     raise PersonalMcpError(
                         "personal_mcp_confirmation_" + (row["status"] if row["status"] in {"rejected", "expired"} else "unavailable")
                     )
+                if card_open:
+                    card_open = False
+                    # The allowance did not exist when this call was queued (it would have been approved
+                    # without asking), so finding it now means this decision allowed the session.
+                    for_session = await store.session_allows(owner, call_ctx.session_id, tool)
+                    await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="approved_session" if for_session else "approved")
                 connection = await store.revalidate(owner, manifest, tool, call_ctx)
                 await store.expire(owner)
                 if not await store.transition(owner, identity, "approved", "dispatching"):
@@ -926,6 +954,8 @@ async def build_personal_specs(store: PersonalMcpStore, owner: str, binding: Any
                         await self_finish(identity, dispatched, started)
                 if not isinstance(exc, Exception):
                     raise
+                if card_open and identity:
+                    await resolve_confirmation(call_ctx, confirmation_id=identity, outcome="unavailable")
                 code = str(exc) if isinstance(exc, PersonalMcpError) else "personal_mcp_call_failed"
                 return {
                     "ok": False,

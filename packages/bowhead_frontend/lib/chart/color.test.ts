@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * R7: color composition. Enforce an actual **production-build-only** incident.
  *

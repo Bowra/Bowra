@@ -1,3 +1,4 @@
+// @vitest-environment node
 // File-page Category: server filters and badge rules must agree — every asset belongs to exactly the category shown by its badge.
 import { describe, expect, it } from "vitest";
 

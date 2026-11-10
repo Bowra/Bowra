@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * turn-elapsed — elapsed time must not lie under clock skew.
  *

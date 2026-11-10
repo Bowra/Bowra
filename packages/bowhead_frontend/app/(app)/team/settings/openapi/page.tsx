@@ -18,6 +18,7 @@ import { appPath, publicBaseUrl, unprefixAppPath } from "@/lib/base-path";
 import { copyTextWithFallback } from "@/lib/clipboard";
 import { responseRequestId } from "@/lib/error-presentation";
 import { keepFocusAfterRemoval } from "@/lib/focus-after-removal";
+import { formatDateTime } from "@/lib/locale";
 import {
   AGENT_CI_SCOPES,
   defaultKeyExpiry,
@@ -89,8 +90,7 @@ function localDateTimeNow(): string {
 }
 function displayDate(value: string | null, locale: string, fallback: string) {
   if (!value) return fallback;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 function scopeName(scope: string, t: T) {
   const key = `scope_${scope.replace(":", "_")}`;

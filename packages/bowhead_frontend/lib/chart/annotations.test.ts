@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { annotationsFixture } from "../../e2e/_chart-annotations-fixture";
 import { annotationBinding, annotationCaption, annotationMatchesRow, annotationTarget, observationRows, validAnnotations, type ObservationAnnotation } from "./annotations";

@@ -1488,13 +1488,14 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     from bowhead_core.routine_notify_tool import register_routine_notify_tool
 
-    from bowhead_gateway._scheduled_runner import send_routine_alert_email
+    from bowhead_gateway._scheduled_runner import routine_result_email_reaches_owner, send_routine_alert_email
 
     # FEATURE_ROUTINE_NOTIFY: a scheduled run may flag its result for the task owner (registered only with the switch on).
     register_routine_notify_tool(
         tool_registry,
         service_provider=lambda: getattr(app.state, "notification_service", None),
         urgent_email=lambda run, item: send_routine_alert_email(app, run, item),
+        result_email_reaches_owner=lambda run: routine_result_email_reaches_owner(app, run),
     )
 
     from bowhead_core.google_delivery_tool import register_google_delivery_tools
@@ -4119,6 +4120,10 @@ def create_app() -> FastAPI:
     from bowhead_gateway.routes import team_tool_confirmations as team_tool_confirmation_routes
 
     app.include_router(team_tool_confirmation_routes.router, prefix="/api/v1/team-tool-confirmations", tags=["chat"])
+    # One owner-only view of every waiting tool call, used by the inline confirmation cards.
+    from bowhead_gateway.routes import tool_confirmations as tool_confirmation_routes
+
+    app.include_router(tool_confirmation_routes.router, prefix="/api/v1/tool-confirmations", tags=["chat"])
     # P4.5.1 auth
     from bowhead_gateway.routes import auth as auth_routes
 

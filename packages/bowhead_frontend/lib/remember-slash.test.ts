@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * V3 PRD-B · /remember slash command parser tests.
  *

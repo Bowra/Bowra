@@ -1,5 +1,5 @@
 import { quantityUnitOf } from "./format";
-import { colorIndex, editableColorColumns } from "./series-colors";
+import { colorHex, colorIndex, editableColorColumns } from "./series-colors";
 import { CHART_STYLE_PRESENTATION_POLICY } from "./chart-style-registry";
 import { compareDateAxisValues } from "./date-order";
 import { pivotLongSpec, transposeTimeWideSpec, type CellOrigins } from "./pivot-long";
@@ -34,6 +34,7 @@ export interface NormalizedChartRenderShapeV1 {
     hasPositive: boolean;
     hasNegative: boolean;
     paletteIndex?: number;
+    colorHex?: string;
   }>;
   barStackEdges?: {
     positiveOuterSeriesIndexByCategory: Array<number | null>;
@@ -329,8 +330,11 @@ export function deriveNormalizedChartRenderShapeV1(spec: ChartSpec): NormalizedC
       colorColumns = [...split.bars, ...split.lines];
     }
     derived.series.forEach((series, index) => {
+      const item = series as NormalizedChartRenderShapeV1["series"][number];
+      const hex = colorHex(colorColumns[index]?.color_hex);
       const selected = colorIndex(colorColumns[index]?.color_index);
-      if (selected !== undefined) (series as NormalizedChartRenderShapeV1["series"][number]).paletteIndex = selected;
+      if (hex !== undefined) item.colorHex = hex;
+      else if (selected !== undefined) item.paletteIndex = selected;
     });
   }
   const stacked = spec.kind === "area_stacked" || spec.kind === "stacked_bar";

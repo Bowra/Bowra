@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirmDialog, type ConfirmDialogOptions } from "@/components/ui/confirm-dialog";
 import { ErrorDiagnosticsInline } from "@/components/error-notice";
 import { copyTextWithFallback } from "@/lib/clipboard";
+import { formatShortDateTime, formatTime } from "@/lib/locale";
 import type { AgentEvalUsageRange } from "@/lib/agents-api";
 
 export interface CiFormat {
@@ -48,9 +49,8 @@ export function makeCiFormat(locale: string): CiFormat {
   const compact = new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 });
   const minuteUnit = new Intl.NumberFormat(locale, { style: "unit", unit: "minute", unitDisplay: "short", maximumFractionDigits: 0 });
   const secondUnit = new Intl.NumberFormat(locale, { style: "unit", unit: "second", unitDisplay: "short", maximumFractionDigits: 0 });
-  const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  // Month and day only; times go through lib/locale.ts so they follow the interface language's clock.
   const date = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
-  const dateTime = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   const tokens = (value: number) => (Math.abs(value) >= 10_000 ? compact.format(value) : integer.format(value));
   const wholeMinutes = (ms: number, round: (value: number) => number) => Math.max(1, round(ms / 60_000));
   const safe = (format: Intl.DateTimeFormat) => (value: string | number | Date) => {
@@ -76,9 +76,9 @@ export function makeCiFormat(locale: string): CiFormat {
       if (minutes === 0) return secondUnit.format(seconds);
       return seconds === 0 ? minuteUnit.format(minutes) : `${minuteUnit.format(minutes)} ${secondUnit.format(seconds)}`;
     },
-    time: safe(time),
+    time: (value) => formatTime(value, locale),
     date: safe(date),
-    dateTime: safe(dateTime),
+    dateTime: (value) => formatShortDateTime(value, locale),
   };
 }
 

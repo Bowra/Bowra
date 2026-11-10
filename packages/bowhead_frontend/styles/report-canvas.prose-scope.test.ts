@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * **Scope** gate for prose hierarchy (h3–h6 / lists / quotes / body tables).
  *

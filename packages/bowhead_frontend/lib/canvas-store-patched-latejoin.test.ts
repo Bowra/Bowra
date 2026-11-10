@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * onSectionPatched late-join upsert (canvas-comprehensive Batch 1 WP-4 / B2/B3).
  * write_report update + sources-repatch emit section_patched carrying the FULL
@@ -51,5 +52,18 @@ describe("onSectionPatched · late-join upsert (WP-4)", () => {
     onSectionPatched({ section_id: "ghost", patch: { markdown: "x" } });
     expect(getCanvasSnapshot().sections.length).toBe(0); // not inserted (no kind)
     expect(warn).toHaveBeenCalled(); // but observable (F3), not silent
+  });
+});
+
+describe("onSectionPatched · chat-delivered sections", () => {
+  it("a chat-only patch never inserts the section into Canvas", () => {
+    onCanvasOpened({ canvas_id: "cv1", session_id: "s1" });
+    onSectionPatched({
+      section_id: "sec_chat",
+      patch: { id: "sec_chat", kind: "chart", spec: { title: "Green" } },
+      rev: 2,
+      hiddenForChatMode: true,
+    });
+    expect(getCanvasSnapshot().sections).toEqual([]);
   });
 });

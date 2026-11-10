@@ -96,6 +96,31 @@ describe("useTurnRunner failed-turn hydration", () => {
     },
   );
 
+  it.each(["sse", "mock"] as const)(
+    "keeps the last turn's persisted start and end as byline fallbacks, the end for the reply (%s)",
+    async (mode) => {
+      // 116 t_7ab16f11ce9a: a resumed turn read its start 18:48 after reload instead of its end 18:49.
+      const startedAt = Date.parse("2026-11-08T02:48:08+00:00");
+      const endedAt = Date.parse("2026-11-08T02:49:21+00:00");
+      const hydrate = {
+        sessionId: "s_time",
+        sessionTitle: "Time",
+        messages: [],
+        lastTurnId: "t_time",
+        lastTerminalStatus: "completed",
+        lastTurnRouted: true,
+        lastUserText: "ask",
+        lastAnswer: "answer",
+        lastStartedAt: startedAt,
+        lastEndedAt: endedAt,
+      };
+      const hook = renderHook(() => useTurnRunner({ mode, hydrate, hydrateTick: 1 }));
+      await waitFor(() => expect(hook.result.current.turnId).toBe("t_time"));
+      expect(hook.result.current.persistedStartedAt).toBe(startedAt);
+      expect(hook.result.current.persistedEndedAt).toBe(endedAt);
+    },
+  );
+
   it("keeps mock and SSE baseline projection fields aligned", async () => {
     const hydrate = {
       sessionId: "s_mock_projection",
@@ -290,7 +315,7 @@ describe("useTurnRunner failed-turn hydration", () => {
       peersDispatched: [],
       beats: [],
       errorReason: null,
-      archivedAt: 1,
+      endedAt: 1,
     } as ArchivedTurn;
     const newer = {
       turnId: "t_new",
@@ -301,7 +326,7 @@ describe("useTurnRunner failed-turn hydration", () => {
       peersDispatched: [],
       beats: [],
       errorReason: null,
-      archivedAt: 2,
+      endedAt: 2,
     } as ArchivedTurn;
     const enriched = {
       ...base,

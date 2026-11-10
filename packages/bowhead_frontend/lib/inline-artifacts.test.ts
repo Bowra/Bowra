@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Phase 1.6 G4 — `extractInlineArtifacts` defensive narrowing.
  *
@@ -38,7 +39,15 @@ describe("extractInlineArtifacts", () => {
     expect(out[0].id).toBe("sec_1");
     if (out[0].kind === "chart") {
       expect(out[0].spec).toEqual({ type: "bar", x: ["a"] });
+      expect(out[0].rev).toBeUndefined();
     }
+  });
+
+  it("keeps the saved chart revision supplied by the history projection", () => {
+    const [chart] = extractInlineArtifacts({
+      inline_artifacts: [{ kind: "chart", id: "sec_1", spec: { type: "bar" }, rev: 3 }],
+    });
+    expect(chart).toMatchObject({ kind: "chart", id: "sec_1", rev: 3 });
   });
 
   it("narrows kpi entry shape", () => {

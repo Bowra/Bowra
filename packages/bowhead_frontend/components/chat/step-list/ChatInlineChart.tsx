@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 
 import type { ChartSpec } from "@/lib/chart/types";
+import { useChatFigureSpec } from "@/lib/chat-figure-revisions";
 
 
 // canvas/sections/chart-block pulls in chart.js + chartjs-plugin-datalabels
@@ -15,6 +16,10 @@ const ChartBlock = dynamic(
 
 export interface ChatInlineChartProps {
   spec: ChartSpec;
+  /** Canvas section id of the chart; enables in-place updates from later edits. */
+  sectionId?: string;
+  /** Saved revision of `spec`, when the history projection supplied it. */
+  rev?: number;
 }
 
 /**
@@ -26,8 +31,12 @@ export interface ChatInlineChartProps {
  * Per PRD N14/N15: no `↗` canvas trigger, no citation `[N]` chip —
  * the answer is pure prose; verification lives in the step expand +
  * canvas surfaces.
+ *
+ * A chart delivered in chat is edited in place: the figure renders the newest
+ * saved revision of its section, live and after a reload.
  */
-export function ChatInlineChart({ spec }: ChatInlineChartProps) {
+export function ChatInlineChart({ spec: delivered, sectionId, rev }: ChatInlineChartProps) {
+  const spec = useChatFigureSpec(sectionId, delivered, rev);
   // No outer border/background here: ChartBlock (`.v2-chart-block`) already
   // renders a complete bordered card. Re-boxing it produced a double frame
   // in chat (see globals.css:5010 UX-5 for the same double-frame problem nested in

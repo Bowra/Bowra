@@ -101,6 +101,7 @@ describe("AgentTrace partial outcomes", () => {
     const original = structuredClone(record);
     const { container } = trace(record);
     expect(container.querySelector(".bh-step-failure")).toBeNull();
+    expect(container.querySelector('[data-testid="step-failure-detail"]')).toBeNull();
     expect(screen.queryByText("查看技术详情")).toBeNull();
     if (!screen.queryByText("Required revenue")) fireEvent.click(container.querySelector(".stp-head")!);
     expect(screen.getByText("Required revenue").closest(".srow")?.querySelector(state === "partial" ? ".g-done" : ".g-fail")).toBeTruthy();
@@ -113,7 +114,7 @@ describe("AgentTrace partial outcomes", () => {
     const children = status === "done" ? outcomes.map((child) => ({ ...child, status })) : [outcomes[0], { ...outcomes[1], status }];
     const { container } = trace(partial({ state: "failed", error: genericError, subSteps: children }));
     fireEvent.click(container.querySelector(".stp-head")!);
-    expect(container.querySelector(".bh-step-failure")).toBeTruthy();
+    expect(container.querySelector('[data-testid="step-failure-detail"]')).toBeTruthy();
   });
 
   it.each([
@@ -124,14 +125,15 @@ describe("AgentTrace partial outcomes", () => {
   ])("keeps actionable or uncertain batch feedback: %j", (error) => {
     const { container } = trace(partial({ state: "failed", error, subSteps: outcomes }));
     fireEvent.click(container.querySelector(".stp-head")!);
-    expect(container.querySelector(".bh-step-failure")).toBeTruthy();
-    expect(screen.getByText("查看技术详情")).toBeTruthy();
+    const detail = container.querySelector('[data-testid="step-failure-detail"]');
+    expect(detail).toBeTruthy();
+    expect(detail?.textContent).toContain("错误编号 aabbccddeeff00112233445566778899");
   });
 
   it("retains single-operation failure feedback even when nested rows exist", () => {
     const { container } = trace(partial({ toolName: "python_sandbox", state: "failed", error: genericError, subSteps: outcomes }));
     fireEvent.click(container.querySelector(".stp-head")!);
-    expect(container.querySelector(".bh-step-failure")).toBeTruthy();
+    expect(container.querySelector('[data-testid="step-failure-detail"]')).toBeTruthy();
   });
 
   it("keeps a missing-query explanation factual after the task ends", () => {

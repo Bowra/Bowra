@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Agent management dates use the shared list-date rule, so the value can be relative ("3d ago", "Yesterday") or
  * absolute ("Oct 2"). The templates are "label: value" so both read correctly in every locale — "Archiviert am vor

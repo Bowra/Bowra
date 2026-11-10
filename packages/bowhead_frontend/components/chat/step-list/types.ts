@@ -5,6 +5,7 @@
 // from `lib/sse-events.ts`.
 
 import type { ErrorDiagnostics } from "@/lib/error-presentation";
+import type { StepConfirmation } from "@/lib/turn-store";
 
 /**
  * ⚠ New values **must be enumerated at every consumer**, not just added to this line.
@@ -179,4 +180,6 @@ export interface StepView {
   /** chat-ux-2026-08: bus's monotonically increasing per-turn event sequence (see `turn-store.Step.evtSeq`).
    *  The running band uses it to order steps and peer terminal states in one history; without it, only array order is available. */
   evtSeq?: number;
+  /** Inline tool call confirmation this step waited for; the card renders it below the row. */
+  confirmation?: StepConfirmation;
 }

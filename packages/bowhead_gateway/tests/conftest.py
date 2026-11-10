@@ -181,7 +181,7 @@ def migrated_core_snapshot(tmp_path_factory):
     return directory / "bowhead.db"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def initialize_migrated_core_database(migrated_core_snapshot):
     """Copy the real migrated baseline before a route fixture creates records."""
     import sqlite3

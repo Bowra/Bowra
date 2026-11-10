@@ -23,6 +23,7 @@ import {
   type AccessRequestStatus,
   type AccessRequestKind,
 } from "@/lib/access-requests-api";
+import { formatDate as formatLocaleDate } from "@/lib/locale";
 import { useAccessRequestsEnabled } from "@/lib/use-access-requests-enabled";
 
 export const ACCESS_REQUEST_REASON_MAX = 280;
@@ -137,12 +138,7 @@ export function AccessRequestPanel({ kind, resourceId, onBack, onOpen, className
     };
   }, [load]);
 
-  const formatDate = (iso: string | null | undefined) => {
-    if (!iso) return "";
-    const ms = Date.parse(iso);
-    if (!Number.isFinite(ms)) return "";
-    return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(ms);
-  };
+  const formatDate = (iso: string | null | undefined) => formatLocaleDate(iso, locale);
 
   const submit = async () => {
     setBusy("submit");

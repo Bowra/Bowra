@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance, page-by-page acceptance A · team-settings Appearance and Routine group:
  * source contracts for Brand and Appearance (team-theme.tsx, team-chart-style-library.tsx), Chart Style Editing (chart-style-editor.tsx),

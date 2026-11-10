@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The export request carries the exporting user's legend-hidden series (user decision 2026-10-01, option b) —
  * and only when something is hidden, so other exports keep their request (and idempotency) hash.

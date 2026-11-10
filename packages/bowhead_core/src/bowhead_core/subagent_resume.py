@@ -27,6 +27,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from bowhead_router.reasoning import record_reasoning, valid_record_keys
 from bowhead_router.types import Message, ToolCall
 
 from bowhead_core._db import open_shared_ctx
@@ -149,6 +150,9 @@ def _scope(checkpoint_scope: dict[str, str]):
     return ReferenceScope(policy_epoch=0, **checkpoint_scope)
 
 
+_RESUME_RECORD_KEYS = frozenset({"role", "content", "name", "tool_call_id", "tool_calls"})
+
+
 def _message_dict(message: Message) -> dict[str, Any]:
     # Images are not kept; the transcript keeps the text the model saw beside them.
     return {
@@ -157,6 +161,8 @@ def _message_dict(message: Message) -> dict[str, Any]:
         "name": message.name,
         "tool_call_id": message.tool_call_id,
         "tool_calls": [asdict(call) for call in message.tool_calls] if message.tool_calls else None,
+        # Reasoning blocks let a thinking-mode tool loop continue after resume; absent stays absent.
+        **({"provider_reasoning": message.provider_reasoning} if message.provider_reasoning is not None else {}),
     }
 
 
@@ -196,11 +202,11 @@ def encode_material(
     Returns the compressed bytes and the plaintext size. Raises ``ValueError`` when even a
     transcript without tool results does not fit.
     """
-    from dataclasses import asdict
+    from bowhead_router.reasoning import message_record
 
     from bowhead_core.context_segments import MAX_CONTEXT_BYTES
 
-    items = [asdict(message) if segmented else _message_dict(message) for message in messages]
+    items = [message_record(message) if segmented else _message_dict(message) for message in messages]
     tool_indexes = [index for index, item in enumerate(items) if item["role"] == "tool"]
     cleared = 0
     while True:
@@ -332,10 +338,13 @@ def decode_material(packed: bytes, *, segmented: bool = False) -> ResumeMaterial
             continue
         if (
             not isinstance(item, dict)
-            or set(item) != {"role", "content", "name", "tool_call_id", "tool_calls"}
+            or not valid_record_keys(item, _RESUME_RECORD_KEYS)
             or item["role"] not in {"user", "assistant", "tool"}
             or not isinstance(item["content"], str)
         ):
+            raise ValueError("resume_checkpoint_shape")
+        reasoning = record_reasoning(item)
+        if reasoning is not None and item["role"] != "assistant":
             raise ValueError("resume_checkpoint_shape")
         calls = item["tool_calls"]
         tool_calls = None
@@ -360,6 +369,7 @@ def decode_material(packed: bytes, *, segmented: bool = False) -> ResumeMaterial
                 name=item["name"] if isinstance(item["name"], str) else None,
                 tool_call_id=item["tool_call_id"] if isinstance(item["tool_call_id"], str) else None,
                 tool_calls=tool_calls,
+                provider_reasoning=reasoning,
             )
         )
     if not transcript_is_resumable(messages):

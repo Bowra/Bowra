@@ -5,6 +5,7 @@ from bowhead_core.agents.registry import AgentRegistry
 from bowhead_core.document_chat_continuation import DocumentPlanningCheckpointRef
 from bowhead_core.documents.continuation import DocumentPlanningFailure, DocumentPlanningPause, DocumentPlanningReview
 from bowhead_core.events import TurnEventBus
+from bowhead_core.report_chrome_text import chrome_text
 from bowhead_core.subagent import SubagentRunner
 from test_document_tool import proposal
 from test_document_tool import runtime as runtime
@@ -44,7 +45,8 @@ async def test_trusted_document_outcome_stops_lead_before_paraphrase(runtime, ki
     assert result.tool_invocations[-1].result["document_terminal"] is True
 
 
-async def test_repairable_document_arguments_still_reach_legacy_receipt(runtime):
+async def test_repairable_document_arguments_still_reach_legacy_receipt(runtime, monkeypatch):
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     registry, context, service = runtime
     invalid = proposal()
     del invalid["evidence"]
@@ -68,4 +70,5 @@ async def test_repairable_document_arguments_still_reach_legacy_receipt(runtime)
     assert context.document_turn_state.planning_result is None
     assert router._registry._adapters["p1"]._script_index == 2
     assert not result.tool_invocations[0].result.get("document_terminal")
-    assert result.final_answer == result.tool_invocations[-1].result["message"]
+    # A repaired legacy failure still needs delivery review before claiming completion.
+    assert result.final_answer == result.tool_invocations[-1].result["message"] + "\n\n" + chrome_text("delivery_unverified", "en-US")

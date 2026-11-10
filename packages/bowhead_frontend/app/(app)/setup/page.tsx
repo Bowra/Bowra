@@ -13,6 +13,7 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { appPath } from "@/lib/base-path";
+import { formatDateTime } from "@/lib/locale";
 import { safeInternalPath } from "@/lib/safe-next-path";
 import { MODEL_ADMIN_ROLES } from "@/lib/settings-navigation";
 import {
@@ -42,13 +43,8 @@ function isAbortError(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === "AbortError";
 }
 
-function formatObservedAt(value: string, locale?: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value;
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function formatObservedAt(value: string, locale: string): string {
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 export default function SetupPage() {

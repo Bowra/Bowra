@@ -310,20 +310,10 @@ def test_embed_signature_tracks_custom_transport_and_azure_deployment() -> None:
 
 
 @pytest.fixture
-async def store(tmp_path):
+async def store(tmp_path, initialize_migrated_core_database):
     s = UserStore(str(tmp_path / "bowhead.db"))
-    import sqlite3
 
-    from bowhead_core.migrations.baseline_schema import initial_schema
-    from gateway_legacy_database import upgrade
-
-    with sqlite3.connect(s.db_path) as connection:
-        connection.executescript(initial_schema("core"))
-
-    upgrade(
-        f"sqlite+aiosqlite:///{Path(s.db_path).with_name('bowhead.db')}",
-        target="core",
-    )
+    initialize_migrated_core_database(Path(s.db_path).with_name("bowhead.db"))
     await s.initialize()
     return s
 
@@ -2603,3 +2593,70 @@ async def test_context_window_catalog_returns_reviewed_windows_and_the_default(
     assert body["default"] == 131_072
     assert body["models"]["deepseek-flash"] == 1_000_000
     assert body["models"]["qwen3.7-plus-us"] == 991_808
+
+
+@pytest.mark.asyncio
+async def test_deletion_repair_runs_without_automatic_maintenance_and_preview_is_secret_free(client, store, monkeypatch):
+    monkeypatch.setenv("FEATURE_MODEL_ASSIGNMENT_RECONCILIATION", "0")
+    await _seed_team(store)
+    await _seed_user(store, "u_delete", "delete@t.com", is_creator=True)
+    current = _tier_v2_config()
+    current["providers"]["main"]["base_url"] = "https://93.184.216.34/v1"
+    current["kb"] = {"models": {"vector": {"provider": "main", "real_id": "vector", "capability": "embed", "dim": 8}}, "active": {"embed": "vector"}}
+    await store.update_team_llm_config("team_llm", current)
+    _, version = await store.get_team_llm_config_with_version("team_llm")
+    draft = json.loads(json.dumps(current))
+    draft["providers"] = {}
+    response = client.post(
+        "/api/v1/admin/llm-config/validate",
+        json={"config": draft, "expected_version": version},
+        cookies={"bowhead_jwt": _jwt_cookie("u_delete")},
+    )
+    assert response.status_code == 200, response.text
+    repaired = response.json()["assignment_config"]
+    assert not repaired["kb"]["models"] and not repaired["kb"]["active"]
+    assert "primary" not in repaired["tiers"]
+    assert "api_key" not in json.dumps(repaired)
+    assert (await store.get_team_llm_config_with_version("team_llm"))[1] == version
+    applied = _apply_config(
+        client, "/api/v1/admin/llm-config", json={"config": draft, "expected_version": version}, cookies={"bowhead_jwt": _jwt_cookie("u_delete")}
+    )
+    assert applied.status_code == 200, applied.text
+    saved, saved_version = await store.get_team_llm_config_with_version("team_llm")
+    assert saved_version == version + 1
+    assert not saved["providers"] and not saved["kb"]["active"] and "primary" not in saved["tiers"]
+
+
+@pytest.mark.asyncio
+async def test_reindex_after_source_deletion_does_not_restore_a_dangling_active_model():
+    from bowhead_gateway.routes.admin_billing import _stage_embed_reindex_if_needed
+    from fastapi import HTTPException
+
+    class Files:
+        async def list_active_for_team_all_scopes(self, team_id):
+            return [SimpleNamespace(file_id="existing")]
+
+    old = _v2_config()
+    new = json.loads(json.dumps(old))
+    old_model = old["kb"]["active"]["embed"]
+    new["kb"]["models"] = {"replacement": {"provider": "replacement", "real_id": "vector", "capability": "embed", "dim": 16}}
+    new["kb"]["active"] = {"embed": "replacement"}
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(kb_files_store=Files())))
+    with pytest.raises(HTTPException) as error:
+        await _stage_embed_reindex_if_needed(request=request, team_id="team_llm", old_config=old, new_config=new, confirm_embed_reindex=False)
+    assert error.value.detail["code"] == "embed_reindex_required"
+    staged, task = await _stage_embed_reindex_if_needed(
+        request=request, team_id="team_llm", old_config=old, new_config=new, confirm_embed_reindex=True
+    )
+    assert "embed" not in staged["kb"]["active"]
+    assert old_model not in staged["kb"]["models"]
+    assert staged["kb"]["pending_embed"]["model"] == "replacement"
+    assert task["state"] == "pending"
+
+    old["kb"]["pending_embed"] = staged["kb"]["pending_embed"]
+    resumed, duplicate_task = await _stage_embed_reindex_if_needed(
+        request=request, team_id="team_llm", old_config=old, new_config=new, confirm_embed_reindex=False
+    )
+    assert "embed" not in resumed["kb"]["active"]
+    assert resumed["kb"]["pending_embed"] == staged["kb"]["pending_embed"]
+    assert duplicate_task is None

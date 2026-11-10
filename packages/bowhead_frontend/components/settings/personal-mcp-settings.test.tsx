@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("next-intl", () => ({
+  useLocale: () => "en-US",
   useTranslations:
     () => (key: string, values?: Record<string, unknown>) =>
       values ? `${key} ${JSON.stringify(values)}` : key,

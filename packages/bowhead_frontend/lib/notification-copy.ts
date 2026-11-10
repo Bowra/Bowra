@@ -2,6 +2,8 @@
 // bell and home Needs Attention directly render them. Rewrite by type + metadata in current language;
 // legacy rows missing parameters (names/labels absent from metadata) fall back per field to persisted text.
 
+import { formatDateTime } from "./locale";
+
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 export interface NotificationCopySource {
@@ -30,10 +32,7 @@ function num(meta: Record<string, unknown>, key: string): number | null {
 }
 
 function formatMinute(value: string | null, locale: string): string | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) return null;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(ms);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || null;
 }
 
 const AGENT_RELEASE_TYPES = new Set([

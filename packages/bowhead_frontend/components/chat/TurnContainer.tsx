@@ -144,8 +144,10 @@ import { requestOpenDraft } from "@/lib/config-copilot-draft";
 import { LiteConfirmConnected } from "@/components/config-copilot/lite-confirm-connected";
 import { stepsToStepViews } from "./step-list/step-view";
 import { AgentTrace } from "./step-list/AgentTrace";
+import { PendingToolConfirmations } from "./tool-confirmation/PendingToolConfirmations";
 import { CollaborationTraceProvider } from "./step-list/collaboration-trace-state";
 import { ContextActivityProvider, useContextActivities } from "./step-list/ContextActivity";
+import { StepRecoveryProvider } from "./step-list/step-recovery";
 import { StepSummary } from "./step-list/StepSummary";
 import { formatModelRetry, RunningBand, useElapsedText } from "./step-list/RunningBand";
 import type { StepView } from "./step-list/types";
@@ -154,7 +156,8 @@ import { getActiveSpaceId } from "@/lib/space-storage";
 import { appPath } from "@/lib/base-path";
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
 import { useResultsWorkspaceCapability } from "@/lib/use-results-workspace-capability";
-import { resolveUserMessageTimeMs } from "@/lib/turn-user-time";
+import { getCurrentLocale, formatMessageTime } from "@/lib/locale";
+import { resolveReplyTimeMs, resolveUserMessageTimeMs } from "@/lib/turn-user-time";
 import { CharIcon } from "@/components/char-icon";
 
 type ExplicitDisclosurePlacement = "inline-open" | "before-answer-open";
@@ -894,20 +897,22 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
     bandSlotOwnsDisclosure,
   );
 
-  // Time stamp for BotByline (HH:mm in zh-CN). Derived from runner.startedAt
-  // (set in use-turn-runner at submit time). Memoize so we don't re-format
-  // every render — the stamp is stable for the turn's lifetime.
-  const turnTimeText = useMemo(() => formatTurnTime(runner.startedAt), [runner.startedAt]);
-  // User bubble submission time: clarification resume changes `runner.startedAt` to the new generation's start,
-  // so prefer turn-store's first turn_started (same source as archive/refresh).
-  const turnStoreStartedAt = turnStoreState?.startedAt ?? null;
-  const userTimeText = useMemo(
-    () => formatTurnTime(resolveUserMessageTimeMs({
-      firstTurnStartedAt: turnStoreStartedAt,
-      submittedAtMs: runner.startedAt,
-    })),
-    [turnStoreStartedAt, runner.startedAt],
-  );
+  // Byline times come from server timestamps only, identical live, archived and after reload (see
+  // lib/turn-user-time.ts): the reply shows its root `done` time and nothing while running (the band shows the
+  // elapsed time); the user bubble shows the first `turn_started` and nothing before the server acknowledges it.
+  // ⚠ Never `runner.startedAt`: that is the browser clock until `turn_started`, and a resumed generation's start.
+  const bylineLocale = getCurrentLocale();
+  const replyTimeMs = resolveReplyTimeMs({
+    running: runner.running,
+    terminalEndedAt: turnStoreState?.endedAt ?? null,
+    persistedEndedAtMs: runner.persistedEndedAt,
+  });
+  const turnTimeText = useMemo(() => formatMessageTime(replyTimeMs, bylineLocale), [replyTimeMs, bylineLocale]);
+  const userTimeMs = resolveUserMessageTimeMs({
+    firstTurnStartedAt: turnStoreState?.startedAt ?? null,
+    persistedStartedAtMs: runner.persistedStartedAt,
+  });
+  const userTimeText = useMemo(() => formatMessageTime(userTimeMs, bylineLocale), [userTimeMs, bylineLocale]);
   /**
    * Timing-anchor key. **Include `executionGeneration`**: same-turn clarification resume resets
    * `startedAt` on the same turnId (`use-turn-runner.ts:1229`: exclude paused generation duration);
@@ -1589,10 +1594,9 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           {/* chat-ux-2026-08 batch E: turn separators. Previously turn-01 answer directly joined turn-02
               question with **no separator**, visually merging both turns.
               Render only between turns, never before the first.
-              ⚠ Batch F correction: batch E incorrectly claimed ArchivedTurn lacked a timestamp
-              (`archivedAt` is required). Still implement only the design's thin line here,
-              without its centered timestamp: **each turn's own byline** now carries time (batch F fixed
-              its hardcoded empty string), avoiding duplicate timestamps on separators. */}
+              Implement only the design's thin line here, without its centered timestamp: **each turn's own
+              byline** carries its time (server times, see lib/turn-user-time.ts), avoiding duplicate
+              timestamps on separators. */}
           {i > 0 ? <div className="bh-turn-sep" role="separator" /> : null}
         <ArchivedTurnView
           archived={a}
@@ -1649,6 +1653,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
         <TurnRunningProvider running={runner.running} bandOwnsLiveStatus={bandMode}>
         <CollaborationTraceProvider turnId={runner.turnId ?? ""}>
         <ContextActivityProvider turnId={runner.turnId ?? ""}>
+        <StepRecoveryProvider turnId={runner.turnId ?? ""}>
         <div
           className={`bh-bot-block rho-agent-block${runner.turnId === "t_rho_historical_1" ? " rho-historical-turn" : ""}`}
           data-archived="false"
@@ -1786,6 +1791,16 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
                   onExpand={() =>
                     setTraceRequestOrigin((o) => (o === "band" ? null : "band"))}
                 />
+                {/* The collapsed band hides the step trace, so a confirmation waiting under its step would be
+                   invisible: show its card right below the band. Expanded in place, the card renders under
+                   its step in the trace below instead (never both). */}
+                {!bandExpandedInPlace ? (
+                  <PendingToolConfirmations
+                    steps={collectStepViews(runner, turnStoreState)}
+                    peerNames={turnStoreState?.peerNames}
+                    peerDisplayNames={turnStoreState?.peerDisplayNames}
+                  />
+                ) : null}
                 {/* In-place expansion: same slot, same `AgentTrace` (inventory §2.3 requires
                    returning to the same component, never a second list). Render here rather than at the beat,
                    keeping opened content under the user's finger instead of jumping above the viewport.
@@ -1953,6 +1968,7 @@ export function TurnContainer({ runner, onSend, onContinue, onSolidify, onSolidi
           ) : null}
 
         </div>
+        </StepRecoveryProvider>
         </ContextActivityProvider>
         </CollaborationTraceProvider>
         </TurnRunningProvider>
@@ -2376,6 +2392,15 @@ function BeatStream({
       !hasPeerDisclosureFacts(turnStoreState) &&
       (runner.traceSteps?.length ?? 0) === 0);
   const stepViews = collectStepViews(runner, turnStoreState);
+  // A folded step list hides the confirmation card under its waiting step: keep any pending
+  // card visible right below the summary (the expanded trace renders it under its step).
+  const foldedPendingConfirmations = stepsFolded ? (
+    <PendingToolConfirmations
+      steps={stepViews}
+      peerNames={turnStoreState?.peerNames}
+      peerDisplayNames={turnStoreState?.peerDisplayNames}
+    />
+  ) : null;
   // Band owns step rows during takeover.
   // ⚠ **Correction (③, 2026-08-14)**: formerly never-change-`traceEnabled` (inventory §2.5),
   //   **overturned**: `traceEnabled` below now equals `!bandSlotActive`.
@@ -2435,6 +2460,7 @@ function BeatStream({
           onCollapse={onCollapseSteps}
         />
       ) : null}
+      {foldedPendingConfirmations}
       {stepsFolded ? null : (
         <TurnTraceRegion
           steps={stepViews}
@@ -2477,16 +2503,19 @@ function BeatStream({
             elapsedKey={elapsedAnchorKeyOf(runner.turnId, runner.executionGeneration)}
           /> : null}
         {placeStepDisclosureBeforeAnswer || fastPathHasNoSteps || showWorking ? null : stepsFolded || traceOpenedByUser ? (
-          <StepSummary
-            steps={stepViews}
-            peerNames={turnStoreState?.peerNames}
-            totalDurationMs={turnStoreState?.totalDurationMs}
-            stepOutcome={turnStoreState?.stepOutcome}
-            failed={failedSummary}
-            onExpand={onExpandSteps}
-            expanded={!stepsFolded}
-            onCollapse={onCollapseSteps}
-          />
+          <>
+            <StepSummary
+              steps={stepViews}
+              peerNames={turnStoreState?.peerNames}
+              totalDurationMs={turnStoreState?.totalDurationMs}
+              stepOutcome={turnStoreState?.stepOutcome}
+              failed={failedSummary}
+              onExpand={onExpandSteps}
+              expanded={!stepsFolded}
+              onCollapse={onCollapseSteps}
+            />
+            {foldedPendingConfirmations}
+          </>
         ) : null}
         {placeStepDisclosureBeforeAnswer || fastPathHasNoSteps || showWorking || stepsFolded ? null : noBeatHasTraceFacts ? (
           <TurnTraceRegion
@@ -2554,16 +2583,19 @@ function BeatStream({
           position. Narrative + answer beats still iterate inline below so
           the prose around the summary stays readable. */}
       {!placeStepDisclosureBeforeAnswer && (stepsFolded || traceOpenedByUser) && hasAnyStepBeat && !fastPathHasNoSteps ? (
-        <StepSummary
-          steps={collectStepViews(runner, turnStoreState)}
-          peerNames={turnStoreState?.peerNames}
-          totalDurationMs={turnStoreState?.totalDurationMs}
-          stepOutcome={turnStoreState?.stepOutcome}
-          failed={failedSummary}
-          onExpand={onExpandSteps}
-          expanded={!stepsFolded}
-          onCollapse={onCollapseSteps}
-        />
+        <>
+          <StepSummary
+            steps={collectStepViews(runner, turnStoreState)}
+            peerNames={turnStoreState?.peerNames}
+            totalDurationMs={turnStoreState?.totalDurationMs}
+            stepOutcome={turnStoreState?.stepOutcome}
+            failed={failedSummary}
+            onExpand={onExpandSteps}
+            expanded={!stepsFolded}
+            onCollapse={onCollapseSteps}
+          />
+          {foldedPendingConfirmations}
+        </>
       ) : null}
 
       {/* O2 (2026-07-03): flat iteration consolidated into TurnBeatFlow, shared with ArchivedTurnView;
@@ -2825,18 +2857,6 @@ function computeNarrativeDedupSegIds(
   return suppressed;
 }
 
-function formatTurnTime(startedAt: number | null | undefined): string {
-  if (!startedAt) return "";
-  try {
-    return new Date(startedAt).toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
 // ─── inner: archived turn renderer ───────────────────────────────────
 
 /** Whether an archived turn completed normally (same criterion as action bar/completion summary); parent uses it to find the latest answer. */
@@ -2971,23 +2991,21 @@ function ArchivedTurnView({
     setStepsFolded(true);
   }, []);
 
-  // chat-ux-2026-08 batch F: formerly hardcoded `""`, with a comment claiming historical turns lacked timestamps.
-  // Obsolete: `ArchivedTurn.archivedAt` is now required. Live byline showed
-  // 14:32, then F5 **erased** that turn's time, violating CLAUDE.md's
-  // `live、持久化和重放的数据必须一致`.
-  // Both write paths have consistent semantics, so displaying it is safe:
-  //   live    → `archiveCompletedTurnInPlace` uses `Date.now()` **on completion**
-  //   hydrate → `Date.parse(turn.ended_at ?? turn.started_at)`
-  // If both timestamps are absent in legacy archive, `Date.parse` yields NaN; `formatTurnTime`'s falsy guard
-  // turns it into empty (NaN is falsy), degrading to original behavior.
-  const turnTimeText = formatTurnTime(archived.archivedAt);
-  // ⚠ Above applies only to BotByline: `archivedAt` is **end** time. User bubbles formerly also used it;
-  // observed on 116: `07:46 发送 → 完成后显示 你 · 07:53`. User bubbles now use submission time, same source as live.
-  const userTimeText = formatTurnTime(resolveUserMessageTimeMs({
+  // Same byline sources as the live turn (lib/turn-user-time.ts), so archiving a turn when the next message is
+  // sent, or reloading the page, never changes its times. Reply byline: the turn's root `done.ended_at` from the
+  // turn store (live and replay), else the snapshot's server end time (`turns.ended_at` after hydration); the
+  // browser clock at archive time is never used. User byline: the first `turn_started`, else `turns.started_at`.
+  // A legacy turn with neither shows no time rather than "Invalid Date".
+  const bylineLocale = getCurrentLocale();
+  const turnTimeText = formatMessageTime(resolveReplyTimeMs({
+    running: false,
+    terminalEndedAt: storeState?.endedAt ?? null,
+    persistedEndedAtMs: archived.endedAt,
+  }), bylineLocale);
+  const userTimeText = formatMessageTime(resolveUserMessageTimeMs({
     firstTurnStartedAt: storeState?.startedAt ?? null,
-    submittedAtMs: archived.userSentAt,
-    fallbackMs: archived.archivedAt,
-  }));
+    persistedStartedAtMs: archived.userSentAt,
+  }), bylineLocale);
   const archivedComplete = archivedTurnComplete(archived, storeState);
 
   const userId = archived.userMsgId ?? null;
@@ -3087,6 +3105,7 @@ function ArchivedTurnView({
     <ChatSourcesProvider sources={chatSourcesFromPayload(archived.finalPayload)}>
     <CollaborationTraceProvider turnId={archived.turnId ?? ""}>
     <ContextActivityProvider turnId={archived.turnId ?? ""}>
+    <StepRecoveryProvider turnId={archived.turnId ?? ""}>
     <div
       className="bh-bot-block"
       data-archived="true"
@@ -3277,6 +3296,7 @@ function ArchivedTurnView({
       ) : null}
 
     </div>
+    </StepRecoveryProvider>
     </ContextActivityProvider>
     </CollaborationTraceProvider>
     </ChatSourcesProvider>

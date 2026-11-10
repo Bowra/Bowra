@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Phase 1.7-D — turn counter unit test (refreshed for p0-followup F5 off-by-one fix).
  *

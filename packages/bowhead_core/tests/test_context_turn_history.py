@@ -139,10 +139,12 @@ def test_failed_marker_carries_error_kind_and_dropped_incomplete_turns_are_uncou
 
 
 @pytest.mark.unit
-def test_incomplete_turn_with_spawn_records_keeps_the_tool_calls() -> None:
+@pytest.mark.parametrize("recovery", ["0", "1"], ids=["legacy-zero", "conservative-unknown"])
+def test_incomplete_turn_with_spawn_records_keeps_the_tool_calls(monkeypatch, recovery) -> None:
     """取消前已派出的 peer 有 summary 时照常渲成 tool_calls——Lead 该知道自己派过谁、干到哪。"""
     from bowhead_core.context_assembly import INCOMPLETE_TURN_MARKERS
 
+    monkeypatch.setenv("FEATURE_CONTEXT_MATERIAL_RECOVERY", recovery)
     turns = [_turn(1, status="cancelled", answer="")]
     th = build_turn_history(turns, exclude_turn_id=None, budget_tokens=0, estimate=_ONE, spawns={"t1": [_spawn("call_a", status="cancelled")]})
     assert th.turns_used == 1 and th.turn_sizes == [4]
@@ -154,7 +156,8 @@ def test_incomplete_turn_with_spawn_records_keeps_the_tool_calls() -> None:
     synth = _spawn("call_b", status="cancelled", child_tool_count=2, canvas_sections=(), outcome="", synthesized=True)
     rendered = render_spawn_result(synth)
     assert rendered.startswith("cancelled｜子工具 2 次｜没有回执") and "画布写入" not in rendered
-    assert "画布写入 0 节" in render_spawn_result(_spawn("call_c", canvas_sections=(), synthesized=False))
+    expected = "No figure receipt is listed; other saved content is unknown." if recovery == "1" else "画布写入 0 节"
+    assert expected in render_spawn_result(_spawn("call_c", canvas_sections=(), synthesized=False))
 
 
 @pytest.mark.unit
@@ -588,14 +591,18 @@ def test_history_renders_spawn_turns_as_tool_calls_and_sizes_follow() -> None:
 
 
 @pytest.mark.unit
-def test_multiple_spawns_in_one_turn_render_in_order_and_failures_are_honest() -> None:
+@pytest.mark.parametrize("recovery", ["0", "1"], ids=["legacy-zero", "conservative-unknown"])
+def test_multiple_spawns_in_one_turn_render_in_order_and_failures_are_honest(monkeypatch, recovery) -> None:
+    monkeypatch.setenv("FEATURE_CONTEXT_MATERIAL_RECOVERY", recovery)
     recs = [_spawn("call_a"), _spawn("call_b", profile="canvas-writer", status="failed", failure_reason="peer_timeout", canvas_sections=())]
     th = build_turn_history([_turn(1)], exclude_turn_id=None, budget_tokens=0, spawns={"t1": recs})
     m = th.messages
     assert th.turn_sizes == [5]
     assert [tc["id"] for tc in m[1]["tool_calls"]] == ["h1_call_a", "h1_call_b"]
     assert m[2]["tool_call_id"] == "h1_call_a" and m[3]["tool_call_id"] == "h1_call_b"
-    assert "failed" in m[3]["content"] and "失败原因：peer_timeout" in m[3]["content"] and "画布写入 0 节" in m[3]["content"]
+    assert "failed" in m[3]["content"] and "失败原因：peer_timeout" in m[3]["content"]
+    expected = "No figure receipt is listed; other saved content is unknown." if recovery == "1" else "画布写入 0 节"
+    assert expected in m[3]["content"]
 
 
 @pytest.mark.unit

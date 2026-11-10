@@ -153,7 +153,7 @@ async def resolve_task_source_in_tx(db, *, current: ChatTurnUserSource, quote: U
 
 
 async def read_task_source_in_tx(
-    db, *, current: ChatTurnUserSource, snapshot: DocumentTaskSource, quote: UserQuote
+    db, *, current: ChatTurnUserSource, snapshot: DocumentTaskSource, quote: UserQuote, collapse_repeats: bool = True
 ) -> tuple[ChatTurnUserSource, str]:
     """Recover by pinned identity and hash; never select a newer matching source."""
     source = await _read_earlier(db, current=current, turn_id=snapshot.turn_id)
@@ -167,16 +167,40 @@ async def read_task_source_in_tx(
         context = await _continuation_context(db, current=end, original=source)
         if content_hash(context) != snapshot.continuation.context_hash:
             raise DocumentRequestError("document_task_source_changed", field="task_source")
-    return source, instruction_with_task_source(current=current, original=source, context=context)
+    return source, instruction_with_task_source(current=current, original=source, context=context, collapse_repeats=collapse_repeats)
 
 
-def instruction_with_task_source(*, current: ChatTurnUserSource, original: ChatTurnUserSource, context: list[dict] | None = None) -> str:
+def _latest_supplements(context: list[dict], current: ChatTurnUserSource) -> list[dict]:
+    """Keep each identical supplement only at its latest position.
+
+    A retried message adds no requirement, but every copy would otherwise be
+    rendered again. Keeping the latest copy preserves the order in which later
+    supplements change earlier ones; confirmed answers always stay in place.
+    """
+    later = {current.user_text.strip()}
+    kept = []
+    for item in reversed(context):
+        if "user_text" in item:
+            key = item["user_text"].strip()
+            if key in later:
+                item = {name: value for name, value in item.items() if name != "user_text"}
+            else:
+                later.add(key)
+        kept.append(item)
+    return kept[::-1]
+
+
+def instruction_with_task_source(
+    *, current: ChatTurnUserSource, original: ChatTurnUserSource, context: list[dict] | None = None, collapse_repeats: bool = True
+) -> str:
+    """Render the worker instruction; ``collapse_repeats=False`` reproduces attempts retained before collapsing."""
     text = (
         "Apply the original user request and the current supplement together. "
         "The supplement updates only what it explicitly changes; preserve all other requirements.\n\n"
         "Original user request:\n" + original.user_text
     )
-    for item in context or ():
+    items = context or []
+    for item in _latest_supplements(items, current) if collapse_repeats else items:
         if "user_text" in item:
             text += "\n\nEarlier user supplement:\n" + item["user_text"]
         for answer in item["answers"]:
@@ -187,7 +211,9 @@ def instruction_with_task_source(*, current: ChatTurnUserSource, original: ChatT
     return text
 
 
-async def job_task_source_in_tx(db, *, job) -> tuple[DocumentTaskSource, ChatTurnUserSource, ChatTurnUserSource, str] | None:
+async def job_task_source_in_tx(
+    db, *, job, collapse_repeats: bool = True
+) -> tuple[DocumentTaskSource, ChatTurnUserSource, ChatTurnUserSource, str] | None:
     """Validate optional persisted provenance under the caller's original job ACL."""
     request = json.loads(job["request_json"])
     snapshot = request.get("task_source")
@@ -208,10 +234,10 @@ async def job_task_source_in_tx(db, *, job) -> tuple[DocumentTaskSource, ChatTur
         or content_hash(chat_turn_user_source_projection(current)) != job["user_source_sha256"]
     ):
         raise DocumentRequestError("document_source_unavailable")
-    original, instruction = await read_task_source_in_tx(db, current=current, snapshot=snapshot, quote=quote)
+    original, instruction = await read_task_source_in_tx(db, current=current, snapshot=snapshot, quote=quote, collapse_repeats=collapse_repeats)
     return snapshot, current, original, instruction
 
 
-async def task_instruction_in_tx(db, *, job, fallback: str) -> str:
-    material = await job_task_source_in_tx(db, job=job)
+async def task_instruction_in_tx(db, *, job, fallback: str, collapse_repeats: bool = True) -> str:
+    material = await job_task_source_in_tx(db, job=job, collapse_repeats=collapse_repeats)
     return material[3] if material else fallback

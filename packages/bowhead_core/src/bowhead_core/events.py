@@ -13,7 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass, field
+import time
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from bowhead_core.types import utc_now_iso
@@ -149,6 +150,10 @@ EventType = Literal[
     "step_started",  # payload: StepStartedPayload — Step List Card adds new step row
     "step_progress",  # payload: StepProgressPayload — content delta or N/M progress
     "step_done",  # payload: StepDonePayload — step finish (success/failure/partial)
+    # Inline tool confirmation (FEATURE_INLINE_TOOL_CONFIRMATION): a waiting tool step asks its requester
+    # and records the outcome. Labels only; arguments/bodies/diffs stay in the owner-only queue.
+    "confirmation_requested",  # payload: ConfirmationRequestedPayload
+    "confirmation_resolved",  # payload: ConfirmationResolvedPayload
     "step_list_card_created",  # payload: StepListCardCreatedPayload — card created at turn start
     "step_list_card_finalized",  # payload: StepListCardFinalizedPayload — card lock (turn done)
     "emoji_ack",  # payload: EmojiAckPayload — add emoji on user msg (steer ack 🤝)
@@ -294,6 +299,54 @@ def _attach_recovery_action(event_type: str, payload: dict[str, Any]) -> None:
     action = chat_recovery_action(failure_event_reason_code(payload))
     if action is not None:
         payload["recovery_action"] = action
+
+
+def turn_wall_duration_ms(bus: Any) -> int | None:
+    """Wall time of this execution generation, from its ``turn_started`` until now.
+
+    ``TurnRunner`` anchors each generation's bus when it emits ``turn_started``.
+    A bus without that anchor (a path outside TurnRunner) has no known start, so
+    the result is ``None`` rather than an invented zero.
+    """
+    t0 = getattr(bus, "_turn_wall_t0_perf", None)
+    if not isinstance(t0, (int, float)) or isinstance(t0, bool):
+        return None
+    return max(0, int((time.perf_counter() - t0) * 1000))
+
+
+def _stamp_generation_duration(bus: Any, payload: dict[str, Any]) -> None:
+    """Give a root ``done`` this generation's wall duration unless it already has one.
+
+    Lead stamps its own terminal; this persistence seam covers every other producer
+    (worker exception, cancellation, clarification and direct gateway emits) so the
+    live, persisted and replayed frame carry one value. Terminal v1 compatibility
+    frames (already persisted with ``event_id``) are left untouched.
+    """
+
+    if "event_id" in payload or payload.get("duration_ms") is not None:
+        return
+    duration_ms = turn_wall_duration_ms(bus)
+    if duration_ms is None:
+        return
+    payload["duration_ms"] = duration_ms
+    if not isinstance(getattr(bus, "_turn_wall_duration_ms", None), int):
+        # The turn summary reads the same value as done.duration_ms.
+        bus._turn_wall_duration_ms = duration_ms
+
+
+def _stamp_terminal_time(event: OrchestratorEvent) -> None:
+    """Give a root ``done`` its server time as ``ended_at`` (plain ISO-8601 UTC) unless it has one.
+
+    The browser's reply byline shows this value. Carrying it in the payload makes the
+    live frame, the persisted row and every replay show the same server time, instead
+    of the browser clock at archive time. Terminal v1 compatibility frames (already
+    persisted with ``event_id``) are left untouched.
+    """
+
+    payload = event.payload
+    if "event_id" in payload or payload.get("ended_at"):
+        return
+    payload["ended_at"] = event.occurred_at.split("#", 1)[0]
 
 
 @dataclass
@@ -465,6 +518,39 @@ class StepProgressPayload:
 
 
 @dataclass
+class ConfirmationRequestedPayload:
+    """Wire shape for `confirmation_requested`: the step `step_id` waits for `requester_user_id`.
+
+    No arguments, email body or diff: Turn events are kept with the conversation and shown to
+    every viewer. `timeout_seconds` is the time left when emitted, by the server clock.
+    """
+
+    card_id: str
+    step_id: str
+    call_id: str
+    confirmation_id: str
+    kind: str  # personal_mcp | email_send | shopify_content | team_mcp
+    requester_user_id: str
+    title: str
+    source_label: str | None
+    category: str | None  # external_write | destructive | unknown (MCP kinds)
+    choices: list[str]  # reject | approve | approve_session
+    expires_at: str
+    timeout_seconds: int
+
+
+@dataclass
+class ConfirmationResolvedPayload:
+    """Wire shape for `confirmation_resolved`. Stop and restart emit nothing; views derive them."""
+
+    card_id: str
+    step_id: str
+    confirmation_id: str
+    outcome: str  # approved | approved_session | rejected | expired | unavailable
+    decided_at: str
+
+
+@dataclass
 class StepDonePayload:
     """Wire shape for `step_done` event.
 
@@ -522,6 +608,30 @@ class EmojiAckPayload:
 
     target_msg_id: str  # user message id to react on
     emoji: str  # 🤝 (steer) | ⏳ (thinking) | ✅ (done)
+    text: str | None = None  # accepted steering text shown in the bubble
+    ts: str | None = None  # ISO-8601 UTC event time (the steering byline time)
+
+
+def make_steer_ack_event(turn_id: str, *, target_msg_id: str, text: str) -> OrchestratorEvent:
+    """Build the legacy steering acknowledgement for one accepted steering line.
+
+    ``ts`` is the event's own time in plain ISO-8601 UTC (``occurred_at`` without its
+    uniqueness suffix), carried in the payload so live delivery and replay show the
+    same steering byline time.
+    """
+    occurred_at = utc_now_iso()
+    payload = EmojiAckPayload(
+        target_msg_id=target_msg_id,
+        emoji="🤝",
+        text=text,
+        ts=occurred_at.split("#", 1)[0],
+    )
+    return OrchestratorEvent(
+        event_type="emoji_ack",
+        turn_id=turn_id,
+        payload=asdict(payload),
+        occurred_at=occurred_at,
+    )
 
 
 @dataclass
@@ -872,6 +982,11 @@ class TurnEventBus:
             # reason. Injected at this persistence seam (like seq) so every producer of a root
             # failure terminal carries it, and live == persisted == replayed.
             _attach_recovery_action(event.event_type, event.payload)
+            if event.event_type == "done" and not event.payload.get("parent_agent_id"):
+                # Same seam for the generation duration: a direct emit (for example the
+                # gateway worker's failure terminal) cannot bypass it.
+                _stamp_generation_duration(self, event.payload)
+                _stamp_terminal_time(event)
         if event.event_type == "step_done":
             try:
                 self._step_count += 1  # type: ignore[has-type]

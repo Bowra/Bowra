@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { BUILD_EDITION, PRODUCT_NAME } from "./product-identity";
 import { canonicalEffectiveThemeFallback } from "./theme-config";

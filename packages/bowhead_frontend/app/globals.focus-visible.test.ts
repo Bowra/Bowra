@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Global keyboard focus ring (UI redesign P0-2, docs/design/界面改版-Apple设计方向.md).
  *

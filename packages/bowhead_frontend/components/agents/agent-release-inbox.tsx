@@ -5,15 +5,12 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { listAgentReleaseInbox, type AgentReleaseInboxItem } from "@/lib/agents-api";
 import { appPath } from "@/lib/base-path";
+import { formatDateTime } from "@/lib/locale";
 import { agentArtworkStyle } from "./agent-artwork";
 import { agentMark } from "./agent-mark";
 
 function formatDate(value: string, locale: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? value : new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(parsed);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 export function AgentReleaseInbox({ totalCount = 0 }: { totalCount?: number }) {

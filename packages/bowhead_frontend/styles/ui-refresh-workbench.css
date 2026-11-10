@@ -189,6 +189,70 @@
   color: var(--c-ink-3);
 }
 
+/* ── Opened failed step (StepFailureDetail): a reason line and a reference line in the row's detail slot,
+ *    no panel or extra inset; 12 secondary text, reference 11 with a 24-square copy button ── */
+:root:root .ag-trace .stp-fail {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0;
+}
+:root:root .ag-trace .stp-fail p {
+  margin: 0;
+}
+:root:root .ag-trace .stp-fail__why {
+  font: 400 var(--fs-sm) / 1.5 var(--font-control);
+  color: var(--c-ink-2);
+  overflow-wrap: anywhere;
+}
+/* One line at every width: a narrow column shortens the reference visibly; its text, tooltip and copy stay whole. */
+:root:root .ag-trace .stp-fail__ref {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 24px;
+  font: 400 var(--fs-xs) / 1.5 var(--font-control);
+  color: var(--c-ink-3);
+  white-space: nowrap;
+}
+:root:root .ag-trace .stp-fail__ref code {
+  min-width: 0;
+  overflow: hidden;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+}
+:root:root .ag-trace .stp-fail__copy {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--c-ink-3);
+  cursor: pointer;
+}
+:root:root .ag-trace .stp-fail__copy--text {
+  display: inline-flex;
+  gap: 4px;
+  width: auto;
+  margin-left: -4px;
+  padding: 0 4px;
+  font: inherit;
+}
+:root:root .ag-trace .stp-fail__copy:hover {
+  background: var(--c-fill-1);
+  color: var(--c-ink-2);
+}
+:root:root .ag-trace .stp-fail__copy:focus-visible {
+  outline: 2px solid var(--c-focus, var(--c-accent));
+  outline-offset: 1px;
+}
+
 /* ═══ Step list border: one row type (30 high), one icon column (16 wide), agent header 32, at most one indentation level ═══ */
 :root:root .bh-step-list .ag-trace {
   border: 0;

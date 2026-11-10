@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { DialogShell } from "@/components/ui/dialog";
+import { formatTime } from "@/lib/locale";
 import { useAuthSession } from "@/lib/auth/auth-session-context";
+import { useHasActiveToolStep } from "@/lib/turn-store";
 import {
   teamToolConfirmationApi,
   type TeamToolConfirmation,
@@ -22,10 +24,26 @@ function TeamToolConfirmationQueue() {
   const [pending, setPending] = useState<TeamToolConfirmation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  // Same gating as email and Shopify: poll only while a Team tool step is running in a turn this
+  // tab knows about, or a confirmation is already on screen. One read on mount covers a reload in
+  // the middle of a wait.
+  const teamToolRunning = useHasActiveToolStep("teammcp.", "prefix");
+  const [mountCheck, setMountCheck] = useState(true);
   useConfirmationQueuePoll({
-    load: async () =>
-      (await teamToolConfirmationApi<{ confirmations: TeamToolConfirmation[] }>("")).confirmations,
-    onItems: setPending,
+    enabled: mountCheck || teamToolRunning || pending.length > 0,
+    load: async () => {
+      try {
+        return (await teamToolConfirmationApi<{ confirmations: TeamToolConfirmation[] }>("")).confirmations;
+      } catch (failure) {
+        setMountCheck(false);
+        throw failure;
+      }
+    },
+    // Same update batch as the items, so `enabled` never flickers off while a confirmation is arriving.
+    onItems: (items) => {
+      setPending(items);
+      setMountCheck(false);
+    },
   });
   const current = pending[0];
   if (!current) return null;
@@ -60,11 +78,18 @@ function TeamToolConfirmationQueue() {
         {current.source_name} · {current.tool_name}
       </p>
       <p>{current.description}</p>
-      <p>{t("notice")}</p>
+      <p>
+        {t("notice")}{" "}
+        {current.category === "external_write"
+          ? t("riskExternalWrite")
+          : current.category === "destructive"
+            ? t("riskDestructive")
+            : t("riskUnknown")}
+      </p>
       <pre>{JSON.stringify(current.arguments, null, 2)}</pre>
       <p>
         {t("expires", {
-          time: new Date(current.expires_at).toLocaleTimeString(locale),
+          time: formatTime(current.expires_at, locale, { seconds: true }),
         })}
       </p>
       {error ? <p role="alert">{t("decisionError")}</p> : null}

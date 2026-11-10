@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { suggestedContextWindow } from "./llm-config-v2-api";

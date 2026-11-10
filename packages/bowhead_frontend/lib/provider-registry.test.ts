@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Unit tests for provider-registry · preferred_model pack/unpack.
  * (Legacy provider templates and their tests were removed together in the tiering sprint, 2026-07-22.)

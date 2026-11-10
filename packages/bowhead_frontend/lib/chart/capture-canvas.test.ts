@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, test } from "vitest";
 
 import { POINT_LABEL_KEEP_ALL_KEY } from "./build-config";

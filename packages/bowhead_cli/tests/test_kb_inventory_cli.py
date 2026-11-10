@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 from pathlib import Path
+from uuid import UUID
 
 from bowhead_cli.main import app
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
@@ -19,6 +20,8 @@ def dump(path: Path) -> str:
 
 def test_inventory_pages_are_read_only_and_report_unknown_binding(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BOWHEAD_ARTIFACT_BACKEND", "local")
+    file_ids = iter(UUID(hex=f"{i:012x}" + "0" * 20) for i in range(6))
+    monkeypatch.setattr("bowhead_core.kb.files_store.uuid4", lambda: next(file_ids))
     db = tmp_path / "data" / "sqlite" / "bowhead.db"
     db.parent.mkdir(parents=True)
     upgrade(f"sqlite:///{db}", "files")
@@ -40,7 +43,8 @@ def test_inventory_pages_are_read_only_and_report_unknown_binding(tmp_path: Path
                 team_id="team_other" if i == 5 else "team_test",
                 uploaded_by="u1",
             )
-            if i == 0:
+            # The missing source gets its own final page and a full health-probe I/O budget.
+            if i == 4:
                 Path(art.path).unlink()
 
     asyncio.run(seed())

@@ -7,6 +7,7 @@ import { ExternalLink, File, FileText, Presentation, Table } from "lucide-react"
 import { ChatCard, ChatCardButton } from "@/components/ui/card";
 import { Segment, SegmentedControl } from "@/components/ui/segmented-control";
 import { embedFrame } from "@/lib/embed-frame";
+import { formatShortDateTime } from "@/lib/locale";
 import { Markdown } from "@/lib/md";
 import { safeHref } from "@/lib/safe-href";
 import type { ReportSection } from "@/lib/types";
@@ -108,9 +109,7 @@ export function GoogleFileCard({ data }: { data: Card }) {
   );
 }
 
-/** “10月5日 14:10” / “Oct 5, 14:10”: the write time in the card meta. */
+/** “10月5日 14:10” / “Oct 5, 2:10 PM”: the write time in the card meta. */
 function formatWriteTime(value: string, locale: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return formatShortDateTime(value, locale) || null;
 }

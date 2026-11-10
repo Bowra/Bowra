@@ -52,7 +52,7 @@ import {
   formatTurnDuration,
   resolveLiveTurnDurationMs,
 } from "./turn-duration";
-import { resolveUserMessageTimeMs } from "./turn-user-time";
+import { resolveReplyTimeMs, resolveUserMessageTimeMs } from "./turn-user-time";
 import { requestAutoOpenDraft } from "./config-copilot-draft";
 import {
   clearPendingSubmission,
@@ -283,12 +283,17 @@ export function snapshotArchivedTurn(s: TurnRunnerState): import("./types").Arch
     citations: s.citations ?? [],
     // Likewise, retain the notice that explicit planning mode did not produce a plan after archiving.
     planningFallback: s.planningFallback,
-    archivedAt: Date.now(),
-    // User-bubble time: first turn_started (never overwritten by same-turn continuation), or send time if absent.
-    // ⚠ Do not prefer `s.startedAt`: after clarification resumes, it is the new generation's start.
+    // Byline fallbacks for when the turn store lacks them: server times only, never `Date.now()` (archiving
+    // happens when the next message is sent, minutes after the turn ended). ⚠ Not `s.startedAt`: that is the
+    // browser clock until `turn_started` arrives, and the latest generation's start after a resume.
+    endedAt: resolveReplyTimeMs({
+      running: false,
+      terminalEndedAt: turnStoreSnap?.endedAt ?? null,
+      persistedEndedAtMs: s.persistedEndedAt,
+    }),
     userSentAt: resolveUserMessageTimeMs({
       firstTurnStartedAt: turnStoreSnap?.startedAt ?? null,
-      submittedAtMs: s.startedAt,
+      persistedStartedAtMs: s.persistedStartedAt,
     }),
   };
 }
@@ -395,6 +400,8 @@ function archiveCompletedTurnInPlace(
   next.headline = undefined;
   next.userMsgId = null;
   next.startedAt = null;
+  next.persistedStartedAt = null;
+  next.persistedEndedAt = null;
   next.effectDisclosure = null;
   next.effectDisclosureDiscoveryPending = false;
   // This runs inside a React state updater, which may run while the host component renders; a synchronous
@@ -510,6 +517,8 @@ function archiveAndFreshTurn(
     citations: [],
     userMsgId: _newUserMsgId(),
     startedAt: Date.now(),
+    persistedStartedAt: null,
+    persistedEndedAt: null,
     running: true,
     started: true,
   };
@@ -677,6 +686,11 @@ function dispatchMockTimelineEventToTurnStore(
   };
 
   switch (ev.kind) {
+    // The mock timeline stands in for the server, so its clock supplies the server byline times.
+    case "turn_started": {
+      dispatchToTurnStore("turn_started", { turn_id: turnId, started_at: nowIso() });
+      break;
+    }
     case "tool_call": {
       const stepId = `tool_${ev.id}`;
       activeSteps.set(ev.id, { stepId, startedAt: Date.now() });
@@ -790,6 +804,7 @@ function dispatchMockTimelineEventToTurnStore(
         card_id: turnId,
         turn_id: turnId,
         status: "completed",
+        ended_at: nowIso(),
       });
       break;
     }
@@ -897,6 +912,8 @@ function useMockRunner(
       turnId: hydrate.lastTurnId ?? null,
       operationKind: hydrate.lastOperationKind ?? null,
       startedAt: finiteMsOrNull(hydrate.lastStartedAt),
+      persistedStartedAt: finiteMsOrNull(hydrate.lastStartedAt),
+      persistedEndedAt: finiteMsOrNull(hydrate.lastEndedAt),
       user: hasRoutedLastTurn ? (hydrate.lastUserText ?? "") : "",
       userAttachments: hasRoutedLastTurn ? (hydrate.lastUserAttachments ?? []) : [],
       answer: hasRoutedLastTurn ? (hydrate.lastAnswer ?? "") : "",
@@ -1394,6 +1411,8 @@ function useSSERunner(
       // The paused generation's summary/duration must not leak into it.
       summary: null,
       startedAt: Date.now(),
+      // The resumed generation ends later; its own `done` carries the new end time.
+      persistedEndedAt: null,
       clarificationPending: null,
       errorReason: base.errorReason?.source === "clarification_resume" ? null : base.errorReason,
       executionGeneration: executionGeneration ?? base.executionGeneration,
@@ -1640,6 +1659,8 @@ function useSSERunner(
         turnId: hydrate.lastTurnId ?? null,
         operationKind: hydrate.lastOperationKind ?? null,
         startedAt: finiteMsOrNull(hydrate.lastStartedAt),
+        persistedStartedAt: finiteMsOrNull(hydrate.lastStartedAt),
+        persistedEndedAt: finiteMsOrNull(hydrate.lastEndedAt),
         user: hasRoutedLastTurn ? (hydrate.lastUserText ?? "") : "",
         userAttachments: hasRoutedLastTurn ? (hydrate.lastUserAttachments ?? []) : [],
         // chat-redesign Phase 1.2 CTO 2nd review P0 #1 — seed runner.answer
@@ -2285,9 +2306,24 @@ function attachStream(
       }
     }
     // A steer continuation is announced before the parent terminal frame.
-    // attachStream(follow-up) replaces esRef immediately; any later parent
-    // done/error is stale and must not stop the child stream.
-    if (TURN_TERMINAL_FACT_EVENTS.has(name) && esRef.current !== currentEs) return;
+    // attachStream(follow-up) replaces esRef immediately, so a later parent
+    // done/error/turn_failed/turn_aborted arrives on a stream that no longer
+    // owns the runner. It must not stop the child stream: setState,
+    // markTerminal, terminal reconciliation and canvas effects all belong to
+    // the child now and are skipped. The parent's own Turn facts (wall-clock
+    // duration, step outcome, superseded narrative, card finalization and
+    // failure-answer cleanup) still reach the turn store, which routes them by
+    // the payload's turn id and de-duplicates them by per-turn seq, exactly as
+    // replay does. Dropping them made the live parent row disagree with replay.
+    if (TURN_TERMINAL_FACT_EVENTS.has(name) && esRef.current !== currentEs) {
+      // Same gate as the current-stream path below: a prior-generation
+      // terminal belongs to history only.
+      const priorGenerationTerminal = terminalProtocolVersion === 1
+        && STREAM_TERMINAL_EVENTS.has(name)
+        && payload.terminal_current === false;
+      if (!priorGenerationTerminal) dispatchToTurnStore(name, payload, "live", streamTurnId);
+      return;
+    }
     // fix/sse-reconnect-resilience: server fully replays on each reconnect; deduplicate monotonic bus seq,
     // or append reducers (chips/traceSteps/narrative) count twice. seq comes from bus; emit already
     // writes it into payload (events.py) + to_sse includes it, covering live+replay. Bus seq starts at 1;
@@ -3437,6 +3473,9 @@ function attachStream(
       // window so v3/v4 surfaces don't regress.
       "step_started", "step_progress", "step_done",
       "step_list_card_created", "step_list_card_finalized",
+      // Inline tool call confirmation, attached to the waiting tool step. Same silent-drop
+      // concern: without these the card never appears live (replay would still show it).
+      "confirmation_requested", "confirmation_resolved",
       // Planning Mode — plan-card events. SAME EventSource silent-drop concern:
       // without these the dispatcher (turn-store-dispatch.ts) never sees them, so
       // plan_proposed never seeds the card in a real browser session (curl SSE +
@@ -3795,9 +3834,12 @@ export interface UseTurnRunnerArgs {
     lastSummary?: import("./types").TurnSummary | null;
     /** chat-hydrate-overhaul: last turn's turnId makes trace chip openable. */
     lastTurnId?: string | null;
-    /** Last turn's server start time (epoch ms). Live startedAt exists on submission; after refresh,
-     *  fill from here so user-bubble and Bowhead-signature times do not disappear after F5. */
+    /** Last turn's persisted `turns.started_at` (epoch ms): the elapsed-time anchor and the user byline until
+     *  the event log's first `turn_started` replays, so the time does not disappear after F5. */
     lastStartedAt?: number | null;
+    /** Last turn's persisted `turns.ended_at` (epoch ms): the reply byline until the event log's
+     *  `done.ended_at` replays. Null while it runs. */
+    lastEndedAt?: number | null;
     /** chat-v4 hydrate: v4 slot payloads backfilled from persisted events
      *  of the last turn — completed turns don't reconnect SSE, so V4 emits
      *  otherwise never reach the reducer. See app/page.tsx `_fetchV4FromTurn`.

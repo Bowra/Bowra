@@ -2439,6 +2439,10 @@
   font-family: var(--font-v2-mono);
   color: var(--c-ink-3);
 }
+/* A local date and 12-hour time ("Nov 8, 2026, 10:51 PM") stays on one line; the frame scrolls horizontally. */
+.legacy-credits-ledger-time {
+  white-space: nowrap;
+}
 .legacy-credits-ledger-delta {
   font-family: var(--font-v2-mono);
   font-size: 0.8125rem;
@@ -4513,6 +4517,18 @@
   color: var(--c-ink-3);
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+/* Confirm Tool Categories (source-tool-category-dialog.tsx): the select keeps a fixed width so the
+   tool name and description keep the remaining space, and moves below them on narrow screens. */
+.legacy-tools-category-row {
+  flex-wrap: wrap;
+}
+.legacy-tools-category-row .legacy-tools-choose-label {
+  flex: 1 1 14rem;
+}
+.legacy-tools-category-select {
+  flex: 0 0 11rem;
+  width: 11rem;
 }
 .legacy-tools-choose-badge {
   padding: 1px 6px;

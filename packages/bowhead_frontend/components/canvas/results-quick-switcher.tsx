@@ -16,6 +16,7 @@ import {
 import { DialogShell } from "@/components/ui/dialog";
 import { useNarrowViewport } from "@/components/ui/sheet";
 import type { ResultItemDTO, ResultsApiErrorCode } from "@/lib/results-api";
+import { formatTime } from "@/lib/locale";
 import { resultDisplayTitle } from "@/lib/results-workspace-model";
 import { CharIcon } from "@/components/char-icon";
 import { ResultsStateIcon } from "@/components/canvas/results-state-icon";
@@ -467,14 +468,8 @@ function itemContext(
     }));
   }
   if (context.occurred_at) {
-    const occurredAt = new Date(context.occurred_at);
-    if (!Number.isNaN(occurredAt.getTime())) {
-      pieces.push(new Intl.DateTimeFormat(locale, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(occurredAt));
-    }
+    const occurredAt = formatTime(context.occurred_at, locale, { seconds: true });
+    if (occurredAt) pieces.push(occurredAt);
   }
   return pieces.join(" · ");
 }

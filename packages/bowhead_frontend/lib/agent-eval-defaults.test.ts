@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { caseWithCurrentDefaults, scorerConfigOnOldDefaults, withCurrentScorerDefaults } from "./agent-eval-defaults";

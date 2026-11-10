@@ -52,9 +52,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Process streams of Skill scripts are not saved elsewhere. Keep a short beginning and a
+# longer end (errors usually end a stream) and state exactly what was omitted.
+_STREAM_LIMIT_CHARS = 2000
+_STREAM_HEAD_CHARS = 500
+
+
+def _bounded_stream(text: str) -> str:
+    if len(text) <= _STREAM_LIMIT_CHARS:
+        return text
+    tail = _STREAM_LIMIT_CHARS - _STREAM_HEAD_CHARS
+    omitted = text[_STREAM_HEAD_CHARS : len(text) - tail]
+    total_lines = text.count("\n") + (0 if text.endswith("\n") else 1)
+    marker = (
+        f"[... {len(omitted)} of {len(text)} characters ({omitted.count(chr(10))} of {total_lines} lines) omitted; "
+        f"showing the first {_STREAM_HEAD_CHARS} and last {tail} characters. The complete stream was not saved; "
+        "print less or write large output to a file.]"
+    )
+    return f"{text[:_STREAM_HEAD_CHARS]}\n{marker}\n{text[-tail:]}"
+
+
 # ─────────────────────────────────────────────────────────
 # Sprint π §K (Layer 1 + Layer 2 metric drain)
 # ─────────────────────────────────────────────────────────
+
+
 def _k_flag_on() -> bool:
     # compute-agent-optimize batch 1 (2026-08-19): default ON. Previously defaulted to "0", and deployment never configured this key,
     # so production INPUTS never included columns/dtypes/sample; models recalled column names from memory (31 KeyErrors on 116 in 30 days =
@@ -1071,8 +1093,8 @@ def build_skill_tools(
                 if _download_name
                 else {}
             ),
-            "stdout": result.stdout[-2000:],
-            "stderr": result.stderr[-2000:],
+            "stdout": _bounded_stream(result.stdout),
+            "stderr": _bounded_stream(result.stderr),
             "result_json": _rj,
             # review nit: relative to workdir, not basename; preserve subdirectory information so nested files with the same name
             # do not collapse. Fall back to basename when workdir is absent.

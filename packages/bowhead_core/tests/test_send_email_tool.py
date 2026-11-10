@@ -10,7 +10,7 @@ from bowhead_core.agents._lead_context import set_current_subagent_invocations
 from bowhead_core.email_config import SmtpConfig
 from bowhead_core.email_send_confirmation import EmailSendConfirmations
 from bowhead_core.language_context import LanguageContext
-from bowhead_core.tool_registry import ToolRegistry
+from bowhead_core.tool_registry import ToolRegistry, ToolStepRef
 from bowhead_core.types import ToolInvocation
 
 from bowhead_core import send_email_tool as setool
@@ -267,6 +267,40 @@ def test_numbers_the_user_dictated_are_a_source(configured, owner_decides) -> No
     result = _run(_call(_args(body="下季度预算 120 万元，占比 12.5%。"), ctx))
 
     assert result["ok"] is True
+
+
+def test_confirmation_card_carries_labels_but_not_the_email(configured, monkeypatch) -> None:
+    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
+    queue = EmailSendConfirmations(timeout_seconds=5)
+    events: list[tuple[str, dict]] = []
+
+    class Bus:
+        async def emit(self, event) -> bool:
+            events.append((event.event_type, dict(event.payload)))
+            return True
+
+    ctx = _ctx(tool_step=ToolStepRef(bus=Bus(), card_id="t_1", step_id="step_call_mail", call_id="call_mail"))
+
+    async def scenario():
+        task = asyncio.create_task(_call(_args(), ctx))
+        for _ in range(300):
+            if items := queue.pending("usr_owner"):
+                break
+            await asyncio.sleep(0.01)
+        assert queue.decide("usr_owner", items[0]["id"], True)
+        return await task
+
+    setool.set_send_email_confirmations(queue)
+    try:
+        assert _run(scenario())["ok"] is True
+    finally:
+        setool.set_send_email_confirmations(EmailSendConfirmations())
+    (requested, req), (resolved, res) = events
+    assert (requested, resolved) == ("confirmation_requested", "confirmation_resolved")
+    assert req["kind"] == "email_send" and req["choices"] == ["reject", "approve"]
+    assert (req["title"], req["source_label"]) == ("项目更新", "recipient@example.com")
+    assert "本周进展如下" not in repr(req)
+    assert res["outcome"] == "approved"
 
 
 def test_confirmation_queue_is_owner_scoped_and_single_use() -> None:

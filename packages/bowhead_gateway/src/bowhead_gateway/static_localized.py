@@ -286,7 +286,14 @@ class RuntimeBasePathStaticFiles(StaticFiles):
         self._public_brand_provider = public_brand_provider
 
     async def get_response(self, path: str, scope: Scope) -> Response:
+        callback_headers = {}
+        query_string = scope.get("query_string", b"")
+        if path.strip("/") in {"connect/bowra/callback", "connect/bowra/callback/index.html"}:
+            callback_headers = {"cache-control": "no-store", "referrer-policy": "no-referrer"}
+            # Response-time access logs must not retain authorization codes, including slash redirects.
+            scope["query_string"] = b""
         response = await super().get_response(path, scope)
+        response.headers.update(callback_headers)
         context = current_public_access_context()
         base_path = context.base_path if context is not None else ""
         # Browser-facing static URLs and directory redirects must never depend
@@ -303,12 +310,12 @@ class RuntimeBasePathStaticFiles(StaticFiles):
             # ``path`` alone, so the query must be re-appended or invite/reset
             # tokens (``/invite?token=...`` → ``/invite/``) are silently dropped.
             target = _relative_static_directory_path(path)
-            query_string = scope.get("query_string", b"")
             if query_string:
                 target = f"{target}?{query_string.decode('latin-1')}"
             return RedirectResponse(
                 target,
                 status_code=response.status_code,
+                headers=callback_headers,
             )
         static_path = getattr(response, "path", None)
         if not isinstance(static_path, str):
@@ -350,7 +357,7 @@ class RuntimeBasePathStaticFiles(StaticFiles):
                 public_brand=public_brand,
             ),
             status_code=response.status_code,
-            headers={"cache-control": "no-cache"},
+            headers={"cache-control": "no-cache", **callback_headers},
         )
 
 

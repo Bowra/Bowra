@@ -24,7 +24,7 @@ function archived(turnId: string, status: "completed" | "failed"): ArchivedTurn 
     traceSteps: [],
     peersDispatched: [],
     errorReason: status === "failed" ? { source: "turn_failed", reasonCode: "lead_internal_error" } : null,
-    archivedAt: Date.parse("2026-09-29T02:00:00Z"),
+    endedAt: Date.parse("2026-09-29T02:00:00Z"),
   } as ArchivedTurn;
 }
 

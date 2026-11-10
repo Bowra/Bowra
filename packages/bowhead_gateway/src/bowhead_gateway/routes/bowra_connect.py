@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import ipaddress
 import os
 import secrets
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -15,6 +15,7 @@ from bowhead_core.bowra_connect import BowraConnectStore
 from bowhead_core.ssrf_guard import SsrfBlocked, build_guarded_async_client, validate_url
 from bowhead_core.user_store import User
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, StrictStr
 from starlette.responses import JSONResponse, RedirectResponse
 
 from bowhead_gateway._entitlement_gate import require_not_readonly
@@ -26,7 +27,8 @@ from bowhead_gateway.routes.auth import _require_team_role_dep
 _REQUIRE_TEAM_ADMIN = _require_team_role_dep("owner", "team_admin")
 
 router = APIRouter(prefix="/api/v1/admin/llm-config/bowra")
-CALLBACK_PATH = "/api/v1/admin/llm-config/bowra/callback"
+CALLBACK_PATH = "/connect/bowra/callback/"
+LEGACY_CALLBACK_PATH = "/api/v1/admin/llm-config/bowra/callback"
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
@@ -48,26 +50,13 @@ def _service_url() -> str:
     return value
 
 
-def _validate_callback(value: str) -> None:
-    parsed = urlsplit(value)
-    host = parsed.hostname or ""
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        raise ValueError("IP callback")
-    if parsed.scheme != "https" or parsed.port not in (None, 443) or "." not in host or host.endswith(".localhost") or host == "localhost":
-        raise ValueError("HTTPS domain callback required")
-
-
 def _store(request: Request) -> BowraConnectStore:
     return BowraConnectStore(request.app.state.user_store.db_path)
 
 
 def _return(**query: str) -> RedirectResponse:
     return RedirectResponse(
-        oauth_return_path(f"/team/settings/models/?{urlencode(query)}", callback_path=CALLBACK_PATH), status_code=303, headers=HEADERS
+        oauth_return_path(f"/team/settings/models/?{urlencode(query)}", callback_path=LEGACY_CALLBACK_PATH), status_code=303, headers=HEADERS
     )
 
 
@@ -79,9 +68,8 @@ async def start(request: Request, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> 
         if address is None or not address.prefix_known:
             raise ValueError("browser address unavailable")
         redirect_uri = public_app_url_for_base(address.base_url, CALLBACK_PATH)
-        _validate_callback(redirect_uri)
     except ValueError:
-        raise HTTPException(422, {"code": "bowra_https_callback_required"}) from None
+        raise HTTPException(422, {"code": "bowra_callback_address_invalid"}) from None
     verifier = secrets.token_urlsafe(32)
     name = product_name()
     try:
@@ -145,18 +133,39 @@ async def callback(request: Request) -> RedirectResponse:
         return _return(bowra_error="permission_changed")
     if any(len(query.getlist(key)) > 1 for key in ("state", "code", "error")) or not query.get("state"):
         return _return(bowra_error="invalid_callback")
-    pending = await _store(request).take(query["state"], team_id=user.team_id, user_id=user.id, kind="authorization")
+    return _return(**await _complete(request, user, dict(query)))
+
+
+class CallbackResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: StrictStr
+    code: StrictStr | None = None
+    error: StrictStr | None = None
+
+
+@router.post("/complete", dependencies=[Depends(require_not_readonly)])
+async def complete(result: CallbackResult, request: Request, user: User = Depends(_REQUIRE_TEAM_ADMIN)) -> JSONResponse:
+    return JSONResponse(await _complete(request, user, result.model_dump(exclude_unset=True)), headers=HEADERS)
+
+
+async def _complete(request: Request, user: User, query: Mapping[str, str | None]) -> dict[str, str]:
+    state = query.get("state")
+    if not state:
+        return {"bowra_error": "invalid_callback"}
+    pending = await _store(request).take(state, team_id=user.team_id, user_id=user.id, kind="authorization")
     if pending is None:
-        return _return(bowra_error="invalid_callback")
-    restore_oauth_public_access_context(pending["redirect_uri"], callback_path=CALLBACK_PATH)
+        return {"bowra_error": "invalid_callback"}
+    callback_path = CALLBACK_PATH if pending["redirect_uri"].endswith(CALLBACK_PATH) else LEGACY_CALLBACK_PATH
+    restore_oauth_public_access_context(pending["redirect_uri"], callback_path=callback_path)
     if not available() or pending["service_url"] != os.environ.get("BOWRA_URL", "").strip().rstrip("/"):
-        return _return(bowra_error="unavailable")
+        return {"bowra_error": "unavailable"}
     if ("code" in query) == ("error" in query):
-        return _return(bowra_error="invalid_callback")
+        return {"bowra_error": "invalid_callback"}
     if "error" in query:
-        return _return(bowra_error="cancelled" if query["error"] == "access_denied" else "invalid_callback")
+        return {"bowra_error": "cancelled" if query["error"] == "access_denied" else "invalid_callback"}
     if not query["code"]:
-        return _return(bowra_error="invalid_callback")
+        return {"bowra_error": "invalid_callback"}
     try:
         # No automatic retry: a lost response may already have consumed the code.
         async with build_guarded_async_client(timeout=20, follow_redirects=False, trust_env=False) as client:
@@ -173,16 +182,16 @@ async def callback(request: Request) -> RedirectResponse:
                 (503, "service_unavailable"): "service_unavailable",
                 (400, "invalid_grant"): "exchange_rejected",
             }.get((response.status_code, error if isinstance(error, str) else None), "exchange_uncertain")
-            return _return(bowra_error=reason)
+            return {"bowra_error": reason}
         if response.headers.get("content-type", "").split(";")[0].strip() != "application/json":
             raise ValueError("invalid content type")
         result = _validated_result(response.json(), pending["app_name"])
         if not result["models"]:
-            return _return(bowra_error="no_models")
+            return {"bowra_error": "no_models"}
         token = await _store(request).put(team_id=user.team_id, user_id=user.id, kind="import", payload=result)
     except (httpx2.HTTPError, ValueError, SsrfBlocked):
-        return _return(bowra_error="exchange_uncertain")
-    return _return(bowra_import=token)
+        return {"bowra_error": "exchange_uncertain"}
+    return {"bowra_import": token}
 
 
 @router.post("/imports/{token}", dependencies=[Depends(require_not_readonly)])

@@ -299,6 +299,7 @@ class PublicEntryContextMiddleware:
             registry_available = False
             context = _unbound_request_context(scope)
 
+        request_scope = scope
         state = scope.setdefault("state", {})
         state["public_access_context"] = context
         if (
@@ -321,6 +322,8 @@ class PublicEntryContextMiddleware:
 
             async def send_with_cookie(message: Message) -> None:
                 if message["type"] == "http.response.start":
+                    # Preserve callback redaction in the server's outer access-log scope.
+                    request_scope["query_string"] = scope.get("query_string", b"")
                     response_context = current_public_access_context() or context
                     cookie = _cookie_header(response_context)
                     if cookie is not None:

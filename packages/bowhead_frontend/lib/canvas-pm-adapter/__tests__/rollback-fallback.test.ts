@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sprint ι Phase A · P1 #4 (tech-r2 §5.3.1, §6.3 spec 7).
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * step-view · correct failed spawn-step kind (chat-ux-2026-08 closure).
  *

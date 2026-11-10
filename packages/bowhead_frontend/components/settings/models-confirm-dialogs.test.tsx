@@ -63,8 +63,8 @@ afterEach(() => {
 const MENU = "qwen 的更多操作";
 
 /** Renders the page and returns the qwen card's row menu trigger (delete lives in that menu). */
-async function renderPage() {
-  llmConfigMocks.fetchAdminLlmConfig.mockResolvedValue({ config: CONFIG, version: 2, features: {} });
+async function renderPage(config: Record<string, unknown> = CONFIG) {
+  llmConfigMocks.fetchAdminLlmConfig.mockResolvedValue({ config, version: 2, features: {} });
   render(
     <NextIntlClientProvider locale="zh-CN" messages={messagesZh}>
       <SettingsModels />
@@ -97,7 +97,7 @@ describe("删除模型来源确认框", () => {
     expect(document.getElementById(dialog.getAttribute("aria-describedby") ?? "")?.textContent).toBe(m.del.clean_body);
     expect(dialog.contains(document.activeElement)).toBe(true);
     // Confirmation action is in the footer (footer placement makes it solid red)
-    const confirm = screen.getByRole("button", { name: new RegExp(messagesZh.settings.models.v4.delete_draft) });
+    const confirm = screen.getByRole("button", { name: new RegExp(messagesZh.settings.models.del.confirm) });
     expect(confirm.closest(".modal-foot")).not.toBeNull();
   });
 
@@ -195,7 +195,7 @@ describe("连接卡片「⋯」（外观段第四批）", () => {
     await expectConfirmGate({
       action: removed,
       dialogName: m.del.title.replace("{name}", "qwen"),
-      confirmName: new RegExp(messagesZh.settings.models.v4.delete_draft),
+      confirmName: new RegExp(messagesZh.settings.models.del.confirm),
       cancelName: m.common.cancel,
       reopen: async () => {
         expect(screen.getByRole("button", { name: MENU })).toBeTruthy();
@@ -203,5 +203,57 @@ describe("连接卡片「⋯」（外观段第四批）", () => {
       },
     });
     await waitFor(() => expect(screen.queryByRole("button", { name: MENU })).toBeNull());
+  });
+});
+
+
+describe("deleting a source used by knowledge-base embeddings", () => {
+  const configured = { ...CONFIG, kb: { models: { vector: { provider: "qwen", real_id: "text-embedding-v3", capability: "embed", dim: 1024 } }, active: { embed: "vector" } } };
+
+  it("cancels without changes and stages the server-repaired settings on confirmation", async () => {
+    llmConfigMocks.validateAdminLlmConfig.mockResolvedValue({ valid: true, version: 2, issues: [], has_changes: true, changed_sections: ["providers", "kb"], assignment_config: { tiers: {}, kb: { models: {}, active: {} } } });
+    await renderPage(configured);
+    await openDelete();
+    expect(screen.getByText(m.del.embedding_body)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: m.common.cancel }));
+    expect(llmConfigMocks.validateAdminLlmConfig).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: MENU })).toBeTruthy();
+    await openDelete();
+    fireEvent.click(screen.getByRole("button", { name: m.del.confirm }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(llmConfigMocks.validateAdminLlmConfig).toHaveBeenCalledWith(expect.objectContaining({ providers: {}, kb: expect.objectContaining(configured.kb) }), 2);
+    expect(screen.queryByRole("button", { name: MENU })).toBeNull();
+    expect((screen.getByRole("combobox", { name: m.kb.vector }) as HTMLSelectElement).value).toBe("");
+    expect(llmConfigMocks.saveAdminLlmConfig).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.v4.review }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("checkbox", { name: m.v4.reindex_confirm })).toBeNull();
+  });
+
+  it("selects the replacement and requires rebuild confirmation without promising the deleted source will keep serving", async () => {
+    const replacement = { provider: "other", real_id: "text-embedding-v3", capability: "embed", dim: 1024 };
+    llmConfigMocks.validateAdminLlmConfig.mockResolvedValue({
+      valid: true, version: 2, issues: [], has_changes: true, changed_sections: ["providers", "kb"],
+      assignment_config: { tiers: {}, kb: { models: { replacement }, active: { embed: "replacement" } } },
+    });
+    await renderPage({ ...configured, providers: { ...CONFIG.providers, other: CONFIG.providers.qwen } });
+    await openDelete();
+    fireEvent.click(screen.getByRole("button", { name: m.del.confirm }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect((screen.getByRole("combobox", { name: m.kb.vector }) as HTMLSelectElement).value).toBe("other::text-embedding-v3");
+    fireEvent.click(screen.getByRole("button", { name: m.v4.review }));
+    await screen.findByRole("dialog");
+    expect(screen.getByRole("checkbox", { name: m.v4.reindex_confirm })).toBeTruthy();
+    expect(screen.getByText(m.del.reindex_body.replace("{count}", "—"))).toBeTruthy();
+  });
+
+  it("keeps the source and confirmation open when preparing replacement settings fails", async () => {
+    llmConfigMocks.validateAdminLlmConfig.mockRejectedValue(new Error("Replacement preparation failed"));
+    await renderPage(configured);
+    await openDelete();
+    fireEvent.click(screen.getByRole("button", { name: m.del.confirm }));
+    await waitFor(() => expect(screen.getByRole("dialog").querySelector('[role="alert"]')?.textContent).toContain(m.del.repair_failed));
+    expect(screen.getByRole("button", { name: MENU, hidden: true })).toBeTruthy();
+    expect(llmConfigMocks.saveAdminLlmConfig).not.toHaveBeenCalled();
   });
 });

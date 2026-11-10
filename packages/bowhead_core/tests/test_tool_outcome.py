@@ -35,6 +35,30 @@ def test_chart_validation_has_safe_field_and_requires_correction() -> None:
     assert not outcome.retryable
 
 
+@pytest.mark.parametrize(
+    ("path", "published"),
+    [
+        ("/changes/kind", "field=changes.kind"),
+        ("/changes/series_colors/质数个数", "field=changes.series_colors"),
+        ("/view_id", "field=view_id"),
+    ],
+)
+def test_rejected_chart_edit_names_the_rejected_change(path: str, published: str) -> None:
+    # 116 1.7.21: an in-place chart type change was refused, and the trace only said the tool couldn't complete.
+    result = {"error": "invalid_chart_change", "error_kind": "invalid_chart_change", "path": path, "hint": "private hint"}
+    outcome = classify_tool_outcome(result)
+    assert outcome.code == "tool_arguments_invalid"
+    assert not outcome.retryable
+    assert publish_tool_failure(outcome).safe_detail == published
+
+
+@pytest.mark.parametrize("path", ["/Users/alice data/secret.csv", "/<script>/x", "/a b/c"])
+def test_nested_argument_path_publishes_only_its_schema_prefix(path: str) -> None:
+    outcome = classify_tool_outcome({"error_kind": "invalid_args", "path": path})
+    detail = publish_tool_failure(outcome).safe_detail or ""
+    assert "alice" not in detail and "secret" not in detail and "<" not in detail and " " not in detail.removeprefix("field=")
+
+
 @pytest.mark.parametrize("key", ["/private/secret", "https://private.invalid", "<script>", "Authorization: Bearer secret"])
 def test_unpublishable_missing_key_does_not_erase_finite_script_failure(key: str) -> None:
     outcome = classify_tool_outcome({"ok": False, "exit_code": 1, "stderr": f"KeyError: '{key}'"})

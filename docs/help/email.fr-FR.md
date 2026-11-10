@@ -10,6 +10,8 @@ Indiquez le destinataire, l’objet et le corps, puis demandez l’envoi. Par ex
 
 La fenêtre **Confirmer l’e-mail** affiche tous les destinataires, l’objet et le corps. Vérifiez-les et choisissez **Envoyer**. **Ne pas envoyer**, ou l’absence de réponse pendant le délai affiché, empêche l’envoi ; Bowra l’indique dans la conversation. Un e-mail envoyé ne peut pas être rappelé.
 
+Si votre déploiement active la confirmation dans la conversation, la demande apparaît sous l’étape en attente au lieu d’une fenêtre, puis reste affichée sous forme d’une ligne indiquant votre décision. Si vous êtes sur une autre page, un avis mène à la conversation et le titre de l’onglet indique le nombre d’actions en attente.
+
 Seule la personne ayant commencé la conversation peut voir et confirmer l’e-mail. Les tâches planifiées, Feishu et les autres canaux sans confirmation sur la page web n’envoient jamais ces e-mails.
 
 ### Chiffres dans l’e-mail

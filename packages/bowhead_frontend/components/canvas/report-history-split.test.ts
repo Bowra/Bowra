@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * canvas-update-turn batch B1-2 — split superseded sections into two paths:
  * old charts with `_meta.folded_by === "revise"` stay out of History (otherwise every revision marks the current report as superseded).

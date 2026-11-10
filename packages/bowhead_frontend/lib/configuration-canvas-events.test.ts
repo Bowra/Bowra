@@ -1,3 +1,4 @@
+// @vitest-environment node
 import metadataFixture from "@/__tests__/fixtures/configuration-space-metadata.json";
 import { expect, it } from "vitest";
 import { dispatchToTurnStore } from "./turn-store-dispatch";

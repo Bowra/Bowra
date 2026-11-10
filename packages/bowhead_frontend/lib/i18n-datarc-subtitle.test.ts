@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Copy contract for settings.datarc.subtitle (data-source page subtitle).
  *

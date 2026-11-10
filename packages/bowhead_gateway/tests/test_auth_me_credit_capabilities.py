@@ -12,13 +12,12 @@ from bowhead_gateway.settings import Settings
 
 
 @pytest.fixture
-async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation):
+async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_secret_auth_me_credit_caps")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
-    from gateway_legacy_database import upgrade
 
     db = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db}", target="core")
+    initialize_migrated_core_database(db)
     user_store = UserStore(str(db))
     await user_store.initialize()
     await complete_community_http_installation(user_store)

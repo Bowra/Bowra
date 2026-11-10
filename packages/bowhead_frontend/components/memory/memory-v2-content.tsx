@@ -71,6 +71,7 @@ import { MEMORY_FOCUS_PARAM } from "@/lib/legacy-app-links";
 import { _gateRefusal } from "@/lib/use-memory-candidates";
 import { notify, toast } from "@/lib/use-toast";
 import { useMemoryScopeLabel, withoutMemoryIds } from "@/lib/memory-display";
+import { formatDate } from "@/lib/locale";
 
 type ItemState = "active" | "trashed";
 type ActionConfirmTarget =
@@ -593,13 +594,8 @@ export function MemoryV2Content() {
     }
   };
 
-  const dateFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }),
+  const dateFormatter = useMemo<MemoryDateFormatter>(
+    () => ({ format: (value) => formatDate(value, locale) }),
     [locale],
   );
 
@@ -1684,6 +1680,11 @@ export function memorySourceKeysMatching(t: (key: string) => string, query: stri
   return [...MEMORY_SOURCE_KEYS].filter((key) => t(`source_${key}`).toLocaleLowerCase().includes(needle));
 }
 
+/** Memory dates in the interface language (lib/locale.ts `formatDate`, medium style). */
+interface MemoryDateFormatter {
+  format(value: Date): string;
+}
+
 function MemoryItemRow({
   item,
   acting,
@@ -1697,7 +1698,7 @@ function MemoryItemRow({
   item: CanonicalMemoryItem;
   acting: boolean;
   highlighted?: boolean;
-  dateFormatter: Intl.DateTimeFormat;
+  dateFormatter: MemoryDateFormatter;
   onDelete: (item: CanonicalMemoryItem) => void;
   onEdit: (item: CanonicalMemoryItem, returnFocus: HTMLElement) => void;
   onPermanentDelete: (

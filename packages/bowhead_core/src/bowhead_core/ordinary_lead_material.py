@@ -34,6 +34,7 @@ from bowhead_skill.catalog import builtin_catalog_dir
 # when it is missing. Team, MCP and personal Tools have no manifest risk.
 _PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke", "read_report"})
 RETAINED_READ_TOOLS = frozenset(name for name, risk in TOOL_RISKS.items() if risk == "read") - _PROOF_BEARING_READS
+_SESSION_INPUT_CONTRACTS = frozenset(f"ordinary-lead-loop.v{version}" for version in range(10, 15))
 
 
 def retained_read_tool(name: str, *, legacy_report: bool = False) -> bool:
@@ -191,6 +192,17 @@ async def revalidate_material_authority_in_connection(
         art = await ctx.artifact_store.get(expected["artifact_id"], check_created_by=ctx.user_id, reject_null_owner=True, connection=db)
         if art is None or _artifact_metadata_hash(art, contract=contract) != expected["metadata_hash"]:
             raise OrdinaryContinuationUnavailable()
+        if contract in _SESSION_INPUT_CONTRACTS and not expected["output"] and art.created_by_turn != ctx.turn_id:
+            from bowhead_core.ordinary_lead_input_context import session_input_artifact
+            from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+
+            source = await _read_chat_turn_user_source_in_tx(
+                db, turn_id=ctx.turn_id, expected_user_id=ctx.user_id, expected_workspace_id=ctx.workspace_id
+            )
+            if source is None:
+                raise OrdinaryContinuationUnavailable()
+            if art.id not in source.attachment_ids:
+                await session_input_artifact(ctx, db, art.id)
 
 
 def _artifact_metadata_hash(art, *, contract: str) -> str:
@@ -235,7 +247,22 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
     return content_hash(metadata)
 
 
-async def artifact_evidence(ctx, artifact_id: str, *, output: bool, contract: str = "ordinary-lead-loop.v3") -> dict:
+async def artifact_evidence(
+    ctx,
+    artifact_id: str,
+    *,
+    output: bool,
+    contract: str = "ordinary-lead-loop.v3",
+    prepared_pins: list[dict] | None = None,
+    retained_input: dict | None = None,
+) -> dict:
+    if retained_input is not None and (
+        output
+        or contract not in _SESSION_INPUT_CONTRACTS
+        or retained_input.get("artifact_id") != artifact_id
+        or retained_input.get("output") is not False
+    ):
+        raise OrdinaryContinuationUnavailable()
     store = ctx.artifact_store
     art = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True)
     if art is None or art.status != "ready" or art.workspace_id != ctx.workspace_id or not 0 <= art.size <= 50 * 1024 * 1024:
@@ -249,24 +276,40 @@ async def artifact_evidence(ctx, artifact_id: str, *, output: bool, contract: st
             source = await _read_chat_turn_user_source_in_tx(
                 db, turn_id=ctx.turn_id, expected_user_id=ctx.user_id, expected_workspace_id=ctx.workspace_id
             )
-        if source is None or artifact_id not in source.attachment_ids:
-            raise OrdinaryContinuationUnavailable()
-        ready = await store.get_ready_uploads_for_chat([artifact_id], user_id=ctx.user_id, workspace_id=ctx.workspace_id)
-        if artifact_id not in ready:
-            raise OrdinaryContinuationUnavailable()
+            if source is None:
+                raise OrdinaryContinuationUnavailable()
+            if artifact_id in source.attachment_ids:
+                ready = await store.get_ready_uploads_for_chat([artifact_id], user_id=ctx.user_id, workspace_id=ctx.workspace_id, connection=db)
+                if artifact_id not in ready:
+                    raise OrdinaryContinuationUnavailable()
+            elif retained_input is not None:
+                from bowhead_core.ordinary_lead_input_context import session_input_artifact
+
+                art, _ = await session_input_artifact(ctx, db, artifact_id)
+            elif prepared_pins is not None:
+                from bowhead_core.ordinary_lead_input_context import prepared_input_artifact
+
+                art = await prepared_input_artifact(ctx, db, artifact_id, prepared_pins)
+            else:
+                raise OrdinaryContinuationUnavailable()
     content = await store.backend.read_bounded(art.path, limit=art.size)
     if len(content) != art.size:
         raise OrdinaryContinuationUnavailable()
-    return {
+    evidence = {
         "artifact_id": artifact_id,
         "metadata_hash": _artifact_metadata_hash(art, contract=contract),
         "size": art.size,
         "sha256": hashlib.sha256(content).hexdigest(),
         "output": output,
     }
+    if retained_input is not None and evidence != retained_input:
+        raise OrdinaryContinuationUnavailable()
+    return evidence
 
 
-async def revalidate_tool_materials(ctx, records: list[dict], *, contract: str = "ordinary-lead-loop.v3", historical_skills: bool = False) -> None:
+async def revalidate_tool_materials(
+    ctx, records: list[dict], *, contract: str = "ordinary-lead-loop.v3", historical_skills: bool = False, prepared_pins: list[dict] | None = None
+) -> None:
     for record in records:
         # Prior-Turn observations retain original content under current source
         # authority below. Current execution/resume still verifies exact bytes.
@@ -280,11 +323,38 @@ async def revalidate_tool_materials(ctx, records: list[dict], *, contract: str =
             await _revalidate_attachment_read(ctx, record, contract=contract, read_bytes=True)
         if record["kind"] in {"sandbox", "uncertain_sandbox"}:
             for expected in record["artifacts"]:
-                if await artifact_evidence(ctx, expected["artifact_id"], output=expected["output"], contract=contract) != expected:
+                if (
+                    await artifact_evidence(
+                        ctx,
+                        expected["artifact_id"],
+                        output=expected["output"],
+                        contract=contract,
+                        prepared_pins=prepared_pins,
+                        retained_input=expected if not expected["output"] and contract in _SESSION_INPUT_CONTRACTS else None,
+                    )
+                    != expected
+                ):
                     raise OrdinaryContinuationUnavailable()
 
 
-async def canvas_evidence(ctx, *, contract: str = "ordinary-lead-loop.v3") -> dict | None:
+def retained_sandbox_inputs(helpers: list[dict]) -> dict[str, dict]:
+    """Share native input evidence without merging conflicting reads."""
+    inputs = {}
+    for helper in helpers:
+        for record in helper.get("tools", []):
+            if record["kind"] not in {"sandbox", "uncertain_sandbox"}:
+                continue
+            for item in record["artifacts"]:
+                if item["output"] is not False:
+                    continue
+                identity = item["artifact_id"]
+                if identity in inputs and inputs[identity] != item:
+                    raise OrdinaryContinuationUnavailable()
+                inputs[identity] = item
+    return inputs
+
+
+async def canvas_evidence(ctx, *, contract: str = "ordinary-lead-loop.v3", tool_inputs: dict[str, dict] | None = None) -> dict | None:
     if ctx.canvas_store is None:
         return None
     projection = await ctx.canvas_store.read_retained_projection(session_id=ctx.session_id, turn_id=ctx.turn_id)
@@ -303,7 +373,16 @@ async def canvas_evidence(ctx, *, contract: str = "ordinary-lead-loop.v3") -> di
     ids = sorted(set(_ARTIFACT_ID_RE.findall(canonical_json(touched))))
     if len(ids) > 64:
         raise OrdinaryContinuationUnavailable()
-    artifacts = [await artifact_evidence(ctx, artifact_id, output=False, contract=contract) for artifact_id in ids]
+    artifacts = [
+        await artifact_evidence(
+            ctx,
+            artifact_id,
+            output=False,
+            contract=contract,
+            retained_input=(tool_inputs or {}).get(artifact_id) if contract in _SESSION_INPUT_CONTRACTS else None,
+        )
+        for artifact_id in ids
+    ]
     return {"canvas_id": canvas["id"], "projection_hash": _canvas_hash(projection), "artifacts": artifacts}
 
 
@@ -424,7 +503,7 @@ class OrdinarySkillObserver:
                 return
             artifacts, expected = [], []
             for name, item in actual_inputs.items():
-                evidence = await artifact_evidence(ctx, item["artifact_id"], output=False)
+                evidence = await artifact_evidence(ctx, item["artifact_id"], output=False, prepared_pins=getattr(ctx, "_psi_pinned_snapshot", None))
                 artifacts.append(evidence)
                 expected.append({"key": name, **{field: evidence[field] for field in ("artifact_id", "size", "sha256")}})
             sanitized = {name: value for name, value in inputs.items() if name not in {"_artifact_fetch_token", "_sandbox_executor_token"}}
@@ -512,7 +591,7 @@ class OrdinarySkillObserver:
                 if sum(item["size"] for item in record["artifacts"]) > 64 * 1024 * 1024:
                     raise OrdinaryContinuationUnavailable()
                 record.update(tool=tool, arguments_hash=content_hash(arguments), result_hash=content_hash(result))
-                await revalidate_tool_materials(ctx, [record])
+                await revalidate_tool_materials(ctx, [record], prepared_pins=getattr(ctx, "_psi_pinned_snapshot", None))
             if record is not None and record["kind"] in {"skill_read", "skill_list"}:
                 # No re-resolution by name: the native observation retained IDs.
                 ctx_copy = copy.copy(ctx)

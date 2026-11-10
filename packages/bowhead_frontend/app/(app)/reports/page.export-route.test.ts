@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Report-library exports must use the workbench (V2); no legacy direct-export path may remain.
  *

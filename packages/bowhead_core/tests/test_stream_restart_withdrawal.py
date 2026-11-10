@@ -170,3 +170,38 @@ def test_reference_primary_restart_withdraws_narrative_from_helper_scope() -> No
     # A reference primary streams Lead narrative from a helper-scoped stream.
     payload = {"subagent_id": "ref", "parent_agent_id": "ref", "discarded_narrative_chars": 7, "discarded_partial_answer_chars": 0}
     assert stream_restart_narrative_chars(payload) == 7
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_final_attempt_reasoning_reaches_the_response_and_restarts_drop_it() -> None:
+    def envelope(text: str) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "protocol": "anthropic_messages",
+            "provider": "deepseek_anthropic",
+            "model": "m",
+            "blocks": [{"type": "thinking", "thinking": text, "signature": "sig"}],
+        }
+
+    call = ToolCall(id="call_new", name="bi_query", arguments={"q": "new"})
+    router = _Router(
+        [
+            LLMChunk(finish_reason="tool_use", provider_reasoning=envelope("discarded attempt")),
+            LLMChunk(stream_restart=True),
+            LLMChunk(tool_call_delta=call),
+            LLMChunk(finish_reason="tool_use", provider_reasoning=envelope("kept attempt")),
+        ]
+    )
+    response = await _invoke(router, _Bus(), profile="lead", subagent_id="lead_root", restart_callback=lambda: _zero())
+    assert response.provider_reasoning == envelope("kept attempt")
+
+    restarted_only = _Router(
+        [LLMChunk(finish_reason="tool_use", provider_reasoning=envelope("old")), LLMChunk(stream_restart=True), LLMChunk(finish_reason="stop")]
+    )
+    response = await _invoke(restarted_only, _Bus(), profile="lead", subagent_id="lead_root", restart_callback=lambda: _zero())
+    assert response.provider_reasoning is None
+
+
+async def _zero() -> int:
+    return 0

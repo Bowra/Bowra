@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertComposerTextDraftFormat } from "./composer-draft-format";
 import { ComposerPersistenceVersionError } from "./composer-local-persistence-db";

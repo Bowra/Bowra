@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -110,10 +111,30 @@ def _pinned_head_literals(*, include_exempt: bool = False) -> dict[str, set[str]
         rel = path.relative_to(REPO_ROOT).as_posix()
         if "/migrations/versions/" in rel or (not include_exempt and rel in EXEMPT):
             continue
-        hits = set(REVISION_LITERAL.findall(path.read_text(encoding="utf-8"))) & known_revisions
+        hits = _head_copy_candidates(path.read_text(encoding="utf-8"), rel) & known_revisions
         if hits:
             found[rel] = hits
     return found
+
+
+def _head_copy_candidates(source: str, relative_path: str) -> set[str]:
+    if relative_path == "packages/bowhead_core/src/bowhead_core/sqlite_domains.py":
+        lines = source.splitlines(keepends=True)
+        # Table birth revisions are immutable admission boundaries, not copies of the current head.
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "APPENDED_TABLES":
+                lines[node.lineno - 1 : node.end_lineno] = ["\n"] * (node.end_lineno - node.lineno + 1)
+        source = "".join(lines)
+    return set(REVISION_LITERAL.findall(source))
+
+
+def test_birth_revision_authority_does_not_exempt_other_head_copies() -> None:
+    path = "packages/bowhead_core/src/bowhead_core/sqlite_domains.py"
+    head = _actual_head()
+    authority = f'APPENDED_TABLES: dict = {{"example": ("content", "{head}")}}\n'
+    assert _head_copy_candidates(authority, path) == set()
+    assert _head_copy_candidates(authority + f'COPIED_HEAD = "{head}"\n', path) == {head}
+    assert _head_copy_candidates(authority, "other.py") == {head}
 
 
 def test_revision_chain_has_exactly_one_head() -> None:

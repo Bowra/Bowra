@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * dingsiyan #11 (review test #8) — direct clarification tombstone unit tests.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { attemptFailureReason, attemptReasonDetail, retryCanHelp, storedAttemptFailure } from "./agent-eval-attempt-failure";
 

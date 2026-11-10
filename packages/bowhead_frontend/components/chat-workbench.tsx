@@ -42,7 +42,7 @@ import {
 import { ResultsQuickSwitcher } from "./canvas/results-quick-switcher";
 import resultsNavigatorStyles from "./canvas/results-navigator.module.css";
 import { ReportView, type ReportViewHandle } from "./canvas/report-view";
-import { SteerMessage } from "./chat/step-list/SteerMessage";
+import { SteerMessage, formatSteerTime } from "./chat/step-list/SteerMessage";
 import { TurnStream } from "./chat/turn-stream";
 import { V2Composer } from "./chat/v2-composer";
 import { ComposerRecoveryNotice } from "./chat/composer-recovery-notice";
@@ -506,8 +506,9 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
   const tCreateAgent = useTranslations("create_subagent");
   const tChat = useTranslations("chat");
   const tComposer = useTranslations("composer");
-  // chat-ux-2026-08 batch C: viewport following. enabled is true only while this turn **is still running**:
-  // stop forcing bottom alignment when the turn ends; users may be reading, so do not fight them.
+  // chat-ux-2026-08 batch C: viewport following. enabled is true only while this turn **is still running**.
+  // After it ends, growth is followed only until the reader engages with the conversation, and a disclosure the
+  // reader toggles (such as "View trace") keeps its row in place (2026-11-08 dogfood F8).
   const stick = useStickToBottom(Boolean(runner.running));
   const sendAndFollow = useCallback(async (...args: Parameters<Props["onSend"]>) => {
     const accepted = await onSend(...args);
@@ -2979,14 +2980,7 @@ export function ChatWorkbench({ runner, onSend, onContinue, onResolveDraftSubmis
               <SteerMessage
                 key={ack.msgId}
                 who={t("steer_you")}
-                time={
-                  ack.ts
-                    ? new Date(ack.ts).toLocaleTimeString("zh-CN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : ""
-                }
+                time={formatSteerTime(ack.ts, locale)}
                 text={ack.text ?? ""}
                 emoji={ack.emoji}
                 ackText={t("steer_ack")}

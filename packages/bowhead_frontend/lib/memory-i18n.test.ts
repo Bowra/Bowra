@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * V3 PRD-B · i18n key parity test (B8 lesson — missing keys break runtime).
  *

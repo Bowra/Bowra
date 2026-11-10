@@ -589,3 +589,99 @@ def test_completion_hint_requires_current_native_review_provenance(monkeypatch: 
         else "complete"
     )
     assert delivery_summary_input(result) == ({} if case == "feature_off" else {"_delivery_completion": expected})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [True, False])
+async def test_delivery_review_refusal_lets_a_later_lead_question_retain_the_helper(monkeypatch: pytest.MonkeyPatch, batched: bool) -> None:
+    from types import SimpleNamespace
+
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+    from bowhead_core.ordinary_lead_runtime import _require_settled_returns, content_hash
+    from bowhead_core.tool_delivery_review import DeliveryReviewRefusal
+
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
+    applied: list[dict] = []
+
+    async def handler(args: dict, _ctx: ToolExecutionContext) -> dict:
+        applied.append(args["submission"])
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(ToolSchema("finish", "", {}), handler, terminal_payload_field="submission"))
+    ctx = ToolExecutionContext(workspace_id="ws_test", member_uid="member", user_id="user", turn_id="turn", datarc=None)
+    state = SimpleNamespace(checkpoint=None, rejected_returns={})
+    ctx.ordinary_lead_state = state
+    ctx.ordinary_call_identity = ("worker", "early_return")
+    ctx.terminal_batch_conflict = batched
+    calls = _calls()
+    calls[-1].result = {"ok": True, "rows": [["Store 1", 1]], "columns": ["Store", "Revenue"]}
+    token = set_current_subagent_invocations(calls)
+    try:
+        refused = await registry.execute("finish", {"submission": {"exec_summary": "Done"}}, ctx)
+    finally:
+        token.var.reset(token)
+    # The refusal keeps its native type, so the bounded review count still sees it.
+    assert isinstance(refused.result, DeliveryReviewRefusal)
+    assert refused.result["error_kind"] == "tool_delivery_review_required"
+    assert not applied
+    assert state.rejected_returns[("worker", "early_return")] == content_hash(refused.result)
+
+    def settled(call_id: str, result: dict) -> ToolInvocation:
+        return ToolInvocation("subagent_return", {}, call_id=call_id, result=result, ended_at="2026-11-09T00:00:00+00:00")
+
+    helper = ToolInvocation(
+        "subagent_spawn",
+        {},
+        call_id="spawn",
+        result={"ok": True, "subagent_id": "worker"},
+        nested=[settled("early_return", refused.result), settled("final_return", {"ok": True})],
+    )
+    _require_settled_returns(helper, state)
+    # A refusal that trusted code did not observe still cannot be retained.
+    state.rejected_returns.clear()
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        _require_settled_returns(helper, state)
+
+
+@pytest.mark.parametrize("refusal", ["missing_review", "invalid_review", "batch_conflict"])
+async def test_native_review_refusal_retains_exact_provenance_for_a_later_question(refusal):
+    from bowhead_core.ordinary_lead_checkpoint import OrdinaryLeadRunState
+    from bowhead_core.ordinary_lead_runtime import _require_settled_returns, content_hash
+    from bowhead_core.tool_delivery_review import DeliveryReviewRefusal
+
+    applied = []
+
+    async def handler(arguments, ctx):
+        applied.append(arguments)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(ToolSchema("subagent_return", "", {}), handler, terminal_payload_field="payload"))
+    state = OrdinaryLeadRunState()
+    ctx = ToolExecutionContext(workspace_id="ws_test", member_uid="member", user_id="user", turn_id="turn", datarc=None)
+    ctx.ordinary_lead_state = state
+    ctx.ordinary_call_identity = ("worker", "native-return")
+    ctx.terminal_batch_conflict = refusal == "batch_conflict"
+    payload = {"exec_summary": "The inspection needs a reporting audience."}
+    if refusal == "invalid_review":
+        payload["delivery_review"] = {}
+    token = set_current_subagent_invocations(_calls())
+    try:
+        rejected = await registry.execute("subagent_return", {"payload": payload}, ctx)
+    finally:
+        token.var.reset(token)
+    assert not applied
+    assert rejected.error is None
+    assert isinstance(rejected.result, DeliveryReviewRefusal), "The original review subtype owns the existing correction count"
+    assert state.rejected_returns[("worker", "native-return")] == content_hash(rejected.result)
+    helper = ToolInvocation(
+        "subagent_spawn",
+        {},
+        result={"subagent_id": "worker"},
+        nested=[
+            ToolInvocation("subagent_return", {}, call_id="native-return", result=rejected.result, ended_at="2026-11-09T00:00:01Z"),
+            ToolInvocation("subagent_return", {}, call_id="settled-return", result={"ok": True}, ended_at="2026-11-09T00:00:02Z"),
+        ],
+    )
+    _require_settled_returns(helper, state)

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Licensing §9 — after retiring the teams.py routes, the admin credits tier-defaults UI must hit the
  * caller-team-bound admin_billing twins: GET /api/v1/admin/credits (read) + POST /api/v1/admin/team/tier-credits

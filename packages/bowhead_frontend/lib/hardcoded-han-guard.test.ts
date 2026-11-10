@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Guard: cleaned files must not regain hardcoded user-facing Chinese.
  *

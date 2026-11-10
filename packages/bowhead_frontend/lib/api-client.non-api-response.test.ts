@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Recognize infrastructure HTML error pages instead of treating them as unknown business errors.
  *

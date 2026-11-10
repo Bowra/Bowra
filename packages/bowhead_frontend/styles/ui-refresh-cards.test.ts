@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for the chat card shell (Chat Cards Spec, D1): styles/ui-refresh-cards.css.
  *

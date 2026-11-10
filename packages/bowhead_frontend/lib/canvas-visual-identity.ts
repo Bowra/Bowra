@@ -81,7 +81,8 @@ import { sha256HexFallback } from "./sha256-fallback";
 // Version 34: ordinary numeric precision and base-unit Table readings; source verification retains available digits.
 // Version 37: Table captions and unit disclosures share resolved column display, including export.
 // Version 38: explicit native measure palette slots, shared by screen and export.
-export const CANVAS_VISUAL_RENDERER_VERSION = "38";
+// Version 39: exact opaque HEX series overrides remain independent of the theme palette.
+export const CANVAS_VISUAL_RENDERER_VERSION = "39";
 
 const VISUAL_FIELDS: Record<string, readonly string[]> = {
   image: ["artifact_id", "caption", "alt"],

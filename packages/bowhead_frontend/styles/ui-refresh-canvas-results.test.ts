@@ -157,7 +157,7 @@ describe("Results controls", () => {
 
 describe("Object detail: no nested card", () => {
   it("the viewer and details inside the results card drop border, radius, background and shadow", () => {
-    for (const sel of [".result-file-viewer > .artifact-viewer", ".result-file-viewer > .artifact-details"]) {
+    for (const sel of [".result-file-viewer > .artifact-viewer:not(.artifact-viewer--fullscreen)", ".result-file-viewer > .artifact-details"]) {
       expect(rule(RESULTS, sel)).toEqual({ border: "0", "border-radius": "0", background: "transparent", "box-shadow": "none" });
     }
     expect(rule(RESULTS, ".result-file-viewer > .artifact-viewer > .artifact-viewer-head")).toMatchObject({

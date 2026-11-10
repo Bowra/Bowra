@@ -1386,6 +1386,10 @@ class CanvasStore:
                 # Patch does not change either column; use original row values.
                 turn_id=row["turn_id"],
                 superseded=bool(row["superseded"]),
+                # A patch keeps the delivery surface: a chat-delivered section
+                # stays hidden from Canvas and its update event must say so.
+                hidden_for_chat_mode=bool(row["hidden_for_chat_mode"]),
+                surface_target=row["surface_target"],
             )
         # V4 Sprint 2 PRD-D-4-1: cascade (post-commit, hook gets MERGED new payload)
         await self._fire_anchor_invalidation("payload_changed", canvas_id, section_id, new)

@@ -2818,6 +2818,7 @@ async def me(
     agent_start_use_ready = reference_input_ready and os.environ.get("FEATURE_AGENT_START_USE_V1", "0").strip().lower() in {"1", "true", "yes"}
     from bowhead_core.shopify_content import content_writes_enabled
     from bowhead_core.team_tool_confirmation import team_tool_confirmation_enabled
+    from bowhead_core.tool_confirmation_events import inline_tool_confirmation_enabled
 
     shopify_enabled = _shopify_plugin_feature_on()
     capabilities = {
@@ -2839,6 +2840,8 @@ async def me(
         "shopify_content_confirmations": shopify_enabled and content_writes_enabled(),
         # FEATURE_TEAM_TOOL_CONFIRMATION: the requester confirms each non-read team MCP call.
         "team_tool_confirmations": team_tool_confirmation_enabled(),
+        # FEATURE_INLINE_TOOL_CONFIRMATION: confirmations appear as cards under the waiting step, not as dialogs.
+        "inline_tool_confirmations": inline_tool_confirmation_enabled(),
         "composer": {
             "submission_protocol": composer_submission_protocol_enabled(),
             "reference_input": reference_input_ready,

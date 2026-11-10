@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Verify UUID generation when plain HTTP makes crypto.randomUUID unavailable.
  * The fallback must produce a valid v4 UUID without the native implementation.

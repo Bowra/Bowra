@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { effectiveChartStyleV2Fixture } from "@/__tests__/chart-style-export-fixture";

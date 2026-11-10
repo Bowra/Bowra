@@ -181,6 +181,7 @@ _ARGUMENT_KINDS = frozenset(
         "invalid_arguments",
         "schema_invalid",
         "invalid_chart_expression",
+        "invalid_chart_change",
         "invalid_chart_display",
         "invalid_chart_binding",
         "invalid_deck_arguments",

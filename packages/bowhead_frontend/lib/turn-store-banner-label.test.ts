@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * report-streaming — constrain report banner/wait-band labels (caught on dev 1.0.77).
  *

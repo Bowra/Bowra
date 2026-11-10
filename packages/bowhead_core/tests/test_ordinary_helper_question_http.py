@@ -194,3 +194,65 @@ async def test_unretained_primary_refuses_the_question_without_failing_the_turn(
     refusal = json.loads(next(m for m in lead_calls[2]["messages"] if m.get("tool_call_id") == "question-native")["content"])
     assert refusal["error_kind"] == "clarification_capture_unavailable"
     assert "dispatched Agent result cannot be retained" in refusal["note"]
+
+
+async def test_a_scheduled_run_pauses_for_a_question_after_a_helper(http_start, monkeypatch):
+    """A scheduled run has no chat source; its question after a helper pauses instead of failing the run."""
+    from types import SimpleNamespace
+
+    from bowhead_gateway._scheduled_runner import run_scheduled_turn
+
+    case = http_start
+    _prepare(case, monkeypatch)
+    lead_calls = []
+    helper_profile = case.fixture.case.args["reference_start"].profile_name
+
+    def respond(request):
+        body = json.loads(request.content)
+        names = {item["function"]["name"] for item in body.get("tools", [])}
+        if "subagent_spawn" in names:
+            lead_calls.append(body)
+            if len(lead_calls) == 1:
+                spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "helper"}
+                return response(body, call("helper-native", "subagent_spawn", spawn), "tool_calls")
+            if len(lead_calls) == 2:
+                return response(body, call("question-native", "clarification_ask", {"questions": [QUESTION]}), "tool_calls")
+            return response(body, {"role": "assistant", "content": "Net sales were selected."}, "stop")
+        if "subagent_return" in names:
+            return response(body, call("helper-return", "subagent_return", {"payload": {"exec_summary": "Sales are ready."}}), "tool_calls")
+        return response(body, {"role": "assistant", "content": "Sales"}, "stop")
+
+    scope = case.fixture.scope
+    job = SimpleNamespace(
+        id="sj_question",
+        user_id=scope.user_id,
+        workspace_id=scope.workspace_id,
+        name="Daily sales",
+        query="Show sales.",
+        tz=None,
+        anchor_session_id=None,
+        notify_channels={},
+        datarc_workspace_id=None,
+        recipe_ref=None,
+    )
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
+        outcome = await run_scheduled_turn(case.app, job)
+
+        # Before the fix the run failed with scheduled_turn_failed and created no question.
+        assert outcome.error is None and outcome.awaiting is True, outcome
+        turn = next(row for row in rows(case, "turns") if row["id"] == outcome.turn_id)
+        assert turn["status"] == "clarification_pending", turn["error"]
+        assert [row for row in rows(case, "chat_turn_user_sources") if row["turn_id"] == outcome.turn_id] == []
+        cards = [row for row in rows(case, "clarification_requests") if row["turn_id"] == outcome.turn_id]
+        assert len(cards) == 1
+        answered = await case.client.post(
+            f"/api/v1/clarifications/{cards[0]['request_id']}/resolve",
+            json={"answers": [{"question": QUESTION["question"], "source": "candidate", "answer": "Net sales", "option_index": 0}]},
+        )
+        assert answered.status_code == 200, answered.text
+        await settled(outcome.turn_id)
+
+    turn = next(row for row in rows(case, "turns") if row["id"] == outcome.turn_id)
+    assert turn["status"] == "completed", turn["error"]
+    assert "Net sales" in json.dumps(lead_calls[-1]["messages"], ensure_ascii=False)

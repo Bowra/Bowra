@@ -170,6 +170,135 @@ export interface LlmStreamRestartedEvent {
   discarded_step_ids: string[];
 }
 
+// ─────────────────────────────────────────────────────────────
+// Inline tool call confirmation (FEATURE_INLINE_TOOL_CONFIRMATION).
+// Both events are persisted Turn events attached to the waiting tool step and
+// replayed through the normal replay path. They never carry arguments, email
+// bodies or diffs: the full preview stays in the owner-only queue.
+// ─────────────────────────────────────────────────────────────
+
+export const TOOL_CONFIRMATION_KINDS = ["personal_mcp", "email_send", "shopify_content", "team_mcp"] as const;
+export type ToolConfirmationKind = (typeof TOOL_CONFIRMATION_KINDS)[number];
+
+export const TOOL_CONFIRMATION_CHOICES = ["reject", "approve", "approve_session"] as const;
+export type ToolConfirmationChoice = (typeof TOOL_CONFIRMATION_CHOICES)[number];
+
+export const TOOL_CONFIRMATION_CATEGORIES = ["external_write", "destructive", "unknown"] as const;
+export type ToolConfirmationCategory = (typeof TOOL_CONFIRMATION_CATEGORIES)[number];
+
+export const TOOL_CONFIRMATION_OUTCOMES = ["approved", "approved_session", "rejected", "expired", "unavailable"] as const;
+export type ToolConfirmationOutcome = (typeof TOOL_CONFIRMATION_OUTCOMES)[number];
+
+/** confirmation_requested payload. */
+export interface ConfirmationRequestedEvent {
+  card_id: string;
+  /** "step_<call_id>": the waiting tool step. */
+  step_id: string;
+  call_id: string;
+  /** pmi_* | esc_* | scc_* | ttc_* */
+  confirmation_id: string;
+  kind: ToolConfirmationKind;
+  /** Only this user may decide. */
+  requester_user_id: string;
+  title: string;
+  source_label: string | null;
+  category: ToolConfirmationCategory | null;
+  choices: ToolConfirmationChoice[];
+  /** ISO-8601, server clock. Never compared with the local clock. */
+  expires_at: string;
+  /** Remaining seconds when the event was emitted. */
+  timeout_seconds: number;
+  seq?: number;
+  parent_agent_id?: string | null;
+}
+
+/** confirmation_resolved payload. */
+export interface ConfirmationResolvedEvent {
+  card_id: string;
+  step_id: string;
+  confirmation_id: string;
+  outcome: ToolConfirmationOutcome;
+  decided_at: string;
+  seq?: number;
+}
+
+function _oneOf<T extends string>(values: readonly T[], value: unknown): T | null {
+  return typeof value === "string" && (values as readonly string[]).includes(value) ? (value as T) : null;
+}
+
+function _nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** Parsed `confirmation_requested`; null when a required field is missing or malformed. */
+export interface ParsedConfirmationRequested {
+  stepId: string;
+  callId: string | null;
+  confirmationId: string;
+  kind: ToolConfirmationKind;
+  requesterUserId: string;
+  title: string;
+  sourceLabel: string | null;
+  category: ToolConfirmationCategory | null;
+  choices: ToolConfirmationChoice[];
+  expiresAt: string;
+  timeoutSeconds: number;
+  parentAgentId: string | null;
+}
+
+export function parseConfirmationRequested(payload: Record<string, unknown>): ParsedConfirmationRequested | null {
+  const stepId = _nonEmptyString(payload.step_id);
+  const confirmationId = _nonEmptyString(payload.confirmation_id);
+  const kind = _oneOf(TOOL_CONFIRMATION_KINDS, payload.kind);
+  const requesterUserId = _nonEmptyString(payload.requester_user_id);
+  if (!stepId || !confirmationId || !kind || !requesterUserId) return null;
+  const choices = Array.isArray(payload.choices)
+    ? Array.from(
+        new Set(
+          payload.choices.flatMap((choice) => {
+            const known = _oneOf(TOOL_CONFIRMATION_CHOICES, choice);
+            return known ? [known] : [];
+          }),
+        ),
+      )
+    : [];
+  const timeout = payload.timeout_seconds;
+  return {
+    stepId,
+    callId: _nonEmptyString(payload.call_id),
+    confirmationId,
+    kind,
+    requesterUserId,
+    title: typeof payload.title === "string" ? payload.title.slice(0, 120) : "",
+    sourceLabel: _nonEmptyString(payload.source_label),
+    category: _oneOf(TOOL_CONFIRMATION_CATEGORIES, payload.category),
+    choices,
+    expiresAt: typeof payload.expires_at === "string" ? payload.expires_at : "",
+    timeoutSeconds: typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? timeout : 0,
+    parentAgentId: _nonEmptyString(payload.parent_agent_id),
+  };
+}
+
+/** Parsed `confirmation_resolved`; null when a required field is missing or malformed. */
+export interface ParsedConfirmationResolved {
+  stepId: string | null;
+  confirmationId: string;
+  outcome: ToolConfirmationOutcome;
+  decidedAt: string | null;
+}
+
+export function parseConfirmationResolved(payload: Record<string, unknown>): ParsedConfirmationResolved | null {
+  const confirmationId = _nonEmptyString(payload.confirmation_id);
+  const outcome = _oneOf(TOOL_CONFIRMATION_OUTCOMES, payload.outcome);
+  if (!confirmationId || !outcome) return null;
+  return {
+    stepId: _nonEmptyString(payload.step_id),
+    confirmationId,
+    outcome,
+    decidedAt: _nonEmptyString(payload.decided_at),
+  };
+}
+
 /** Parsed `llm.stream_restarted` withdrawal; malformed counts read as nothing to withdraw. */
 export interface StreamRestartWithdrawal {
   parentAgentId: string | null;

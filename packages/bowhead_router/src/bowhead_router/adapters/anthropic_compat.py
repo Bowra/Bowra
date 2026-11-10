@@ -68,6 +68,7 @@ from bowhead_router.outbound import (
     rejected_param,
     resolve_outbound_params,
 )
+from bowhead_router.reasoning import REASONING_BLOCK_TYPES, anthropic_reasoning, matching_blocks
 from bowhead_router.ssrf_guard import build_guarded_async_client
 from bowhead_router.tool_args import loads_tool_arguments
 from bowhead_router.tool_names import ToolNameMap, to_wire_tool_name
@@ -406,6 +407,8 @@ class AnthropicCompatibleAdapter:
         # Per-content-block accumulators (keyed by index).
         # Each entry: {"id": str, "name": str, "json_buf": str}
         tool_blocks: dict[int, dict[str, Any]] = {}
+        # Exact thinking/redacted_thinking blocks by stream index, for tool continuation.
+        reasoning_blocks: dict[int, dict[str, Any]] = {}
         upstream_tool_indices: set[int] = set()
         tool_names = self._tool_name_map(req)
         try:
@@ -500,6 +503,9 @@ class AnthropicCompatibleAdapter:
                     if et == "content_block_start":
                         idx = int(obj.get("index", 0))
                         block = obj.get("content_block") or {}
+                        if block.get("type") in REASONING_BLOCK_TYPES:
+                            started = {key: value for key, value in block.items() if value not in (None, "")}
+                            reasoning_blocks[idx] = {"thinking": "", **started} if block.get("type") == "thinking" else started
                         if block.get("type") == "tool_use":
                             upstream_tool_indices.add(idx)
                             tool_blocks[idx] = {
@@ -519,8 +525,14 @@ class AnthropicCompatibleAdapter:
                         elif dt == "thinking_delta":
                             think = d.get("thinking") or ""
                             if think:
+                                reasoning = reasoning_blocks.setdefault(idx, {"type": "thinking", "thinking": ""})
+                                reasoning["thinking"] = str(reasoning.get("thinking") or "") + think
                                 output_started = True
                                 yield LLMChunk(thinking_delta=think)
+                        elif dt == "signature_delta":
+                            signature = d.get("signature") or ""
+                            if signature and idx in reasoning_blocks:
+                                reasoning_blocks[idx]["signature"] = str(reasoning_blocks[idx].get("signature") or "") + signature
                         elif dt == "input_json_delta" and idx in tool_blocks:
                             partial = d.get("partial_json") or ""
                             if partial:
@@ -664,6 +676,11 @@ class AnthropicCompatibleAdapter:
                 yield LLMChunk(
                     finish_reason=finish_reason,
                     usage=usage,
+                    provider_reasoning=anthropic_reasoning(
+                        [reasoning_blocks[index] for index in sorted(reasoning_blocks)],
+                        provider=self.provider_name,
+                        model=req.model,
+                    ),
                     diagnostics=LLMResponseDiagnostics(
                         transport_mode="stream",
                         upstream_tool_call_count=len(upstream_tool_indices),
@@ -778,9 +795,53 @@ class AnthropicCompatibleAdapter:
             params=params,
             family="anthropic",
         )
+        self._continue_reasoning(body, req)
         finalize_output_allowance(req, body, self.provider_options, capability=capability, family="anthropic")
         admit_outbound_input(req, body, family="anthropic")
         return body
+
+    def _continue_reasoning(self, body: dict[str, Any], req: LLMRequest) -> None:
+        """Send back each assistant's own reasoning blocks when thinking is on.
+
+        A thinking-mode tool continuation must return the assistant's reasoning blocks
+        unchanged. Blocks are only returned to the connection and model that produced them.
+        If the current tool loop has an assistant tool call without matching blocks
+        (fallback, model switch, rebuilt or older history), this request continues without
+        thinking instead of failing, which is the pre-existing non-thinking continuation.
+        """
+        from bowhead_router.runtime_notes import model_messages
+
+        thinking = body.get("thinking")
+        if not isinstance(thinking, dict) or thinking.get("type") not in {"enabled", "adaptive"}:
+            return
+        sources = [message for message in model_messages(req.messages) if message.role == "assistant"]
+        wire = [entry for entry in body["messages"] if entry.get("role") == "assistant"]
+        blocks = [matching_blocks(message.provider_reasoning, provider=self.provider_name, model=req.model) for message in sources]
+        # Assistant entries after the latest user entry that is not only tool results form the current tool loop.
+        current: list[int] = []
+        ordinal = -1
+        for entry in body["messages"]:
+            content = entry.get("content")
+            if entry.get("role") == "assistant":
+                ordinal += 1
+                if isinstance(content, list) and any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content):
+                    current.append(ordinal)
+            elif not (isinstance(content, list) and any(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)):
+                current = []
+        if len(sources) != len(wire) or any(blocks[index] is None for index in current):
+            body["thinking"] = {"type": "disabled"}
+            logger.info(
+                "anthropic_compat.reasoning_continuation_unavailable provider=%s model=%s tool_turns=%d",
+                self.provider_name,
+                req.model,
+                len(current),
+            )
+            return
+        for entry, kept in zip(wire, blocks, strict=True):
+            if kept:
+                content = entry.get("content")
+                existing = list(content) if isinstance(content, list) else ([{"type": "text", "text": content}] if content else [])
+                entry["content"] = kept + existing
 
     def _outbound_params(self, model_id: str, capability: str = "chat") -> OutboundParams:
         from bowhead_router.runtime_parameters import effective_outbound_params
@@ -984,10 +1045,13 @@ class AnthropicCompatibleAdapter:
         text_parts: list[str] = []
         thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
+        reasoning: list[dict[str, Any]] = []
         for blk in blocks:
             if not isinstance(blk, dict):
                 continue
             btype = blk.get("type")
+            if btype in REASONING_BLOCK_TYPES:
+                reasoning.append(blk)
             if btype == "text":
                 t = blk.get("text") or ""
                 if t:
@@ -1032,6 +1096,7 @@ class AnthropicCompatibleAdapter:
             provider=self.provider_name,
             model=str(data.get("model") or req.model),
             thinking="\n".join(thinking_parts),
+            provider_reasoning=anthropic_reasoning(reasoning, provider=self.provider_name, model=req.model),
             diagnostics=LLMResponseDiagnostics(
                 transport_mode="invoke",
                 upstream_tool_call_count=sum(isinstance(block, dict) and block.get("type") == "tool_use" for block in blocks),

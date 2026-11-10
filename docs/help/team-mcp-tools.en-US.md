@@ -40,14 +40,16 @@ If the source is used by team Agents, running tasks, or schedules, review the im
 
 ## Confirm each call that can change data
 
-When your deployment turns on call confirmation, Bowhead asks the member who started a task before it calls an MCP tool that may change data. The dialog shows the tool source, the tool, its description and the complete arguments that will be sent:
+When your deployment turns on call confirmation, Bowhead asks the member who started a task before it calls an MCP tool that may change data. The dialog shows the tool source, the tool, its description, whether the tool writes data, deletes data or has no known category, and the complete arguments that will be sent:
 
 - **Allow This Call** runs this call once with the arguments shown.
 - **Always Allow in This Session** also allows later calls to the same tool in the current session. It ends when the session ends or the tool's definition changes.
 - **Reject and Skip** does not run the call.
-- If nobody decides within two minutes, the call is skipped.
+- If nobody decides within three minutes, the call is skipped.
 
-Tools the service marks as read-only run without asking. Tools the service marks as writing or deleting data can then be selected for Agents and are confirmed on every call. Tools with no marking can't be selected for Agents until an owner or administrator confirms their category; when the assistant uses them, every call is confirmed. Each call uses the account the source was connected with, so it acts as that account for every member. Scheduled tasks have nobody to confirm, so their calls to these tools are skipped.
+If your deployment turns on inline confirmation, the request appears in the conversation under the step that is waiting instead of in a dialog, and afterwards stays there as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
+
+Tools the service marks as read-only run without asking. A tool marked both read-only and deleting data counts as unmarked. Tools the service marks as writing or deleting data can then be selected for Agents and are confirmed on every call. Tools with no marking can't be selected for Agents until an owner or administrator confirms their category; when the assistant uses them, every call is confirmed. Each call uses the account the source was connected with, so it acts as that account for every member. Scheduled tasks have nobody to confirm, so their calls to these tools are skipped.
 
 ### Confirm a tool's category
 

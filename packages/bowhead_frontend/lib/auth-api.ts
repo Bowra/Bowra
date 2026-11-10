@@ -82,6 +82,8 @@ export interface MeUser {
     shopify_content_confirmations?: boolean;
     /** FEATURE_TEAM_TOOL_CONFIRMATION: the requester confirms each non-read Team MCP call. */
     team_tool_confirmations?: boolean;
+    /** FEATURE_INLINE_TOOL_CONFIRMATION: confirmations are cards in the conversation plus a notice, not dialogs. */
+    inline_tool_confirmations?: boolean;
     credit?: CreditCapabilities;
     /** Future Composer controls and the legacy submission-reader capability. */
     composer?: {

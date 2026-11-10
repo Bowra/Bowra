@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Declared stacked axis roles (readability audit I).
  *

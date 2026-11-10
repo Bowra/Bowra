@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `llm.retry_scheduled` → transient running status in turn-store.
  *

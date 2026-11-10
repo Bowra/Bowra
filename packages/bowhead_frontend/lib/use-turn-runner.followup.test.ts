@@ -17,8 +17,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
+import type { TurnEventDTO } from "./api";
 import { useTurnRunner } from "./use-turn-runner";
-import { _resetAllTurnsForTesting } from "./turn-store";
+import {
+  _resetAllTurnsForTesting,
+  getTurnSnapshot,
+  selectNarrativeBuffer,
+  subscribeTurn,
+  type TurnState,
+} from "./turn-store";
+import { _resetNarrativeCursorsForTesting } from "./turn-store-dispatch";
+import { replayTurnEventRows } from "./turn-store-replay";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_ES = globalThis.EventSource;
@@ -56,6 +65,8 @@ class FakeEventSource {
 
 beforeEach(() => {
   _resetAllTurnsForTesting();
+  // Tests reuse turn ids; per-turn applied-seq caches must not leak between them.
+  _resetNarrativeCursorsForTesting();
   FakeEventSource.instances = [];
   (globalThis as Record<string, unknown>).EventSource = FakeEventSource;
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
@@ -79,6 +90,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   _resetAllTurnsForTesting();
+  _resetNarrativeCursorsForTesting();
 });
 
 /** Advance fake time and flush microtasks (send IIFE's fetch/.json chain). */
@@ -407,5 +419,179 @@ describe("use-turn-runner · turn.follow_up steer 续跑接流", () => {
     expect(FakeEventSource.instances.length).toBeGreaterThanOrEqual(3);
     expect(FakeEventSource.instances[FakeEventSource.instances.length - 1].url)
       .toContain("/chat/stream/t_2");
+  });
+});
+
+/**
+ * Dogfood 2026-11-08 F6: the backend sends `turn.follow_up` before the parent's terminal `done`. The runner
+ * attaches the child stream on the pointer, and used to drop the parent's later `done` before the turn store saw
+ * it. Live, the parent row lost its wall-clock duration (the fold fell back to summed steps: 55 s against
+ * 1 min 56 s on replay), its step outcome, its superseded narrative, the card finalization and the
+ * failure-answer cleanup.
+ */
+describe("use-turn-runner · a steered parent keeps its terminal facts live", () => {
+  const STEP_OUTCOME_WIRE = {
+    schema_version: 1,
+    issue_steps: 1,
+    recovered_steps: 1,
+    unresolved_steps: 0,
+    answer_affected: false,
+  };
+  const FOLLOW_UP = {
+    follow_up_turn_id: "t_2",
+    follow_up_stream_url: "/api/v1/chat/stream/t_2",
+    reason: "steer_drain",
+    buffered_count: 1,
+  };
+
+  type Frame = [name: string, payload: Record<string, unknown>];
+
+  /** Parent stream frames in production order: the follow-up pointer precedes the parent's `done`. */
+  function completedParentFrames(): Frame[] {
+    return [
+      ["turn_started", { seq: 1, turn_id: "t_1", session_id: "s_1", user_text: "查一下销售" }],
+      ["step_list_card_created", { seq: 2, card_id: "t_1" }],
+      ["step_started", {
+        seq: 3, card_id: "t_1", step_id: "s1", step_type: "tool_run", tool_name: "bi.query",
+        header_zh: "查询销售", started_at: "2026-11-08T12:10:51Z",
+      }],
+      ["step_done", { seq: 4, card_id: "t_1", step_id: "s1", state: "success", duration_ms: 55_100 }],
+      ["narrative.delta", { seq: 5, card_id: "t_1", delta: "Lead prose" }],
+      ["emoji_ack", { seq: 6, card_id: "t_1", target_msg_id: "m1", emoji: "🤝", text: "顺便按地区拆分" }],
+      ["turn.follow_up", { seq: 7, ...FOLLOW_UP }],
+      ["done", {
+        seq: 8,
+        turn_id: "t_1",
+        status: "completed",
+        duration_ms: 116_237,
+        step_outcome: STEP_OUTCOME_WIRE,
+        narrative_superseded: true,
+      }],
+    ];
+  }
+
+  async function startParent() {
+    const hook = renderRunner();
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+    await waitFor(() => expect(hook.result.current.turnId).toBe("t_1"));
+    return { hook, parent: FakeEventSource.instances[0] };
+  }
+
+  function emitAll(es: FakeEventSource, frames: Frame[]) {
+    for (const [name, payload] of frames) act(() => es.emit(name, payload));
+  }
+
+  function asReplayRows(frames: Frame[]): TurnEventDTO[] {
+    return frames.map(([event_type, payload]) => ({
+      seq: Number(payload.seq),
+      event_type,
+      payload,
+      occurred_at: "2026-11-08T12:11:46Z",
+    }));
+  }
+
+  it("applies the parent done that follows turn.follow_up to the parent row without stopping the child", async () => {
+    const { hook, parent } = await startParent();
+    emitAll(parent, completedParentFrames());
+
+    const snapshot = getTurnSnapshot("t_1");
+    expect(snapshot?.totalDurationMs).toBe(116_237);
+    expect(snapshot?.stepOutcome).toEqual({
+      issueSteps: 1,
+      recoveredSteps: 1,
+      unresolvedSteps: 0,
+      answerAffected: false,
+      turnCompleted: true,
+    });
+    expect(snapshot?.narrativeSuperseded).toBe(true);
+    expect(snapshot?.cardFinalized).toBe(true);
+    expect(snapshot?.cardFinalState).toBe("completed");
+
+    // The stale parent terminal must not terminate the child that now owns the runner.
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const child = FakeEventSource.instances[1];
+    expect(child.url).toContain("/api/v1/chat/stream/t_2");
+    expect(child.readyState).toBe(FakeEventSource.OPEN);
+    expect(hook.result.current.turnId).toBe("t_2");
+    expect(hook.result.current.running).toBe(true);
+    expect(hook.result.current.terminalStatus).toBeNull();
+    expect(hook.result.current.errorReason).toBeNull();
+    expect(getTurnSnapshot("t_2")?.cardFinalized ?? false).toBe(false);
+
+    act(() => child.emit("narrative.delta", { seq: 1, card_id: "t_2", delta: "child prose" }));
+    expect(selectNarrativeBuffer(getTurnSnapshot("t_2"))).toBe("child prose");
+    expect(hook.result.current.running).toBe(true);
+  });
+
+  it("drops the parent's legacy failure answer when its failed done follows turn.follow_up", async () => {
+    const { hook, parent } = await startParent();
+    emitAll(parent, [
+      ["turn_started", { seq: 1, turn_id: "t_1", session_id: "s_1", user_text: "查一下销售" }],
+      ["step_list_card_created", { seq: 2, card_id: "t_1" }],
+      ["final_answer", {
+        seq: 3, card_id: "t_1", turn_id: "t_1", text: "System failure sentence", reason_code: "silent_done_fallback",
+      }],
+      ["turn.follow_up", { seq: 4, ...FOLLOW_UP }],
+      ["done", { seq: 5, turn_id: "t_1", status: "failed", reason_code: "lead_internal_error", duration_ms: 64_000 }],
+    ]);
+
+    const snapshot = getTurnSnapshot("t_1");
+    expect(snapshot?.beats.some((beat) => beat.kind === "answer")).toBe(false);
+    expect(snapshot?.totalDurationMs).toBe(64_000);
+    expect(snapshot?.cardFinalState).toBe("failed");
+    // The parent's failure belongs to the parent row, never to the running child.
+    expect(hook.result.current.turnId).toBe("t_2");
+    expect(hook.result.current.running).toBe(true);
+    expect(hook.result.current.errorReason).toBeNull();
+  });
+
+  it("leaves the parent row equal to its replay", async () => {
+    const frames = completedParentFrames();
+    const { parent } = await startParent();
+    emitAll(parent, frames);
+    const live = getTurnSnapshot("t_1") as TurnState;
+    expect(live.totalDurationMs).toBe(116_237);
+
+    _resetAllTurnsForTesting();
+    _resetNarrativeCursorsForTesting();
+    replayTurnEventRows("t_1", asReplayRows(frames));
+    expect(getTurnSnapshot("t_1")).toEqual(live);
+  });
+
+  it("applies the parent terminal once across a parent reconnect and a re-delivered frame", async () => {
+    vi.useFakeTimers();
+    renderRunner();
+    for (let i = 0; i < 5 && FakeEventSource.instances.length === 0; i++) {
+      await flush(0);
+    }
+    expect(FakeEventSource.instances).toHaveLength(1);
+    const frames = completedParentFrames();
+    const beforePointer = frames.slice(0, 5);
+    const parent = FakeEventSource.instances[0];
+    emitAll(parent, beforePointer);
+
+    // The parent connection drops before the pointer; the reconnect replays the whole persisted stream.
+    act(() => parent.onerror?.(new Event("error")));
+    await flush(1_100);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const reconnectedParent = FakeEventSource.instances[1];
+    expect(reconnectedParent.url).toContain("/chat/stream/t_1");
+    emitAll(reconnectedParent, frames);
+
+    expect(FakeEventSource.instances).toHaveLength(3);
+    expect(FakeEventSource.instances[2].url).toContain("/chat/stream/t_2");
+    const snapshot = getTurnSnapshot("t_1");
+    expect(snapshot?.totalDurationMs).toBe(116_237);
+    expect(snapshot?.narrativeSuperseded).toBe(true);
+    expect(snapshot?.steps).toHaveLength(1);
+    expect(selectNarrativeBuffer(snapshot)).toBe("Lead prose");
+
+    // A re-delivered parent terminal (same seq) is not applied a second time.
+    const notifications = vi.fn();
+    const unsubscribe = subscribeTurn("t_1", notifications);
+    act(() => reconnectedParent.emit(...frames[frames.length - 1]));
+    unsubscribe();
+    expect(notifications).not.toHaveBeenCalled();
+    expect(getTurnSnapshot("t_1")).toBe(snapshot);
   });
 });

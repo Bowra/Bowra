@@ -196,6 +196,20 @@ async def test_production_followup_resolver_rehydrates_current_context(
 
 
 @pytest.mark.asyncio
+async def test_queued_steer_turn_keeps_the_chat_route_report_and_chart_authority(followup_dependencies) -> None:
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    app = _app()
+    request = await pending_execution.resolve_terminal_followup_request(app, _template(), _scope())
+
+    access = request.report_read_access
+    assert isinstance(access, ReportReadAccess)
+    assert (access.session_id, access.workspace_id, access.team_id, access.user_id) == ("s_1", "ws_1", "team_1", "u_1")
+    assert access.request.app is app
+    assert request.chart_authoring_projection == access.project_chart
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("steer_text", "settings", "expected_output"),
     [
@@ -529,6 +543,8 @@ async def test_pending_clarification_recovery_matches_web_resume_capabilities(
     opened_request, request = captured
     assert opened_request.text == request.text
     assert request.terminal_runtime is not None
+    # Like the chat route, chart tools use the resumed actor's report authority.
+    assert request.chart_authoring_projection == request.report_read_access.project_chart
     if native_choice:
         assert request.datarc_switch_resolution.call_id == "original_switch"
         assert request.datarc_switch_resolution.source.datarc_workspace_id == "sales"

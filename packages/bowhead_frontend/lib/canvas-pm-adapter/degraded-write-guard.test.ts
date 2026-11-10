@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Fail-closed guard: degraded Markdown must not be written back as a faithful result.
  *

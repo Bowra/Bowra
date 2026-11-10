@@ -12,7 +12,7 @@ import messagesEn from "@/messages/en-US.json";
 import messagesZh from "@/messages/zh-CN.json";
 import { ApiError } from "@/lib/api-client";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
 
 const llmConfigMocks = vi.hoisted(() => ({
   fetchAdminLlmConfig: vi.fn(),
@@ -22,7 +22,7 @@ const llmConfigMocks = vi.hoisted(() => ({
   verifyProvider: vi.fn(),
 }));
 
-vi.mock("@/lib/llm-config-api", () => llmConfigMocks);
+vi.mock("@/lib/llm-config-api", async (original) => ({ ...await original<typeof import("@/lib/llm-config-api")>(), ...llmConfigMocks }));
 
 const llmConfigV2Mocks = vi.hoisted(() => ({
   cancelVerificationBatch: vi.fn(),
@@ -36,7 +36,7 @@ const llmConfigV2Mocks = vi.hoisted(() => ({
   precheckV2Provider: vi.fn(),
 }));
 
-vi.mock("@/lib/llm-config-v2-api", () => llmConfigV2Mocks);
+vi.mock("@/lib/llm-config-v2-api", async (original) => ({ ...await original<typeof import("@/lib/llm-config-v2-api")>(), ...llmConfigV2Mocks }));
 
 import {
   hasBillableImageProbe,
@@ -382,13 +382,12 @@ describe("model settings V2 provider identity", () => {
         probe_execution_policy_version: "probe-policy-v1",
       }],
     });
-    renderLocalized(locales[1], <SettingsModels section="assignments" />);
+    renderLocalized(locales[1], <SettingsModels />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Model assignments" }));
     const verify = await screen.findByRole("button", {
       name: "Verify current assignments",
     });
-    // The scoped assignments page re-validates the draft after a 250 ms debounce, which
-    // disables the button again; wait for that second readiness check before clicking.
-    await waitFor(() => expect(llmConfigMocks.validateAdminLlmConfig).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(llmConfigMocks.validateAdminLlmConfig).toHaveBeenCalled());
     await waitFor(() => expect((verify as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(verify);
     expect(await screen.findByRole("heading", {

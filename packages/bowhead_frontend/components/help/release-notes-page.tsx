@@ -3,7 +3,7 @@
 import { withoutNextRouterHistoryMarkers } from "@/lib/url-session-nav";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import type { Parent, Root, RootContent } from "mdast";
@@ -16,6 +16,7 @@ import { Topbar } from "@/components/shell/Topbar";
 import { withUiHooks } from "@/components/settings/ui-hook-classes";
 import { appPath } from "@/lib/base-path";
 import type { HelpArticle } from "@/lib/help-content";
+import { formatDate } from "@/lib/locale";
 import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
 import { useAppRouter } from "@/lib/use-app-router";
 
@@ -128,7 +129,7 @@ function highlightSearch(query: string) {
 export function ReleaseNotesPage({ article }: { article: HelpArticle }) {
   const router = useAppRouter();
   const t = useTranslations("release_notes");
-  const format = useFormatter();
+  const locale = useLocale();
   const [targetId, setTargetId] = useState("");
   const articleRef = useRef<HTMLElement>(null);
   const beforeSearch = useRef<{
@@ -187,10 +188,7 @@ export function ReleaseNotesPage({ article }: { article: HelpArticle }) {
     return date ? (
       <time dateTime={date}>
         {t("released_on", {
-          date: format.dateTime(new Date(`${date}T00:00:00Z`), {
-            dateStyle: "medium",
-            timeZone: "UTC",
-          }),
+          date: formatDate(`${date}T00:00:00Z`, locale, "medium", "UTC"),
         })}
       </time>
     ) : null;
@@ -271,7 +269,7 @@ export function ReleaseNotesPage({ article }: { article: HelpArticle }) {
         );
       },
     }),
-    [versions, article.releaseDates, format, t, router],
+    [versions, article.releaseDates, locale, t, router],
   );
 
   const changeSearch = (value: string) => {

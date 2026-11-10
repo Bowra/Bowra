@@ -63,6 +63,24 @@ test("production Composer hydrates full source, saves before POST and clears its
   expect(errors).toEqual([]);
 });
 
+test("the reference editor is named by its visible prompt: ordinary, steering and read-only", async ({ page }) => {
+  // 2026-11-08 dogfood F11: real deployments render this editor, whose name was fixed to "Task input", so
+  // screen readers never heard the steering prompt; the earlier fix reached only the textarea fallback.
+  const errors = await load(page, "?locale=en");
+  const editor = page.getByRole("combobox");
+  const prompt = page.locator(".composer-reference-editor__placeholder");
+  await expect(editor).toHaveAccessibleName("Ask about your data…");
+  await expect(prompt).toHaveText("Ask about your data…");
+  await page.evaluate(() => window.referenceV2.configure({ steer: true }));
+  // The decorative ↻ stays visible but is not part of the name.
+  await expect(prompt).toHaveText("↻ Add an instruction—queued until the current response finishes");
+  await expect(editor).toHaveAccessibleName("Add an instruction—queued until the current response finishes");
+  await page.evaluate(() => window.referenceV2.configure({ steer: false, readOnly: true }));
+  await expect(prompt).toHaveText("Sending disabled");
+  await expect(editor).toHaveAccessibleName("Sending disabled");
+  expect(errors).toEqual([]);
+});
+
 test("editing and reload preserve exact identities; deleting tokens returns to the ordinary writer", async ({ page }) => {
   await load(page, "?seed=1&locale=en", "/bowhead");
   const editor = page.getByRole("combobox");

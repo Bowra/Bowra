@@ -42,6 +42,9 @@ class Message:
     # into multiple blocks (text + image_url / base64 images); other adapters ignore images,
     # keep content as plain text, and log a warning.
     images: list[ImageRef] = field(default_factory=list)
+    # Provider-native assistant reasoning blocks for thinking-mode tool continuation
+    # (see bowhead_router.reasoning). Opaque JSON; never user-facing content.
+    provider_reasoning: dict[str, Any] | None = None
 
 
 @dataclass
@@ -189,6 +192,8 @@ class LLMResponse:
     # An empty string indicates a non-thinking model or no reasoning output.
     thinking: str = ""
     diagnostics: LLMResponseDiagnostics | None = None
+    # Exact reasoning blocks the next thinking-mode tool continuation must send back.
+    provider_reasoning: dict[str, Any] | None = None
 
 
 @dataclass
@@ -216,6 +221,8 @@ class LLMChunk:
     # everything yielded since the previous restart belongs to a failed attempt
     # and must be discarded before the next attempt streams. Carries nothing else.
     stream_restart: bool = False
+    # Final-chunk-only reasoning envelope (see LLMResponse.provider_reasoning).
+    provider_reasoning: dict[str, Any] | None = None
 
 
 @runtime_checkable

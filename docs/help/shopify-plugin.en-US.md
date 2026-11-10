@@ -30,6 +30,8 @@ Ask for suggestions to receive copy without saving, or explicitly request an upd
 
 For an update, review the shop, target and full before/after content in the browser dialog, then choose **Apply these changes** or **Reject update**. HTML appears as text so it can be inspected. Ignoring the dialog lets it expire without updating. Only the requester can decide. Updates require a live browser chat and current member access to its Space. If another editor changes the original content before submission, prepare a fresh review; coordinate when editing together because Shopify cannot make the original-content check atomic with the update.
 
+If your deployment turns on inline confirmation, the request appears in the conversation under the step that is waiting instead of in a dialog, and afterwards stays there as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
+
 A saved result is reported only after the content is read back and verified. If the write result is uncertain or verification disagrees, inspect the current Shopify object before proposing a correction; do not repeat the same update blindly. Verification does not establish storefront visibility or improved search/conversion performance.
 
 ## Maintain access

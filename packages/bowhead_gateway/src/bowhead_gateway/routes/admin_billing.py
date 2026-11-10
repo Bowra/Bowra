@@ -909,7 +909,7 @@ async def _stage_embed_reindex_if_needed(
         staged = copy.deepcopy(new_config)
         kb = staged.setdefault("kb", {})
         active = kb.setdefault("active", {})
-        if old_embed:
+        if old_embed in (new_kb.get("models") or {}):
             active["embed"] = old_embed
             old_index = (old_config.get("kb") or {}).get("index_version")
             if old_index:
@@ -955,7 +955,7 @@ async def _stage_embed_reindex_if_needed(
     active = kb.setdefault("active", {})
     target_index_version = f"kbidx_{uuid4().hex[:12]}"
     task_id = f"kb_reindex_{uuid4().hex[:12]}"
-    if old_embed:
+    if old_embed in (new_kb.get("models") or {}):
         active["embed"] = old_embed
         old_index = (old_config.get("kb") or {}).get("index_version")
         if old_index:
@@ -1305,6 +1305,7 @@ async def validate_llm_config(
         "changed_sections": changed_sections,
         "impact": impact,
         "assignment_changes": assignment_changes,
+        "assignment_config": redact_config({key: incoming_config.get(key, {}) for key in ("tiers", "kb", "media", "search")}),
     }
     if not issues:
         try:

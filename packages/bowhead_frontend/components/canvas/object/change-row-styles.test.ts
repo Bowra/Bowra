@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** C7 change row: before/after labels (Updated, Suggested, Vorgeschlagen) never break mid-word. */
 import { readFileSync } from "node:fs";
 import path from "node:path";

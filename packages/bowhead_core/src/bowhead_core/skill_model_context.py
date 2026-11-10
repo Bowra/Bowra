@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from bowhead_router.invocation import canonical_transport_digest
+from bowhead_router.reasoning import message_record
 from bowhead_router.types import LLMRequest
 
 from bowhead_core._db import open_shared_ctx
@@ -41,7 +42,7 @@ def _input_hash(request: LLMRequest) -> str:
         {
             "contract": "reference-model-context.v1",
             "system": request.system,
-            "messages": [asdict(m) for m in request.messages],
+            "messages": [message_record(m) for m in request.messages],
             "tools": [asdict(t) for t in request.tools],
             "response_format": request.response_format,
         }

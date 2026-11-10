@@ -8,7 +8,14 @@
  *
  * Use for:
  * - Any UI displaying numbers/dates/currency (chat, files, canvas chart axis labels)
- * - Never hardcode `toLocaleString("zh-CN")`; obtain current preference via useUserLocale()
+ * - Never hardcode `toLocaleString("zh-CN")` or call `toLocale*String()` / `Intl.DateTimeFormat` without the
+ *   interface locale: pass next-intl `useLocale()` in components, or `getCurrentLocale()` outside React.
+ *
+ * Dates and times shown to users go through the formatters in this module ({@link formatTime},
+ * {@link formatDate}, {@link formatDateTime}, {@link formatShortDateTime}, {@link formatMessageTime},
+ * {@link formatListDate}, {@link formatCalendarDay}), so every surface follows one clock rule
+ * ({@link clockOptions}): English reads a 12-hour clock ("6:39 PM"); Chinese, German and French read 24-hour
+ * time ("18:39"). Machine formats (ISO strings, file names, logs, form input values) stay outside it.
  */
 
 export type Locale = "zh-CN" | "en-US" | "de-DE" | "fr-FR";
@@ -122,60 +129,116 @@ export function formatCurrency(
   }).format(value);
 }
 
+/** A displayable instant: a Date, an ISO-8601 string or epoch milliseconds. Missing values format as "". */
+export type DateInput = Date | string | number | null | undefined;
+
+/** The instant `value` names, or null when it is missing or unparseable. */
+function toValidDate(value: DateInput): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Interface languages whose everyday clock is 12-hour; Chinese, German and French read 24-hour time. */
+const TWELVE_HOUR_LANGUAGES: ReadonlySet<string> = new Set(["en"]);
+
 /**
- * Format a date.
+ * Hour and minute options in the locale's own clock convention, the one clock rule for every displayed time:
+ * en-US "6:39 PM" / "8:05 AM" (12-hour, no leading zero); zh-CN, de-DE and fr-FR "18:39" / "08:05" (24-hour).
+ * The cycle is explicit so a browser or OS clock preference cannot make one surface differ from another.
+ */
+export function clockOptions(locale: string, { seconds = false }: { seconds?: boolean } = {}): Intl.DateTimeFormatOptions {
+  const twelveHour = TWELVE_HOUR_LANGUAGES.has(locale.split("-", 1)[0].toLowerCase());
+  return {
+    hour: twelveHour ? "numeric" : "2-digit",
+    minute: "2-digit",
+    ...(seconds ? { second: "2-digit" as const } : null),
+    hourCycle: twelveHour ? "h12" : "h23",
+  };
+}
+
+/** Time of day only ("6:39 PM" / "18:39"; with `seconds`, "6:39:05 PM" / "18:39:05"). "" when missing or invalid. */
+export function formatTime(
+  value: DateInput,
+  locale: string,
+  opts: { seconds?: boolean; timeZone?: string } = {},
+): string {
+  const date = toValidDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat(locale, { ...clockOptions(locale, opts), timeZone: opts.timeZone }).format(date);
+}
+
+/**
+ * Format a date without a time ("Nov 8, 2026" / "2026年11月8日" for "medium"). "" when missing or invalid.
  *
- * @param value Date or ISO string
- * @param locale BCP 47
  * @param style "short" | "medium" | "long" | "full"
  */
 export function formatDate(
-  value: Date | string,
-  locale: Locale = DEFAULT_LOCALE,
+  value: DateInput,
+  locale: string = DEFAULT_LOCALE,
   style: "short" | "medium" | "long" | "full" = "medium",
+  timeZone?: string,
 ): string {
-  const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: style }).format(d);
+  const date = toValidDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat(locale, { dateStyle: style, timeZone }).format(date);
 }
 
 /**
- * Format date and time.
- *
- * @param hour12 Defaults to false (China convention is 24-hour; English uses locale default).
+ * Full date and time ("Nov 8, 2026, 6:39 PM" / "2026年11月8日 18:39" for a "medium" date). The time part follows the
+ * locale's clock (see {@link clockOptions}). "" when missing or invalid.
  */
 export function formatDateTime(
-  value: Date | string,
-  locale: Locale = DEFAULT_LOCALE,
+  value: DateInput,
+  locale: string = DEFAULT_LOCALE,
   opts: {
     dateStyle?: "short" | "medium" | "long" | "full";
     timeStyle?: "short" | "medium" | "long" | "full";
-    hour12?: boolean;
+    timeZone?: string;
   } = {},
 ): string {
-  const d = typeof value === "string" ? new Date(value) : value;
+  const date = toValidDate(value);
+  if (!date) return "";
   return new Intl.DateTimeFormat(locale, {
     dateStyle: opts.dateStyle ?? "short",
     timeStyle: opts.timeStyle ?? "short",
-    hour12: opts.hour12,
-  }).format(d);
+    timeZone: opts.timeZone,
+  }).format(date);
 }
 
 /**
- * Short date and time for lists, cards and details (P2 rule): "9月26日 14:23" / "Sep 26, 14:23", with the year only
+ * Short date and time for lists, cards and details (P2 rule): "9月26日 14:23" / "Sep 26, 2:23 PM", with the year only
  * when it differs from the current one. Empty string for a missing or unparseable value.
  */
-export function formatShortDateTime(value: Date | string | null | undefined, locale: string, now = new Date()): string {
-  if (!value) return "";
-  const d = typeof value === "string" ? new Date(value) : value;
-  if (Number.isNaN(d.getTime())) return "";
+export function formatShortDateTime(value: DateInput, locale: string, now: Date = new Date(), timeZone?: string): string {
+  const date = toValidDate(value);
+  if (!date) return "";
   return new Intl.DateTimeFormat(locale, {
-    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : null),
+    ...(calendarDay(date, timeZone).year !== calendarDay(now, timeZone).year ? { year: "numeric" } : null),
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(d);
+    ...clockOptions(locale),
+    timeZone,
+  }).format(date);
+}
+
+/**
+ * Chat byline time: the time alone on the viewer's current calendar day ("6:39 PM" / "18:39"); an earlier day adds a
+ * short date in the locale's order ("Nov 8, 6:39 PM" / "11月8日 18:39" / "8. Nov., 18:39" / "8 nov., 18:39"); another
+ * year adds the year. A value slightly ahead of `now` (server/browser clock skew) still reads as today.
+ * "" when missing or invalid.
+ */
+export function formatMessageTime(
+  value: DateInput,
+  locale: string,
+  { now = new Date(), timeZone }: { now?: Date; timeZone?: string } = {},
+): string {
+  const date = toValidDate(value);
+  if (!date) return "";
+  if (calendarDay(date, timeZone).day >= calendarDay(now, timeZone).day) {
+    return formatTime(date, locale, { timeZone });
+  }
+  return formatShortDateTime(date, locale, now, timeZone);
 }
 
 /** Relative-time copy for {@link formatListDate} (the caller's existing `rel_*` messages). */

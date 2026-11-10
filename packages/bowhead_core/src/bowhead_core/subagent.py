@@ -35,6 +35,7 @@ from uuid import uuid4
 
 from bowhead_router.errors import provider_failure_kind
 from bowhead_router.retry import RetryNotice, attempt_fits, retry_observer_scope
+from bowhead_router.runtime_notes import RUNTIME_CORRECTION_NOTE_NAME
 from bowhead_router.types import TokenUsage
 from bowhead_skill.export_naming import export_filename, report_title_from_sections
 from bowhead_skill.sandbox_call_shape import FLAT_SANDBOX_TOOL, SANDBOX_SCRIPT, SANDBOX_SKILL_NAME, SKILL_INVOKE_TOOL, sandbox_entry_for
@@ -137,6 +138,7 @@ from bowhead_core.tool_outcome import classify_tool_outcome, invocation_result
 from bowhead_core.tool_registry import (
     ToolExecutionContext,
     ToolRegistry,
+    ToolStepRef,
     _unwrap_tool_args,
     connector_for_tool,
 )
@@ -1673,6 +1675,35 @@ class FinalAnswerCorrection:
 
     instruction: str
     assistant_history_name: str | None = None
+
+
+_REVIEW_CLOSEOUT_REFUSAL = (
+    "Not executed. Your previous answer ended this Turn's work, and the delivery review only checks it; "
+    "it never authorizes new or alternative work the user has not approved. Do not dispatch, retry or change the requested "
+    "outcome now. Call {review_tool} alone, then answer from the delivered results and disclose what remains unmet. "
+    "If the user must decide how to continue, ask with clarification_ask and end the Turn."
+)
+
+
+def _review_closeout_admits(tool_name: str, registry: Any, *, review_tool: str | None) -> bool:
+    """Whether a call may run during Lead's delivery-review correction after a failure.
+
+    The review carrier, the user question and Tools declared read-only (such as the
+    retained-file readback the review may require) may run. Delegation is declared
+    effect-free yet starts new work, so it waits for the user like every other operation.
+    """
+    if tool_name in {review_tool, "clarification_ask"}:
+        return True
+    try:
+        spec = registry.get(tool_name)
+    except Exception:  # noqa: BLE001 — an unknown Tool cannot prove it is read-only
+        return False
+    if review_tool is None and getattr(spec, "terminal_payload_field", None):
+        return True  # The terminal payload carries the review when no separate carrier exists.
+    from bowhead_core.terminal_protocol import EffectClass
+
+    effect = getattr(spec, "effect_spec", None)
+    return effect is not None and effect.effect_class is EffectClass.READ_ONLY
 
 
 @dataclass
@@ -4301,6 +4332,9 @@ class SubagentRunner:
         _empty_lead_retry_attempted = False
         _empty_lead_retry_iteration: int | None = None
         _delivery_text_reviewed = False
+        # Lead's delivery-review correction after a failed call: only review, read-only
+        # checks or a user question may run until the Turn ends (see the bounce below).
+        _review_closeout_only = False
         _empty_peer_closeout_attempted = False
         # Settings have their own admitted terminal Tool; never substitute a
         # generic payload return for their original submission/receipt checks.
@@ -5995,6 +6029,8 @@ class SubagentRunner:
                     make_tool_call=lambda i, n, a: ToolCall(id=i, name=n, arguments=a),
                 )
                 if _salvaged:
+                    # Provider reasoning never covered these recovered calls; the next request continues without thinking.
+                    resp.provider_reasoning = None
                     logger.warning(
                         "subagent.tool_call_salvaged_from_text profile=%s tools=%s",
                         profile.name,
@@ -6108,7 +6144,7 @@ class SubagentRunner:
                         except Exception:  # noqa: BLE001 — gate itself must never fail a turn
                             logger.warning("subagent.final_answer_gate_failed profile=%s", profile.name, exc_info=True)
                             _bounce = None
-                    from bowhead_core.tool_delivery_review import delivery_review_enabled, requires_delivery_review, review_guidance
+                    from bowhead_core.tool_delivery_review import delivery_review_enabled, failed_calls, requires_delivery_review, review_guidance
 
                     if (
                         _bounce is None
@@ -6120,11 +6156,29 @@ class SubagentRunner:
                         and (delivery_review_carrier is None or await delivery_review_carrier.current(invocations, parent_ctx) is None)
                     ):
                         _delivery_text_reviewed = True
-                        _bounce = review_guidance(invocations, review_tool=delivery_review_carrier.name if delivery_review_carrier else None)
+                        # Lead already ended its work with this answer while a call had failed. The
+                        # review checks that answer; it never authorizes new or alternative work the
+                        # user has not approved (116 t_7edbc155f8d8 dispatched an unapproved redraw).
+                        _review_closeout_only = profile.name == "lead" and bool(failed_calls(invocations))
+                        _bounce = review_guidance(
+                            invocations,
+                            review_tool=delivery_review_carrier.name if delivery_review_carrier else None,
+                            closeout_only=_review_closeout_only,
+                            ask_tool="clarification_ask" if profile.name == "lead" and "clarification_ask" in effective_whitelist else None,
+                        )
                     if _bounce:
                         correction = _bounce if isinstance(_bounce, FinalAnswerCorrection) else FinalAnswerCorrection(_bounce)
                         messages.append(Message(role="assistant", content=resp.content or "", name=correction.assistant_history_name))
-                        messages.append(Message(role="user", content=correction.instruction))
+                        # A server-authored runtime note, never the user's reply to that answer.
+                        messages.append(Message(role="user", name=RUNTIME_CORRECTION_NOTE_NAME, content=correction.instruction))
+                        if profile.name == "lead" and (resp.content or "").strip():
+                            # The rejected final already streamed; supersede it like every Lead bounce.
+                            _rejected_hook = getattr(parent_ctx, "_final_answer_rejected", None)
+                            if callable(_rejected_hook):
+                                try:
+                                    _rejected_hook()
+                                except Exception:  # noqa: BLE001 — presentation bookkeeping must never fail a turn
+                                    logger.warning("subagent.final_answer_rejected_hook_failed", exc_info=True)
                         _bounce_pending = True
                         logger.warning("subagent.final_answer_bounced profile=%s iteration=%d", profile.name, iteration)
                         continue
@@ -6186,6 +6240,7 @@ class SubagentRunner:
                     role="assistant",
                     content=resp.content,
                     tool_calls=list(resp.tool_calls),
+                    provider_reasoning=resp.provider_reasoning,
                 )
             )
             # ─── Sprint χ-2 (tech-design-r3 §3.1): sequential precheck / parallel execution / ordered append ───
@@ -6271,6 +6326,23 @@ class SubagentRunner:
                         Message(
                             role="tool",
                             content=scope_error,
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                        )
+                    )
+                    continue
+                if _review_closeout_only and not _review_closeout_admits(
+                    tc.name,
+                    parent_ctx.tool_view or self.tool_registry,
+                    review_tool=delivery_review_carrier.name if delivery_review_carrier else None,
+                ):
+                    # Not executed: no step, receipt or effect exists for this call.
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=_REVIEW_CLOSEOUT_REFUSAL.format(
+                                review_tool=delivery_review_carrier.name if delivery_review_carrier else "the delivery review"
+                            ),
                             tool_call_id=tc.id,
                             name=tc.name,
                         )
@@ -8091,7 +8163,14 @@ class SubagentRunner:
             rejected = bool(current) and all(isinstance(inv.result, dict) and inv.result.get("error") in _COORDINATION_CORRECTABLE for inv in current)
             if correction or not (rejected or (not current and pending_ids)):
                 break
-            transcript.append(Message(role="assistant", content=response.content or "", tool_calls=response.tool_calls))
+            transcript.append(
+                Message(
+                    role="assistant",
+                    content=response.content or "",
+                    tool_calls=response.tool_calls,
+                    provider_reasoning=response.provider_reasoning,
+                )
+            )
             transcript.extend(
                 Message(role="tool", name=inv.tool_name, tool_call_id=inv.call_id, content=json.dumps(inv.result, ensure_ascii=False))
                 for inv in current
@@ -8251,6 +8330,7 @@ class SubagentRunner:
         async def _attempt_stream() -> LLMResponse:
             full_text = ""
             thinking_text = ""
+            provider_reasoning: dict[str, Any] | None = None
             visible_output_seen = False
             accumulated_tool_calls: list[ToolCall] = []
             finish_reason: Any = "stop"
@@ -8269,7 +8349,8 @@ class SubagentRunner:
 
             async def _withdraw_attempt() -> None:
                 """Discard everything the restarted attempt produced and published."""
-                nonlocal full_text, thinking_text, visible_output_seen, finish_reason, usage, response_diagnostics, partial_answer_chars
+                nonlocal full_text, thinking_text, provider_reasoning, visible_output_seen
+                nonlocal finish_reason, usage, response_diagnostics, partial_answer_chars
                 discarded_narrative_chars = 0
                 if stream_restart_callback is not None:
                     try:
@@ -8282,6 +8363,7 @@ class SubagentRunner:
                 discarded_step_ids = list(_lead_writing_started)
                 full_text = ""
                 thinking_text = ""
+                provider_reasoning = None
                 visible_output_seen = False
                 accumulated_tool_calls.clear()
                 finish_reason = "stop"
@@ -8341,7 +8423,8 @@ class SubagentRunner:
                     logger.warning("llm.stream_restart_emit_failed turn=%s sub=%s", turn_id, subagent_id, exc_info=True)
 
             async def _drain() -> None:
-                nonlocal full_text, thinking_text, visible_output_seen, finish_reason, usage, response_diagnostics, partial_answer_chars
+                nonlocal full_text, thinking_text, provider_reasoning, visible_output_seen
+                nonlocal finish_reason, usage, response_diagnostics, partial_answer_chars
                 if bus is not None:
                     raise_if_terminal_bus_failed(bus)
                 it = self.router.stream(
@@ -8431,6 +8514,8 @@ class SubagentRunner:
                                 )
                     if chunk.thinking_delta:
                         thinking_text += chunk.thinking_delta
+                    if chunk.provider_reasoning is not None:
+                        provider_reasoning = chunk.provider_reasoning
                     if chunk.tool_call_delta is not None:
                         accumulated_tool_calls.append(chunk.tool_call_delta)
                     # Sprint chat-redesign-2026-05-21 Phase 1.1 (Spike 1) —
@@ -8571,6 +8656,7 @@ class SubagentRunner:
                 usage=usage,
                 thinking=thinking_text,
                 diagnostics=response_diagnostics,
+                provider_reasoning=provider_reasoning,
             )
 
         # Router owns all target retries. Subagent makes one logical stream call.
@@ -8973,6 +9059,16 @@ class SubagentRunner:
                 if dispatch_ctx is ctx:
                     dispatch_ctx = copy.copy(ctx)
                 dispatch_ctx.role = "analyst"
+            # Lets a handler that waits for the requester attach its confirmation to this step.
+            if dispatch_ctx is ctx:
+                dispatch_ctx = copy.copy(ctx)
+            dispatch_ctx.tool_step = ToolStepRef(
+                bus=bus,
+                card_id=parent_turn_id,
+                step_id=_step_id,
+                call_id=tc.id,
+                parent_agent_id=subagent_id if running_profile != "lead" else None,
+            )
             # One shared Turn budget covers every Tool, including automatic calls.
             from bowhead_core.agent_run_limits import get_tool_call_budget
 
@@ -10086,6 +10182,31 @@ _SKIP_LABELS_EN = {
     "not_an_image": "not an image",
     "design_v2a_disabled": "layout disabled",
 }
+#: User-visible words for the finite Tool failure codes (`tool_outcome.classify_tool_outcome`).
+#: A failed call never shows its raw result JSON or an internal error string in the step row.
+_FAILURE_LABELS: dict[str, tuple[str, str]] = {
+    "tool_arguments_invalid": ("参数无效", "invalid input"),
+    "tool_resource_unavailable": ("所需内容不可用", "resource unavailable"),
+    "tool_code_failed": ("代码运行出错", "code error"),
+    "tool_execution_timeout": ("超时", "timed out"),
+    "tool_execution_unknown": ("结果未知", "outcome unknown"),
+    "tool_execution_failed": ("执行出错", "execution error"),
+    "tool_delivery_review_required": ("需要核对交付", "delivery check required"),
+}
+#: Tools whose branches below already word their own failure; they read the shared failure test.
+_TOOLS_WITH_FAILURE_WORDING = frozenset(
+    {
+        "python_sandbox",
+        "subagent_return",
+        "memory_write",
+        "memory_propose",
+        "memory_add",
+        "remember",
+        "bi_ask_question",
+        "bi_list_measures",
+        "bi_list_dimensions",
+    }
+)
 
 
 def _prettify_output_preview(
@@ -10162,6 +10283,23 @@ def _prettify_output_preview(
             return _t("无可访问的工作区 · 名单为空", "No accessible workspaces")
         if _kind == "switch_streak_paused":
             return _t("连环切换已暂停 · 先盘点当前工作区", "Rapid switching paused · inspect current workspace first")
+
+    # Dict-shaped Tool errors (`{"error": …}`, `{"ok": false, …}`) mark the step failed through the shared
+    # outcome extraction; the summary must agree before any per-Tool success wording. 116 t_7edbc155f8d8:
+    # failed `add_chart` rows read "Added · chart" and failed `read_chart` rows showed raw JSON.
+    # Expected outcomes (`_is_non_failure_result`) stay neutral above.
+    _failed = isinstance(result, dict) and _extract_result_ok(result) is False and not _is_non_failure_result(result)
+    if _failed and tool_name not in _TOOLS_WITH_FAILURE_WORDING:
+        _code = classify_tool_outcome(result).code or "tool_execution_failed"
+        _zh_label, _en_label = _FAILURE_LABELS.get(_code, _FAILURE_LABELS["tool_execution_failed"])
+        if is_canvas_add_tool(tool_name) and not result.get("skipped"):
+            _reason = _extract_result_error(result)[1] or ""
+            return _t(
+                f"未添加 · {_SKIP_LABELS_ZH.get(_reason, _zh_label)}",
+                f"Not added · {_SKIP_LABELS_EN.get(_reason, _en_label)}",
+            )
+        if not is_canvas_add_tool(tool_name):
+            return _t(f"失败: {_zh_label}", f"Failed: {_en_label}")
 
     # tool_switch_context success: {switched:{name}, note}; previously no branch, so users saw
     # a raw JSON dump in expanded step lists (116 hardware screenshot evidence; added by bi-workspace-tour).
@@ -10372,7 +10510,7 @@ def _prettify_output_preview(
     if tool_name == "python_sandbox" and isinstance(result, dict):
         ok = result.get("ok")
         exit_code = result.get("exit_code")
-        if ok is False or (isinstance(exit_code, int) and exit_code != 0):
+        if _failed or ok is False or (isinstance(exit_code, int) and exit_code != 0):
             return _t("运行出错", "Run failed")
         # Count stdout output blocks if available
         outputs = result.get("outputs") or result.get("stdout_blocks")
@@ -10446,7 +10584,7 @@ def _prettify_output_preview(
         # "payload 已交" (success fallback) because summary is None, leaving
         # users confused by "❌ 出错 · payload 已交" contradiction. Surface the
         # actual rejection reason so the failure row reads "payload 拒收: …".
-        if result.get("ok") is False:
+        if _failed or result.get("ok") is False:
             # ⚠ Prefer `error_message` (user-facing), then fall back to `error` (**model-facing self-healing instructions**).
             # `subagent_return_tool`'s args-parse branch includes both; `error` contains:
             # Exact guidance: "请修正后原样重发；先检查转义…（错误位置 offset=1083，附近原文：…）.
@@ -10495,7 +10633,7 @@ def _prettify_output_preview(
     # stored record is already the step label, so the row says only whether it was saved; without this branch the
     # remember step fell through to the raw-JSON fallback (116 1.5.19: `{"ok": true, "id": "mem_…", "stored": …}`).
     if tool_name in ("memory_write", "memory_propose", "memory_add", "remember") and isinstance(result, dict):
-        if result.get("ok") is False:
+        if _failed or result.get("ok") is False:
             return _t("未存入记忆", "Not saved to memory")
         return _t("已存入记忆", "Saved to memory")
 
@@ -10511,7 +10649,7 @@ def _prettify_output_preview(
         conf = result.get("confidence")
         if isinstance(conf, (int, float)):
             return _t(f"置信 {conf:.2f}", f"confidence {conf:.2f}")
-        if result.get("ok") is False:
+        if _failed or result.get("ok") is False:
             return _t("无法回答", "Cannot answer")
         return _t("已答", "Answered")
 
@@ -10523,7 +10661,7 @@ def _prettify_output_preview(
         "bi_list_measures",
         "bi_list_dimensions",
     ) and isinstance(result, dict):
-        if result.get("ok") is False:
+        if _failed or result.get("ok") is False:
             return _t("失败", "Failed")
         for key in ("count", "n", "size"):
             n = result.get(key)
@@ -11291,6 +11429,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "Set delegation_role=helper only for a separate assisting task. "
                         "Do not ask the user to reselect the Agent or substitute another receiver."
                     ),
+                    # `path` names the failed argument (never its value) for the step diagnostic's safe_detail.
+                    **({"path": "delegation_role"} if str(exc) == "reference_delegation_role_required" else {}),
                 }
             refused = _reference_continuation_refusal(str(exc))
             if refused is not None:
@@ -11417,11 +11557,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                 "ok": False,
                 "error_kind": "invalid_args",
                 "error": "Include required_source_urls with the exact required pages, or [] for an output-only task.",
+                "path": "required_source_urls",
             }
         try:
             declared_sources = required_source_urls(args.get("required_source_urls", []))
         except ValueError as exc:
-            return {"ok": False, "error_kind": "invalid_args", "error": str(exc)}
+            return {"ok": False, "error_kind": "invalid_args", "error": str(exc), "path": "required_source_urls"}
         from copy import copy as copy_source_scope
 
         def source_context(context):
@@ -11527,6 +11668,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                             else "canvas_mode is required: one of new_report | revise | append"
                         ),
                         "error_kind": "invalid_args",
+                        "path": "canvas_mode",
                         "hint": (
                             "这是参数问题，不是系统故障：补上 canvas_mode 重新调用本工具即可，不要告诉用户稍后重试。"
                             "画布已有报告：用户只补一句收窄口径/改数/改措辞 → revise；要加一节 → append；另出一份或换主题 → new_report。"
@@ -11617,6 +11759,7 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                         "error": f"用户点名的章节在报告里找不到：{'、'.join(_unresolved)}",
                         "error_kind": "invalid_args",
                         "reason_code": "revise_scope_unresolved",
+                        "path": "revise_scope",
                     }
                     if _resumed:
                         # 续跑轮（用户刚答过一次澄清）不许再问第二次（clarification_ask 会被 resume_guard 拒）——
@@ -13277,6 +13420,8 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                     "画布报告的续轮档位（必传，一轮一个档位）：画布上已有报告时——用户只补一句收窄口径/改数/改措辞"
                     "（如「2026年1-6月」「改成上半年口径」「第二章措辞收一下」）→ 'revise'（同一份报告就地改段；"
                     "改数和改措辞都派 compute，它能重新取数并用 write_report 就地改段）；"
+                    "只改报告里某张图的展示（标题、颜色、标签、图例、格式、支持的图表类型）也是 'revise'："
+                    "task 里写明那张图的标题和真实 section id，让 compute 用 read_chart + edit_chart 就地改它，不要新画一张；"
                     "用户要加一节 → 'append'；用户明说另出一份或换主题 → 'new_report'。画布没有报告 → 'new_report'。"
                 ),
             },
@@ -13462,7 +13607,12 @@ def register_subagent_tool(tool_registry: ToolRegistry) -> None:
                                 "If delegating data retrieval for a native template edit, assign retrieval only and leave the template edit with the Lead. "
                                 "For a delegated analysis, leave field names, analysis depth and comparable calculation methods to the specialist "
                                 "unless the user specified them. Forward ambiguous metric definitions as given. For example, 'find the fastest growth' "
-                                "does not specify first-to-last month change or compound growth, and a requested year can still require a prior-year baseline."
+                                "does not specify first-to-last month change or compound growth, and a requested year can still require a prior-year baseline. "
+                                "For a presentation-only change to an existing chart (title, subtitle, colors, labels, legend, formats or a supported "
+                                "chart type), name that chart's title and real section ID and ask for an in-place edit with read_chart and edit_chart, "
+                                "not a new chart; changed data or scope still needs a new chart. "
+                                "State only the user's requests as requirements. Label any styling, method or content idea of your own as an "
+                                "optional suggestion; never present it as the user's request."
                             ),
                         },
                         "extra_instructions": {

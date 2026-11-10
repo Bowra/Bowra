@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Every failure reason has list copy and a drawer title in both Chinese and English (source_missing previously lacked a drawer title, exposing the raw key).
 import { describe, expect, it } from "vitest";
 

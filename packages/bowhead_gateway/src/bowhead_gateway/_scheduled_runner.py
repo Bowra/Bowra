@@ -365,6 +365,7 @@ async def _deliver_run_result(
     channels = job.notify_channels or {}
     emails = channels.get("email") or []
     if not (emails or channels.get("deliver_on_success")):
+        await _release_held_alert_email(app, job, run_id)
         return
     if await _skipped_without_alert(app, job, channels, run_id=run_id):
         return
@@ -443,17 +444,70 @@ async def _record_run_delivery(
     Each configured address must belong to an active member of the task's Team (the same allowlist,
     at most 5 people); the delivery worker sends, retries and records each outcome for the run
     history. Addresses that match no member are dropped and logged without the address.
+
+    When the run raised an urgent alert, the owner's result email says so and replaces the held
+    alert email; an owner who gets no result email receives the alert email now.
     """
-    user_store = getattr(app.state, "user_store", None)
-    members = await user_store.team_member_ids_by_email(team_id) if (user_store is not None and team_id) else {}
-    user_ids = list(dict.fromkeys(members[e] for e in (str(a).strip().lower() for a in emails) if e in members))[:5]
+    user_ids = await _result_email_user_ids(app, emails, team_id)
     dropped = len(emails) - len(user_ids)
     if dropped:
         logger.warning("scheduler.delivery_recipients_dropped job=%s dropped=%d (non-member/unverified)", job.id, dropped)
     try:
-        await notif.emit_routine_delivered(job, run_id=run_id, session_id=session_id, summary=summary, email_user_ids=user_ids)
+        urgent = await notif.routine_alert_level(job, run_id=run_id) == "urgent"
+    except Exception:
+        logger.warning("scheduler.alert_lookup_failed job=%s run=%s", job.id, run_id, exc_info=True)
+        urgent = False
+    delivered = None
+    try:
+        delivered = await notif.emit_routine_delivered(
+            job, run_id=run_id, session_id=session_id, summary=summary, email_user_ids=user_ids, flagged_urgent=urgent
+        )
     except Exception as exc:
         logger.warning("scheduler.routine_delivered_failed job=%s err=%s", job.id, exc)
+    if urgent:
+        await _settle_alert_email(notif, job, run_id, merged=delivered is not None and job.user_id in user_ids)
+
+
+async def _result_email_user_ids(app: FastAPI, emails: list[str], team_id: str | None) -> list[str]:
+    """The members a result email goes to: configured addresses of active Team members, at most 5."""
+    user_store = getattr(app.state, "user_store", None)
+    members = await user_store.team_member_ids_by_email(team_id) if (user_store is not None and team_id) else {}
+    return list(dict.fromkeys(members[e] for e in (str(a).strip().lower() for a in emails) if e in members))[:5]
+
+
+async def routine_result_email_reaches_owner(app: FastAPI, run: Any) -> bool:
+    """Whether this run's result email will go to the task owner (FEATURE_NOTIFICATION_DELIVERY).
+
+    True when the task emails its results and the owner's address is among the member recipients.
+    An urgent alert in such a run holds its email for the result email to carry it.
+    """
+    scheduled_store = getattr(app.state, "scheduled_store", None)
+    user_store = getattr(app.state, "user_store", None)
+    if scheduled_store is None or user_store is None:
+        return False
+    job = await scheduled_store.get(run.job_id)
+    if job is None or job.user_id != run.owner_id:
+        return False
+    emails = (job.notify_channels or {}).get("email") or []
+    if not emails:
+        return False
+    team_id = await user_store.get_workspace_team_id(job.workspace_id)
+    return job.user_id in await _result_email_user_ids(app, emails, team_id)
+
+
+async def _settle_alert_email(notif: Any, job: ScheduledJob, run_id: str, *, merged: bool) -> None:
+    try:
+        await notif.settle_routine_alert_email(job, run_id=run_id, merged=merged)
+    except Exception:
+        # A held alert email still goes out when its wait ends.
+        logger.warning("scheduler.alert_email_settle_failed job=%s run=%s", job.id, run_id, exc_info=True)
+
+
+async def _release_held_alert_email(app: FastAPI, job: ScheduledJob, run_id: str | None) -> None:
+    """A run that ends without a result email lets its held urgent alert email go now."""
+    notif = getattr(app.state, "notification_service", None)
+    if run_id and notif is not None and getattr(notif, "delivery_enabled", False):
+        await _settle_alert_email(notif, job, run_id, merged=False)
 
 
 async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict[str, Any], *, run_id: str) -> bool:
@@ -979,6 +1033,7 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
                     logger.warning("scheduler.pause_notify_failed job=%s err=%s", job.id, exc)
             return RunOutcome(error=bind_err)
 
+    turn_id: str | None = None
     try:
         from bowhead_core.agent_execution_binding import TurnAgentBindingInput
 
@@ -1003,9 +1058,16 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
         from bowhead_core.types import ScheduledRunRef
 
         turn_id = f"t_sched_{uuid4().hex[:10]}"
+        from bowhead_gateway.chart_authoring_projection import actor_chart_authoring_projection
+
         tr = TurnRequest(
             turn_id=turn_id,
             session_id=session_id,
+            # A scheduled run has no browser request: chart tools verify sources
+            # for the job owner through the same actor-bound report authority.
+            chart_authoring_projection=actor_chart_authoring_projection(
+                app, session_id=session_id, workspace_id=job.workspace_id, team_id=team_id or "", user_id=job.user_id
+            ),
             # The positive signal that this Turn is a scheduled run (admits routine_notify).
             scheduled_run=ScheduledRunRef(
                 job_id=job.id,
@@ -1074,6 +1136,7 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
             job.id,
             type(e).__name__,
         )
+        await _release_held_alert_email(app, job, turn_id)
         return RunOutcome(error="scheduled_turn_failed")
 
     # Outcome gate: only a COMPLETED turn is a real success. Anything else (failed / awaiting_approval /
@@ -1096,8 +1159,10 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
             # an ordering fence.
             await orchestrator.event_registry.drain_turn_persistence(tr.turn_id)
             logger.info("scheduler.turn_awaiting_input job=%s turn=%s", job.id, tr.turn_id)
+            await _release_held_alert_email(app, job, tr.turn_id)
             return RunOutcome(turn_id=tr.turn_id, awaiting=True, session_id=tr.session_id)
         logger.info("scheduler.turn_not_completed job=%s status=%s", job.id, status_val)
+        await _release_held_alert_email(app, job, tr.turn_id)
         return RunOutcome(error=_turn_status_failure_code(status_val))
 
     # Phase B delivery (opt-in, success path). Extract `_deliver_run_result` for reconciliation reuse:

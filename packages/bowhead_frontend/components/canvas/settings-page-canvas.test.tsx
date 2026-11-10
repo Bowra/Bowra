@@ -11,11 +11,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderIntl } from "@/__tests__/intl-render";
 import messages from "@/messages/en-US.json";
 
-vi.mock("@/lib/api", () => ({
-  getWorkspaceMetadata: vi.fn(),
-  getWorkspaceSettings: vi.fn(),
-  setWorkspaceSetting: vi.fn(),
-}));
+vi.mock("@/lib/api", () => {
+  const getWorkspaceSettings = vi.fn();
+  return {
+    getWorkspaceMetadata: vi.fn(),
+    getWorkspaceSettings,
+    getWorkspaceSettingsView: async (...args: unknown[]) => ({ settings: await getWorkspaceSettings(...args) }),
+    setWorkspaceSetting: vi.fn(),
+  };
+});
 import {
   getWorkspaceMetadata,
   getWorkspaceSettings,

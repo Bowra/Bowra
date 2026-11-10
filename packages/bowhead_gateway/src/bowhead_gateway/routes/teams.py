@@ -481,7 +481,13 @@ async def _start_turn(
     from bowhead_core import TurnRequest
     from bowhead_gateway._turn_runtime import _resolve_turn_datarc_runtime
     from bowhead_gateway.channel_language import resolve_channel_turn_language
-    from bowhead_gateway.turn_service import admit_legacy_chat_execution, resolve_team_model_runtime, spawn_turn
+    from bowhead_gateway.turn_service import (
+        admit_legacy_chat_execution,
+        is_session_busy_rejection,
+        resolve_team_model_runtime,
+        session_has_active_turn,
+        spawn_turn,
+    )
 
     conversation = activity.get("conversation") if isinstance(activity.get("conversation"), dict) else {}
     session_id = f"teams:{connection.entra_tenant_id}:{conversation.get('id')}:{user_id}"
@@ -559,6 +565,11 @@ async def _start_turn(
         )
         return
     await orchestrator.session_store.ensure_session(session_id=session_id, workspace_id=workspace_id, user_id=user_id)
+    busy_card = _card(im_interface_message("session_busy_title", locale), im_interface_message("channel_session_busy", locale))
+    # Teams has no steer and one Session per personal chat: any message during a running Turn lands here.
+    if await session_has_active_turn(orchestrator, session_id):
+        await _send_activity(request, activity, connection, busy_card)
+        return
     turn = TurnRequest(
         session_id=session_id,
         workspace_id=workspace_id,
@@ -577,15 +588,22 @@ async def _start_turn(
     )
     bus = await admit_legacy_chat_execution(orchestrator, turn)
     await _send_activity(request, activity, connection, _card(im_interface_message("processing_title", locale), text[:1000]))
-    await spawn_turn(
-        orchestrator,
-        turn,
-        user_store=request.app.state.user_store,
-        team_id=team_id,
-        entitlements=getattr(request.app.state, "entitlements", None),
-        name_prefix="turn_run_teams",
-        admitted_legacy_bus=bus,
-    )
+    try:
+        await spawn_turn(
+            orchestrator,
+            turn,
+            user_store=request.app.state.user_store,
+            team_id=team_id,
+            entitlements=getattr(request.app.state, "entitlements", None),
+            name_prefix="turn_run_teams",
+            admitted_legacy_bus=bus,
+        )
+    except ValueError as exc:
+        # Another Turn started after the pre-check; spawn_turn already released this one.
+        if not is_session_busy_rejection(exc):
+            raise
+        await _send_activity(request, activity, connection, busy_card)
+        return
     task = asyncio.create_task(
         _mirror_turn(request, activity, connection, turn.turn_id, locale, language_context.output_language), name=f"teams_mirror:{turn.turn_id}"
     )

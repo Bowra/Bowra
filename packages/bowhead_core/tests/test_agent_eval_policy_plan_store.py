@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from bowhead_core._db import open_shared_ctx
 from bowhead_core.agent_eval_comparison import (
     RUN_SCHEDULING_SLACK_MS,
@@ -33,9 +31,7 @@ from bowhead_core.agent_execution_binding import AgentExecutionBindingStore
 from bowhead_core.agent_revision_store import AgentPublicationValidation, AgentReleaseStaleError, AgentRevisionStore
 from bowhead_core.agent_version_automation import AgentVersionAutomationError
 from bowhead_core.agent_version_service import AgentVersionError, AgentVersionService
-from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
-
-from bowhead_core import migrations
+from test_agent_execution_binding import _migrated_core_template
 
 pytestmark = pytest.mark.integration
 NOW = "2026-09-14T10:00:00+00:00"
@@ -57,11 +53,9 @@ def _hash_document(value: object) -> str:
 
 
 def _upgrade(path: Path) -> None:
-    config = Config()
-    config.set_main_option("script_location", str(Path(migrations.__file__).resolve().parent))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
-    config.attributes["bowhead_target"] = "core"
-    command.upgrade(config, SOURCE_REVISION)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(_migrated_core_template()) as source, sqlite3.connect(path) as destination:
+        source.backup(destination)
 
 
 def _seed(path: Path, *, owner_expected_contract: dict[str, Any] | None = None) -> None:

@@ -135,10 +135,23 @@ async def test_review_then_exact_partial_update_and_readback_preserve_other_fiel
 
 @pytest.mark.parametrize("decision", ["reject", "expire", "cancel"])
 async def test_unapproved_change_never_dispatches(setup, monkeypatch, decision):
+    from bowhead_core.tool_registry import ToolStepRef
+
+    class Bus:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, event):
+            self.events.append((event.event_type, dict(event.payload)))
+            return True
+
+    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
     api = RecordingApi([reply("product", obj())] * 2, scopes=setup.scopes)
     transport(monkeypatch, api)
     view = specs(setup)
     change = await preview(setup, view)
+    bus = Bus()
+    setup.ctx.tool_step = ToolStepRef(bus=bus, card_id=setup.ctx.turn_id, step_id="step_apply", call_id="apply")
     waiting = asyncio.create_task(view["teammcp.ibt_one.shopify_apply_content_update"].handler(change, setup.ctx))
     item = await wait_pending()
     if decision == "cancel":
@@ -152,6 +165,13 @@ async def test_unapproved_change_never_dispatches(setup, monkeypatch, decision):
         assert result["error_code"] == "shopify_content_confirmation_" + ("rejected" if decision == "reject" else "expired")
     assert not mutation_requests(api)
     assert content.default_shopify_content_confirmations().pending("user_1") == []
+    requested = bus.events[0][1]
+    assert bus.events[0][0] == "confirmation_requested" and requested["confirmation_id"] == item["id"]
+    assert requested["kind"] == "shopify_content" and requested["source_label"] == "ibt-one.myshopify.com"
+    assert "Improved copy" not in repr(requested)
+    # Stop emits nothing more; the view derives "not run" from the Turn's terminal events.
+    expected = {"reject": ["rejected"], "expire": ["expired"], "cancel": []}[decision]
+    assert [payload["outcome"] for _, payload in bus.events[1:]] == expected
 
 
 @pytest.mark.parametrize(

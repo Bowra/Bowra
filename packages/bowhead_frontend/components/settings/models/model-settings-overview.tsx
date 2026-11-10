@@ -16,6 +16,7 @@ import {
   Spinner,
 } from "@/components/icons";
 import type { LlmReadiness, LlmReadinessRow } from "@/lib/llm-config-api";
+import { formatDateTime } from "@/lib/locale";
 import {
   attentionBreakdown,
   attentionCount,
@@ -171,13 +172,7 @@ function EvidenceRow({
   const t = useTranslations("settings.models.overview");
   const locale = useLocale();
   const [confirming, setConfirming] = useState(false);
-  const observedDate = row.observed_at ? new Date(row.observed_at) : null;
-  const observedAt = observedDate && !Number.isNaN(observedDate.valueOf())
-    ? new Intl.DateTimeFormat(locale, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(observedDate)
-    : null;
+  const observedAt = formatDateTime(row.observed_at, locale, { dateStyle: "medium" }) || null;
   // ★ Both sources essential: `attempt_state` is truth **after** refresh,
   // `verifyingRowKey` covers just-clicked, not-yet-finished-batch window;
   // using only first would reenable button there, duplicating requests to customer model service.

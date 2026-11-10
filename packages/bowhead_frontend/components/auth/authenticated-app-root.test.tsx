@@ -51,9 +51,9 @@ vi.mock("@/components/chat/toast-container", () => ({
   ToastContainer: () => <div data-testid="toast" />,
 }));
 
-vi.mock("@/components/chat/personal-mcp-confirmations", () => ({ PersonalMcpConfirmations: () => <div data-testid="personal-mcp-confirmations" /> }));
-vi.mock("@/components/chat/email-send-confirmations", () => ({ EmailSendConfirmations: () => <div data-testid="email-send-confirmations" /> }));
-vi.mock("@/components/chat/team-tool-confirmations", () => ({ TeamToolConfirmations: () => <div data-testid="team-tool-confirmations" /> }));
+vi.mock("@/components/chat/tool-confirmation/ToolConfirmationSurfaces", () => ({
+  ToolConfirmationSurfaces: () => <div data-testid="tool-confirmation-surfaces" />,
+}));
 
 import { AuthenticatedAppRoot } from "./authenticated-app-root";
 
@@ -79,6 +79,7 @@ describe("AuthenticatedAppRoot", () => {
     expect(screen.getByTestId("app-chrome").dataset.chrome).toBe(
       "product-shell",
     );
+    expect(screen.getByTestId("tool-confirmation-surfaces")).toBeTruthy();
   });
 
   it("gates onboarding with standalone chrome", () => {
@@ -116,4 +117,3 @@ describe("AuthenticatedAppRoot", () => {
   });
 });
 
-vi.mock("@/components/chat/shopify-content-confirmations", () => ({ ShopifyContentConfirmations: () => <div data-testid="shopify-content-confirmations" /> }));

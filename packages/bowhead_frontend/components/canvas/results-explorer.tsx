@@ -23,6 +23,7 @@ import type {
   ResultsFiltersDTO,
   ResultsQueryResponse,
 } from "@/lib/results-api";
+import { formatDateTime } from "@/lib/locale";
 import { resultDisplayTitle } from "@/lib/results-workspace-model";
 import type { ResultsCompletedView } from "@/lib/use-results-query";
 import { CharIcon } from "@/components/char-icon";
@@ -777,17 +778,8 @@ function itemContext(
     }));
   }
   if (context.occurred_at) {
-    const occurredAt = new Date(context.occurred_at);
-    if (!Number.isNaN(occurredAt.getTime())) {
-      pieces.push(new Intl.DateTimeFormat(locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(occurredAt));
-    }
+    const occurredAt = formatDateTime(context.occurred_at, locale, { dateStyle: "medium", timeStyle: "medium" });
+    if (occurredAt) pieces.push(occurredAt);
   }
   return pieces.join(" · ");
 }

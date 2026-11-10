@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import type { KbDocTypeDTO } from "@/lib/kb-knowledge-tables-api";

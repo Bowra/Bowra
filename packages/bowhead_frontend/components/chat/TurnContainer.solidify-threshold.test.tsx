@@ -41,7 +41,7 @@ function archived(n: number): ArchivedTurn[] {
     traceSteps: [],
     peersDispatched: [],
     errorReason: null,
-    archivedAt: 1_700_000_000_000 + i * 60_000,
+    endedAt: 1_700_000_000_000 + i * 60_000,
   })) as ArchivedTurn[];
 }
 

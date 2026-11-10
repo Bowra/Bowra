@@ -1,3 +1,4 @@
+// @vitest-environment node
 // FR5.2: ≥10MB uses presigned direct upload (uploadViaEnvelopeWithRetry), likewise using transfer progress to distinguish
 // disconnection before the full request body was sent from failure before sending the request.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

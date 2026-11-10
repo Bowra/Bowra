@@ -57,6 +57,7 @@ import {
   type ErrorDiagnostics,
   type ErrorSurface,
 } from "@/lib/error-presentation";
+import { formatDateTime, getCurrentLocale } from "@/lib/locale";
 
 export type ChatCardIntent = "input" | "info" | "success" | "failure" | "progress";
 
@@ -474,12 +475,10 @@ export function ChatCard({
   );
 }
 
+/** Observation time with seconds in the interface language. `getCurrentLocale()`: chat cards render inside
+ *  TurnContainer, whose tests replace next-intl with translation-only mocks. */
 function formatObservedAt(value: string | undefined): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return formatDateTime(value, getCurrentLocale(), { dateStyle: "medium", timeStyle: "medium" }) || null;
 }
 
 /**

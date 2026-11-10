@@ -11,11 +11,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { ShellGlobalControls } from "./global-controls";
 import { Topbar } from "./Topbar";
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
-    values?.name ? `${key}:${String(values.name)}` : key,
-  useLocale: () => "en-US",
-}));
+vi.mock("next-intl", () => {
+  const translate = (key: string, values?: Record<string, unknown>) => values?.name ? `${key}:${String(values.name)}` : key;
+  return { useTranslations: () => translate, useLocale: () => "en-US" };
+});
 
 const mocks = vi.hoisted(() => ({
   setActiveId: vi.fn(),

@@ -2647,18 +2647,14 @@ async def _send_impl(
                 )
             if steer_receipt.outcome == "buffered":
                 try:
-                    from bowhead_core.events import OrchestratorEvent
+                    from bowhead_core.events import make_steer_ack_event
 
                     await get_event_registry().emit_if_local_producer(
                         steer_receipt.turn_id,
-                        OrchestratorEvent(
-                            event_type="emoji_ack",
-                            turn_id=steer_receipt.turn_id,
-                            payload={
-                                "target_msg_id": body.client_info.get("user_msg_id") or f"u_{uuid4().hex[:12]}",
-                                "emoji": "🤝",
-                                "text": text,
-                            },
+                        make_steer_ack_event(
+                            steer_receipt.turn_id,
+                            target_msg_id=body.client_info.get("user_msg_id") or f"u_{uuid4().hex[:12]}",
+                            text=text,
                         ),
                     )
                 except Exception as exc:
@@ -3204,18 +3200,14 @@ async def _send_impl(
                     fallback_code="steer_parent_not_active",
                 )
             try:
-                from bowhead_core.events import OrchestratorEvent
+                from bowhead_core.events import make_steer_ack_event
 
                 await get_event_registry().emit_if_local_producer(
                     steer_receipt.turn_id,
-                    OrchestratorEvent(
-                        event_type="emoji_ack",
-                        turn_id=steer_receipt.turn_id,
-                        payload={
-                            "target_msg_id": body.client_info.get("user_msg_id") or f"u_{uuid4().hex[:12]}",
-                            "emoji": "🤝",
-                            "text": text,
-                        },
+                    make_steer_ack_event(
+                        steer_receipt.turn_id,
+                        target_msg_id=body.client_info.get("user_msg_id") or f"u_{uuid4().hex[:12]}",
+                        text=text,
                     ),
                 )
             except Exception as exc:
@@ -5792,6 +5784,7 @@ async def stream(
         turn_state = "unavailable"
         canonical_turn_status: str | None = None
         terminal_turn_status: str | None = None
+        terminal_turn_ended_at: str | None = None
         if session_store is not None:
             try:
                 t = await session_store.get_turn(turn_id)
@@ -5803,6 +5796,7 @@ async def stream(
                     if normalized_turn_status in _TERMINAL_TURN_STATUSES:
                         turn_state = "terminal"
                         terminal_turn_status = normalized_turn_status
+                        terminal_turn_ended_at = getattr(t, "ended_at", None) or None
                     else:
                         turn_state = "running"
             except Exception:
@@ -5899,6 +5893,8 @@ async def stream(
                         {
                             "turn_id": turn_id,
                             "status": terminal_turn_status,
+                            # The reply byline shows the persisted end time, as after reload.
+                            **({"ended_at": str(terminal_turn_ended_at)} if terminal_turn_ended_at else {}),
                         }
                     ),
                 }
@@ -5991,12 +5987,14 @@ async def stream(
                                     else None
                                 )
                                 if normalized_terminal_status in _TERMINAL_TURN_STATUSES:
+                                    term_ended_at = getattr(t_term, "ended_at", None)
                                     yield {
                                         "event": "done",
                                         "data": _json.dumps(
                                             {
                                                 "turn_id": turn_id,
                                                 "status": normalized_terminal_status,
+                                                **({"ended_at": str(term_ended_at)} if term_ended_at else {}),
                                             }
                                         ),
                                     }
@@ -6090,6 +6088,17 @@ async def stream(
 # ─────────────────────────────────────────────────────────────
 # Background worker
 # ─────────────────────────────────────────────────────────────
+_COMPACT_FAILURE_REASON_MAX_CHARS = 200
+
+
+def _compact_failure_fields(error: BaseException) -> dict[str, str]:
+    """Name one failure for a log line without its traceback or chained context."""
+    reason = " ".join(str(error).split())
+    if len(reason) > _COMPACT_FAILURE_REASON_MAX_CHARS:
+        reason = reason[: _COMPACT_FAILURE_REASON_MAX_CHARS - 1] + "…"
+    return {"error_type": type(error).__name__, "reason": reason}
+
+
 async def _run_turn_and_cleanup(
     orchestrator: Orchestrator,
     req: TurnRequest,
@@ -6246,19 +6255,23 @@ async def _run_turn_and_cleanup(
                     turn_id=req.turn_id,
                     session_id=req.session_id,
                 )
-            except BaseException:
+            except BaseException as marker_error:
                 _preterminal_deferred = False
                 log.warning(
                     "steer.preterminal_cancel_marker_failed",
                     parent_turn=req.turn_id,
-                    exc_info=True,
+                    **_compact_failure_fields(marker_error),
                 )
             raise
-        except Exception:
+        except Exception as materialize_error:
+            # The hook runs while the worker may still be handling a large
+            # (grouped) Turn failure. Rendering that implicit exception context
+            # once stalled the event loop past the dispatch lease, so log only
+            # this failure's own type and reason.
             log.warning(
                 "steer.preterminal_materialize_failed",
                 parent_turn=req.turn_id,
-                exc_info=True,
+                **_compact_failure_fields(materialize_error),
             )
             # Do not let the lease monitor terminalize this dispatch. Durable
             # maintenance will retry and project a recoverable child Turn.
@@ -6267,12 +6280,12 @@ async def _run_turn_and_cleanup(
                     turn_id=req.turn_id,
                     session_id=req.session_id,
                 )
-            except Exception:
+            except Exception as marker_error:
                 _preterminal_deferred = False
                 log.warning(
                     "steer.preterminal_failure_marker_failed",
                     parent_turn=req.turn_id,
-                    exc_info=True,
+                    **_compact_failure_fields(marker_error),
                 )
             # Never deliver parent terminal after accepted steer work became
             # uncertain. The finalizer retries materialization/marker and then

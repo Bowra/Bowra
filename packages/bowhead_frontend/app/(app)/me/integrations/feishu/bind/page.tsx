@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Check, Lock, Spinner } from "@/components/icons";
 import { AppShell } from "@/components/shell/AppShell";
 import { ApiError } from "@/lib/api-client";
+import { formatTime } from "@/lib/locale";
 import {
   completeFeishuBindingSession,
   fetchFeishuBindingSession,
@@ -485,13 +486,7 @@ function formatCountdown(seconds: number): string {
 }
 
 function formatExpiry(expiresAt: string, locale: string): string {
-  const date = new Date(expiresAt);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
+  return formatTime(expiresAt, locale, { seconds: true }) || "—";
 }
 
 function maskEmail(email: string): string {

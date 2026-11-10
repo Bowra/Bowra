@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance page-acceptance finish: Files, Skills, turn replay, miscellaneous states (zero-space guidance, route error boundaries,
  * admin/settings permission denial), Help Center, and Notice / Field gaps from page acceptance A.

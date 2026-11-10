@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import sqlite3
 from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
 from bowhead_core.terminal_protocol_store import TerminalProtocolStore
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from community_http_fixture import community_http_headers, seed_community_http_space
-from gateway_legacy_database import upgrade
 
 from bowhead_core import SessionStore
 
@@ -23,9 +20,9 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, complete_community_http_installation):
+async def app_ctx(tmp_path: Path, complete_community_http_installation, initialize_migrated_core_database):
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{db_path}", target="core")
+    initialize_migrated_core_database(db_path)
     store = SessionStore(db_path)
     await store.initialize()
     app = create_app()
@@ -48,11 +45,9 @@ async def app_ctx(tmp_path: Path, complete_community_http_installation):
 
 
 @pytest.fixture
-async def migrated_app_ctx(tmp_path: Path, complete_community_http_installation):
+async def migrated_app_ctx(tmp_path: Path, complete_community_http_installation, initialize_migrated_core_database):
     db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     store = SessionStore(db_path)
     await store.initialize()
     terminal = TerminalProtocolStore(str(db_path))

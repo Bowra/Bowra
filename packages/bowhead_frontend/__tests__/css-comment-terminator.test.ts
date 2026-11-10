@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Guard: CSS comments must not close prematurely.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { chartThemeBaseForMode } from "../chart-theme";
 import { sharedScaleFixture } from "../../e2e/_chart-shared-scale-fixture";

@@ -157,7 +157,7 @@ export function SourceToolCategoryDialog({
               const selectId = `${idPrefix}-category-${index}`;
               const marked = item.annotation_category;
               return (
-                <li key={item.name} className="legacy-tools-choose-row">
+                <li key={item.name} className="legacy-tools-choose-row legacy-tools-category-row">
                   <div className="legacy-tools-choose-label">
                     <label htmlFor={selectId} className="legacy-tools-choose-name">
                       <span translate="no">{item.name}</span>
@@ -173,7 +173,7 @@ export function SourceToolCategoryDialog({
                   </div>
                   <select
                     id={selectId}
-                    className="ui-input legacy-input-tools"
+                    className="ui-input legacy-input-tools legacy-tools-category-select"
                     value={draft[item.name] ?? ""}
                     disabled={saving || !load.data.enabled}
                     aria-label={t("category_select_label", { tool: item.name })}

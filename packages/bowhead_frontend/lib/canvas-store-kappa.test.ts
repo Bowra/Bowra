@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sprint κ Phase C — canvas-store unit tests for streaming path.
  *

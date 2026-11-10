@@ -14,6 +14,7 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { Notice } from "@/components/ui/notice";
 import { useNarrowViewport } from "@/components/ui/sheet";
 import { formatDateYMD } from "@/lib/format";
+import { formatDate as formatLocaleDate } from "@/lib/locale";
 import { useAppRouter } from "@/lib/use-app-router";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import { ApiError } from "@/lib/api-client";
@@ -116,11 +117,7 @@ export function AccessRequestsContent() {
     [t],
   );
 
-  const formatDate = (iso: string | null | undefined) => {
-    if (!iso) return "";
-    const ms = Date.parse(iso);
-    return Number.isFinite(ms) ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(ms) : "";
-  };
+  const formatDate = (iso: string | null | undefined) => formatLocaleDate(iso, locale);
 
   const load = useCallback(
     async (showLoading = false) => {

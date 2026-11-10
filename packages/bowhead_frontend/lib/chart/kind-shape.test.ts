@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * **Case-by-case parity** between kind-shape.ts and buildChartJSConfig.
  *

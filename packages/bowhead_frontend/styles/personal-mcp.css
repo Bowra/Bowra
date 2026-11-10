@@ -785,3 +785,230 @@
     width: 100%;
   }
 }
+
+/* Inline tool call confirmation: the card under a waiting step, its one-line record, and the notice. */
+.tcf {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 2px 6px 8px 30px;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+.tcf:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.tcf.is-pending {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--c-surface);
+  border: 1px solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
+  border-radius: var(--r-2);
+}
+.tcf p {
+  margin: 0;
+  line-height: 1.55;
+}
+.tcf-head {
+  font-weight: 600;
+}
+.tcf-risk {
+  color: var(--c-warn-ink);
+}
+.tcf-desc,
+.tcf-note,
+.tcf-countdown {
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+.tcf-preview {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.tcf-preview pre,
+.tcf-args pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+  background: var(--c-surface-2);
+  border-radius: var(--r-1);
+}
+.tcf-preview h3 {
+  margin: 4px 0 0;
+  font-size: var(--fs-md);
+}
+.tcf-args {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.tcf-args-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.tcf-args-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.tcf-arg {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
+  gap: 10px;
+}
+.tcf-arg dt {
+  color: var(--c-ink-3);
+  font-family: var(--f-mono, monospace);
+  font-size: var(--fs-sm);
+}
+.tcf-arg dd {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.tcf-arg-fold summary,
+.tcf-args-raw summary {
+  cursor: pointer;
+}
+.tcf-arg-more,
+.tcf-args-raw summary {
+  color: var(--c-accent);
+  font-size: var(--fs-sm);
+}
+.tcf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tcf-btn,
+.tcf-link,
+.tcf-notice-view {
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tcf-btn {
+  padding: 6px 12px;
+  min-height: 36px;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  white-space: normal;
+}
+.tcf-btn:hover:not(:disabled) {
+  background: var(--c-surface-2);
+}
+.tcf-btn.is-approve_session,
+.tcf-btn.is-approve:last-child {
+  color: var(--c-accent-ink);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.tcf-btn.is-approve_session:hover:not(:disabled),
+.tcf-btn.is-approve:last-child:hover:not(:disabled) {
+  background: var(--c-accent-hover);
+}
+.tcf-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.tcf-btn:focus-visible,
+.tcf-link:focus-visible,
+.tcf-notice-view:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.tcf-link {
+  padding: 0;
+  color: var(--c-accent);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+}
+.tcf [role="alert"] {
+  color: var(--c-err);
+  font-size: var(--fs-sm);
+}
+.tcf-record,
+.tcf-waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink-3);
+  font-size: var(--fs-sm);
+}
+.tcf-record-glyph {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-ink-3);
+}
+.tcf-record.is-pos .tcf-record-glyph {
+  background: var(--c-pos);
+}
+.tcf-record.is-neg .tcf-record-glyph {
+  background: var(--c-err);
+}
+.tcf-waiting .tcf-record-glyph {
+  background: var(--c-warn);
+}
+.tcf-band-slot {
+  display: grid;
+  margin-top: 6px;
+}
+.tcf-band-slot .tcf {
+  margin-left: 0;
+  margin-right: 0;
+}
+.tcf-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: var(--z-drawer);
+  display: grid;
+  gap: 6px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.tcf-notice:empty {
+  display: none;
+}
+.tcf-notice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  color: var(--c-ink);
+  font-size: var(--fs-md);
+  background: var(--c-surface);
+  border: 1px solid color-mix(in srgb, var(--c-warn) 35%, var(--c-line));
+  border-radius: var(--r-2);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+}
+.tcf-notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tcf-notice-view {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  color: var(--c-accent);
+  background: transparent;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+}
+@media (max-width: 640px) {
+  .tcf {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}

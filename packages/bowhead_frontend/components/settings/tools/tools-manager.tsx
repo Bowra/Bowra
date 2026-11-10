@@ -28,6 +28,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { builtinTools, type BuiltinTool } from "@/lib/tool-display";
 import { fetchMe } from "@/lib/auth-api";
+import { formatDateTime } from "@/lib/locale";
 import { DatarcMark, PowerBiMark, TavilyMark } from "@/components/settings/data-source-icons";
 import { ShopifyToolSection } from "@/components/settings/tools/shopify-tool-section";
 import { PowerBiToolSection } from "@/components/settings/tools/powerbi-tool-section";
@@ -113,9 +114,7 @@ function newIdempotencyKey(): string {
 
 function formatScopeTimestamp(value: string | null | undefined, locale: string): string | null {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 function ScopeChips({ values, empty }: { values: string[]; empty: string }) {

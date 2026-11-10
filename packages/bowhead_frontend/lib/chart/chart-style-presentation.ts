@@ -37,6 +37,7 @@ export type ChartFillPattern = "solid" | "diagonal" | "dots" | "crosshatch";
 export interface ChartSeriesPresentationV2 {
   key: string;
   paletteIndex: number;
+  colorHex?: string;
   lineDash: number[];
   pointStyle: "circle" | "rect" | "triangle" | "rectRot" | "crossRot" | "star";
   /** Texture painted over the series color on filled marks (bar, area, pie slice). */
@@ -98,6 +99,7 @@ function baseSeries(shape: NormalizedChartRenderShapeV1): ChartSeriesPresentatio
   return shape.series.map((series, index) => ({
     key: series.key,
     paletteIndex: series.paletteIndex ?? index,
+    ...(series.colorHex ? { colorHex: series.colorHex } : {}),
     lineDash: [],
     pointStyle: "circle",
     fillPattern: "solid",
@@ -120,6 +122,7 @@ export function colorOnlySeriesCapacity(theme: ChartTheme): number {
 export interface SeriesEncodingInput {
   roles: readonly string[];
   paletteIndices?: readonly number[];
+  colorKeys?: readonly string[];
   paletteLength: number;
   capacity: number;
   colorSafe: boolean;
@@ -171,7 +174,7 @@ export function assignSeriesEncodings(input: SeriesEncodingInput): SeriesEncodin
     const family = FILLED_ROLES.has(role) ? "fill" : "line";
     const variants = family === "fill" ? policy.fillPatterns.length : lineVariants;
     const color = (input.paletteIndices?.[index] ?? index) % paletteLength;
-    const key = `${family}:${color}`;
+    const key = `${family}:${input.colorKeys?.[index] ?? color}`;
     const taken = used.get(key) ?? new Set<number>();
     used.set(key, taken);
     if (taken.size >= variants) taken.clear();
@@ -345,8 +348,10 @@ export function resolveChartPresentation(
     );
   }
 
+  const hasHex = shape.series.some((series) => series.colorHex !== undefined);
+  const palette = theme.chartStyleV2?.categoricalSeriesPalette ?? theme.palette;
   const colorSafe = theme.accessibility?.colorVision === "color-safe" || renderContext.forcedColors
-    || (shape.series.length > 1 && shape.series.some((series) => series.paletteIndex !== undefined));
+    || (shape.series.length > 1 && shape.series.some((series) => series.paletteIndex !== undefined || series.colorHex !== undefined));
   const encodings = assignSeriesEncodings({
     roles: shape.series.map((series) => series.role),
     paletteLength: Math.max(1, theme.chartStyleV2?.categoricalSeriesPalette.length ?? theme.palette.length),
@@ -354,6 +359,8 @@ export function resolveChartPresentation(
     colorSafe,
     stacked: shape.flags.stacked,
     paletteIndices: shape.series.map((series, index) => series.paletteIndex ?? index),
+    colorKeys: hasHex ? shape.series.map((series, index) => series.colorHex
+      ?? palette[(series.paletteIndex ?? index) % Math.max(1, palette.length)]?.toUpperCase() ?? String(index)) : undefined,
   });
   if (encodings) {
     effective.series = effective.series.map((series, index) => ({ ...series, ...encodings[index]! }));

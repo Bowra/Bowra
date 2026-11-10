@@ -15,6 +15,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { ChartTable } from "@/components/canvas/sections/chart-table";
 import { ChartBlock } from "@/components/canvas/sections/chart-block";
 import type { ChartSpec } from "@/lib/chart/types";
+import { formatDateTime } from "@/lib/locale";
 import { Markdown } from "@/lib/md";
 import { parseNumberCell, type CodeRunSection, type SourceBlock, type SourceTable } from "@/lib/source-content";
 
@@ -118,9 +119,7 @@ const RUN_LANG_LABEL_KEY: Record<string, string> = {
 
 function formatRanAt(value: string | undefined, locale: string): string | null {
   if (!value) return null;
-  const time = new Date(value);
-  if (Number.isNaN(time.getTime())) return null;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(time);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || null;
 }
 
 /** Run header of the drawer's Run Code view: when it ran and in which language. The run label

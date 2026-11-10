@@ -25,6 +25,7 @@ import {
 import styles from "./document-draft-canvas-object.module.css";
 import { documentErrorKey, documentFailureKey } from "@/components/chat/document-errors";
 import { ApiError } from "@/lib/api-client";
+import { formatShortDateTime } from "@/lib/locale";
 import {
   completeDocumentCanvasContext,
   confirmDocumentDraft,
@@ -672,7 +673,5 @@ function RequestSection({ text }: { text: string }) {
 }
 
 function formatGeneratedTime(value: string, locale: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return formatShortDateTime(value, locale) || null;
 }

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { BUILD_EDITION } from "./product-identity";
 import { describe, expect, it } from "vitest";
 

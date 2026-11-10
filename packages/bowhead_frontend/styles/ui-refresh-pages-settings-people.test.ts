@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance, page-by-page acceptance A · Team and Members, Space Settings:
  * source contracts for members, spaces, license management and space settings (General / Space Access / Term Aliases).

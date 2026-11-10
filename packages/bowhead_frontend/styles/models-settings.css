@@ -436,12 +436,13 @@
 .mset-scrim{position:fixed;inset:0;background:rgba(22,19,16,.4);display:flex;align-items:center;justify-content:center;z-index:120;backdrop-filter:blur(1px);overscroll-behavior:contain}
 [data-theme="dark"] .mset-scrim,.dark .mset-scrim{background:rgba(0,0,0,.6)}
 .mset-modal{width:452px;max-width:calc(100vw - 40px);background:var(--c-surface);border-radius:var(--mset-r2);border:1px solid var(--c-line);box-shadow:var(--mset-shadow-3);padding:22px 24px 18px;display:flex;flex-direction:column;gap:15px;font-family:var(--f-sans);color:var(--c-ink)}
-.mset-modal .modal-ico{width:40px;height:40px;border-radius:11px;display:grid;place-items:center}
-.mset-modal .modal-ico.danger{background:var(--c-err-soft);color:var(--c-err);border:1px solid var(--c-err-line)}
-.mset-modal .modal-title{font-family:var(--f-serif);font-size:1.1875rem;font-weight:500;letter-spacing:-.005em;margin:0}
-.mset-modal .modal-body{font-size:0.8125rem;color:var(--c-ink-3);line-height:1.6}
+.mset-modal .modal-head{display:flex;align-items:center;gap:var(--space-3)}
+.mset-modal .modal-ico{display:flex;align-items:center;flex:none}
+.mset-modal .modal-ico.danger{color:var(--c-err)}
+.mset-modal .modal-title{min-width:0;overflow-wrap:anywhere;font-family:var(--f-serif);font-size:1.1875rem;font-weight:500;letter-spacing:-.005em;margin:0}
+.mset-modal .modal-body{margin:0;font-size:0.8125rem;color:var(--c-ink-3);line-height:1.6}
 .mset-modal .modal-body b{color:var(--c-ink-2);font-weight:600}
-.mset-modal .modal-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;border-radius:var(--mset-r1);background:var(--c-err-tint);border:1px solid var(--c-err-line);font-size:0.75rem;color:var(--c-err-ink);line-height:1.5}
+.mset-modal .modal-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;border-radius:var(--mset-r1);background:var(--c-err-tint);border:1px solid var(--c-err-line);font-size:0.75rem;color:var(--c-err-ink);line-height:1.5;overflow-wrap:anywhere}
 .mset-modal .modal-warn svg{flex:none;margin-top:1px}
 .mset-modal .mcheck{background:var(--c-surface)}
 .mset-modal .modal-foot{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--c-line-2)}

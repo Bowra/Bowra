@@ -51,15 +51,18 @@ describe("toolDisplay", () => {
   it("陈列集是显式的：只排掉不该陈列的两个，其余全在", () => {
     const caps = builtinTools();
     const refs = caps.map((c) => c.ref);
+    const withGoogle = builtinTools({ googleWorkspace: true }).map((c) => c.ref);
     // Criterion: customer can perceive this happening; **not** author-side NATIVE_ALLOWLIST reuse.
     // Report-write/destructive/nonanalyst tools excluded from author surface still belong in display.
-    for (const shown of ["write_report", "remove_chart"]) {
+    for (const shown of ["write_report", "remove_chart", "bi_query", "send_email", "get_current_user", "template_document_submit"]) {
       expect(refs, `${shown} 该陈列却没有`).toContain(shown);
     }
     // Since 93e9c47db only entries declared `kind: "tool"` are listed; protocol and
     // runtime parts (Coach, settings, Skill runtime, sub-agent protocol) stay hidden.
-    for (const part of ["subagent_return", "subagent_spawn", "tool_switch_context", "python_exec"]) {
+    for (const part of ["subagent_return", "subagent_spawn", "tool_switch_context", "python_exec", "render_deck", "skill_read", "configuration_apply", "agent_ci_start"]) {
+      expect(TOOL_DISPLAY_TABLE[part]?.kind).toBe("part");
       expect(refs).not.toContain(part);
+      expect(withGoogle).not.toContain(part);
     }
     expect(refs).toContain("python_sandbox");
     // Google delivery tools stay hidden until the team's Google connection is enabled.
@@ -67,10 +70,9 @@ describe("toolDisplay", () => {
     // Includes the current-user reader; Google delivery Tools require the connection.
     expect(GOOGLE_DELIVERY_TOOL_REFS.size).toBe(3);
     expect(caps.map((tool) => tool.ref)).toContain("get_current_user");
-    expect(caps.length).toBe(32);
-    const withGoogle = builtinTools({ googleWorkspace: true }).map((c) => c.ref);
+    expect(caps.length).toBe(40);
     for (const ref of GOOGLE_DELIVERY_TOOL_REFS) expect(withGoogle).toContain(ref);
-    expect(withGoogle.length).toBe(35);
+    expect(withGoogle.length).toBe(43);
   });
 
   it("组内按代号排，同族能力相邻（不按译名排）", () => {

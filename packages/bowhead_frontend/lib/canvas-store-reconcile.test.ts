@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * reconcileCanvasWithServer: final-state reconciliation (canvas-comprehensive Batch 1 WP-2 / TD-5 / FR-1.1).
  * Contract: server-wins convergence of sections + canvas metadata; **preserve pyCells**; count drift;

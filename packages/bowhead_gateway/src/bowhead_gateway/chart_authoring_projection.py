@@ -2,44 +2,112 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
 from typing import Any
 
+from bowhead_core.chart.authoring_tools import ChartProjectionUnavailable
 from bowhead_core.source_access_projection import canonical_source_identity, collect_source_identities
 
 
-async def project_chart_for_authoring(request: Any, session_id: str, section: Any, *, access: Any = None) -> dict[str, Any] | None:
-    from bowhead_gateway.routes.canvas import _build_source_refs_for_session, _viewer_safe_projector
+async def project_chart_for_authoring(request: Any, session_id: str, section: Any, *, access: Any = None) -> dict[str, Any]:
+    """Return the viewer-safe chart, or raise ``ChartProjectionUnavailable`` with the failing check.
+
+    A chart delivered in chat is hidden from the report lens and Canvas, but it
+    remains this conversation's chart and is edited in place. Only this target
+    section's own typed relations join its authorization closure; every
+    existing source-access and projector check still applies.
+    """
+    from bowhead_gateway.routes.canvas import _build_source_refs_for_session, _closure_from_sections, _viewer_safe_projector
 
     store = getattr(request.app.state, "canvas_store", None)
-    canvas = await access._canvas() if access is not None else await store.get_canvas_by_session(session_id) if store else None
+    if access is not None:
+        try:
+            canvas = await access._canvas()
+        except ValueError as exc:
+            raise ChartProjectionUnavailable("scope_unavailable") from exc
+    else:
+        canvas = await store.get_canvas_by_session(session_id) if store else None
     if canvas is None or section.canvas_id != canvas.id:
-        return None
+        raise ChartProjectionUnavailable("section_unavailable")
     sections = await store.list_sections(canvas.id, include_hidden=True)
     if not any(item.id == section.id and item.rev == section.rev for item in sections):
-        return None
+        raise ChartProjectionUnavailable("section_changed")
     canonical = section.to_report_section()
     try:
         identities, related_sources, derived_section = await chart_source_requirements(request.app.state.artifact_store, canonical)
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise ChartProjectionUnavailable("provenance_unavailable") from exc
     if not identities:
-        return None
+        raise ChartProjectionUnavailable("source_unrecorded")
     refs = await _build_source_refs_for_session(request, session_id, strict=True)
     related_refs = [ref for ref in refs if canonical_source_identity(ref) in identities]
     if derived_section is not None:
         # The server-owned derivation links this report's data artifact to the
         # original, even when the report has no separate source-ref row for it.
         related_refs.extend(related_sources)
+    authorized_sections = [canonical, *([derived_section] if derived_section else [])]
+    ref_artifacts = {artifact_id for ref in related_refs for artifact_id in _ref_artifact_ids(ref)}
     if access is not None:
-        projector = await access._sources(canvas, [canonical, *([derived_section] if derived_section else [])], related_refs)
+        candidates = {identity for identity in collect_source_identities(authorized_sections, related_refs) if identity.startswith("art_")}
+        projector = await access._sources(canvas, authorized_sections, related_refs)
     else:
+        candidates = set(_closure_from_sections([section], include_chat_hidden=True))
         projector = await _viewer_safe_projector(
-            request, canvas, [section], related_refs, additional_sections=[derived_section] if derived_section else None
+            request,
+            canvas,
+            [section],
+            related_refs,
+            additional_sections=[derived_section] if derived_section else None,
+            include_chat_hidden=True,
         )
-    if any(not projector.access_by_identity.get(identity, False) for identity in identities):
-        return None
+    candidates |= ref_artifacts
+    denied = [identity for identity in identities if not projector.access_by_identity.get(identity, False)]
+    if denied:
+        # A required source with no backing artifact in this chart's own
+        # closure is a closure gap; a backed source (or a knowledge source,
+        # which is judged by the viewer's knowledge access) that still fails
+        # was removed by current authorization or no longer exists.
+        knowledge = getattr(projector, "kb_by_identity", None) or {}
+        if any(identity not in knowledge and not (_identity_backing(identity, related_refs) & candidates) for identity in denied):
+            raise ChartProjectionUnavailable("section_outside_report_closure")
+        raise ChartProjectionUnavailable("source_access_denied")
     projected, _ = projector.project([canonical])
-    return projected[0] if len(projected) == 1 else None
+    if len(projected) != 1:
+        raise ChartProjectionUnavailable("projection_unavailable")
+    return projected[0]
+
+
+def actor_chart_authoring_projection(
+    app: Any, *, session_id: str, workspace_id: str, team_id: str, user_id: str
+) -> Callable[[Any], Awaitable[dict[str, Any]]]:
+    """Bind chart authoring to a Turn's admitted actor when no browser request exists.
+
+    Terminal, resume and scheduled Turns have no HTTP credentials. They use the
+    same actor-bound report authority as the chat route, which rechecks the
+    conversation scope and every chart source on each call.
+    """
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    return ReportReadAccess(SimpleNamespace(app=app), session_id, workspace_id, team_id or "", user_id).project_chart
+
+
+def _ref_artifact_ids(ref: Any) -> set[str]:
+    if not isinstance(ref, dict):
+        return set()
+    out = {ref["artifact_id"]} if isinstance(ref.get("artifact_id"), str) and ref["artifact_id"] else set()
+    for sub in ref.get("sub_sources") or ():
+        if isinstance(sub, dict) and isinstance(sub.get("artifact_id"), str) and sub["artifact_id"]:
+            out.add(sub["artifact_id"])
+    return out
+
+
+def _identity_backing(identity: str, refs: list[dict[str, Any]]) -> set[str]:
+    backing = {identity} if identity.startswith("art_") else set()
+    for ref in refs:
+        if canonical_source_identity(ref) == identity:
+            backing |= _ref_artifact_ids(ref)
+    return backing
 
 
 async def chart_source_requirements(artifact_store: Any, canonical: dict[str, Any]) -> tuple[list[str], list[dict], dict | None]:

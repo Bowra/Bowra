@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Newly added terminal states must not fall through to an active step style.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Long → wide table (chart-config-ux ⑪).
  *

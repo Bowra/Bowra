@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sprint λ F5 (R2-a) — peer_dispatched upsert dedup tests.
  *

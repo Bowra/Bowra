@@ -19,6 +19,7 @@ import {
 } from "@/components/sidebar/session-action-menu";
 import type { AdminMemberRow, TeamRole } from "@/lib/admin-members-api";
 import { appPath } from "@/lib/base-path";
+import { formatDateTime } from "@/lib/locale";
 
 
 const ROLE_LABEL_KEY: Record<TeamRole, string> = {
@@ -47,17 +48,7 @@ const ROLE_BADGE_TONE: Record<TeamRole, BadgeTone> = {
 
 function formatTime(iso: string | null, locale: string): string {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString(locale, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso, locale, { dateStyle: "medium" }) || iso;
 }
 
 

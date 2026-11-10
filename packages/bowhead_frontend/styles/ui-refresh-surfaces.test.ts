@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance batch 5: source contracts for surfaces earlier four batches marked
  * as visually distinctive or inline-styled and uncovered (styles/ui-refresh-surfaces.css).

@@ -309,6 +309,8 @@ describe("resetMemory", () => {
 
   it("POSTs /memory/reset with the caller idempotency key", async () => {
     fetchMock().mockResolvedValueOnce(_ok({
+      snapshot_id: "snap_abc",
+      affected_memory: 3,
     }));
     const idempotencyKey = "781d8bd9-56b1-443d-a3bd-2bbbdd10a025";
     const r = await resetMemory(idempotencyKey);

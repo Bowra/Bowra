@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
@@ -37,6 +38,8 @@ class _Pending:
     created: float
     event: anyio.Event = field(default_factory=anyio.Event)
     decision: Decision | None = None
+    # The owner also allowed later identical calls in this session (kinds that offer it).
+    for_session: bool = False
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "turn_id": self.turn_id, "session_id": self.session_id, **self.payload, "expires_at": self.expires_at}
@@ -56,8 +59,15 @@ class DeliveryConfirmations:
         session_id: str,
         payload: dict[str, Any],
         timeout_seconds: float | None = None,
+        on_pending: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_resolved: Callable[[str], Awaitable[None]] | None = None,
     ) -> Decision:
-        """Wait for the owner's decision on this exact snapshot."""
+        """Wait for the owner's decision on this exact snapshot.
+
+        ``on_pending`` receives the public item once it is queued; ``on_resolved`` receives
+        the outcome (``approved_session`` for a session approval) when the wait ends by a
+        decision or expiry. Neither runs when the request is refused up front or cancelled.
+        """
         timeout = self._timeout if timeout_seconds is None else max(0.0, min(self._timeout, timeout_seconds))
         if not owner_user_id or sum(1 for p in self._pending.values() if p.owner_user_id == owner_user_id) >= MAX_PENDING_PER_OWNER:
             return "unavailable"
@@ -72,9 +82,14 @@ class DeliveryConfirmations:
         )
         self._pending[item.id] = item
         try:
+            if on_pending is not None:
+                await on_pending(item.public())
             with anyio.move_on_after(timeout):
                 await item.event.wait()
-            return item.decision or "expired"
+            decision = item.decision or "expired"
+            if on_resolved is not None:
+                await on_resolved("approved_session" if decision == "approved" and item.for_session else decision)
+            return decision
         finally:
             self._pending.pop(item.id, None)
 
@@ -85,11 +100,12 @@ class DeliveryConfirmations:
         )
         return [p.public() for p in items]
 
-    def decide(self, owner_user_id: str, confirmation_id: str, approve: bool) -> bool:
+    def decide(self, owner_user_id: str, confirmation_id: str, approve: bool, *, for_session: bool = False) -> bool:
         """Record the owner's decision; False when the request is gone or not theirs."""
         item = self._pending.get(confirmation_id)
         if item is None or item.owner_user_id != owner_user_id or item.decision is not None:
             return False
         item.decision = "approved" if approve else "rejected"
+        item.for_session = approve and for_session
         item.event.set()
         return True

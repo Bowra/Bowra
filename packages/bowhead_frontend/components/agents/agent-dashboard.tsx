@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTimeZone, useTranslations } from "next-intl";
 import { ArrowUpRight } from "lucide-react";
 
 import { CapabilityLink } from "@/components/capabilities/capability-link";
@@ -9,6 +9,7 @@ import { LucideGlyph } from "@/components/icon-refresh";
 import { Button } from "@/components/ui/button";
 import { StatTiles } from "@/components/ui/stat-tiles";
 import { useAuthSession } from "@/lib/auth/auth-session-context";
+import { formatShortDateTime } from "@/lib/locale";
 import { AGENT_CHART_DOMAINS } from "@/lib/agent-charts-navigation";
 import { AgentDashboardReadError, agentDashboardAttention, agentDashboardDetailHref, agentListingState, readAgentDashboard } from "@/lib/agent-dashboard";
 import { getAgentReleaseInboxCount, type AgentCatalogItem } from "@/lib/agents-api";
@@ -25,6 +26,7 @@ export function AgentDashboard() {
   const session = useAuthSession();
   const t = useTranslations("agents_marketplace");
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const format = useFormatter();
   const { displayName } = useAgentListingText();
   const role = teamRoleForUser(session.me);
@@ -80,7 +82,7 @@ export function AgentDashboard() {
       <AgentBreadcrumb href="/agents/marketplace/" label={t("charts_parent")} />
     </nav>
     <header className="ad-header"><div><span className="ad-eyebrow">{t("dashboard_eyebrow")}</span><h1>{t("dashboard_title")}</h1><p>{t("dashboard_subtitle")}</p></div><Button variant="secondary" onClick={() => setRevision(value => value + 1)} disabled={!current || !queue}>{t("dashboard_refresh")}</Button></header>
-    <div className="ad-context"><p>{t("dashboard_scope")}</p>{ready ? <span>{t("dashboard_read_at", { date: format.dateTime(current.at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })}</span> : null}</div>
+    <div className="ad-context"><p>{t("dashboard_scope")}</p>{ready ? <span>{t("dashboard_read_at", { date: formatShortDateTime(current.at, locale, new Date(), timeZone) })}</span> : null}</div>
     {current?.error === "forbidden" ? <section className="ad-empty" role="alert"><h2>{t("dashboard_forbidden")}</h2><p>{t("dashboard_forbidden_body")}</p><CapabilityLink href="/agents/marketplace/">{t("charts_browse")}</CapabilityLink></section> : <>
       {/* Chart Embed Spec D6/D7: one hairline stat band. The listing breakdown (pass / no evidence) is the blocked tile's
           secondary line instead of a three-bar chart whose middle bar repeated this tile. */}

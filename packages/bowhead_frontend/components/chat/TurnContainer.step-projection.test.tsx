@@ -118,7 +118,7 @@ function archivedTurn(turnId: string): ArchivedTurn {
     traceSteps: [],
     peersDispatched: [],
     errorReason: null,
-    archivedAt: Date.now(),
+    endedAt: Date.now(),
   } as ArchivedTurn;
 }
 
@@ -248,5 +248,42 @@ describe("Step → StepView 投影 · live 与重放必须同源", () => {
     cleanup();
 
     expect(stepStatusClass(renderArchived(turnId))).toBe("is-fail");
+  });
+});
+
+describe("opened failed row · live and archived read the same persisted facts", () => {
+  beforeEach(() => _resetAllTurnsForTesting());
+
+  /** Open the folded trace when present, then the failed row; returns the disclosed detail text. */
+  function openFailedDetail(container: HTMLElement): string | null {
+    const summary = container.querySelector('[data-testid="step-summary"]');
+    if (summary && !container.querySelector(".stp")) fireEvent.click(summary as HTMLElement);
+    fireEvent.click(container.querySelector(".stp.is-fail .stp-head") as HTMLElement);
+    return container.querySelector('[data-testid="step-failure-detail"]')?.textContent ?? null;
+  }
+
+  it("shows the recovery receipt of `done.step_outcome` on both surfaces", () => {
+    // Mutation: drop either StepRecoveryProvider in TurnContainer → that surface loses "action_recovered".
+    const turnId = "t-proj-recovered";
+    const turn = { card_id: turnId, turn_id: turnId };
+    dispatchToTurnStore("step_list_card_created", { ...turn, plan: [] });
+    dispatchToTurnStore("step_started", { ...turn, step_id: "s1", step_type: "subagent", tool_name: "subagent_spawn", header_zh: "Call", started_at: "2026-11-08T02:40:00Z", input_preview: "Recolor the chart" });
+    dispatchToTurnStore("step_done", {
+      ...turn, step_id: "s1", state: "failure", duration_ms: 12,
+      error: {
+        type: "invalid_args", code: "tool_arguments_invalid", message_zh: "tool_arguments_invalid", is_transient: false,
+        diagnostics: { schema_version: 1, disclosure: "authenticated", diagnostic_code: "tool_failure", occurrence_id: "20b91dd835a842319527e3f4768f3aca", turn_id: turnId, safe_detail: "field=canvas_mode", retryable: false },
+      },
+    });
+    dispatchToTurnStore("done", { ...turn, status: "completed", step_outcome: { schema_version: 1, issue_steps: 1, recovered_steps: 1, unresolved_steps: 0, answer_affected: false } });
+
+    const live = render(<TurnContainer runner={runner({ turnId, user: "查询", running: false })} />);
+    const liveText = openFailedDetail(live.container);
+    cleanup();
+    const archivedText = openFailedDetail(renderArchived(turnId));
+
+    expect(liveText).toContain("action_recovered");
+    expect(liveText).toContain("20b91dd835a842319527e3f4768f3aca");
+    expect(archivedText).toBe(liveText);
   });
 });

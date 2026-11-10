@@ -7,7 +7,7 @@ UV ?= uv
 FRONTEND_DIR := packages/bowhead_frontend
 PY_GUARDS := scripts/check_notification_types.py scripts/check_theme_surface_coverage.py scripts/check_chart_style_registry.py scripts/check_third_party_notices.py scripts/check_configuration_coverage.py scripts/check_configuration_field_guidance.py
 
-.PHONY: help install install-frontend frontend-assemble run-gateway run-frontend fmt lint test typecheck-frontend build-frontend third-party-notices
+.PHONY: help install install-frontend frontend-assemble run-gateway run-frontend fmt lint test typecheck-frontend test-frontend build-frontend third-party-notices
 
 help: ## List available commands
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -48,6 +48,9 @@ lint: frontend-assemble ## Verify shared contracts, notices and Python formattin
 
 test: ## Run supported package tests
 	$(UV) run pytest
+
+test-frontend: frontend-assemble ## Run frontend tests; pass file paths and worker limits through ARGS
+	cd $(FRONTEND_DIR) && npm test -- $(ARGS)
 
 typecheck-frontend: ## Check frontend TypeScript
 	cd $(FRONTEND_DIR) && npm run typecheck

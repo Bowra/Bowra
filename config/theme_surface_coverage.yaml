@@ -485,6 +485,7 @@ surfaces:
     routes:
       - /access-required
       - /activate
+      - /connect/bowra/callback
       - /forgot-password
       - /invite
       - /invite/**
@@ -497,6 +498,7 @@ surfaces:
     source_roots:
       - packages/bowhead_frontend/app/(public)/access-required
       - packages/bowhead_frontend/app/(public)/activate
+      - packages/bowhead_frontend/app/(public)/connect/bowra/callback
       - packages/bowhead_frontend/app/(public)/forgot-password
       - packages/bowhead_frontend/app/(public)/invite
       - packages/bowhead_frontend/app/(public)/login

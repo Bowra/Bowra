@@ -8,9 +8,9 @@
  *   ① Effect depended only on `traceSteps.length`; **growth inside existing steps** never triggered it
  *   ② Hard exit at `dist > 200`; crossing once made return impossible
  *
- * ⚠ Testing discipline: detaching follow **requires real wheel / touchmove / keydown events**.
- * Directly changing `scrollTop` creates a vacuously green test: our own scrollTo
- * also changes scrollTop, so implementation deliberately excludes that path.
+ * ⚠ Testing discipline: detaching follow **requires real wheel / touchmove / keydown events**, or a
+ * `scroll` event that moved **up** away from the bottom. Directly changing `scrollTop` without an event
+ * proves nothing: our own scrollTo also changes scrollTop.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
@@ -62,12 +62,40 @@ function mount(enabled = true) {
   const scroll = makeScrollEl();
   const content = document.createElement("div");
   scroll.el.appendChild(content);
-  const hook = renderHook(() => useStickToBottom(enabled));
+  const hook = renderHook(({ running }) => useStickToBottom(running), {
+    initialProps: { running: enabled },
+  });
   act(() => {
     hook.result.current.scrollRef(scroll.el);
     hook.result.current.contentRef(content);
   });
   return { hook, scroll, content };
+}
+
+/**
+ * A disclosure row (`aria-expanded` button) at `rowY()` within the content. jsdom has no layout, so its
+ * on-screen top is derived from the fake scroll position (the scroll container's own top is 0).
+ */
+function addDisclosureRow(
+  scroll: ReturnType<typeof makeScrollEl>,
+  content: HTMLElement,
+  rowY: () => number,
+) {
+  const row = document.createElement("button");
+  row.setAttribute("aria-expanded", "false");
+  row.getBoundingClientRect = () => ({ top: rowY() - scroll.scrollTop } as DOMRect);
+  content.appendChild(row);
+  return {
+    row,
+    screenTop: () => rowY() - scroll.scrollTop,
+    /** Click as a reader would; the component flips its state in the same event. */
+    toggle() {
+      act(() => {
+        row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        row.setAttribute("aria-expanded", row.getAttribute("aria-expanded") === "true" ? "false" : "true");
+      });
+    },
+  };
 }
 
 function growAndSettle(scroll: ReturnType<typeof makeScrollEl>, by: number) {
@@ -204,5 +232,118 @@ describe("useStickToBottom — 回到最新", () => {
 
     act(() => hook.result.current.jumpToLatest());
     expect(hook.result.current.pendingCount).toBe(0);
+  });
+});
+
+describe("useStickToBottom — after the Turn ends (2026-11-08 dogfood F8)", () => {
+  it("growth after the Turn ends does not pull a reader who has engaged back to the bottom", () => {
+    // Mutation: drop the `!enabledRef.current && readerEngagedRef.current` guard → this case fails.
+    const { hook, scroll } = mount(true);
+    scroll.setScrollTop(600);
+    hook.rerender({ running: false });
+    act(() => {
+      scroll.el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    growAndSettle(scroll, 400);
+    expect(scroll.scrollTop).toBe(600);
+  });
+
+  it("while the Turn runs, growth is still followed after the reader clicks inside the conversation", () => {
+    const { scroll } = mount(true);
+    scroll.setScrollTop(600);
+    act(() => {
+      scroll.el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    growAndSettle(scroll, 400);
+    expect(scroll.atBottom()).toBe(true);
+  });
+
+  it("a conversation opened after its Turn ended still settles on its latest content", () => {
+    // Positive control for the guard above: gating on the running state alone would open finished
+    // conversations at the top, because this observer is what brings them to their latest content.
+    const { scroll } = mount(false);
+    growAndSettle(scroll, 1200);
+    growAndSettle(scroll, 300); // A chart below lays out late.
+    expect(scroll.atBottom()).toBe(true);
+  });
+
+  it("the closing render of a Turn stays in view for a reader who is still following", () => {
+    const { hook, scroll } = mount(true);
+    scroll.setScrollTop(600);
+    act(() => {
+      scroll.el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    hook.rerender({ running: false });
+    growAndSettle(scroll, 120);
+    expect(scroll.atBottom()).toBe(true);
+  });
+
+  it("★ opening a trace after the Turn ended keeps the clicked row where it was (116: 120 px → −283 px)", () => {
+    // Mutation: make the observer ignore the disclosure hold and the engaged reader → the row leaves the screen.
+    const { hook, scroll, content } = mount(true);
+    scroll.setScrollTop(600); // At the bottom, following.
+    hook.rerender({ running: false });
+    const trace = addDisclosureRow(scroll, content, () => 720);
+    expect(trace.screenTop()).toBe(120);
+
+    trace.toggle();
+    growAndSettle(scroll, 400); // The trace opens below its row.
+    expect(trace.screenTop()).toBe(120);
+    expect(hook.result.current.following).toBe(false); // "Jump to latest" offers the way back.
+  });
+
+  it("a disclosure toggled while the Turn runs keeps its row instead of following the growth", () => {
+    const { hook, scroll, content } = mount(true);
+    scroll.setScrollTop(600);
+    const step = addDisclosureRow(scroll, content, () => 700);
+    step.toggle();
+    growAndSettle(scroll, 300);
+    expect(step.screenTop()).toBe(100);
+    expect(hook.result.current.following).toBe(false);
+    growAndSettle(scroll, 200); // Streaming output continues below.
+    expect(step.screenTop()).toBe(100);
+  });
+
+  it("a toggled row is held in place when content above it changes in the same resize", () => {
+    const { scroll, content } = mount(false);
+    scroll.setScrollTop(600);
+    let rowY = 700;
+    const row = addDisclosureRow(scroll, content, () => rowY);
+    row.toggle();
+    act(() => {
+      rowY += 300; // Content above the row grew …
+      scroll.grow(500); // … and the opened section below it.
+      roCallbacks.forEach((cb) => cb());
+    });
+    expect(row.screenTop()).toBe(100);
+    expect(scroll.scrollTop).toBe(900);
+  });
+
+  it("a click that toggles nothing does not hold the view: streaming growth is still followed", () => {
+    const { scroll, content } = mount(true);
+    scroll.setScrollTop(600);
+    const menu = addDisclosureRow(scroll, content, () => 700);
+    act(() => {
+      menu.row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    growAndSettle(scroll, 300);
+    expect(scroll.atBottom()).toBe(true);
+  });
+
+  it("an upward scroll by other means (scrollbar drag, focus move) releases following", () => {
+    // Mutation: restore `onScroll` to only re-attach → following stays true and the next growth yanks the reader.
+    const { hook, scroll } = mount(true);
+    scroll.setScrollTop(600);
+    act(() => {
+      scroll.el.dispatchEvent(new Event("scroll"));
+    });
+    expect(hook.result.current.following).toBe(true);
+    act(() => {
+      scroll.setScrollTop(200);
+      scroll.el.dispatchEvent(new Event("scroll"));
+    });
+    expect(hook.result.current.following).toBe(false);
+    growAndSettle(scroll, 400);
+    expect(scroll.scrollTop).toBe(200);
   });
 });

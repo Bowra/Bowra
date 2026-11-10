@@ -27,7 +27,7 @@ _EXACT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 # v1 contract set (frozen floor): additions only; any removal requires explicitly updating this set + design review.
 _V1_FLOOR = {"pptxgenjs", "jszip", "lodash", "papaparse", "dayjs"}
 
-# Lockfile transitive-tree snapshot (generated on 2026-07-15 against registry.npmjs.team; 22 packages).
+# Lockfile transitive-tree snapshot (21 packages, including patched image-size).
 # When bumping the curated set, regenerate the lockfile with s2-tech-design §3.2 commands and update the full set here;
 # the diff is visible during review, which is the purpose of this snapshot.
 _LOCK_TREE_SNAPSHOT = {
@@ -46,7 +46,6 @@ _LOCK_TREE_SNAPSHOT = {
     "papaparse",
     "pptxgenjs",
     "process-nextick-args",
-    "queue",
     "readable-stream",
     "safe-buffer",
     "setimmediate",

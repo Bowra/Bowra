@@ -29,11 +29,11 @@ Bowra brings specialist agents, business knowledge, document review, calculation
 
 This is a **source preview**. You can build and initialize the reviewed Community source; model services, execution runtimes, and integrations need configuration. Agent evaluation and CI/CD are opt-in. Follow the [setup guide](deploy/README.md) for the current prerequisites.
 
-Known production dependency advisories remain under review. This source preview does not establish deployment security readiness; follow the [security guidance](SECURITY.md) and review the dependency lock before deployment.
+ChromaDB has unresolved upstream dependency advisories. See the [current assessment and deployment boundaries](SECURITY.md#chromadb-dependency-advisories).
 
-## Source snapshot 1.7.17
+## Source snapshot 1.7.24
 
-This update improves retained material access, chart colors, knowledge citations, file identity and conversation navigation. See the [Community release notes](docs/help/release-notes/releases/v1.7.17.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+This update adds in-place chart edits and exact HEX colors, clearer tool confirmations, more reliable conversation continuation, model connection deletion review, and shared dependency security fixes. See the [Community release notes](docs/help/release-notes/releases/v1.7.24.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
 
 SQLite upgrades now coordinate twelve database files and complete recovery archives. Stop every writer and preserve instance keys and the current deletion ledger before upgrading. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 

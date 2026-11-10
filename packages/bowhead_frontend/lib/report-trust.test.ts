@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * report-trust: counting criteria for three citation generations (Phase F adaptation batch).
  */

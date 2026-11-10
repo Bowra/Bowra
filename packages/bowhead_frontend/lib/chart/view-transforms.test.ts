@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch 3 §3.2 · Derived-view pure-function tests (same foundation as batch 2 inspection).
  */

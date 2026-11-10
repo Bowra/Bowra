@@ -490,16 +490,21 @@ class TerminalDeliveryReviewPolicy:
 
         if not delivery_review_enabled():
             return None
+        from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
+
+        # Every native refusal is bound to its exact call so a later Lead question can retain the helper.
         if getattr(ctx, "terminal_batch_conflict", False):
             return PolicyDenial(
-                result=DeliveryReviewRefusal(
-                    ok=False,
-                    error_kind="tool_delivery_review_required",
-                    error="Submit the terminal payload alone after the other calls in this batch settle. Review their actual outcomes before finishing; do not repeat completed writes.",
-                    retryable=False,
+                result=note_ordinary_return_rejection(
+                    ctx,
+                    DeliveryReviewRefusal(
+                        ok=False,
+                        error_kind="tool_delivery_review_required",
+                        error="Submit the terminal payload alone after the other calls in this batch settle. Review their actual outcomes before finishing; do not repeat completed writes.",
+                        retryable=False,
+                    ),
                 )
             )
-        from bowhead_core.ordinary_lead_runtime import note_ordinary_return_rejection
 
         def invalid_input(message: str) -> PolicyDenial:
             return PolicyDenial(
@@ -540,7 +545,7 @@ class TerminalDeliveryReviewPolicy:
                 evidence_problem=evidence_problem,
             )
             if failure is not None:
-                return PolicyDenial(result=failure)
+                return PolicyDenial(result=note_ordinary_return_rejection(ctx, failure))
         return None
 
 

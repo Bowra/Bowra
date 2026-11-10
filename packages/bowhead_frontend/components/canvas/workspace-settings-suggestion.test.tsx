@@ -12,7 +12,11 @@ import { SettingsPageCanvas } from "./settings-page-canvas";
 import { WorkspaceSettingsCanvasProvider, useWorkspaceSettingsCanvasBridge } from "./workspace-settings-canvas-context";
 import type { WorkspaceSettingsCanvasBridge } from "@/lib/workspace-settings-canvas-bridge";
 
-vi.mock("@/lib/api", () => ({ getWorkspaceMetadata: vi.fn(), getWorkspaceSettings: vi.fn(), setWorkspaceSetting: vi.fn() }));
+vi.mock("@/lib/api", () => {
+  const getWorkspaceSettings = vi.fn();
+  return { getWorkspaceMetadata: vi.fn(), getWorkspaceSettings, getWorkspaceSettingsView: async (...args: unknown[]) => ({ settings: await getWorkspaceSettings(...args) }), setWorkspaceSetting: vi.fn() };
+});
+vi.mock("@/lib/use-app-router", async (original) => ({ ...await original<typeof import("@/lib/use-app-router")>(), useAppRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }) }));
 vi.mock("@/lib/api-client", async (original) => ({ ...await original<typeof import("@/lib/api-client")>(), apiJson: vi.fn() }));
 const target = { page: "workspace_i18n" as const, userId: "u_1", teamId: "team_1", workspaceId: "ws_1" };
 const proposal = { proposal_id: "ccd_1", turn_id: "t_1", form_id: "workspace_i18n", team_id: "team_1", workspace_id: "ws_1", workspace_name: "Original Space", notes: {}, rows: [{ field: "week_start_day", from: "monday", to: "sunday", from_unset: false }], settings_target: { form_id: "workspace_i18n" as const, user_id: "u_1", team_id: "team_1", workspace_id: "ws_1", edit_generation: 0 } };

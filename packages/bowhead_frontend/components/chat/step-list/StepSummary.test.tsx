@@ -316,6 +316,39 @@ describe("StepSummary", () => {
       fireEvent.click(screen.getByTestId("step-summary"));
       expect(onExpand).toHaveBeenCalledTimes(1);
     });
+
+    // Dogfood 2026-11-08 F7: a failed Turn that ran over a minute read "Not finished · 1 step · 2 s" because the
+    // row summed its step durations. Without the backend wall time, a failed row shows no duration at all.
+    describe("duration on the failed row", () => {
+      const timed = [
+        step({ stepId: "a", state: "done", durationText: "2.0s" }),
+        step({ stepId: "b", state: "failed", durationText: "0.4s" }),
+      ];
+
+      it("shows no duration without wall time, even when its steps carry durations", () => {
+        renderIntl(<StepSummary steps={timed} failed={{}} onExpand={() => {}} />, { locale: "en-US" });
+        const row = screen.getByTestId("step-summary");
+        expect(row.textContent).toContain("Not finished");
+        expect(screen.getByTestId("step-summary-progress")).toBeTruthy();
+        expect(screen.queryByTestId("step-summary-duration")).toBeNull();
+        expect(row.textContent).not.toMatch(/\d\s*s\b/);
+      });
+
+      it("treats the zero not-measured sentinel as no duration", () => {
+        renderIntl(<StepSummary steps={timed} totalDurationMs={0} failed={{}} onExpand={() => {}} />);
+        expect(screen.queryByTestId("step-summary-duration")).toBeNull();
+      });
+
+      it("shows the backend wall time, not the step sum", () => {
+        renderIntl(<StepSummary steps={timed} totalDurationMs={55_000} failed={{}} onExpand={() => {}} />, { locale: "en-US" });
+        expect(screen.getByTestId("step-summary-duration").textContent).toBe(" · 55 s");
+      });
+
+      it("keeps the summed fallback only on the completed row (old archived Turns without a duration)", () => {
+        renderIntl(<StepSummary steps={timed} onExpand={() => {}} />, { locale: "en-US" });
+        expect(screen.getByTestId("step-summary-duration").textContent).toBe(" · 2 s");
+      });
+    });
   });
 
   describe("duration copy: human-readable and localized, never raw milliseconds (spec §8)", () => {

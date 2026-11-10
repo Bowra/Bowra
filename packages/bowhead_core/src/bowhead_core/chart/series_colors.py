@@ -1,5 +1,6 @@
-"""Bounded palette selection for directly bound Cartesian measure series."""
+"""Bounded palette or exact HEX selection for directly bound Cartesian measures."""
 
+import re
 from colorsys import rgb_to_hls
 from typing import Any
 
@@ -23,6 +24,16 @@ def editable_color_columns(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
 def color_index(value: Any) -> int | None:
     return value if type(value) is int and 0 <= value < 16 else None
+
+
+def color_hex(value: Any) -> str | None:
+    """Canonical opaque HEX only; never accept CSS expressions or discard alpha."""
+    if not isinstance(value, str) or re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", value) is None:
+        return None
+    digits = value[1:]
+    if len(digits) == 3:
+        digits = "".join(char * 2 for char in digits)
+    return "#" + digits.upper()
 
 
 def palette_color_family(hex_color: str) -> str:

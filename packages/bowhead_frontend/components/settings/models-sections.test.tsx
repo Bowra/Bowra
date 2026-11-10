@@ -770,11 +770,12 @@ describe("Configuration Agent model review", () => {
 describe("automatic assignment maintenance", () => {
   it("reviews deletion of the last referenced connection without requiring a cross-tab repair", async () => {
     vi.mocked(configApi.fetchAdminLlmConfig).mockResolvedValue({ ...structuredClone(response), features: { model_discovery_v2: true, model_assignment_reconciliation: true } });
+    vi.mocked(configApi.validateAdminLlmConfig).mockResolvedValue({ valid: true, version: 7, issues: [], has_changes: true, changed_sections: ["providers", "tiers", "media", "search"], assignment_config: { tiers: { fast: { follow: "primary" }, judge: { auto: true } }, kb: { models: {}, active: {} }, media: { models: {}, active: {} }, search: { models: {}, active: {} } }, readiness });
     show("connection");
     await waitFor(() => expect(document.querySelector(".connect")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: messages.settings.models.sections.delete_connection }));
-    expect(screen.getByText(/应用前请检查替换和清空的分工/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: messages.settings.models.v4.delete_draft }));
+    expect(screen.getByText(messages.settings.models.del.soft_body.replace("{count}", "3"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.models.del.confirm }));
     fireEvent.click(await screen.findByRole("button", { name: messages.settings.models.v4.review }));
     await waitFor(() => expect(configApi.validateAdminLlmConfig).toHaveBeenCalledWith(expect.objectContaining({ providers: {} }), 7));
   });

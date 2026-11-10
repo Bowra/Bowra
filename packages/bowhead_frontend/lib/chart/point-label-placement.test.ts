@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Point labels next to bars (116 dogfood, phone 390 dark): a dual-axis line ran inside the bars and its `-24.0%` /
  * `-19.2%` labels were drawn on the bar fill. Geometry below mirrors that chart at 390: three 20px bars, the line's

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * A1-2 (report-edit-audit P0-1 root fix) — lossless roundtrip regression for real DB shapes.
  *

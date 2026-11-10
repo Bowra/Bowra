@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * The sidebar's older sessions arrive as a server calendar day ("2026-10-01"); the client shows the shared
  * list-date absolute form (Agents & Reports Polish Spec §3a): month and day, the year only for other years.

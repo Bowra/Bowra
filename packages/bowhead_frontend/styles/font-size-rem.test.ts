@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Text sizes follow the user's root text size (WCAG 1.4.4 "Resize text"): the --fs-* type scale and every literal
  * font size are rem relative to the 16px browser default, never px. A px font size stays put when the user raises the

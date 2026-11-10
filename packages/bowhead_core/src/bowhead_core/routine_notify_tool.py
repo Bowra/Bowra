@@ -5,7 +5,9 @@ see now (a threshold crossed, missing data, an anomaly), it calls ``routine_noti
 
 - ``info``: an in-app notification only;
 - ``attention``: also announced in an open Bowhead tab and as a browser notification;
-- ``urgent``: also emailed to the owner's verified address, once.
+- ``urgent``: also emailed to the owner's verified address, once. With recorded deliveries on, when
+  the owner also receives the run's result email, that result email carries the alert instead of
+  a second email (it waits up to ``ROUTINE_ALERT_EMAIL_HOLD_S`` for the run to deliver).
 
 Boundaries:
 
@@ -38,9 +40,12 @@ REASON_MAX: Final = 280
 
 # (run, item) -> None: email the owner about an urgent alert. Provided by the gateway.
 UrgentEmailSender = Callable[[Any, Any], Awaitable[None]]
+# run -> whether the run's result email goes to the owner. Provided by the gateway.
+ResultEmailProbe = Callable[[Any], Awaitable[bool]]
 
 _service_provider: Callable[[], Any | None] | None = None
 _urgent_email: UrgentEmailSender | None = None
+_result_email_reaches_owner: ResultEmailProbe | None = None
 
 
 def routine_notify_enabled() -> bool:
@@ -61,11 +66,15 @@ def _schema() -> ToolSchema:
     return ToolSchema(
         name=TOOL_NAME,
         description=(
-            "Only in a scheduled task run: flag this run's result for the task owner when they should look now, "
-            "for example a metric crossed the threshold the task watches, expected data is missing, or the result looks wrong. "
+            # Offered only in a scheduled run, so state that context: a condition ("only in a scheduled
+            # task run") read as "not this conversation" and the Agent refused (116 dogfood, 2026-11-09).
+            "This Turn is a run of the owner's scheduled task: it runs unattended, nobody is watching this conversation, "
+            "and this tool is available now. Call it to flag this run's result for the task owner when they should look now: "
+            "a condition the task's instructions ask to be alerted about holds, a metric crossed the threshold the task watches, "
+            "expected data is missing, or the result looks wrong. "
             "Do not call it just to report that the run finished; results are delivered by the task's own settings. "
             "Choose the level: info (in-app only), attention (also a pop-up and browser notification), "
-            "urgent (also an email to the owner; only when it cannot wait). "
+            "urgent (also an email to the owner; when it cannot wait or the instructions ask for it). "
             "The owner is the only recipient. The notification text is fixed and names the task; "
             "your reason is shown only in this run's conversation, so state the finding and the key numbers there. "
             "At most one alert per run. status=queued means it was sent; rate_limited or duplicate means nothing new was sent."
@@ -100,10 +109,13 @@ async def _handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str,
         _metric("disabled")
         return {"ok": False, "status": "disabled", "level": level, "reason": reason, "message": "Notifications are switched off."}
     job = _JobRef(run)
-    status, item = await service.emit_routine_alert(job, run_id=run.run_id, session_id=run.session_id, level=level)
-    _metric(status)
     # With recorded deliveries on, the urgent email is a delivery row the worker sends and retries.
     direct_email = not getattr(service, "delivery_enabled", False)
+    extra: dict[str, Any] = {}
+    if level == "urgent" and not direct_email:
+        extra["hold_email"] = await _owner_gets_result_email(run)
+    status, item = await service.emit_routine_alert(job, run_id=run.run_id, session_id=run.session_id, level=level, **extra)
+    _metric(status)
     if status == "queued" and level == "urgent" and item is not None and _urgent_email is not None and direct_email:
         try:
             await _urgent_email(run, item)
@@ -117,6 +129,18 @@ async def _handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str,
         "disabled": "Notifications are switched off; nothing was sent.",
     }
     return {"ok": status == "queued", "status": status, "level": level, "reason": reason, "message": messages.get(status, "")}
+
+
+async def _owner_gets_result_email(run: Any) -> bool:
+    """Whether the run's result email goes to the owner, so it can carry the urgent alert."""
+    if _result_email_reaches_owner is None:
+        return False
+    try:
+        return await _result_email_reaches_owner(run)
+    except Exception:
+        # Unknown: email the alert now rather than wait for a result email that may not come.
+        logger.warning("routine_notify.result_email_probe_failed job=%s run=%s", run.job_id, run.run_id, exc_info=True)
+        return False
 
 
 class _JobRef:
@@ -134,13 +158,15 @@ def register_routine_notify_tool(
     *,
     service_provider: Callable[[], Any | None],
     urgent_email: UrgentEmailSender | None = None,
+    result_email_reaches_owner: ResultEmailProbe | None = None,
 ) -> bool:
     """Register ``routine_notify`` when FEATURE_ROUTINE_NOTIFY is on; returns whether it did."""
-    global _service_provider, _urgent_email  # noqa: PLW0603 -- startup binding, resolved at invocation time
+    global _service_provider, _urgent_email, _result_email_reaches_owner  # noqa: PLW0603 -- startup binding, resolved at invocation time
     if not routine_notify_enabled():
         return False
     _service_provider = service_provider
     _urgent_email = urgent_email
+    _result_email_reaches_owner = result_email_reaches_owner
     registry.register(
         ToolSpec(
             schema=_schema(),

@@ -31,7 +31,7 @@ from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
 from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.workspace_settings_store import WorkspaceSettingsStore
 from bowhead_gateway.main import create_app
-from gateway_legacy_database import TARGET_FILES, upgrade
+from gateway_legacy_database import TARGET_FILES
 
 from bowhead_bi_bridge import DatarcClient
 from bowhead_core import (
@@ -84,14 +84,14 @@ def _visible(req: LLMRequest) -> str:
 
 
 @pytest.fixture
-async def gateway_i18n_enabled(tmp_path, monkeypatch, complete_community_http_installation):
+async def gateway_i18n_enabled(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
     """构造一个 i18n_v1 启用的 gateway，workspace_id='test-ws'."""
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_PRIMARY_RUNTIME", "0")
     app = create_app()
 
     # ─── DB / stores ──────────────────────────────────────
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(core_path.with_name("bowhead.db"))
     db_path = str(core_path)
     from bowhead_core.user_store import UserStore
     from community_http_fixture import (

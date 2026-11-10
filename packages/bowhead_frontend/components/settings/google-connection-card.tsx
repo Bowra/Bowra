@@ -17,11 +17,10 @@ import {
   type GoogleAuthorization,
   type GoogleCallbackNotice,
 } from "@/lib/google-workspace-api";
+import { formatDateTime } from "@/lib/locale";
 
-function formatDate(value: string | null, locale: string): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
+function formatLastUsed(value: string | null, locale: string): string | null {
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || null;
 }
 
 /**
@@ -111,7 +110,7 @@ function GoogleConnectionCardBody() {
           ? "needs_update"
           : "connected";
   const granted = authorization.bundles.filter((bundle) => bundle.enabled && bundle.granted).map((bundle) => t(`bundle.${bundle.id}.label`));
-  const lastUsed = formatDate(authorization.last_used_at, locale);
+  const lastUsed = formatLastUsed(authorization.last_used_at, locale);
 
   return (
     <section className="personal-mcp-panel google-connection-card" aria-labelledby="google-connection-title" data-testid="google-connection-card">

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * report-engine Phase-1 (WP1) — figure_ref anchor round-trip + serializer pair-fix.
  *

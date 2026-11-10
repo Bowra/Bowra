@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * kb-matrix i18n key parity test (B8 lesson: missing keys crash at runtime; added coverage in tech-design §9).
  *

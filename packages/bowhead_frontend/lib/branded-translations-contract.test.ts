@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Contract: keys whose copy contains `{applicationName}` must be read through `useBrandedTranslations` (which passes the current brand's
  * application name), or the call site must pass `applicationName` explicitly. Reading them with plain `useTranslations` / `getTranslations` without the argument

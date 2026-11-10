@@ -77,3 +77,39 @@ def test_unsupported_snapshot_version_does_not_enter_the_reader():
     _, _, snapshot, _ = fixture()
     with pytest.raises(ValidationError):
         ContextSnapshot.model_validate_json(snapshot.model_dump_json().replace('"version":1', '"version":2'))
+
+
+def test_assistant_reasoning_round_trips_and_absent_reasoning_keeps_legacy_bytes():
+    cipher = ReferenceCipher(Fernet.generate_key().decode())
+    envelope = {
+        "version": 1,
+        "protocol": "anthropic_messages",
+        "provider": "deepseek_anthropic",
+        "model": "deepseek-flash",
+        "blocks": [{"type": "thinking", "thinking": "Check totals.", "signature": "sig"}],
+    }
+    call = ToolCall(id="read_1", name="read", arguments={})
+    messages = [
+        Message(role="user", content="Total?"),
+        Message(role="assistant", content="", tool_calls=[call], provider_reasoning=envelope),
+        Message(role="tool", name="read", tool_call_id="read_1", content="12"),
+    ]
+    snapshot, parts = seal_context_messages(messages, cipher=cipher, scope=scope(), owner="execution_one:ordinary")
+    by_digest = {part.reference.digest: part.ciphertext for part in parts}
+    restored = open_context_messages(snapshot, by_digest, cipher=cipher, scope=scope(), owner="execution_one:ordinary")
+    assert restored == messages
+
+    # Messages without reasoning seal to the same bytes as records written before the field existed.
+    plain = [Message(role="user", content="Total?"), Message(role="assistant", content="12")]
+    plain_snapshot, _ = seal_context_messages(plain, cipher=cipher, scope=scope(), owner="execution_one:ordinary")
+    import hashlib
+    import json
+
+    legacy = [{key: value for key, value in asdict(message).items() if key != "provider_reasoning"} for message in plain]
+    encoded = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    assert plain_snapshot.digest == hashlib.sha256(encoded).hexdigest()
+
+    with pytest.raises(ContextSegmentError):
+        seal_context_messages(
+            [Message(role="user", content="x", provider_reasoning=envelope)], cipher=cipher, scope=scope(), owner="execution_one:ordinary"
+        )

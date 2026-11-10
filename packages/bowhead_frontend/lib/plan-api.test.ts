@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { amendPlan, approvePlanViaSend, patchPlanSteps, replanPreview, reviseStepPreview } from "./plan-api";

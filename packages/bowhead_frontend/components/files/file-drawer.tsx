@@ -34,9 +34,7 @@ import { CharIcon } from "@/components/char-icon";
 
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return formatDateTime(d, getCurrentLocale(), { hour12: false });
+  return formatDateTime(iso, getCurrentLocale()) || iso;
 }
 
 export function FileDrawer({

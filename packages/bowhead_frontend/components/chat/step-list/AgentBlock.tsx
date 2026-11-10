@@ -35,6 +35,9 @@ export interface AgentBlockProps {
   bailTo?: string;
   /** start expanded; defaults to expanded while running. */
   open?: boolean;
+  /** Expand now (and whenever this turns true), e.g. while a step inside waits for the user's confirmation.
+   *  The user can still collapse it afterwards. */
+  forceOpen?: boolean;
   children?: ReactNode;
 }
 
@@ -49,6 +52,7 @@ export function AgentBlock({
   outcomeDiagnostics,
   bailTo = "lead",
   open: openProp,
+  forceOpen = false,
   children,
 }: AgentBlockProps) {
   const meta = agentMetaFor(agent);
@@ -59,7 +63,7 @@ export function AgentBlock({
   // (see its UX-1 comment about one-time useState initialization); AgentBlock was missed,
   // leaving every collaborating Agent's full ledger open throughout a 270-second turn.
   // Follow Step's pattern: effect for state transitions; never auto-toggle after the user toggles manually.
-  const [open, setOpen] = useState(openProp ?? status === "run");
+  const [open, setOpen] = useState(forceOpen || (openProp ?? status === "run"));
   const userToggledRef = useRef(false);
   const prevStatusRef = useRef(status);
   useEffect(() => {
@@ -70,6 +74,10 @@ export function AgentBlock({
     // Collapse only the completed transition. fail / bail are unexpected terminal states; keep them open.
     if (prev === "run" && status === "done") setOpen(false);
   }, [status]);
+  // A pending confirmation inside must be visible without the user hunting for it.
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
   const bodyId = useId();
   // chat-ux-2026-08: while the running band is present, it exclusively owns who is running and on what.
   // On 116, band current row repeated this heading's task row / body「当前任务」text,

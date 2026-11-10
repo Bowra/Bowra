@@ -514,6 +514,7 @@ async def test_direct_entry_strips_registered_prefix_before_routing(
     async def inner(scope, receive, send):
         nonlocal seen_path
         seen_path = scope["path"]
+        assert scope["query_string"] == b"search=unchanged"
         await send({"type": "http.response.start", "status": 204, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
@@ -524,6 +525,7 @@ async def test_direct_entry_strips_registered_prefix_before_routing(
         path="/bowhead/settings/",
         headers=[(b"host", b"localhost:8080")],
     )
+    scope["query_string"] = b"search=unchanged"
     scope["app"] = SimpleNamespace(
         state=SimpleNamespace(public_entry_store=store),
     )
@@ -532,7 +534,7 @@ async def test_direct_entry_strips_registered_prefix_before_routing(
         return {"type": "http.disconnect"}
 
     async def send(_message):
-        return None
+        assert scope["query_string"] == b"search=unchanged"
 
     await middleware(scope, receive, send)
     assert seen_path == "/settings/"
@@ -1087,3 +1089,47 @@ async def test_store_failure_does_not_close_websocket(
 
     await PublicEntryContextMiddleware(inner)(scope, receive, send)
     assert closed == [{"type": "inner.reached"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "/bowhead", "/company/apps/bowhead"])
+@pytest.mark.parametrize("slash", ["", "/"])
+async def test_bowra_callback_redacts_outer_access_log_scope_before_response(
+    store: PublicEntryStore, tmp_path: Path, prefix: str, slash: str
+) -> None:
+    from bowhead_gateway.static_localized import RuntimeBasePathStaticFiles
+
+    await _active_entry(store, base_url="https://public.example.com" + prefix)
+    directory = tmp_path / "frontend"
+    callback = directory / "connect/bowra/callback"
+    callback.mkdir(parents=True)
+    (callback / "index.html").write_text("<html><head></head><body>callback</body></html>")
+    path = prefix + "/connect/bowra/callback" + slash
+    scope = _scope(scheme="https", path=path, headers=[(b"host", b"public.example.com")])
+    scope.update(
+        method="GET",
+        app=SimpleNamespace(state=SimpleNamespace(public_entry_store=store)),
+        raw_path=path.encode(),
+        root_path="",
+        query_string=b"code=private-code&state=one-use",
+    )
+    responses = []
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            # Uvicorn logs the outer scope here, before the middleware returns.
+            assert scope["query_string"] == b""
+            assert scope["path"] == path
+            responses.append(message)
+
+    await PublicEntryContextMiddleware(RuntimeBasePathStaticFiles(directory=directory, html=True))(scope, receive, send)
+    assert len(responses) == 1
+    assert responses[0]["status"] == (200 if slash else 307)
+    headers = dict(responses[0]["headers"])
+    assert headers[b"cache-control"] == b"no-store"
+    assert headers[b"referrer-policy"] == b"no-referrer"
+    if not slash:
+        assert headers[b"location"] == b"callback/?code=private-code&state=one-use"

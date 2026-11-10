@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Chat-workbench/report-canvas batch 2 (workbench appearance) style-source contracts.
  *

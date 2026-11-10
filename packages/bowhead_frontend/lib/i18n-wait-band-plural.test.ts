@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Lock English plurals for the wait band's N Charts Produced text.
  *

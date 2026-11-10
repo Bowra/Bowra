@@ -12,6 +12,7 @@ import {
   type AgentVersionReviewerProjection,
 } from "@/lib/agents-api";
 import { releaseEvidence } from "@/lib/agent-release-evidence";
+import { formatDateTime } from "@/lib/locale";
 import { ApiError } from "@/lib/api-client";
 import { appPath } from "@/lib/base-path";
 import { AgentBreadcrumb } from "./agent-breadcrumb";
@@ -42,11 +43,7 @@ const DIFF_KEYS = [
 ] as const;
 
 function formatDate(value: string, locale: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? value : new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(parsed);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 function isVersionEvaluation(value: AgentReleaseCandidateDetail["evaluation"]): value is AgentVersionReviewerProjection {

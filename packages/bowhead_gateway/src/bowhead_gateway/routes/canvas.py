@@ -539,10 +539,12 @@ async def _viewer_safe_projector(
     projection_sections: list[Any],
     source_refs: list[dict[str, Any]],
     additional_sections: list[dict[str, Any]] | None = None,
+    *,
+    include_chat_hidden: bool = False,
 ) -> ViewerSafeCanvasProjector:
     canonical_sections = [section.to_report_section() for section in projection_sections]
     canonical_sections.extend(additional_sections or [])
-    closure = _closure_with_source_refs(_closure_from_sections(projection_sections), source_refs)
+    closure = _closure_with_source_refs(_closure_from_sections(projection_sections, include_chat_hidden=include_chat_hidden), source_refs)
     closure = list(await authorized_report_artifact_ids(request, canvas, closure))
     try:
         return await ViewerSafeCanvasProjector.build(
@@ -813,15 +815,17 @@ def _add_artifact_id(ids: list[str], seen: set[str], value: Any) -> None:
         ids.append(value)
 
 
-def _closure_from_sections(sections: list[Any]) -> list[str]:
+def _closure_from_sections(sections: list[Any], *, include_chat_hidden: bool = False) -> list[str]:
     """Report artifact closure from visible persisted section payloads.
 
     This intentionally follows known artifact-id field names, including nested
     objects and code_block input/output arrays, instead of broad string matching.
+    ``include_chat_hidden`` admits an explicitly targeted chat-delivered
+    section; report and Canvas closures keep excluding chat-hidden sections.
     """
     from bowhead_core.results_report_relations import project_report_relations
 
-    return list(project_report_relations(sections).closure_ids)
+    return list(project_report_relations(sections, include_chat_hidden=include_chat_hidden).closure_ids)
 
 
 def _closure_with_source_refs(section_ids: list[str], refs: list[dict[str, Any]]) -> list[str]:

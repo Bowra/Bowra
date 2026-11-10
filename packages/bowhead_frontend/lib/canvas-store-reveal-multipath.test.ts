@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Visibility-model invariants (canvas-comprehensive WP-3 + review-fix P0).
  *

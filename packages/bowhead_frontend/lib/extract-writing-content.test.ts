@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * chat-solidify follow-up (#5) — extractWritingContent projects the accumulated
  * raw tool-args JSON of a live `lead_thinking_writing` step down to the code /

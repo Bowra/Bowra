@@ -780,29 +780,38 @@ async def emit_section_patched(
     与顶层 `seq`（IM 插入位，FE 忽略）。`open_turn` 先发一帧 `canvas.turn_streaming`（bus exactly-once）。
     `report_tools._emit_section_patched(ctx)` 与 B1 收尾器的 chrome patch 共用。
     With require_delivery, rejected updates are raised instead of logged as best effort.
+
+    A chat-delivered (chat-hidden) section is edited in place where it was
+    shown: the event carries ``hidden_for_chat_mode`` so the browser updates
+    the chat figure without inserting the section into Canvas, and it never
+    opens a Canvas turn.
     """
     if bus is None or section is None:
         return
     from bowhead_core.events import OrchestratorEvent
 
+    chat_only = bool(getattr(section, "hidden_for_chat_mode", False))
     try:
-        if open_turn:
+        if open_turn and not chat_only:
             with contextlib.nullcontext() if require_delivery else contextlib.suppress(Exception):
                 await bus.emit(OrchestratorEvent(event_type="canvas.turn_streaming", turn_id=turn_id or "", payload={"turn_id": turn_id}))  # type: ignore[arg-type]
         rs = section.to_report_section()
         kind = rs.get("kind") if isinstance(rs, dict) else getattr(section, "kind", None)
+        payload: dict[str, Any] = {
+            "canvas_id": canvas_id,
+            "section_id": section.id,
+            "kind": kind,
+            "patch": rs,
+            "rev": getattr(section, "rev", None),
+            "seq": getattr(section, "seq", None),
+        }
+        if chat_only:
+            payload["hidden_for_chat_mode"] = True
         sent = await bus.emit(
             OrchestratorEvent(
                 event_type="canvas.section_patched",  # type: ignore[arg-type]
                 turn_id=turn_id or "",
-                payload={
-                    "canvas_id": canvas_id,
-                    "section_id": section.id,
-                    "kind": kind,
-                    "patch": rs,
-                    "rev": getattr(section, "rev", None),
-                    "seq": getattr(section, "seq", None),
-                },
+                payload=payload,
             )
         )
         if require_delivery and sent is False:
@@ -1161,7 +1170,9 @@ def canvas_mode_context_line(mode: str | None, doc_title: str | None) -> str:
             "先 `read_report` 拿 outline（要看正文就 `include_full=true` 或 `section_ids=[...]`）；"
             "只改受影响的段——`write_report` 传 `section_id`+`expected_rev`，只碰 outline 里 `editable=true` 的正文段，"
             "未受影响的段一个字不动；正文只有一段就只改那一段。**绝不**不传 section_id 另写一篇（那会在旧正文后面再挂一份）。"
-            "改写时保留原文里不受影响的 `[figure:id]` 锚点，不写 [N]；口径变了的图用 `add_chart` 新出、正文引新 id，"
+            "改写时保留原文里不受影响的 `[figure:id]` 锚点，不写 [N]；"
+            "只改图的展示（标题、颜色、标签、图例、格式、支持的图表类型）而数据不变的，用 `read_chart` + `edit_chart` 就地改原图"
+            "（id 取自 `read_report` 的 figures），不新出、不收起；口径变了的图用 `add_chart` 新出、正文引新 id，"
             '有 `remove_chart` 工具时，**被新图取代的上一轮旧图用 `remove_chart(reason="replaced")` 收起**，'
             '用户要求去掉某张图就 `remove_chart(reason="removed")`（正文还引用着它就先改掉那处锚）'
             "——光改文字不会让图消失，图没真的收起就别说已替换/删除。"
@@ -2208,6 +2219,8 @@ def prior_charts_reminder(prior: Sequence[dict[str, str]]) -> str:
     listed = "；".join(f"{p['title']}（{p['section_id']}）" for p in prior)
     return (
         f"这是修订轮，上一轮的这些图仍在画布上：{listed}。"
-        '如果刚画的图取代了其中某张（同一主题换了口径/范围），调 remove_chart(section_ids=[旧图 id], reason="replaced") 收起旧图'
-        "（正文还引用着旧图的话，先用 write_report 把那处锚改成新图再收）；没有被取代的就不要动。"
+        '如果刚画的图取代了其中某张（同一主题换了口径/范围/数据），调 remove_chart(section_ids=[旧图 id], reason="replaced") 收起旧图'
+        "（正文还引用着旧图的话，先用 write_report 把那处锚改成新图再收）；"
+        "只改某张旧图的展示（标题、颜色、标签、图例、格式、图表类型）不该新画再收旧图，用 read_chart + edit_chart 就地改那张旧图；"
+        "没有被取代的就不要动。"
     )

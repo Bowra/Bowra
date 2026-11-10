@@ -44,14 +44,15 @@ from bowhead_core.catalog_localization import (
     materialize_confirmed_agent_localizations_conn,
 )
 from bowhead_core.notification_store import NotificationStore
+from bowhead_core.sqlite_domain_upgrade import SOURCE_REVISION
 from bowhead_core.team_subagent_store import (
     TeamSubagentRevisionWriterRequiredError,
     TeamSubagentStore,
     effective_agent_name_key,
 )
 from bowhead_core.user_store import TeamSubagent
-from core_legacy_database import upgrade
 from legacy_agent_release_fixture import seed_legacy_publication
+from test_agent_execution_binding import _migrated_core_template
 
 _TIME = "2026-09-03T08:00:00+00:00"
 
@@ -375,8 +376,38 @@ def _canonical(value) -> str:
 
 def _db(tmp_path):
     db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(_migrated_core_template()) as source, sqlite3.connect(db_path) as destination:
+        source.backup(destination)
     return db_path
+
+
+@pytest.mark.parametrize("builder", ["revision", "evaluation"])
+def test_business_database_copies_preserve_schema_and_isolate_writes(tmp_path, builder):
+    if builder == "revision":
+        first = _db(tmp_path / "first")
+        second = _db(tmp_path / "second")
+    else:
+        from test_agent_eval_policy_plan_store import _upgrade
+
+        first, second = tmp_path / "first" / "core.db", tmp_path / "second" / "core.db"
+        _upgrade(first)
+        _upgrade(second)
+    with (
+        sqlite3.connect(_migrated_core_template()) as source,
+        sqlite3.connect(first) as first_db,
+        sqlite3.connect(second) as second_db,
+    ):
+        schema = "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"
+        assert first_db.execute(schema).fetchall() == source.execute(schema).fetchall() == second_db.execute(schema).fetchall()
+        for database in (source, first_db, second_db):
+            assert database.execute("SELECT version_num FROM alembic_version").fetchone() == (SOURCE_REVISION,)
+        assert first_db.execute("PRAGMA foreign_key_check").fetchall() == []
+        first_db.execute("CREATE TABLE copy_isolation_probe(value TEXT)")
+        first_db.execute("INSERT INTO copy_isolation_probe VALUES ('first only')")
+        first_db.commit()
+        for other in (source, second_db):
+            assert other.execute("SELECT name FROM sqlite_schema WHERE name='copy_isolation_probe'").fetchall() == []
 
 
 def _definition(prompt: str = "Be helpful.") -> dict:

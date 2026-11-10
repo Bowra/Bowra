@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Clarification card options render labels while submitting canonical values.
  *

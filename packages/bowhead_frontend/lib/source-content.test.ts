@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { RUN_CODE_STDOUT_ALIGNED, RUN_CODE_STDOUT_WITH_CSV } from "./__fixtures__/source-content";

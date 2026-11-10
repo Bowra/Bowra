@@ -49,6 +49,8 @@ export interface ChartColumn {
   date_pattern?: string;
   /** A slot in the server-validated palette; omitted inherits the series default. */
   color_index?: number;
+  /** Exact opaque series color, independent of theme mode; excludes color_index. */
+  color_hex?: string;
   /** Only declared percentage shape or canonical percent input establishes scaling. */
   percent_scale?: ChartPercentScale;
   percent_shape_unknown?: boolean;

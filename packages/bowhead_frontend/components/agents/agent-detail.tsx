@@ -5,6 +5,7 @@ import { ChevronRight, Copy } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { agentManagementView, agentManagementReturnHref, withAgentReturnView } from "@/lib/agent-navigation";
 import { agentChartsReturnHref } from "@/lib/agent-charts-navigation";
+import { formatDate } from "@/lib/locale";
 import { agentDashboardReturnHref } from "@/lib/agent-dashboard";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -199,10 +200,7 @@ function CapabilityTechnicalDetails({ evidence, locale }: { evidence: AgentCapab
 }
 
 function formatEvidenceDate(value: string, locale: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? value : new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-  }).format(parsed);
+  return formatDate(value, locale) || value;
 }
 
 type CapabilityStateKey =

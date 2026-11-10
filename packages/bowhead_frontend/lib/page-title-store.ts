@@ -86,3 +86,37 @@ function notifyIfChanged(previous: string | null): void {
   if (getPageTitleSnapshot() === previous) return;
   for (const listener of listeners) listener();
 }
+
+// ── Attention count ("(n) " tab-title prefix) ─────────────────────────────
+// Things waiting for the user (inline tool call confirmations) prefix the tab
+// title. The prefix goes through the brand metadata controller, the single owner
+// of document.title, so a page-title change never drops it and clearing it
+// restores the current title rather than a stale copy.
+
+let attentionCount = 0;
+const attentionListeners = new Set<PageTitleListener>();
+
+export function getTitleAttentionSnapshot(): number {
+  return attentionCount;
+}
+
+export function getServerTitleAttentionSnapshot(): number {
+  return 0;
+}
+
+export function subscribeTitleAttention(listener: PageTitleListener): () => void {
+  attentionListeners.add(listener);
+  return () => attentionListeners.delete(listener);
+}
+
+export function setTitleAttentionCount(count: number): void {
+  const next = Number.isSafeInteger(count) && count > 0 ? count : 0;
+  if (next === attentionCount) return;
+  attentionCount = next;
+  for (const listener of attentionListeners) listener();
+}
+
+/** "(n) Title" while something waits for the user; the title unchanged otherwise. */
+export function withTitleAttention(title: string, count: number): string {
+  return count > 0 ? `(${count}) ${title}` : title;
+}

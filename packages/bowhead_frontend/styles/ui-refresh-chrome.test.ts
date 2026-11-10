@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for P2 batch 3 (sidebar and topbar visuals, icon size tiers): styles/ui-refresh-chrome.css.
  *

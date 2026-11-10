@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Map data_table → ChartSpec, enforcing **capability relocation without loss**:
  * assert each capability unique to the old DataTableSection renderer (198 lines).

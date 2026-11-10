@@ -40,7 +40,8 @@ GOLDEN: list[tuple] = [
     ("concept", "bi_concept_resolve", {"results": [{"token": "t", "verdict": "ambiguous", "matches": [1, 2]}]}, None, "t 2 候选 · 有歧义"),
     ("chart", "add_chart", {"kind": "bar"}, None, "已添加 · bar"),
     ("sandbox_ok", "python_sandbox", {"outputs": [1, 2, 3]}, None, "运行成功 · 3 输出"),
-    ("sandbox_err", "python_sandbox", {"error": "x"}, None, "运行成功"),
+    # Was "运行成功" for a result the step state marks failed (F4, 116 t_7edbc155f8d8).
+    ("sandbox_err", "python_sandbox", {"error": "x"}, None, "运行出错"),
     ("skill_list", "skill_list", [1, 2], None, "2 个 skill"),
     (
         "subret",

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Terminal cancellation must stop every unfinished step indicator.
  *

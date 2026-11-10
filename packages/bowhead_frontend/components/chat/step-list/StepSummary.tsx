@@ -25,7 +25,8 @@ export interface StepSummaryProps {
    *  ⚠ If absent, use `deriveTotalDurationText` (summed step durations), an approximation **wrong in both
    *  directions**: undercounts large thinking gaps (116 plan turn actually ~2 minutes displayed
    *  `· 15s`, read as running 15 seconds); overcounts concurrent peers by adding parallel durations.
-   *  Use only when wall time is unavailable. */
+   *  Use only when wall time is unavailable, and only on the completed row (old archived Turns whose persisted
+   *  `done` lacks `duration_ms`). A failed row without wall time shows no duration. */
   totalDurationMs?: number | null;
   /** Original execution receipt, not proof that user requirements remain unmet. */
   stepOutcome?: StepOutcome | null;
@@ -67,7 +68,9 @@ export function StepSummary({ steps, peerNames, totalDurationMs, failed, onExpan
       <FailedStepSummary
         steps={steps}
         plannedTotal={failed.plannedTotal}
-        durText={formatDurationText(totalDurationMs, tStep) ?? deriveTotalDurationText(steps, tStep)}
+        // Wall time only: the summed approximation omits the waits between steps, so a failed Turn that ran
+        // over a minute read "Not finished · 1 step · 2 s". Without a backend duration, show none.
+        durText={formatDurationText(totalDurationMs, tStep)}
         onToggle={toggle}
         open={open}
         trailing={toggleTrailing}
@@ -172,7 +175,8 @@ const formatDurationText = formatSummaryDuration;
  *
  * ⚠ Approximation **errs both ways**: omits thinking gaps between steps (undercount), sums
  * concurrent peers' parallel durations (overcount). Always prefer available wall time (`totalDurationMs`);
- * retain only to avoid no number for old archived turns whose persisted done lacks duration_ms.
+ * retain only to avoid no number for old archived completed turns whose persisted done lacks duration_ms.
+ * Never used on the failed row: a failure must not show an invented duration.
  */
 function deriveTotalDurationText(
   steps: StepView[],

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * turn-store-replay — F5 hydrate replay path tests.
  *

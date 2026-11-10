@@ -860,6 +860,7 @@ async def test_subagent_not_ok_returns_failed_with_error(
         ("peer_total_failures=8", "peer_dispatch_network_error"),
         ("peer_no_commit_force_bail", "peer_dispatch_network_error"),
         ("subagent_internal_error", "lead_internal_error"),
+        ("collaboration_effort_exhausted", "agent_step_limit"),
     ],
 )
 def test_subagent_failure_reason_projection_is_finite(

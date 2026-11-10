@@ -34,12 +34,49 @@ import type {
   ToolName,
 } from "@/components/chat/step-list/types";
 import type { ErrorDiagnostics } from "./error-presentation";
+import type {
+  ToolConfirmationCategory,
+  ToolConfirmationChoice,
+  ToolConfirmationKind,
+  ToolConfirmationOutcome,
+} from "./sse-events";
 import type { ThetaClarificationState } from "./types";
 import type { StepOutcome } from "./turn-feedback";
 
 // ───────────────────────────────────────────────────────────────
 // Types
 // ───────────────────────────────────────────────────────────────
+
+/**
+ * Outcome of an inline tool call confirmation. The first five come from
+ * `confirmation_resolved`; `stopped` and `ended` are derived on card finalization
+ * for a confirmation that never resolved (the turn was cancelled, or ended
+ * another way). Both derivations read persisted terminal events, so live,
+ * persisted and replayed views agree.
+ */
+export type StepConfirmationOutcome = ToolConfirmationOutcome | "stopped" | "ended";
+
+/** A "confirm before this action runs" request attached to its waiting tool step. */
+export interface StepConfirmation {
+  /** Queue item id (pmi_* | esc_* | scc_* | ttc_*). */
+  id: string;
+  kind: ToolConfirmationKind;
+  /** Only this user sees the buttons and may request the preview. */
+  requesterUserId: string;
+  title: string;
+  sourceLabel: string | null;
+  category: ToolConfirmationCategory | null;
+  choices: ToolConfirmationChoice[];
+  /** Server clock; display only, never compared with the local clock. */
+  expiresAt: string;
+  /** Remaining seconds when the request was emitted (countdown fallback). */
+  timeoutSeconds: number;
+  /** Local `Date.now()` when this client applied the request (live or replay). */
+  receivedAt: number;
+  outcome?: StepConfirmationOutcome;
+  /** Server time of the decision (`confirmation_resolved.decided_at`). */
+  decidedAt?: string;
+}
 
 export interface Step {
   stepId: string;
@@ -98,6 +135,8 @@ export interface Step {
    * consumers fall back to array order.
    */
   evtSeq: number | null;
+  /** Inline tool call confirmation this step waited for (`confirmation_requested`). */
+  confirmation?: StepConfirmation;
 }
 
 export interface ClarificationState {
@@ -320,6 +359,12 @@ export interface TurnState {
    *  The value comes from persisted event payload, so F5 replay preserves the original start
    *  (waiting p90 is 173s, exactly when users are most likely to refresh). */
   startedAt: Date | null;
+  /** Server time of this turn's latest root terminal `done` (`done.ended_at`), the reply byline time.
+   *
+   *  Written through the shared dispatcher `done` branch, so live delivery and replay read one persisted value
+   *  (never the browser clock). A same-turn resume (`turn.resumed`) clears it until the new generation's `done`:
+   *  a running turn shows no reply time. Null = unknown (still running, or a `done` that predates the field). */
+  endedAt: Date | null;
   /** dogfood s_3e854 ④: live peer-LLM prose accumulated per peer id
    *  (partial_answer.parent_agent_id). Lives HERE in the canonical turn-store —
    *  NOT in the SSE runner — so the live, same-session-archived, and F5/replayed
@@ -544,6 +589,7 @@ function _emptyTurnState(turnId: string): TurnState {
     totalDurationMs: null,
     stepOutcome: null,
     startedAt: null,
+    endedAt: null,
     peerProse: {},
     peerNames: {},
     peerDisplayNames: {},
@@ -670,11 +716,20 @@ export function subscribeAllTurns(listener: () => void): () => void {
   };
 }
 
+export type ToolNameMatch = "exact" | "prefix" | "suffix";
+
+function toolNameMatches(name: string | null | undefined, toolName: string, match: ToolNameMatch): boolean {
+  if (!name) return false;
+  if (match === "prefix") return name.startsWith(toolName);
+  if (match === "suffix") return name.endsWith(toolName);
+  return name === toolName;
+}
+
 /** True while any known turn has a not-yet-finished step for `toolName`. */
-export function hasActiveToolStep(toolName: string, match: "exact" | "suffix" = "exact"): boolean {
+export function hasActiveToolStep(toolName: string, match: ToolNameMatch = "exact"): boolean {
   for (const turn of _states.values()) {
     for (const step of turn.steps) {
-      if ((match === "suffix" ? step.toolName?.endsWith(toolName) : step.toolName === toolName) && (step.state === "active" || step.state === "pending")) {
+      if (toolNameMatches(step.toolName, toolName, match) && (step.state === "active" || step.state === "pending")) {
         return true;
       }
     }
@@ -683,12 +738,76 @@ export function hasActiveToolStep(toolName: string, match: "exact" | "suffix" = 
 }
 
 /** React hook form of `hasActiveToolStep`, re-evaluated on every turn commit. */
-export function useHasActiveToolStep(toolName: string, match: "exact" | "suffix" = "exact"): boolean {
+export function useHasActiveToolStep(toolName: string, match: ToolNameMatch = "exact"): boolean {
   return useSyncExternalStore(
     subscribeAllTurns,
     () => hasActiveToolStep(toolName, match),
     () => false,
   );
+}
+
+/** True while any known turn has a not-yet-finished step of any tool. */
+export function hasAnyActiveStep(): boolean {
+  for (const turn of _states.values()) {
+    if (turn.cardFinalized) continue;
+    for (const step of turn.steps) {
+      if (step.state === "active" || step.state === "pending") return true;
+    }
+  }
+  return false;
+}
+
+/** React hook form of `hasAnyActiveStep`. */
+export function useHasAnyActiveStep(): boolean {
+  return useSyncExternalStore(subscribeAllTurns, hasAnyActiveStep, () => false);
+}
+
+/** A confirmation that is still waiting for a decision, with the turn and step it belongs to. */
+export interface PendingStepConfirmation {
+  turnId: string;
+  stepId: string;
+  confirmation: StepConfirmation;
+}
+
+const EMPTY_PENDING_CONFIRMATIONS: readonly PendingStepConfirmation[] = [];
+let _pendingConfirmationsCache: { key: string; value: readonly PendingStepConfirmation[] } = {
+  key: "",
+  value: EMPTY_PENDING_CONFIRMATIONS,
+};
+
+/**
+ * Every unresolved confirmation in every known turn, in store order. The array
+ * identity is stable until the set changes, so it can back `useSyncExternalStore`.
+ */
+export function getPendingConfirmationsSnapshot(): readonly PendingStepConfirmation[] {
+  const value: PendingStepConfirmation[] = [];
+  for (const turn of _states.values()) {
+    for (const step of turn.steps) {
+      if (step.confirmation && !step.confirmation.outcome) {
+        value.push({ turnId: turn.turnId, stepId: step.stepId, confirmation: step.confirmation });
+      }
+    }
+  }
+  const key = value.map((item) => `${item.turnId}\u001f${item.stepId}\u001f${item.confirmation.id}`).join("\u001e");
+  if (key !== _pendingConfirmationsCache.key) {
+    _pendingConfirmationsCache = { key, value: value.length ? value : EMPTY_PENDING_CONFIRMATIONS };
+  }
+  return _pendingConfirmationsCache.value;
+}
+
+/** React hook form of `getPendingConfirmationsSnapshot`. */
+export function usePendingConfirmations(): readonly PendingStepConfirmation[] {
+  return useSyncExternalStore(subscribeAllTurns, getPendingConfirmationsSnapshot, () => EMPTY_PENDING_CONFIRMATIONS);
+}
+
+/** Outcome already recorded for a confirmation id in any known turn (undefined when unknown or pending). */
+export function knownConfirmationOutcome(confirmationId: string): StepConfirmationOutcome | undefined {
+  for (const turn of _states.values()) {
+    for (const step of turn.steps) {
+      if (step.confirmation?.id === confirmationId) return step.confirmation.outcome;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -792,18 +911,30 @@ export function applyCardFinalized(input: ApplyCardFinalizedInput): void {
   // and `bus.emit` is async: adding await in an already-cancelled task has asyncio pitfalls.
   // More importantly, extra backend frames cannot save the other two states: disconnected (frame sent but missed) and **replay**
   // (that frame never existed in historical persisted events). This is the sole point covering all three states.
-  const needsSweep = prev.steps.some((s) => s.state === "pending" || s.state === "active");
+  //
+  // A confirmation still waiting at this point never gets `confirmation_resolved`: a cancelled
+  // handler emits nothing. Derive its record from the same terminal fact, so live, persisted and
+  // replayed views agree: Stop → "stopped", any other finalization → "ended".
+  const unfinished = (s: Step) => s.state === "pending" || s.state === "active";
+  const unresolved = (s: Step) => Boolean(s.confirmation && !s.confirmation.outcome);
+  const needsSweep = prev.steps.some((s) => unfinished(s) || unresolved(s));
   const steps = needsSweep
-    ? prev.steps.map((s) =>
-        s.state === "pending" || s.state === "active"
-          ? {
-              ...s,
-              // User-initiated Stop → cancelled (⚠ 已停止); turns failing/completing on their own with unfinished
-              // steps → failed. Do not blindly mark cancelled, falsely attributing real failures to user Stop.
-              state: input.finalState === "cancelled" ? ("cancelled" as const) : ("failed" as const),
-            }
-          : s,
-      )
+    ? prev.steps.map((s) => {
+        if (!unfinished(s) && !unresolved(s)) return s;
+        const next: Step = { ...s };
+        if (unfinished(s)) {
+          // User-initiated Stop → cancelled (⚠ 已停止); turns failing/completing on their own with unfinished
+          // steps → failed. Do not blindly mark cancelled, falsely attributing real failures to user Stop.
+          next.state = input.finalState === "cancelled" ? "cancelled" : "failed";
+        }
+        if (s.confirmation && !s.confirmation.outcome) {
+          next.confirmation = {
+            ...s.confirmation,
+            outcome: input.finalState === "cancelled" ? "stopped" : "ended",
+          };
+        }
+        return next;
+      })
     : prev.steps;
   _commit(input.turnId, {
     ...prev,
@@ -848,6 +979,21 @@ export function applyTurnDuration(input: ApplyTurnDurationInput): void {
   _commit(input.turnId, { ...prev, totalDurationMs: ms });
 }
 
+export interface ApplyTurnEndedInput {
+  turnId: string;
+  /** Backend root `done.ended_at` (ISO-8601 UTC). */
+  endedAt: string;
+}
+
+/** Record the server time of the turn's root `done`. Later generations overwrite, like `applyTurnDuration`. */
+export function applyTurnEnded(input: ApplyTurnEndedInput): void {
+  const endedAt = new Date(input.endedAt);
+  if (Number.isNaN(endedAt.getTime())) return;
+  const prev = _states.get(input.turnId) ?? _emptyTurnState(input.turnId);
+  if (prev.endedAt?.getTime() === endedAt.getTime()) return;
+  _commit(input.turnId, { ...prev, endedAt });
+}
+
 export interface ApplyStepOutcomeInput {
   turnId: string;
   stepOutcome: StepOutcome;
@@ -882,7 +1028,8 @@ export function applyCardResumed(input: ApplyCardResumedInput): void {
   if (
     !prev.cardFinalized &&
     prev.cardFinalState === null &&
-    prev.totalDurationMs === null
+    prev.totalDurationMs === null &&
+    prev.endedAt === null
   ) {
     return;
   }
@@ -892,6 +1039,7 @@ export function applyCardResumed(input: ApplyCardResumedInput): void {
     cardFinalState: null,
     totalDurationMs: null,
     stepOutcome: null,
+    endedAt: null,
   });
 }
 
@@ -955,6 +1103,9 @@ export function applyStepStarted(input: ApplyStepStartedInput): void {
     // ⚠ Duplicate step_started preserves the **earliest** sequence: a step's timeline position is set on first
     //   appearance; reconnect redelivery must not move it later (same rule as PeerTerminal.evtSeq).
     evtSeq: prev.steps[idx]?.evtSeq ?? input.evtSeq ?? null,
+    // Same rule: a redelivered step_started (or one arriving after a confirmation placeholder)
+    // must not erase the confirmation already attached to this step.
+    ...(prev.steps[idx]?.confirmation ? { confirmation: prev.steps[idx]!.confirmation } : {}),
   };
 
   const nextSteps =
@@ -1544,6 +1695,109 @@ export function applyStepDone(input: ApplyStepDoneInput): void {
   };
 
   const nextSteps = prev.steps.map((s, i) => (i === idx ? next : s));
+  _commit(input.turnId, { ...prev, steps: nextSteps });
+}
+
+export interface ApplyConfirmationRequestedInput {
+  turnId: string;
+  stepId: string;
+  callId?: string | null;
+  /** Agent id stamped by the bus; groups a placeholder row under its Agent. */
+  parentAgentId?: string | null;
+  confirmation: Omit<StepConfirmation, "receivedAt" | "outcome" | "decidedAt">;
+  /** Local receipt time; defaults to `Date.now()`. */
+  receivedAt?: number;
+}
+
+/**
+ * Attach a `confirmation_requested` to its waiting tool step. The backend persists
+ * `step_started` before the handler runs, so the step is normally known. If it is
+ * not (partial delivery), a placeholder row with a step beat is created so the
+ * request is never lost; a later `step_started` replaces the row in place and
+ * keeps the confirmation. Redelivery of the same request is a no-op, so a
+ * reconnect never restarts the countdown or reopens a recorded decision.
+ */
+export function applyConfirmationRequested(input: ApplyConfirmationRequestedInput): void {
+  if (!input.turnId || !input.stepId || !input.confirmation.id) return;
+  const prev = _states.get(input.turnId) ?? _emptyTurnState(input.turnId);
+  const idx = prev.steps.findIndex((s) => s.stepId === input.stepId);
+  if (idx >= 0 && prev.steps[idx]!.confirmation?.id === input.confirmation.id) return;
+  const confirmation: StepConfirmation = {
+    ...input.confirmation,
+    choices: [...input.confirmation.choices],
+    receivedAt: input.receivedAt ?? Date.now(),
+  };
+  if (idx >= 0) {
+    const nextSteps = prev.steps.map((s, i) => (i === idx ? { ...s, confirmation } : s));
+    _commit(input.turnId, { ...prev, steps: nextSteps });
+    return;
+  }
+  const placeholder: Step = {
+    stepId: input.stepId,
+    parentStepId: null,
+    concurrencyGroupId: null,
+    stepType: "tool_run",
+    toolName: null,
+    headerZh: "",
+    label: input.confirmation.title || null,
+    state: "active",
+    summary: null,
+    durationMs: null,
+    partialContent: "",
+    detail: null,
+    subSteps: null,
+    outputArtifacts: null,
+    codeInput: null,
+    error: null,
+    subagentName: null,
+    startedAt: new Date(confirmation.receivedAt),
+    callId: input.callId ?? null,
+    subagentId: input.parentAgentId ?? null,
+    peerProseKey: null,
+    // Unknown: the real step_started supplies its own sequence when it arrives.
+    evtSeq: null,
+    confirmation,
+  };
+  const hasBeat = prev.beats.some((b) => b.kind === "step" && b.stepId === input.stepId);
+  _commit(input.turnId, {
+    ...prev,
+    steps: [...prev.steps, placeholder],
+    beats: hasBeat ? prev.beats : [...prev.beats, { kind: "step", stepId: input.stepId }],
+  });
+}
+
+export interface ApplyConfirmationResolvedInput {
+  turnId: string;
+  /** Step the confirmation is attached to; the confirmation id alone also matches. */
+  stepId?: string | null;
+  confirmationId: string;
+  outcome: ToolConfirmationOutcome;
+  decidedAt?: string | null;
+}
+
+/**
+ * Record the outcome from `confirmation_resolved`. The first recorded decision
+ * wins; it may replace a derived `stopped` / `ended` record (an inference) but
+ * never another decision. A resolution for an unknown confirmation is dropped:
+ * there is no request to attach a record to.
+ */
+export function applyConfirmationResolved(input: ApplyConfirmationResolvedInput): void {
+  if (!input.turnId || !input.confirmationId) return;
+  const prev = _states.get(input.turnId);
+  if (!prev) return;
+  let idx = input.stepId
+    ? prev.steps.findIndex((s) => s.stepId === input.stepId && s.confirmation?.id === input.confirmationId)
+    : -1;
+  if (idx < 0) idx = prev.steps.findIndex((s) => s.confirmation?.id === input.confirmationId);
+  if (idx < 0) return;
+  const current = prev.steps[idx]!.confirmation!;
+  if (current.outcome && current.outcome !== "stopped" && current.outcome !== "ended") return;
+  const confirmation: StepConfirmation = {
+    ...current,
+    outcome: input.outcome,
+    ...(input.decidedAt ? { decidedAt: input.decidedAt } : {}),
+  };
+  const nextSteps = prev.steps.map((s, i) => (i === idx ? { ...s, confirmation } : s));
   _commit(input.turnId, { ...prev, steps: nextSteps });
 }
 

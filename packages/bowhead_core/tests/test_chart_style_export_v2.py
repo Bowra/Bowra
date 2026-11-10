@@ -293,3 +293,14 @@ def test_selected_series_palette_survives_export_freeze_and_changes_identity():
     assert colored["normalizedRenderShape"]["series"][0]["paletteIndex"] == 4
     assert colored["presentationChecksum"] != before["presentationChecksum"]
     assert parse_frozen_chart_presentation_v2(colored, locale="en-US") == colored
+
+
+def test_exact_hex_survives_export_freeze_and_round_trip():
+    theme = build_chart_style_export_theme_v2(_effective_v2(), print_theme=current_print_theme_snapshot())
+    spec = _spec()
+    metric = next(column for column in spec["columns"] if column["type"] == "numeric")
+    metric["color_hex"] = "#00a651"
+    colored = freeze_chart_presentation_v2(spec, theme=theme, locale="en-US")
+    assert colored["effective"]["series"][0]["colorHex"] == "#00A651"
+    assert colored["normalizedRenderShape"]["series"][0]["colorHex"] == "#00A651"
+    assert parse_frozen_chart_presentation_v2(colored, locale="en-US") == colored

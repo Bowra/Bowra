@@ -42,19 +42,19 @@ function drawnSeries(): string[] {
   return JSON.parse(screen.getByTestId("chartjs").getAttribute("data-series") ?? "[]");
 }
 
-vi.mock("next-intl", () => ({
+vi.mock("next-intl", () => {
   // Chart component localizes x-axis time buckets / granularity column names (2026-09-01) —
   // component really calls useLocale(); missing mock would throw throughout file.
-  useLocale: () => "zh-CN",
-  useTranslations: () => (key: string, values?: Record<string, unknown>) => {
+  const translate = (key: string, values?: Record<string, unknown>) => {
     if (key === "chart.truncated_top_n") return `Showing top ${values?.shown} of ${values?.total}`;
     if (key === "chart.truncated_top_by") return `Top ${values?.shown} of ${values?.total} by |${values?.measure}|`;
     if (key === "chart.truncated_series") return `Top ${values?.shown} of ${values?.total} series`;
     if (key === "chart.downsampled_points") return `${values?.total} pts down to ${values?.shown}`;
     if (key === "chart.auto_from_sandbox") return "Auto-generated from sandbox data";
     return key;
-  },
-}));
+  };
+  return { useLocale: () => "zh-CN", useTranslations: () => translate };
+});
 
 afterEach(() => {
   cleanup();

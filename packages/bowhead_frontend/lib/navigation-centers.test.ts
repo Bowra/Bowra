@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { EXTRA_ADMIN_DESTINATIONS } from "@/edition/settings";
 import type { MeUser } from "./auth-api";

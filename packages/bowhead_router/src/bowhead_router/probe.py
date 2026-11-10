@@ -636,6 +636,56 @@ def not_testable_result() -> ProbeResult:
     )
 
 
+_ANTHROPIC_SSE_EVENTS = frozenset(
+    {"message_start", "ping", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop", "error"}
+)
+
+
+def _decode_anthropic_sse(text: str) -> dict[str, Any]:
+    """Rebuild an Anthropic Messages object from its event stream.
+
+    A probe compiled from runtime parameters streams like the runtime adapter, so
+    Anthropic-compatible models answer with `message_start` ... `message_stop`.
+    Only `message_stop` completes the stream; an `error` event or a missing
+    terminal is `invalid_response`. Thinking blocks are kept but are not a
+    completion by themselves.
+    """
+
+    message: dict[str, Any] = {}
+    blocks: dict[int, dict[str, Any]] = {}
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data:
+            continue
+        frame = json.loads(data)
+        if not isinstance(frame, dict):
+            raise ValueError("invalid SSE response frame")
+        ftype = frame.get("type")
+        if ftype == "error" or frame.get("error") is not None:
+            raise ValueError("provider reported stream failure")
+        if ftype == "message_start" and isinstance(frame.get("message"), dict):
+            message = {key: value for key, value in frame["message"].items() if key != "content"}
+        elif ftype == "content_block_start" and isinstance(frame.get("content_block"), dict):
+            blocks[int(frame.get("index") or 0)] = dict(frame["content_block"])
+        elif ftype == "content_block_delta" and isinstance(frame.get("delta"), dict):
+            delta = frame["delta"]
+            block = blocks.setdefault(int(frame.get("index") or 0), {"type": "text", "text": ""})
+            if delta.get("type") == "text_delta":
+                block["text"] = str(block.get("text") or "") + str(delta.get("text") or "")
+            elif delta.get("type") == "thinking_delta":
+                block["thinking"] = str(block.get("thinking") or "") + str(delta.get("thinking") or "")
+        elif ftype == "message_delta":
+            if isinstance(frame.get("delta"), dict) and "stop_reason" in frame["delta"]:
+                message["stop_reason"] = frame["delta"]["stop_reason"]
+            if frame.get("usage") is not None:
+                message["usage"] = frame["usage"]
+        elif ftype == "message_stop":
+            return {**message, "content": [blocks[index] for index in sorted(blocks)]}
+    raise ValueError("SSE response did not reach a terminal frame")
+
+
 def _decode_responses_sse(text: str) -> Any:
     """Responses 事件流 ⇒ 终帧 `response.completed` 自带的完整 response 对象。
 
@@ -742,6 +792,8 @@ def _decode_success_payload(
             break
         if isinstance(first, dict) and isinstance(first.get("type"), str) and first["type"].startswith("response."):
             return _decode_responses_sse(text)
+        if isinstance(first, dict) and first.get("type") in _ANTHROPIC_SSE_EVENTS:
+            return _decode_anthropic_sse(text)
         break
     content: list[str] = []
     tool_calls: dict[int, dict[str, Any]] = {}

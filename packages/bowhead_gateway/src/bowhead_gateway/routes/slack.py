@@ -311,7 +311,13 @@ async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspac
     from bowhead_core import TurnRequest
     from bowhead_gateway._turn_runtime import _resolve_turn_datarc_runtime
     from bowhead_gateway.channel_language import resolve_channel_turn_language
-    from bowhead_gateway.turn_service import admit_legacy_chat_execution, resolve_team_model_runtime, spawn_turn
+    from bowhead_gateway.turn_service import (
+        admit_legacy_chat_execution,
+        is_session_busy_rejection,
+        resolve_team_model_runtime,
+        session_has_active_turn,
+        spawn_turn,
+    )
 
     session_id = _session_id(connection, channel_id, thread_ts, user.id)
     language_context = await resolve_channel_turn_language(
@@ -358,6 +364,10 @@ async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspac
         await _post(connection, channel_id, im_interface_message("slack_data_permissions_unavailable", locale), thread_ts)
         return
     await orchestrator.session_store.ensure_session(session_id=session_id, workspace_id=workspace_id, user_id=user.id)
+    # Slack has no steer: a message during a running Turn would otherwise get only "working".
+    if await session_has_active_turn(orchestrator, session_id):
+        await _post(connection, channel_id, im_interface_message("channel_session_busy", locale), thread_ts)
+        return
     turn = TurnRequest(
         session_id=session_id,
         workspace_id=workspace_id,
@@ -376,15 +386,22 @@ async def _start_turn(app: Any, connection: SlackConnection, user: Any, workspac
     )
     bus = await admit_legacy_chat_execution(orchestrator, turn)
     await _post(connection, channel_id, im_interface_message("slack_processing", locale), thread_ts)
-    await spawn_turn(
-        orchestrator,
-        turn,
-        user_store=app.state.user_store,
-        team_id=connection.team_id,
-        entitlements=getattr(app.state, "entitlements", None),
-        name_prefix="turn_run_slack",
-        admitted_legacy_bus=bus,
-    )
+    try:
+        await spawn_turn(
+            orchestrator,
+            turn,
+            user_store=app.state.user_store,
+            team_id=connection.team_id,
+            entitlements=getattr(app.state, "entitlements", None),
+            name_prefix="turn_run_slack",
+            admitted_legacy_bus=bus,
+        )
+    except ValueError as exc:
+        # Another Turn started after the pre-check; spawn_turn already released this one.
+        if not is_session_busy_rejection(exc):
+            raise
+        await _post(connection, channel_id, im_interface_message("channel_session_busy", locale), thread_ts)
+        return
     task = asyncio.create_task(
         _mirror_turn(connection, channel_id, thread_ts, turn.turn_id, locale, language_context.output_language), name=f"slack_mirror:{turn.turn_id}"
     )

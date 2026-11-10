@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch 1 §2.1 · figure-caption attachment golden cases. This file tests only TS behavior; **cross-language parity is
  * enforced by packages/bowhead_core/tests/test_figure_caption_parity.py** (it reads these

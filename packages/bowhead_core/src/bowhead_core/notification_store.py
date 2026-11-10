@@ -222,6 +222,7 @@ class NotificationStore:
         reopen_resolved: bool = True,
         escalate_after_s: int | None = None,
         email_delivery_to: Collection[str] = (),
+        email_delivery_after_s: int = 0,
     ) -> NotificationWrite:
         """Write one item and its recipients in one transaction: the only notification write.
 
@@ -245,7 +246,8 @@ class NotificationStore:
 
         Email rows (``notification_deliveries``, FEATURE_NOTIFICATION_DELIVERY) are written in the same
         transaction: ``escalate_after_s`` schedules one escalation per person who just received the
-        item; ``email_delivery_to`` schedules an immediate configured email on a new occurrence.
+        item; ``email_delivery_to`` schedules a configured email on a new occurrence, due now or after
+        ``email_delivery_after_s``.
 
         ⚠ The list is ordered by ``created_at``; refreshing it is what moves a new occurrence to the
         top (2026-09-14 on 116: a suggestion learned that day showed "53 days ago" and sank).
@@ -321,7 +323,8 @@ class NotificationStore:
                 if escalate_after_s is not None and delivered_to:
                     await _schedule_deliveries(db, notification_id, delivered_to, "email_escalation", _after(now, escalate_after_s), now)
                 if email_delivery_to and new_occurrence:
-                    await _schedule_deliveries(db, notification_id, sorted(set(email_delivery_to)), "email_delivery", now, now)
+                    due = _after(now, email_delivery_after_s) if email_delivery_after_s > 0 else now
+                    await _schedule_deliveries(db, notification_id, sorted(set(email_delivery_to)), "email_delivery", due, now)
                 await db.commit()
             except Exception:
                 await db.rollback()
@@ -800,6 +803,31 @@ class NotificationStore:
                 "outcome_code=?, diagnostic_ref=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=? "
                 "WHERE id=? AND lease_owner=? AND status='pending'",
                 (next_status, 0 if status == "skipped" else 1, retry_at, outcome_code, diagnostic_ref, now, delivery_id, owner),
+            )
+            await db.commit()
+        return int(cur.rowcount or 0) == 1
+
+    async def withdraw_pending_delivery(self, *, notification_id: str, user_id: str, channel: str, outcome_code: str) -> bool:
+        """Skip one pending row with ``outcome_code`` unless a worker is sending it; whether it did."""
+        now = _now()
+        async with open_shared_ctx(self.db_path) as db:
+            cur = await db.execute(
+                "UPDATE notification_deliveries SET status='skipped', outcome_code=?, updated_at=? "
+                "WHERE notification_id=? AND user_id=? AND channel=? AND status='pending' "
+                "AND (lease_expires_at IS NULL OR lease_expires_at<=?)",
+                (outcome_code, now, notification_id, user_id, channel, now),
+            )
+            await db.commit()
+        return int(cur.rowcount or 0) == 1
+
+    async def release_pending_delivery(self, *, notification_id: str, user_id: str, channel: str) -> bool:
+        """Make one pending row that waits for a later time due now; whether it did."""
+        now = _now()
+        async with open_shared_ctx(self.db_path) as db:
+            cur = await db.execute(
+                "UPDATE notification_deliveries SET not_before=?, updated_at=? "
+                "WHERE notification_id=? AND user_id=? AND channel=? AND status='pending' AND not_before>?",
+                (now, now, notification_id, user_id, channel, now),
             )
             await db.commit()
         return int(cur.rowcount or 0) == 1

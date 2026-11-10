@@ -12,6 +12,7 @@ import anyio
 from bowhead_router.errors import InvocationOutcomeUnknownError
 from bowhead_router.invocation import physical_invocation_scope
 from bowhead_router.output_budget import ContextCapacityError
+from bowhead_router.reasoning import message_record
 from bowhead_router.types import Message, ToolCall
 from bowhead_router.usage import detached_usage_context, usage_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -312,7 +313,9 @@ async def run_authoring_turn(
             await _observed(delivery, scope, worker, job_id, attempt_no, call_no)
             if reply.finish_reason not in {"stop", "tool_use"} or not reply.tool_calls:
                 raise DocumentRequestError("document_authoring_no_output")
-            messages.append(Message(role="assistant", content=reply.content, tool_calls=reply.tool_calls))
+            messages.append(
+                Message(role="assistant", content=reply.content, tool_calls=reply.tool_calls, provider_reasoning=reply.provider_reasoning)
+            )
             for index, call in enumerate(reply.tool_calls):
                 if authorize_inputs is not None:
                     await authorize_inputs()
@@ -347,7 +350,7 @@ async def run_authoring_turn(
                                             "error": "document_source_unknown",
                                             "available_sources": sorted(aliases),
                                             "hint": "Only these inputs exist, and this task cannot query data systems. "
-                                            "If required values are not in them, ask for the values or a data file; do not invent them.",
+                                            "If required values are not in them, follow the instructions for absent values; never present made-up values as real data.",
                                         }
                                     ),
                                 )
@@ -512,7 +515,7 @@ async def run_authoring_turn(
                                 "action": "ask",
                                 "question": question,
                                 "question_call_id": call.id,
-                                "messages": [asdict(message) for message in messages],
+                                "messages": [message_record(message) for message in messages],
                                 "used_tools": used_tools,
                                 "used_steps": used_steps,
                             }

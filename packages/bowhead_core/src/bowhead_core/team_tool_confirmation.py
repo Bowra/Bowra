@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from typing import Any, Final, Literal
 
 from bowhead_core.delivery_confirmation import MAX_PENDING_PER_OWNER, Decision, DeliveryConfirmations
@@ -27,6 +28,7 @@ __all__ = [
     "MAX_ARGUMENT_BYTES",
     "MAX_PENDING_PER_OWNER",
     "Decision",
+    "TeamMcpCategory",
     "TeamToolConfirmations",
     "default_team_tool_confirmations",
     "resolve_team_mcp_category",
@@ -39,8 +41,8 @@ TeamMcpCategory = Literal["read", "external_write", "destructive", "unknown"]
 CategorySource = Literal["mcp_annotation", "unknown_default", "admin_override"]
 CATEGORY_RANK: Final = {"read": 0, "external_write": 1, "destructive": 2}
 
-# Matches the personal MCP confirmation window shown in its help.
-CONFIRM_SECONDS: Final = 120
+# One waiting time for every confirmation kind (inline tool confirmation design D2).
+CONFIRM_SECONDS: Final = 180
 MAX_ARGUMENT_BYTES: Final = 64 * 1024
 MAX_SESSION_ALLOWANCES: Final = 4096
 # Allowance identity travels with the pending item but is never shown to the requester.
@@ -55,12 +57,14 @@ def team_tool_confirmation_enabled() -> bool:
 def team_mcp_category(*, read_only: bool | None, destructive: bool | None) -> tuple[TeamMcpCategory, CategorySource]:
     """Category of a team MCP tool from its annotations, as ``(risk, risk_source)``.
 
-    Read-only and destructive keep the conflict rules of ``classify_mcp_risk``. A tool
-    explicitly annotated as neither read-only nor destructive is an additive write.
-    Anything else stays ``unknown``: it is confirmed on every call at run time and is
-    not offered for Agent authoring until its category is known.
+    ``readOnlyHint=true`` is read unless the same tool also claims ``destructiveHint=true``;
+    MCP defines ``destructiveHint`` only for tools that are not read-only, so its absence
+    does not weaken a read-only marking. A tool explicitly annotated as neither read-only
+    nor destructive is an additive write. Anything else, including the read-only plus
+    destructive conflict, stays ``unknown``: it is confirmed on every call at run time and
+    is not offered for Agent authoring until its category is known.
     """
-    if read_only is True and destructive is False:
+    if read_only is True and destructive is not True:
         return "read", "mcp_annotation"
     if read_only is False and destructive is True:
         return "destructive", "mcp_annotation"
@@ -113,7 +117,10 @@ class TeamToolConfirmations(DeliveryConfirmations):
         description: str,
         schema_digest: str,
         arguments: dict[str, Any],
+        category: TeamMcpCategory = "unknown",
         timeout_seconds: float | None = None,
+        on_pending: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_resolved: Callable[[str], Awaitable[None]] | None = None,
     ) -> Decision:
         """Wait for the requester's decision on this exact call."""
         if self.session_allows(owner_user_id, session_id, tool_ref, schema_digest):
@@ -128,10 +135,13 @@ class TeamToolConfirmations(DeliveryConfirmations):
                 "tool_ref": tool_ref,
                 "tool_name": tool_name,
                 "description": description,
+                "category": category,
                 "arguments": arguments,
                 "schema_digest": schema_digest,
             },
             timeout_seconds=timeout_seconds,
+            on_pending=on_pending,
+            on_resolved=on_resolved,
         )
 
     def pending(self, owner_user_id: str) -> list[dict[str, Any]]:
@@ -143,7 +153,7 @@ class TeamToolConfirmations(DeliveryConfirmations):
         if item is None or item.owner_user_id != owner_user_id or item.decision is not None or not item.session_id:
             return False
         key = (owner_user_id, item.session_id, str(item.payload["tool_ref"]), str(item.payload["schema_digest"]))
-        if not self.decide(owner_user_id, confirmation_id, True):
+        if not self.decide(owner_user_id, confirmation_id, True, for_session=True):
             return False
         self._allowances[key] = None
         self._allowances.move_to_end(key)

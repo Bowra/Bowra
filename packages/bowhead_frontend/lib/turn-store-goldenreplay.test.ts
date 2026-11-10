@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Golden replay (chat-solidify O3, 2026-07-03) — automated protection for live == F5.
  *

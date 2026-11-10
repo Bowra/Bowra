@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * chart-table-ux — hbar height-by-category works end to end only when **both rules hold**.
  *

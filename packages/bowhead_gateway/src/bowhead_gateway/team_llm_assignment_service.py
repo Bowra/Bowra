@@ -16,10 +16,12 @@ async def prepare_assignment_changes(
     *, db_path: str, team_id: str, current: dict[str, Any], draft: dict[str, Any], verification_completed: bool = False
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Review and Apply use the same evidence projection and deterministic choices."""
-    if not model_assignment_reconciliation_enabled():
-        return draft, []
     if current and not is_v2_config(current):
         current = migrate_legacy_config_to_v2(current)
+    maintenance = model_assignment_reconciliation_enabled()
+    removed = isinstance(draft.get("providers"), dict) and bool((current.get("providers") or {}).keys() - draft["providers"].keys())
+    if not maintenance and not removed:
+        return draft, []
     # Invalid input still belongs to the original validator, not the repair path.
     try:
         validate_v2_config({**draft, "tiers": {}, "kb": {}, "media": {}, "search": {}}, allow_unassigned_tiers=True)
@@ -45,4 +47,4 @@ async def prepare_assignment_changes(
     entries = await catalog_verification_entries(db_path=db_path, team_id=team_id, config=draft, provider_ids=identities)
     runtime_keys = {value: key for key, value in identities.items()}
     verified = {(runtime_keys[row["provider_id"]], row["model_id"], row["capability"]) for row in entries if row["fact_state"] == "verified"}
-    return reconcile_model_assignments(current, draft, verified, verification_completed=verification_completed)
+    return reconcile_model_assignments(current, draft, verified, verification_completed=verification_completed, deletion_only=not maintenance)

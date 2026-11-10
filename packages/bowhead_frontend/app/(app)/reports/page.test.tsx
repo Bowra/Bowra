@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderIntl } from "@/__tests__/intl-render";
 import { chooseRowAction } from "@/__tests__/row-actions";
@@ -63,6 +63,8 @@ vi.mock("@/lib/use-space", () => ({
 }));
 
 import ReportsPage from "./page";
+
+beforeEach(() => window.localStorage.removeItem("bowhead.reports.show_empty"));
 
 describe("ReportsPage loading summary", () => {
   afterEach(() => {
@@ -419,11 +421,14 @@ describe("ReportsPage paging footer", { timeout: 20_000 }, () => {
     await screen.findByText("报告 49", {}, { timeout: 5000 });
     fireEvent.click(screen.getByTestId("reports-load-more"));
     await screen.findByText("报告 99", {}, { timeout: 5000 });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("报告 50"));
+    const firstBatchReads = () => calls.filter((call) => !call.cursor && call.limit === 50 && call.scope !== "shared").length;
+    const readsBeforeChange = firstBatchReads();
 
     await act(async () => {
       window.dispatchEvent(new Event("bowhead.canvas.changed"));
     });
-    await waitFor(() => expect(calls.filter((call) => !call.cursor && call.limit === 50 && call.scope !== "shared")).toHaveLength(2));
+    await waitFor(() => expect(firstBatchReads()).toBe(readsBeforeChange + 1));
     expect(screen.getByText("报告 99")).toBeTruthy();
     expect(screen.getByTestId("reports-progress").textContent).toBe("显示 100 / 共 120 份");
   });

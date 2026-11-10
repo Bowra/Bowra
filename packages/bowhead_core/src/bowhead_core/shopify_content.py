@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from bowhead_core.delivery_confirmation import DeliveryConfirmations
 from bowhead_core.llm_config_crypto import decrypt_llm_config, encrypt_llm_config
 from bowhead_core.shopify_client import ShopifyClient, ShopifyClientError
+from bowhead_core.tool_confirmation_events import confirmation_callbacks
 
 PREVIEW_TTL_SECONDS = 900
 CONTENT_OPERATIONS = frozenset({"shopify_read_content", "shopify_preview_content_update", "shopify_apply_content_update"})
@@ -253,12 +254,22 @@ async def execute_content(
         raise ShopifyClientError("shopify_content_changed")
     queue = default_shopify_content_confirmations()
     queue.claim(args.review_token, review["expires_at"])
+    on_pending, on_resolved = confirmation_callbacks(
+        ctx,
+        kind="shopify_content",
+        requester_user_id=ctx.user_id,
+        title=str(snapshot.get("title") or args.object_id),
+        source_label=str(snapshot.get("shop_domain") or "") or None,
+        choices=["reject", "approve"],
+    )
     decision = await queue.request_snapshot(
         owner_user_id=ctx.user_id,
         turn_id=ctx.turn_id,
         session_id=ctx.session_id,
         payload=snapshot,
         timeout_seconds=review["expires_at"] - time.time(),
+        on_pending=on_pending,
+        on_resolved=on_resolved,
     )
     if decision != "approved":
         raise ShopifyClientError(f"shopify_content_confirmation_{decision}")

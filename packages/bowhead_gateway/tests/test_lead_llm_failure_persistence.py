@@ -478,3 +478,148 @@ async def test_empty_lead_answer_live_and_persisted_terminal_agree(r4_app, outco
         assert done[0]["error"] == reason and done[0]["status"] == "error"
         assert next(p for t, p in payloads if t == "turn_failed")["reason"] == reason
         assert not any(t == "final_answer" for t, p in payloads)
+
+
+async def _renew_without_writing(**_kwargs) -> str:
+    """Keep a lapsed lease lapsed: only recovery may change its ownership here."""
+    return "renewed"
+
+
+def _lapse_dispatch_lease(db_file: Path, turn_id: str) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    with sqlite3.connect(db_file) as connection:
+        updated = connection.execute(
+            "UPDATE chat_turn_spawn_dispatch SET lease_expires_at=? WHERE turn_id=? AND state='spawned'",
+            ((datetime.now(tz=UTC) - timedelta(seconds=40)).isoformat(), turn_id),
+        )
+        assert updated.rowcount == 1
+        connection.commit()
+
+
+async def _start_generation_then_fail(app, db_file: Path, request, *, started_seconds_ago: float, steer_text: str | None = None):
+    """Emulate TurnRunner's generation start, an event-loop stall past the lease, then a grouped failure."""
+    import time
+    from datetime import UTC, datetime, timedelta
+
+    from bowhead_core.events import OrchestratorEvent
+
+    orch = app.state.orchestrator
+    bus, _floor = await orch.event_registry.projection_checkpoint(request.turn_id)
+    assert bus is not None
+    bus._turn_wall_t0_perf = time.perf_counter() - started_seconds_ago
+    await bus.emit(
+        OrchestratorEvent(
+            event_type="turn_started",
+            turn_id=request.turn_id,
+            payload={"started_at": (datetime.now(UTC) - timedelta(seconds=started_seconds_ago)).isoformat()},
+        )
+    )
+    if steer_text is not None:
+        assert await orch.session_store.append_steer_buffer(
+            session_id=request.session_id,
+            text=steer_text,
+            expected_turn_id=request.turn_id,
+        )
+    await asyncio.to_thread(_lapse_dispatch_lease, db_file, request.turn_id)
+    raise ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("synthetic helper stream dropped")])
+
+
+def _terminal_rows(db_file: Path, turn_id: str) -> list[tuple[str, dict]]:
+    _row, events = _read_turn(db_file, turn_id)
+    return [(e["event_type"], json.loads(e["payload_json"])) for e in events if e["event_type"] in {"turn_failed", "done"}]
+
+
+async def test_worker_failure_with_lapsed_lease_publishes_its_timed_terminal(r4_app, monkeypatch) -> None:
+    """Chat dogfood 2026-11-08 F2/F7: an empty steer buffer cannot suppress the worker's own ``done``.
+
+    The lease lapsed during a stall but nobody took it over. Nothing is buffered,
+    so the pre-terminal hook must not fence on the lease; the worker's failure
+    ``done`` (a direct emit that bypasses Lead) carries the generation duration
+    and agrees live, persisted and on replay.
+    """
+    app, db_file = r4_app
+    orch = app.state.orchestrator
+    monkeypatch.setattr(orch.session_store, "heartbeat_chat_spawn_dispatch", _renew_without_writing)
+
+    async def fail(request):
+        await _start_generation_then_fail(app, db_file, request, started_seconds_ago=2.0)
+
+    monkeypatch.setattr(orch, "run_turn", fail)
+    live = []
+    tid = await _run_seeded_turn(app, text="Draw the prime counts.", live_events=live, through_worker=True)
+
+    saved = _terminal_rows(db_file, tid)
+    assert [kind for kind, _ in saved] == ["turn_failed", "done"]
+    assert [(event.event_type, event.payload) for event in live if event.event_type in {"turn_failed", "done"}] == saved
+    replayed = await app.state.turn_log_store.list_events(tid, event_types=("turn_failed", "done"))
+    assert [(event.event_type, event.payload) for event in replayed] == saved
+    failed, done = (payload for _, payload in saved)
+    assert done["status"] == "failed"
+    assert done["reason_code"] == failed["reason_code"] == "lead_internal_error"
+    assert 2_000 <= done["duration_ms"] < 60_000
+    with sqlite3.connect(db_file) as connection:
+        # The lapsed-but-untaken lease still released this Turn's active fence.
+        assert connection.execute(
+            "SELECT s.active_turn_id FROM sessions s JOIN turns t ON t.session_id=s.id WHERE t.id=?",
+            (tid,),
+        ).fetchone() == (None,)
+
+
+async def test_lapsed_lease_with_accepted_steer_defers_to_consistent_recovery(r4_app, monkeypatch) -> None:
+    """Chat dogfood 2026-11-08 F2/F7: accepted steer work keeps the fence, logs compactly, recovers consistently.
+
+    The parent terminal is withheld (accepted work must become discoverable
+    first), the failure is logged without the grouped exception context, and the
+    recovered ``done`` repeats the persisted ``turn_failed`` and the generation
+    duration instead of a contradictory generic failure.
+    """
+    from structlog.testing import capture_logs
+
+    app, db_file = r4_app
+    orch = app.state.orchestrator
+    store = orch.session_store
+    monkeypatch.setattr(store, "heartbeat_chat_spawn_dispatch", _renew_without_writing)
+
+    async def fail(request):
+        await _start_generation_then_fail(app, db_file, request, started_seconds_ago=3.0, steer_text="Use green bars.")
+
+    monkeypatch.setattr(orch, "run_turn", fail)
+    live = []
+    with capture_logs() as logs:
+        tid = await _run_seeded_turn(app, text="Draw the prime counts.", live_events=live, through_worker=True)
+
+    assert not any(event.event_type == "done" for event in live)
+    assert [kind for kind, _ in _terminal_rows(db_file, tid)] == ["turn_failed"]
+    hook_failures = [entry for entry in logs if entry["event"] == "steer.preterminal_materialize_failed"]
+    assert hook_failures == [
+        {
+            "event": "steer.preterminal_materialize_failed",
+            "log_level": "warning",
+            "parent_turn": tid,
+            "error_type": "RuntimeError",
+            "reason": "legacy_parent_dispatch_not_active",
+        }
+    ]
+    with sqlite3.connect(db_file) as connection:
+        assert connection.execute("SELECT state FROM chat_turn_spawn_dispatch WHERE turn_id=?", (tid,)).fetchone() == ("drain_pending",)
+
+    assert tid in await store.recover_expired_chat_spawn_dispatches()
+
+    saved = _terminal_rows(db_file, tid)
+    assert [kind for kind, _ in saved] == ["turn_failed", "done"]
+    replayed = await app.state.turn_log_store.list_events(tid, event_types=("turn_failed", "done"))
+    assert [(event.event_type, event.payload) for event in replayed] == saved
+    failed, done = (payload for _, payload in saved)
+    row, events = _read_turn(db_file, tid)
+    assert done["status"] == "failed"
+    assert done["reason_code"] == failed["reason_code"] == "lead_internal_error"
+    assert done["error"] == failed["message"] == "internal_error"
+    assert done["error_kind"] == row["error_kind"] == "lead_internal_error"
+    assert done["diagnostics"] == failed["diagnostics"]
+    assert done["recovery_action"] == failed["recovery_action"]
+    started = next(json.loads(e["payload_json"])["started_at"] for e in events if e["event_type"] == "turn_started")
+    from datetime import datetime
+
+    expected_ms = int((datetime.fromisoformat(row["ended_at"]) - datetime.fromisoformat(started)).total_seconds() * 1000)
+    assert done["duration_ms"] == expected_ms > 0

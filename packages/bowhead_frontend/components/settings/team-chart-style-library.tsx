@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api-client";
+import { formatDateTime } from "@/lib/locale";
 import { chartStylePreset } from "@/lib/chart/chart-style-registry";
 import {
   activateTeamChartStyle,
@@ -370,9 +371,7 @@ function paletteForChoice(id: string, details: Record<string, TeamChartStyleDeta
 }
 
 function formatDate(value: string, locale: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 function messageOf(error: unknown, fallback: string, t: ReturnType<typeof useTranslations>): string {

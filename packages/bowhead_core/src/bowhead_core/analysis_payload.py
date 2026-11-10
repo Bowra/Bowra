@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
@@ -1466,21 +1467,65 @@ def is_faithful_rounding(stated: float, authoritative: float) -> bool:
 _is_faithful_rounding = is_faithful_rounding
 
 
+# Digits inside identifier-like ASCII tokens (`sec_3bf299ae70f0`, `art_1301403add43`, `Q3`) and the
+# numbers of a hyphenated range or chained label (`1301-1400`, `1–2000`, `2026-11-08`) name things;
+# they are not values that a restatement copies. 116 t_7edbc155f8d8: `sec_3bf299ae70f0` contributed
+# 299 and the range labels contributed their ends, so Lead's correct 303 and 17 read as drift and the
+# guard replaced a correct reply. Values written next to a unit letter (`28M`) remain values.
+_ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+_LETTER_BEFORE_DIGIT_RE = re.compile(r"[A-Za-z]\d")
+_NUMERIC_LABEL_CHAIN_RE = re.compile(
+    r"(?<![\d.])\d+(?:[,，]\d{3})*(?:\.\d+)?(?:[ \t]*[-–—~～][ \t]*\d+(?:[,，]\d{3})*(?:\.\d+)?)+",  # noqa: RUF001 fullwidth comma and tilde are intentional
+)
+_PROSE_MARKER_RE = re.compile(r"\[(?:cite|ref):[^\]]*\]")
+
+
+def _numeric_label_spans(text: str) -> list[tuple[int, int]]:
+    """Return text spans whose digits identify something rather than state a value."""
+    spans = [
+        m.span()
+        for m in _ASCII_WORD_RE.finditer(text)
+        if any(c.isdigit() for c in m.group()) and ("_" in m.group() or _LETTER_BEFORE_DIGIT_RE.search(m.group()))
+    ]
+    spans.extend(m.span() for m in _NUMERIC_LABEL_CHAIN_RE.finditer(text))
+    return spans
+
+
+def _value_numbers_with_kind(text: str) -> list[tuple[float, bool]]:
+    """``_extract_numbers_with_kind`` restricted to stated values (no IDs or range labels)."""
+    if not text or not isinstance(text, str):
+        return []
+    spans = _numeric_label_spans(text)
+    out: list[tuple[float, bool]] = []
+    for m in _NUMBER_RE.finditer(text):
+        start, end = m.span(1)
+        if any(start < b and end > a for a, b in spans):
+            continue
+        v = _norm_unit_value(m.group(1), m.group(2))
+        if v is None:
+            continue
+        out.append((v, (m.group(2) or "").strip() in _RATIO_UNITS))
+    return out
+
+
 def payload_authoritative_numbers(payload: Any) -> set[float]:
     """payload 里**报告实际展示**的那组数：KPI 值 + exec_summary。
 
     这是「Lead 复述时本该照抄的东西」。刻意不含 insights 正文——那本身也是散文，
     拿散文当基准会把两处笔误当成互相印证。
+
+    Only stated values count: digits inside identifiers, range labels and citation markers
+    are excluded (see ``_numeric_label_spans``).
     """
     out: set[float] = set()
     if not isinstance(payload, dict):
         return out
     for k in payload.get("kpis") or []:
         if isinstance(k, dict) and isinstance(k.get("value"), str):
-            out.update(_extract_numbers_with_units(k["value"]))
+            out.update(v for v, _ in _value_numbers_with_kind(k["value"]))
     es = payload.get("exec_summary")
     if isinstance(es, str):
-        out.update(_extract_numbers_with_units(es))
+        out.update(v for v, _ in _value_numbers_with_kind(_PROSE_MARKER_RE.sub("", es)))
     return out
 
 
@@ -1495,12 +1540,13 @@ def narrative_restatement_drift(
     Require both a nearby authoritative referent within referent_window and a value
     that is not faithful rounding. Distant numbers belong to the separate fabrication
     guard. Prefer missing an uncertain case over suppressing valid user-visible prose.
+    Identifier digits and range labels are not stated values on either side.
     """
     if not text or not authoritative:
         return []
     drifted: list[tuple[float, float]] = []
-    raw = re.sub(r"\[(?:cite|ref):[^\]]*\]", "", text)
-    for v, _is_ratio in _extract_numbers_with_kind(raw):
+    raw = _PROSE_MARKER_RE.sub("", text)
+    for v, _is_ratio in _value_numbers_with_kind(raw):
         # Skip year-like integers (1900–2100): in this domain they almost always label periods rather than assert data
         # (same criterion as text_fabrication_detail).
         if 1900.0 <= v <= 2100.0 and float(v).is_integer():
@@ -1532,6 +1578,156 @@ def narrative_restates_payload_incorrectly(
         偏差 1.14%，一刀切 2% 容差放行、多数阈值又够不着，两道旧闸都拦不住。
     """
     return len(narrative_restatement_drift(text, payload_authoritative_numbers(payload))) >= min_drift
+
+
+# ─────────────────────────────────────────────────────────────
+# Internal object IDs in user-visible prose.
+#
+# Canvas, section, revision and artifact IDs are handles for Tools, never words for
+# users (116 t_7edbc155f8d8: "图表节 sec_3bf299ae70f0" reached the answer and the
+# report). Removing them where text is produced keeps live, stored and replayed text
+# identical. Functional markers keep their IDs: `[figure:sec_…]`, `[data:art_…]` and
+# URLs are protected by the guard, and fenced code is left unchanged.
+# ─────────────────────────────────────────────────────────────
+
+_ID_GUARD = r"(?<![A-Za-z0-9_:/=.\-\[])"
+_ID_LABEL = r"(?:(?:section|canvas|revision|artifact)(?:[ _]?id)?[ \t]*[=:：][ \t]*|(?:section|canvas|artifact)[ \t]+)?"
+_OBJECT_ID_PREFIXES = ("sec", "cv", "rv")
+_FENCED_CODE_SPLIT_RE = re.compile(r"(```[\s\S]*?```)")
+_INLINE_CODE_SPAN_RE = re.compile(r"(?<!`)(?P<delimiter>`{1,2})(?P<content>[^`\r\n]*)(?P=delimiter)(?!`)")
+
+
+def _object_id_res(prefixes: tuple[str, ...]) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+    ident = rf"(?:{'|'.join(prefixes)})_[0-9a-f]{{8,}}(?![A-Za-z0-9_])"
+    bracketed = re.compile(rf"[ \t]*[\(（\[【][ \t]*{_ID_LABEL}{ident}[ \t]*[\)）\]】]", re.IGNORECASE)
+    bare = re.compile(rf"[ \t]*{_ID_GUARD}{_ID_LABEL}{ident}", re.IGNORECASE)
+    whole = re.compile(rf"[ \t]*{_ID_LABEL}{ident}[ \t]*", re.IGNORECASE)
+    return bracketed, bare, whole
+
+
+_OBJECT_ID_RES = _object_id_res(_OBJECT_ID_PREFIXES)
+_OBJECT_AND_ARTIFACT_ID_RES = _object_id_res((*_OBJECT_ID_PREFIXES, "art"))
+_REMOVED = "\x00"
+_REMOVED_RUN_RE = re.compile(r"[ \t]*\x00[\x00 \t]*")
+
+
+def _joins_without_space(char: str) -> bool:
+    """Whether text next to a removed ID needs no separating space (CJK, punctuation, edges)."""
+    if not char or char in "\r\n":
+        return True
+    if unicodedata.category(char).startswith("P"):
+        return True
+    return "\u2e80" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff" or "\uff00" <= char <= "\uffef"
+
+
+def _close_removed_gaps(text: str) -> str:
+    def join(match: re.Match[str]) -> str:
+        before = text[match.start() - 1] if match.start() else ""
+        after = text[match.end()] if match.end() < len(text) else ""
+        return "" if _joins_without_space(before) or _joins_without_space(after) else " "
+
+    return _REMOVED_RUN_RE.sub(join, text)
+
+
+def strip_internal_object_ids(text: str, *, artifacts: bool = False) -> str:
+    """Remove internal canvas/section/revision IDs (and artifact IDs with ``artifacts``).
+
+    A bracket containing only an ID (and its label) goes with it; otherwise only the
+    ID is removed, so surrounding brackets stay balanced. The gap closes without a space
+    next to CJK text or punctuation and keeps one space between words. Idempotent.
+    """
+    if not text or "_" not in text or _REMOVED in text:
+        return text
+    bracketed, bare, whole = _OBJECT_AND_ARTIFACT_ID_RES if artifacts else _OBJECT_ID_RES
+    parts = _FENCED_CODE_SPLIT_RE.split(text)
+    for index in range(0, len(parts), 2):
+        part = _INLINE_CODE_SPAN_RE.sub(lambda m: _REMOVED if whole.fullmatch(m.group("content")) else m.group(0), parts[index])
+        part = bare.sub(_REMOVED, bracketed.sub(_REMOVED, part))
+        parts[index] = _close_removed_gaps(part) if _REMOVED in part else part
+    return "".join(parts)
+
+
+_PAYLOAD_PROSE_KEYS = ("exec_summary", "narrative", "title", "report_title", "eyebrow", "fallback_markdown")
+
+
+def strip_internal_ids_from_payload(payload: dict[str, Any]) -> int:
+    """Remove internal object IDs from a payload's user-visible prose in place.
+
+    Structured reference fields (``chart_section_id``, ``table_artifact_id`` …) keep
+    their IDs. Returns the number of fields changed.
+    """
+    changed = 0
+
+    def clean(container: Any, key: Any) -> None:
+        nonlocal changed
+        value = container[key] if isinstance(container, list) else container.get(key)
+        if isinstance(value, str) and value:
+            cleaned = strip_internal_object_ids(value, artifacts=True)
+            if cleaned != value:
+                container[key] = cleaned
+                changed += 1
+
+    if not isinstance(payload, dict):
+        return 0
+    for key in _PAYLOAD_PROSE_KEYS:
+        clean(payload, key)
+    if isinstance(payload.get("error"), dict):
+        clean(payload["error"], "message")
+    for insight in payload.get("insights") or []:
+        if not isinstance(insight, dict):
+            continue
+        for key in ("title", "thesis", "narrative"):
+            clean(insight, key)
+        for evidence in insight.get("evidence") or []:
+            if isinstance(evidence, dict):
+                for key in ("caption", "subcaption", "callout_text"):
+                    clean(evidence, key)
+    for recommendation in payload.get("recommendations") or []:
+        if isinstance(recommendation, dict):
+            for key in ("action", "rationale"):
+                clean(recommendation, key)
+    for source in payload.get("sources") or []:
+        if isinstance(source, dict):
+            clean(source, "label")
+    caveats = payload.get("caveats")
+    if isinstance(caveats, list):
+        for index in range(len(caveats)):
+            clean(caveats, index)
+    return changed
+
+
+_CODE_IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:[_.][a-z0-9]+)+")
+_RESULT_CODE_KEYS = ("error", "error_kind", "skipped", "failure_code", "reason_code")
+
+
+def observed_result_codes(results: Iterable[Any]) -> set[str]:
+    """Machine codes that this Turn's Tool results reported (``chart_edit_incomplete`` …)."""
+    codes: set[str] = set()
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        for key in _RESULT_CODE_KEYS:
+            value = result.get(key)
+            if isinstance(value, str) and _CODE_IDENTIFIER_RE.fullmatch(value):
+                codes.add(value)
+    return codes
+
+
+def exposes_internal_identifiers(text: str, identifiers: Iterable[str]) -> bool:
+    """Whether user-facing ``text`` still shows internal IDs, Tool names or result codes.
+
+    ``identifiers`` are the Turn's own registered Tool names and observed result codes;
+    only code-shaped names (with ``_`` or ``.``) count, so a Tool named like an ordinary
+    word never matches prose.
+    """
+    if not text:
+        return False
+    if strip_internal_object_ids(text, artifacts=True) != text:
+        return True
+    names = {name for name in identifiers if isinstance(name, str) and _CODE_IDENTIFIER_RE.fullmatch(name)}
+    if not names:
+        return False
+    return any(token in names for token in re.findall(r"[A-Za-z][A-Za-z0-9_.]*[A-Za-z0-9]", text))
 
 
 def provenance_caveats(payload: Any) -> list[str]:

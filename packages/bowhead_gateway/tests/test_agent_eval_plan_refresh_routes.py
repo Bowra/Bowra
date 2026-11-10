@@ -20,7 +20,6 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.routes import agents, team_openapi
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI, HTTPException
-from gateway_legacy_database import upgrade
 from test_agent_eval_run_insights_routes import _H, _NOW, _REAL_USERS, _insert_candidate, _seed_real
 
 pytestmark = pytest.mark.integration
@@ -85,10 +84,10 @@ async def _save_case(db_path, *, case_key: str, valid_until: str | None = None) 
 
 
 @pytest.fixture
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-plan-refresh-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     _seed_real(db_path)
     await _prepared(db_path)
     current = {"user": _REAL_USERS["owner"]}

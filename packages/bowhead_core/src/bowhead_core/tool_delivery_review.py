@@ -113,7 +113,31 @@ def _review_call_context(invocations: Sequence[Any]) -> dict[str, Any]:
     return {"failed_calls": failures, "successful_calls": successes, "truncated": len(invocations) > _MAX_REVIEW_CALLS}
 
 
-def review_guidance(invocations: Sequence[Any], *, include_call_context: bool = True, review_tool: str | None = None) -> str:
+def _review_work_guidance(*, closeout_only: bool, ask_tool: str | None) -> str:
+    """How the reviewed run may continue; only the user approves a changed outcome."""
+    if closeout_only:
+        # The reply already ended the work after a failure: the review checks that reply and
+        # never authorizes new work (module contract). A question it asked stays the user's.
+        return (
+            "Your previous answer ended this Turn's work. This review only checks that answer: do not dispatch, retry or start "
+            "other work now. Return the useful results and clearly disclose each unmet requirement. If that answer asked the user "
+            "to choose how to continue, the choice is still theirs: keep the question in your answer"
+            + (f" or ask it with {ask_tool}. " if ask_tool else ". ")
+        )
+    guidance = "Resolve missing required work within the existing budget, or return the useful results and clearly disclose the unmet requirement. "
+    if ask_tool:
+        guidance += f"Never switch to an alternative outcome or approach the user has not approved; ask with {ask_tool} instead. "
+    return guidance
+
+
+def review_guidance(
+    invocations: Sequence[Any],
+    *,
+    include_call_context: bool = True,
+    review_tool: str | None = None,
+    closeout_only: bool = False,
+    ask_tool: str | None = None,
+) -> str:
     import json
 
     submission = (
@@ -128,9 +152,9 @@ def review_guidance(invocations: Sequence[Any], *, include_call_context: bool = 
         "Reassess explicit completion after correction: keep partial for remaining required gaps, not for an earlier mixed batch. "
         "Before finishing, check the current user request and confirmed scope against actual delivered results. "
         "Account for every failed call below. Do not repeat confirmed writes. A later success with the same "
-        "Tool name is not proof of recovery. Resolve missing required work within the existing budget, or "
-        "return the useful results and clearly disclose the unmet requirement. Optional work can be covered "
-        "by an equivalent successful result. "
+        "Tool name is not proof of recovery. "
+        + _review_work_guidance(closeout_only=closeout_only, ask_tool=ask_tool)
+        + "Optional work can be covered by an equivalent successful result. "
         + submission
         + "[{requirement,status:fulfilled|unfulfilled,expected_outcome:success|failure,evidence_call_ids:[...]}] and issues "
         "[{call_id,resolution:recovered|covered|expected|unfulfilled,evidence_call_ids:[...],explanation}]. "

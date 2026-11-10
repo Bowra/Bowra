@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from bowhead_router.reasoning import message_record, record_reasoning, valid_record_keys
 from bowhead_router.types import ImageRef, Message, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -312,7 +313,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 seen.clear()
             if (
                 not isinstance(item, dict)
-                or set(item) != {"role", "content", "name", "tool_call_id", "tool_calls", "images"}
+                or not valid_record_keys(item)
                 or item["role"] not in {"user", "assistant", "tool"}
                 or not isinstance(item["content"], str)
                 or not isinstance(item["images"], list)
@@ -352,7 +353,22 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 ):
                     raise OrdinaryContinuationUnavailable()
                 images.append(ImageRef(**image))
-            messages.append(Message(**{**item, "images": images, "tool_calls": [ToolCall(**call) for call in calls] if calls else None}))
+            try:
+                reasoning = record_reasoning(item)
+            except ValueError as exc:
+                raise OrdinaryContinuationUnavailable() from exc
+            if reasoning is not None and item["role"] != "assistant":
+                raise OrdinaryContinuationUnavailable()
+            messages.append(
+                Message(
+                    **{
+                        **item,
+                        "images": images,
+                        "tool_calls": [ToolCall(**call) for call in calls] if calls else None,
+                        "provider_reasoning": reasoning,
+                    }
+                )
+            )
         current_turn_messages(messages, self.history_sizes)
         last = messages[-1]
         if (
@@ -834,4 +850,4 @@ def capture_message_prefix(messages: list[Message], *, question_call_id: str) ->
     """Remove only the original pause sentinel, never a completed Tool result."""
     if not messages or messages[-1].role != "tool" or messages[-1].tool_call_id != question_call_id:
         raise OrdinaryContinuationUnavailable()
-    return canonical_json([asdict(message) for message in messages[:-1]])
+    return canonical_json([message_record(message) for message in messages[:-1]])

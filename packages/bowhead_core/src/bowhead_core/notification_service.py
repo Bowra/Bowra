@@ -32,6 +32,9 @@ ACCESS_REQUEST_NO_LONGER_ACTIVE = "This request is no longer active. Request acc
 ROUTINE_ALERT_PRIORITIES: dict[str, str] = {"info": "p3", "attention": "p2", "urgent": "p1"}
 # At most this many alerts per task in any rolling 24 hours (plus one per run, by dedupe).
 ROUTINE_ALERT_DAILY_LIMIT = 5
+# An urgent alert's email waits this long when the owner also receives the run's result email, so
+# that one email carries both; a run that does not deliver by then lets the alert email go alone.
+ROUTINE_ALERT_EMAIL_HOLD_S = 600
 
 # Canonical personal Memory page. The standalone `/memory` page was folded into Settings; the
 # frontend still maps legacy persisted `/memory` action URLs to this path.
@@ -158,6 +161,8 @@ class NotificationDraft:
     # FEATURE_NOTIFICATION_DELIVERY: people to email on a new occurrence, for a type with the
     # ``email_delivery`` channel (a scheduled result, an urgent task alert). Filtered like recipients.
     email_delivery_to: Sequence[str] = ()
+    # Seconds the ``email_delivery`` rows wait before they are due (0: due now).
+    email_delivery_after_s: int = 0
 
 
 @dataclass
@@ -236,6 +241,7 @@ class NotificationService:
             reopen_resolved=spec.reopen_resolved,
             escalate_after_s=escalate_after_s,
             email_delivery_to=email_to,
+            email_delivery_after_s=draft.email_delivery_after_s,
         )
         _emit_metric(draft.type, "already_resolved" if result.outcome == "resolved_unchanged" else "success")
         return result
@@ -1076,15 +1082,20 @@ class NotificationService:
         session_id: str,
         summary: str,
         email_user_ids: Sequence[str] = (),
+        flagged_urgent: bool = False,
     ) -> NotificationItem | None:
         """Phase B opt-in success delivery: an in-app (P3, non-badge → Updates tab) notice that a routine
         produced a result, with a deep link back. Pairs with the external email delivery.
 
         ``email_user_ids`` (FEATURE_NOTIFICATION_DELIVERY): Team members to email the result; the
-        delivery worker sends, retries and records each outcome for the run history."""
+        delivery worker sends, retries and records each outcome for the run history.
+        ``flagged_urgent``: the run raised an urgent alert, so the owner's result email says so."""
         if not self.enabled:
             return None
         action_url = f"/?session={session_id}"
+        metadata: dict[str, Any] = {"jobId": job.id, "jobName": job.name, "runId": run_id, "sessionId": session_id}
+        if flagged_urgent:
+            metadata["flaggedUrgent"] = True
         return await self._emit_item(
             NotificationDraft(
                 type="routine.delivered",
@@ -1097,7 +1108,7 @@ class NotificationService:
                 dedupe_key=f"routine.delivered:{job.id}:{run_id}",
                 action_url=action_url,
                 actions=[{"id": "view", "label": "查看完整结果", "kind": "link", "url": action_url}],
-                metadata={"jobId": job.id, "jobName": job.name, "runId": run_id, "sessionId": session_id},
+                metadata=metadata,
                 email_delivery_to=email_user_ids,
             )
         )
@@ -1168,11 +1179,15 @@ class NotificationService:
         run_id: str,
         session_id: str | None,
         level: str,
+        hold_email: bool = False,
     ) -> tuple[str, NotificationItem | None]:
         """A scheduled task's own Agent flags this run for its owner (``routine_notify``).
 
         Returns ``(status, item)``, status one of ``queued``, ``duplicate`` (this run already
         alerted), ``rate_limited`` (5 alerts for the task in the last 24 hours) or ``disabled``.
+
+        ``hold_email``: the owner also receives this run's result email, so an urgent email waits
+        ``ROUTINE_ALERT_EMAIL_HOLD_S`` for the result email to carry it (`settle_routine_alert_email`).
 
         The Agent's only input is the level, which becomes the priority. Title and body are fixed
         product copy naming the task: model-written text never enters a notification (PRD FR12).
@@ -1207,6 +1222,7 @@ class NotificationService:
                 priority=priority,
                 # Urgent: one email to the owner, sent and retried by the delivery worker.
                 email_delivery_to=[job.user_id] if level == "urgent" else (),
+                email_delivery_after_s=ROUTINE_ALERT_EMAIL_HOLD_S if hold_email and level == "urgent" else 0,
             )
         )
         if result is None:
@@ -1223,6 +1239,30 @@ class NotificationService:
     async def routine_alert_raised(self, job: Any, *, run_id: str) -> bool:
         """Whether this run flagged something for its owner (delivery mode "only when flagged")."""
         return await self._open_routine_alert(job, run_id) is not None
+
+    async def routine_alert_level(self, job: Any, *, run_id: str) -> str | None:
+        """The level of this run's open alert, or None when it raised none."""
+        item = await self._open_routine_alert(job, run_id)
+        if item is None:
+            return None
+        return str((item.metadata or {}).get("level") or "") or None
+
+    async def settle_routine_alert_email(self, job: Any, *, run_id: str, merged: bool) -> None:
+        """End the wait of this run's urgent alert email once the run delivers its result, or cannot.
+
+        ``merged``: the owner's result email was written and says the run was flagged urgent, so
+        the alert email is withdrawn (``merged_into_result``). Otherwise it is due now. An alert
+        email already sent, or being sent, is left as it is.
+        """
+        item = await self._open_routine_alert(job, run_id)
+        if item is None or (item.metadata or {}).get("level") != "urgent":
+            return
+        if merged:
+            await self.store.withdraw_pending_delivery(
+                notification_id=item.id, user_id=job.user_id, channel="email_delivery", outcome_code="merged_into_result"
+            )
+        else:
+            await self.store.release_pending_delivery(notification_id=item.id, user_id=job.user_id, channel="email_delivery")
 
     async def resolve_scheduled_job_notifications(
         self,

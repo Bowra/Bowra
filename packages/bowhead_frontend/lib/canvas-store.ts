@@ -239,6 +239,8 @@ export function onSectionPatched(p: {
   section_id: string;
   patch: Record<string, unknown>;
   rev?: number;
+  /** The section was delivered in chat: update it in place, never insert it into Canvas. */
+  hiddenForChatMode?: boolean;
 }): void {
   setState((s) => {
     // report-streaming B: patch **is** final streamed-section draft (writer finishes → backend completes
@@ -264,6 +266,14 @@ export function onSectionPatched(p: {
         streamingSectionIds: nextStreaming,
         currentlyStreamingSectionId: nextCurrent,
       };
+    }
+    // A chat-delivered section is hidden from Canvas; its chat figure takes the
+    // update (lib/chat-figure-revisions), and inserting it here would make it
+    // appear in Canvas live but not after a reload.
+    if (p.hiddenForChatMode) {
+      return nextStreaming === s.streamingSectionIds && nextCurrent === s.currentlyStreamingSectionId
+        ? s
+        : { ...s, streamingSectionIds: nextStreaming, currentlyStreamingSectionId: nextCurrent };
     }
     // canvas-comprehensive WP-4 (B2/B3): late-join upsert. FE never saw section (missing
     // section_added / disorder / reconnect lost frame), but patch supplies full section (with kind) → insert instead of

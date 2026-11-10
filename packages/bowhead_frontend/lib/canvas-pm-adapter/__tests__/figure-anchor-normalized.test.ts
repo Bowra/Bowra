@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Normalized body text must render figures through the **real frontend parser**, validating the backend normalization gate.
  *

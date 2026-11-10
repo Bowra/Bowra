@@ -307,7 +307,7 @@ def test_coach_applies_allowed_override_fields_and_keeps_platform_policy(enabled
     assert known and profile is not None
     assert profile.display_name == "Agent helper"
     assert profile.llm_agent_type == base.llm_agent_type
-    assert profile.max_iterations == 1  # Teams may set Coach's step limit.
+    assert profile.max_iterations == base.max_iterations  # Runtime limits remain platform policy.
     assert (profile.system_prompt, profile.tool_whitelist) == (base.system_prompt, base.tool_whitelist)
 
 

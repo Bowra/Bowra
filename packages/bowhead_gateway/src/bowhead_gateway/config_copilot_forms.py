@@ -1048,7 +1048,12 @@ def register_gateway_forms(app: FastAPI) -> None:
         FormRegistration(
             form_id="personal_appearance",
             schema=PersonalAppearanceDraftDTO,
-            guidance="Propose only explicit personal appearance scalar choices. Use reset for advertised scalar fields to inherit the Team/product default. No colors or whole-document writes.",
+            guidance=(
+                "Propose only explicit personal appearance scalar choices. Use reset for advertised scalar fields to inherit the "
+                "Team/product default. Accent, background and palette colors are not Agent fields; when relevant, say the user can "
+                "change them manually on the original appearance page. Without direct save, the user confirms or ignores the "
+                "suggestion on its Chat card, and nothing is saved before then. No whole-document writes."
+            ),
             field_policy=dict.fromkeys(PERSONAL_APPEARANCE_FIELDS, POLICY_GENERATED),
             context_provider=_with_deps(personal_appearance_context),
             materializer=_with_deps(personal_appearance_materialize),

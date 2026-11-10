@@ -7,6 +7,7 @@ import {
   type PersonalMcpConfirmation,
 } from "@/lib/personal-mcp-api";
 import { DialogShell } from "@/components/ui/dialog";
+import { formatTime } from "@/lib/locale";
 import { useConfirmationQueuePoll } from "@/lib/use-confirmation-queue-poll";
 
 export { CONFIRMATION_POLL_MS } from "@/lib/use-confirmation-queue-poll";
@@ -70,7 +71,7 @@ export function PersonalMcpConfirmations() {
       <pre>{JSON.stringify(current.arguments, null, 2)}</pre>
       <p>
         {t("expires", {
-          time: new Date(current.expires_at).toLocaleTimeString(locale),
+          time: formatTime(current.expires_at, locale, { seconds: true }),
         })}
       </p>
       {error ? <p role="alert">{t("decisionError")}</p> : null}

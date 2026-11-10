@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { agentChartDetailHref, agentChartFilters, agentChartsReturnHref } from "./agent-charts-navigation";
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { PRODUCT_NAME } from "@/lib/product-identity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

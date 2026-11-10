@@ -149,6 +149,7 @@ from bowhead_core.events import (
     TurnEventBus,
     raise_if_terminal_bus_failed,
 )
+from bowhead_core.events import turn_wall_duration_ms as turn_wall_duration_ms  # Re-exported for Lead's done chokepoint.
 from bowhead_core.memory_readiness import memory_storage_ready
 from bowhead_core.skill_import.flags import bundle_import_draft_enabled
 from bowhead_core.types import (
@@ -637,14 +638,6 @@ async def _reference_resume_attachment_snapshot(
     if {item["artifact_id"] for item in items} != selected:
         raise ValueError("reference_attachment_material_unavailable")
     return items
-
-
-def turn_wall_duration_ms(bus: Any) -> int | None:
-    """本执行代 `turn_started` → 此刻的墙钟毫秒；bus 没带起点（非 TurnRunner 路径）时 None。"""
-    t0 = getattr(bus, "_turn_wall_t0_perf", None)
-    if not isinstance(t0, (int, float)) or isinstance(t0, bool):
-        return None
-    return max(0, int((time.perf_counter() - t0) * 1000))
 
 
 def turn_summary_counts(bus: Any, invocations: list[Any] | None) -> tuple[int, int]:

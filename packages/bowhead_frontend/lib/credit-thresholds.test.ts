@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * credit-billing P1-4—low balance must use a relative ratio aligned with backend/design.
  *

@@ -35,6 +35,8 @@ export function extractInlineArtifacts(
         kind: "chart",
         id,
         spec: e.spec as Extract<ChatInlineArtifact, { kind: "chart" }>["spec"],
+        // The history projection supplies the section's current revision.
+        ...(typeof e.rev === "number" ? { rev: e.rev } : {}),
       });
     } else if (e.kind === "kpi" && e.data && typeof e.data === "object") {
       out.push({

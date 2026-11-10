@@ -317,6 +317,40 @@ async def test_fatal_auxiliary_ack_does_not_reverse_committed_steer() -> None:
     assert len(store.append_calls) == 1
 
 
+async def test_steer_ack_carries_its_event_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat dogfood 2026-11-08 F10: the steering byline time comes from the ack itself."""
+    from datetime import datetime, timedelta
+
+    from bowhead_core.events import EventBusRegistry
+
+    registry = EventBusRegistry()
+    monkeypatch.setattr(ts_mod, "get_event_registry", lambda: registry)
+    bus = await registry.get_or_create("t_ack_time")
+    orch = FakeOrchestrator(FakeSessionStore(active="t_ack_time", append_result=True))
+    try:
+        outcome = await steer_or_proceed(orch, session_id="s1", text="Use green bars.", user_msg_id="u1")
+        acks = [event.payload for event in bus.snapshot() if event.event_type == "emoji_ack"]
+    finally:
+        await registry.close("t_ack_time", expected=bus)
+
+    assert outcome == SteerOutcome("buffered", "t_ack_time")
+    assert len(acks) == 1
+    assert {key: acks[0][key] for key in ("target_msg_id", "emoji", "text")} == {
+        "target_msg_id": "u1",
+        "emoji": "🤝",
+        "text": "Use green bars.",
+    }
+    assert datetime.fromisoformat(acks[0]["ts"]).utcoffset() == timedelta(0)
+
+
+def test_composer_steer_receipts_ack_through_the_timed_builder() -> None:
+    """F10: both composer steer receipt branches build their ack with ``ts``."""
+    import inspect
+
+    assert inspect.getsource(chat_mod._send_impl).count("make_steer_ack_event(") == 2
+    assert 'event_type="emoji_ack"' not in inspect.getsource(chat_mod)
+
+
 def test_chat_send_has_no_text_meta_cancel_writer() -> None:
     import inspect
 
@@ -3415,6 +3449,23 @@ def test_build_resume_token_uses_glossary_no_merge() -> None:
     assert tr.turn_id == "t1" and tr.resume_turn_id == "t1"
     assert tr.session_id == "s1" and tr.workspace_id == "ws1" and tr.team_id == "o1"
     assert tr.datarc_client == "DC" and tr.vector_client == "VC"
+
+
+def test_build_resume_binds_chart_authoring_to_the_resumed_actor() -> None:
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    req = _FakeClarReq(
+        turn_id="t1",
+        resume_context={"user_text": "Make the bars green", "session_id": "s1", "team_id": "o1", "workspace_id": "ws1", "user_id": "u1"},
+    )
+    app = SimpleNamespace(state=SimpleNamespace())
+    tr = build_resume_turn_request(req, app=app)
+    assert tr is not None
+    access = tr.chart_authoring_projection.__self__
+    assert isinstance(access, ReportReadAccess) and access.request.app is app
+    assert (access.session_id, access.workspace_id, access.team_id, access.user_id) == ("s1", "ws1", "o1", "u1")
+    # Without the application, the caller supplies its own report authority.
+    assert build_resume_turn_request(req).chart_authoring_projection is None
 
 
 def test_build_resume_empty_token_appends_all_answers() -> None:

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * CSS-side quiet-by-default invariant (chart-config-ux ⑥, 2026-09-02).
  *

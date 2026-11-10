@@ -28,7 +28,6 @@ from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import agents, team_openapi
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI, HTTPException
-from gateway_legacy_database import upgrade
 
 from bowhead_skill import default_catalog
 
@@ -1132,10 +1131,10 @@ def _enable_revisioned_agent(
 
 
 @pytest.fixture
-async def app_client(tmp_path, monkeypatch):
+async def app_client(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-marketplace-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     _seed(db_path)
     user_store = UserStore(db_path)
     assignment_store = AgentAssignmentStore(db_path)

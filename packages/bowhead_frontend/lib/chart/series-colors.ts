@@ -1,4 +1,5 @@
 import type { ChartColumn, ChartSpec } from "./types";
+import { parseHexColor } from "./color";
 
 /** Only direct measure identities, never inferred category/group positions. */
 export function editableColorColumns(spec: ChartSpec): ChartColumn[] {
@@ -15,4 +16,11 @@ export function editableColorColumns(spec: ChartSpec): ChartColumn[] {
 
 export function colorIndex(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < 16 ? value : undefined;
+}
+
+/** Canonical opaque HEX; do not discard an alpha channel or accept arbitrary CSS. */
+export function colorHex(value: unknown): string | undefined {
+  if (typeof value !== "string" || ![4, 7].includes(value.length) || value.trim() !== value) return undefined;
+  const rgb = parseHexColor(value);
+  return rgb ? `#${rgb.map((channel) => channel.toString(16).padStart(2, "0")).join("").toUpperCase()}` : undefined;
 }

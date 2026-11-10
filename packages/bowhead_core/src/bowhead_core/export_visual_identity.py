@@ -94,7 +94,8 @@ from bowhead_core.print_theme import (
 # Version 36: explicit date patterns affect native chart and Table exports.
 # Version 37: Table captions and unit disclosures share resolved column display, including export.
 # Version 38: explicit native measure palette slots, shared by screen and export.
-EXPORT_VISUAL_RENDERER_VERSION = "38"
+# Version 39: exact opaque HEX series overrides remain independent of the theme palette.
+EXPORT_VISUAL_RENDERER_VERSION = "39"
 VISUAL_FIELDS: dict[str, tuple[str, ...]] = {
     "image": ("artifact_id", "caption", "alt"),
     "design": (

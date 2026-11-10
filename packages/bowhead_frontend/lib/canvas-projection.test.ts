@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * canvas-projection — normalized projections & diff counts (canvas-comprehensive Batch 1 WP-0).
  * Projections determine terminal-reconciliation drift counts and "live==F5 diff==0" assertions; require:

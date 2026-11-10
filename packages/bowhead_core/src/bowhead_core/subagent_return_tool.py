@@ -915,6 +915,14 @@ def _make_handler() -> Any:
                     len(_esc_fixes),
                     [f.field_path for f in _esc_fixes][:6],
                 )
+        # Internal canvas/section/artifact IDs never reach users: remove them from the payload's
+        # prose before the report, chat answer and Lead read it, so live, stored and replayed
+        # text agree. Structured reference fields keep their IDs.
+        with contextlib.suppress(Exception):
+            from bowhead_core.analysis_payload import strip_internal_ids_from_payload
+
+            if _id_fields := strip_internal_ids_from_payload(payload):
+                logger.info("subagent_return.internal_ids_removed fields=%d", _id_fields)
 
         import os as _os_a
 
@@ -1933,6 +1941,8 @@ def register_subagent_return_tool(tool_registry: ToolRegistry) -> None:
             "Any kpis you supply are rendered as report cards in addition to authored prose.\n"
             "Each insight requires: title, thesis, evidence (1-5 blocks), narrative (30-1200 chars).\n"
             "Each evidence requires: kind ∈ {chart, computation, table, callout} + caption + matching ref field.\n"
+            "User-visible text (title, exec_summary, insight text, captions, recommendations, caveats) describes outcomes in the "
+            "user's terms: never Tool names, error codes, internal IDs (sec_/art_/cv_) or implementation steps; IDs go only in ref fields.\n"
             "P0 recommendations require owner. See analyst-sop-output-contract for schema doc."
         ),
         input_schema={

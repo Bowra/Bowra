@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Phase 1.7-A — beats[] order pipeline smoke gate.
  *

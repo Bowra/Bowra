@@ -24,7 +24,8 @@ import { LeadNarrative } from "./LeadNarrative";
  * (Phase 1.2 only ships the renderer; emit happens in Phase 1.3).
  */
 export type ChatInlineArtifact =
-  | { kind: "chart"; id: string; spec: ChartSpec }
+  // `id` is the chart's section id; `rev` is its saved revision when known.
+  | { kind: "chart"; id: string; spec: ChartSpec; rev?: number }
   | { kind: "kpi"; id: string; data: KpiRowSectionData }
   | { kind: "table"; id: string; data: DataTableSectionData }
   // subagent-unification P5a — a downloadable produced deliverable (any file
@@ -137,7 +138,9 @@ interface ArtifactSlotProps {
 }
 
 function ArtifactSlot({ artifact }: ArtifactSlotProps) {
-  if (artifact.kind === "chart") return <ChatInlineChart spec={artifact.spec} />;
+  if (artifact.kind === "chart") {
+    return <ChatInlineChart spec={artifact.spec} sectionId={artifact.id} rev={artifact.rev} />;
+  }
   if (artifact.kind === "kpi") return <ChatInlineKpi data={artifact.data} />;
   if (artifact.kind === "table") return <DataTableSection data={artifact.data} surface="chat" />;
   if (artifact.kind === "file") return <ChatInlineFile data={artifact.data} />;

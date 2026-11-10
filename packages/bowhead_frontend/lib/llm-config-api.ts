@@ -146,6 +146,7 @@ export interface LlmConfigValidationIssue {
 }
 
 export interface LlmConfigValidationResp {
+  assignment_config?: Record<string, unknown>;
   assignment_changes?: ModelAssignmentChange[];
   valid: boolean;
   version: number;

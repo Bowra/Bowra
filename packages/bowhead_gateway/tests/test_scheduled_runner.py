@@ -21,7 +21,7 @@ from bowhead_gateway._scheduled_runner import (
     admit_scheduled_execution,
     run_scheduled_turn,
 )
-from gateway_legacy_database import TARGET_FILES, upgrade
+from gateway_legacy_database import TARGET_FILES
 
 NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -178,9 +178,9 @@ async def store(tmp_path):
 
 
 @pytest.fixture
-async def billing_stores(tmp_path):
+async def billing_stores(tmp_path, initialize_migrated_core_database):
     core_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(core_path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(core_path.with_name("bowhead.db"))
     users = UserStore(str(core_path))
     sessions = SessionStore(core_path)
     try:
@@ -485,6 +485,22 @@ async def test_authz_member_turn_has_access_context(store):
     assert orch.called is True
     assert orch.request.team_id == team.id
     assert orch.request.access_context["workspace_role"] == "ws_admin"
+
+
+async def test_scheduled_turn_binds_chart_authoring_to_the_job_owner(store):
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    team = await store.create_team(name="A")
+    user = await store.create_user(team_id=team.id, email="u@a.com", password="Passw0rd!x")
+    await store.set_team_creator(team.id, user.id)
+    ws_id = await store.create_local_workspace(team_id=team.id, name="Sales", creator_user_id=user.id)
+    orch = _FakeOrch()
+    app = _app(orch, _resolver(store), user_store=store)
+    outcome = await run_scheduled_turn(app, _job(user.id, workspace_id=ws_id))
+    assert outcome.error is None
+    access = orch.request.chart_authoring_projection.__self__
+    assert isinstance(access, ReportReadAccess) and access.request.app is app
+    assert (access.session_id, access.workspace_id, access.team_id, access.user_id) == (orch.request.session_id, ws_id, team.id, user.id)
 
 
 async def test_archived_space_denied_before_scheduler_claim(store):

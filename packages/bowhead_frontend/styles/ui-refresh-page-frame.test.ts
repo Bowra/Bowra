@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for the first-level page header and column (Header, Language & Paging Spec §2, D4–D7):
  * styles/ui-refresh-page-frame.css. jsdom does not cascade; pixels are checked in real-browser screenshots.

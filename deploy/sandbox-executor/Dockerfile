@@ -1,15 +1,15 @@
 # Bowhead sandbox-executor image (sandbox-hardening 2026-06-17, Phase 3 de-DooD).
 # The ONLY container that gets /var/run/docker.sock. Minimal: docker CLI + python3
-# (stdlib-only app — no pip deps → no third-party CVE surface on the trusted gate).
+# (stdlib-only app with no pip dependencies; base OS and Docker CLI still need security updates).
 #
 # `docker:cli` already ships the docker client. Add python3 for app.py.
-# CN build-box note (mirror Dockerfile.app:16 lesson): the default Alpine CDN can be
-# slow/unreachable from the CN build box → point apk at the Tencent Alpine mirror.
+# The Tencent mirror returned IO errors and the official CDN stalled during this
+# build; keep apk signature checks enabled while using the reachable Aliyun mirror.
 ARG DOCKER_REGISTRY=docker.m.daocloud.io/
-FROM ${DOCKER_REGISTRY}docker:27-cli
+FROM ${DOCKER_REGISTRY}docker:29.9.3-cli
 
 RUN set -eux; \
-    sed -i 's#https\?://dl-cdn.alpinelinux.org#https://mirrors.tencent.com#g' /etc/apk/repositories || true; \
+    sed -i 's#https\?://dl-cdn.alpinelinux.org#https://mirrors.aliyun.com#g' /etc/apk/repositories || true; \
     apk add --no-cache python3
 
 COPY app.py /opt/bowhead/sandbox-executor/app.py

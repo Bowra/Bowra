@@ -5,7 +5,8 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from typing import Any
+import uuid
+from typing import Any, Literal
 
 from bowhead_router.types import ToolSchema
 
@@ -13,15 +14,79 @@ from bowhead_core.chart.date_display import DATE_PRESETS, date_pattern, date_pat
 from bowhead_core.chart.display_receipt import chart_display_receipt
 from bowhead_core.chart.expression import ChartExpressionError, structured, validate_layout
 from bowhead_core.chart.numeric_display import numeric_display, numeric_format_kinds
-from bowhead_core.chart.series_colors import color_index, editable_color_columns
+from bowhead_core.chart.series_colors import color_hex, color_index, editable_color_columns
 from bowhead_core.terminal_effect_contract import ClassifiedToolEffectResult, EffectProbeEvidence
 from bowhead_core.terminal_protocol import EffectSettlementOutcome, canonical_digest_v1
+
+logger = logging.getLogger(__name__)
+
+ChartProjectionReason = Literal[
+    "channel_unsupported",
+    "scope_unavailable",
+    "section_unavailable",
+    "section_changed",
+    "source_unrecorded",
+    "provenance_unavailable",
+    "section_outside_report_closure",
+    "source_access_denied",
+    "dataset_unverified",
+    "projection_unavailable",
+    "projection_error",
+]
+
+# Model-facing guidance for each failed check. Every hint names the failing
+# condition and a safe next step; none of them suggests replacing the chart.
+_PROJECTION_HINTS: dict[str, str] = {
+    "channel_unsupported": "This channel cannot verify chart source access. Ask the user to edit the chart from the web conversation; do not replace it.",
+    "scope_unavailable": "The current user's access to this conversation could not be confirmed. Ask the user to reopen the conversation and retry; do not replace the chart.",
+    "section_unavailable": "This chart is no longer part of the current conversation. Use a current chart section ID from read_report.",
+    "section_changed": "The chart changed while it was being checked. Call read_chart again and use its current revision.",
+    "source_unrecorded": "This chart has no recorded data source, so it cannot be edited in place. Tell the user it cannot be edited; do not replace it.",
+    "provenance_unavailable": "The chart's calculation history could not be verified, so it cannot be edited in place. Tell the user it cannot be edited; do not replace it.",
+    "section_outside_report_closure": "The chart's data is not linked to this conversation's authorized sources, so it cannot be edited in place. Tell the user it cannot be edited; do not replace it.",
+    "source_access_denied": "The current user can no longer access this chart's data source (access was revoked or the data was deleted). Ask the user to restore access; do not replace the chart.",
+    "dataset_unverified": "The chart dataset cannot currently be verified. Tell the user the chart cannot be edited now; do not replace it.",
+    "projection_unavailable": "Chart source verification returned no result. Retry once; if it fails again, report diagnostic reference {ref}.",
+    "projection_error": "Chart source verification failed unexpectedly. Retry once; if it fails again, report diagnostic reference {ref}.",
+}
+
+
+class ChartProjectionUnavailable(Exception):
+    """A chart authoring projection refused the target with a typed reason.
+
+    Projections raise this instead of returning ``None`` so read_chart and
+    edit_chart can report the failing check rather than a generic access hint.
+    """
+
+    def __init__(self, reason: ChartProjectionReason) -> None:
+        super().__init__(reason)
+        self.reason: ChartProjectionReason = reason
+
+
+def _projection_failure(reason: ChartProjectionReason, ctx: Any, section_id: Any, *, exc_info: bool = False) -> dict[str, Any]:
+    """Log one failed projection check and return its actionable result."""
+    reference = f"chp_{uuid.uuid4().hex[:16]}"
+    logger.warning(
+        "chart_source_projection_unavailable reason=%s section=%s session=%s turn=%s diagnostic_ref=%s",
+        reason,
+        section_id,
+        getattr(ctx, "session_id", None),
+        getattr(ctx, "turn_id", None),
+        reference,
+        exc_info=exc_info,
+    )
+    return {
+        "error": "chart_source_projection_unavailable",
+        "reason": reason,
+        "hint": _PROJECTION_HINTS[reason].format(ref=reference),
+        "diagnostic_ref": reference,
+    }
 
 
 def read_schema() -> ToolSchema:
     return ToolSchema(
         name="read_chart",
-        description="Read an authorized chart's current revision, views, data sample, actual display receipt and supported presentation edits. Use a real section_id from read_report. A category axis has equal spacing, not proportional elapsed time; only a saved date column pattern confirms date formatting. For recoloring, choose an offered palette index and an editable measure key, then use edit_chart.",
+        description="Read an authorized chart's current revision, views, data sample, actual display receipt and supported presentation edits. Use a real section_id from read_report. A category axis has equal spacing, not proportional elapsed time; only a saved date column pattern confirms date formatting. For recoloring, use an editable measure key with an offered palette index or exact #RGB/#RRGGBB string, then use edit_chart. Exact HEX requests must never become palette approximations.",
         input_schema={
             "type": "object",
             "additionalProperties": False,
@@ -45,7 +110,7 @@ def edit_schema() -> ToolSchema:
                 "view_id": {"type": "string", "description": "Stable child view ID; omit for the root chart."},
                 "changes": {
                     "anyOf": [{"type": "object"}, {"type": "string", "maxLength": 20000}],
-                    "description": "Sparse title, subtitle, show_legend, show_data_labels, supported kind, layout, formats, or series_colors. For colors use {series_colors: {exact_measure_key: palette_index}} from read_chart's editable_color_series and color_options; no CSS or Chart.js config. Date: {kind: date, preset: compact_date} or {kind: date, pattern: yyyyMMdd}; numeric precision: {kind: number, decimal_places: 2, decimal_mode: fixed}. Use percent or currency only when editable_format_kinds admits it. Layout presets are stack, grid2 and split. Omit unchanged fields.",
+                    "description": 'Sparse title, subtitle, show_legend, show_data_labels, supported kind, layout, formats, or series_colors. For colors use {series_colors: {exact_measure_key: palette_index_or_hex}} from read_chart\'s editable_color_series. Example: {series_colors: {revenue: "#00A651"}} writes that exact opaque HEX in light/dark mode and export. Offered integer slots follow the theme. Never approximate an exact HEX request; no CSS or Chart.js config. Date: {kind: date, preset: compact_date} or {kind: date, pattern: yyyyMMdd}; numeric precision: {kind: number, decimal_places: 2, decimal_mode: fixed}. Use percent or currency only when editable_format_kinds admits it. Layout presets are stack, grid2 and split. Omit unchanged fields.',
                 },
                 "reset": {
                     "type": "object",
@@ -73,17 +138,18 @@ async def _target(args: dict[str, Any], ctx: Any) -> tuple[Any, Any, dict[str, A
     if callable(project) and any(
         getattr(access, key, None) != getattr(ctx, key, None) for key in ("session_id", "workspace_id", "team_id", "user_id")
     ):
-        return {"error": "chart_source_projection_unavailable", "hint": "Use the current conversation and its authorized chart sources."}
+        return _projection_failure("scope_unavailable", ctx, section.id)
     project = project or getattr(ctx, "chart_authoring_projection", None)
     if not callable(project):
-        return {"error": "chart_source_projection_unavailable", "hint": "The current channel cannot verify chart source access."}
+        return _projection_failure("channel_unsupported", ctx, section.id)
     try:
         projected = await project(section)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("chart_source_projection_failed error_type=%s", type(exc).__name__)
-        projected = None
+    except ChartProjectionUnavailable as refusal:
+        return _projection_failure(refusal.reason, ctx, section.id)
+    except Exception:
+        return _projection_failure("projection_error", ctx, section.id, exc_info=True)
     if not isinstance(projected, dict) or not isinstance(projected.get("spec"), dict):
-        return {"error": "chart_source_projection_unavailable", "hint": "Check access to the chart's sources and try again."}
+        return _projection_failure("projection_unavailable", ctx, section.id)
     plan = projected["spec"].get("presentation_plan")
     if plan is not None and (
         not isinstance(plan, dict)
@@ -91,7 +157,7 @@ async def _target(args: dict[str, Any], ctx: Any) -> tuple[Any, Any, dict[str, A
         or not isinstance(plan.get("dataset"), dict)
         or plan["dataset"].get("availability") != "available"
     ):
-        return {"error": "chart_source_projection_unavailable", "hint": "The chart dataset cannot currently be verified."}
+        return _projection_failure("dataset_unverified", ctx, section.id)
     return canvas, section, projected["spec"]
 
 
@@ -160,9 +226,11 @@ async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                 "show_legend": view.get("show_legend", True),
                 "show_data_labels": view.get("show_data_labels"),
                 "editable_color_series": [
-                    {"key": c["key"], "label": c.get("header", c["key"]), "color_index": c.get("color_index")} for c in editable_color_columns(view)
+                    {"key": c["key"], "label": c.get("header", c["key"]), "color_index": c.get("color_index")}
+                    | ({"color_hex": color_hex(c["color_hex"])} if color_hex(c.get("color_hex")) else {})
+                    for c in editable_color_columns(view)
                 ]
-                if palette and not spec.get("presentation_plan")
+                if not spec.get("presentation_plan")
                 else [],
                 "display_receipt": chart_display_receipt(view, has_root_plan=bool(spec.get("presentation_plan"))),
                 "columns": [
@@ -195,11 +263,7 @@ async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "show_legend",
             "show_data_labels",
             "formats",
-            *(
-                ["series_colors"]
-                if palette and not spec.get("presentation_plan") and any(editable_color_columns(view) for _, view in _views(spec))
-                else []
-            ),
+            *(["series_colors"] if not spec.get("presentation_plan") and any(editable_color_columns(view) for _, view in _views(spec)) else []),
             *(["layout"] if spec.get("views") else []),
             *(["kind"] if _simple_chart_kinds(spec) else []),
         ],
@@ -208,7 +272,7 @@ async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "defaults": {"show_legend": True, "show_data_labels": "automatic"},
         "date_presets": ["auto", *DATE_PRESETS],
         "color_options": palette,
-        "color_policy": "Indices follow the current validated theme palette in light/dark mode and export. Reset restores inherited series colors. Grouped, analytical and non-Cartesian color bindings are not editable here.",
+        "color_policy": "series_colors accepts an offered palette index or exact opaque #RGB/#RRGGBB per editable measure. HEX stays exact across light/dark mode and export; never substitute a palette approximation for an exact HEX request. Palette indices follow the theme. Reset removes either override. Grouped, analytical and non-Cartesian color bindings are not editable here.",
     }
 
 
@@ -236,7 +300,8 @@ async def read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
 
 
 def _invalid(path: str, message: str) -> dict[str, Any]:
-    return {"error": "invalid_chart_change", "path": path, "hint": message}
+    # `error_kind` classifies the rejection as an argument failure, so the trace names the rejected change (`path`).
+    return {"error": "invalid_chart_change", "error_kind": "invalid_chart_change", "path": path, "hint": message}
 
 
 async def _edit_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -292,7 +357,9 @@ async def _edit_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return _invalid("/view_id", "Use a stable view ID returned by read_chart, or omit it for the root.")
     colors, color_resets = changes.get("series_colors", {}), reset.get("series_colors", [])
     if not isinstance(colors, dict) or not isinstance(color_resets, list) or any(not isinstance(k, str) for k in color_resets):
-        return _invalid("/changes/series_colors", "Use exact measure keys and palette indices; reset is a list of measure keys.")
+        return _invalid(
+            "/changes/series_colors", "Use exact measure keys and palette indices or #RGB/#RRGGBB strings; reset is a list of measure keys."
+        )
     if set(colors) & set(color_resets):
         return _invalid("/reset/series_colors", "A series cannot be changed and reset together.")
     if colors or color_resets:
@@ -301,7 +368,7 @@ async def _edit_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         if changes.get("kind", canonical_view.get("kind")) not in {"line", "bar", "hbar", "stacked_bar", "area_stacked", "combo", "dual_axis"}:
             return _invalid("/changes/series_colors", "Choose a Cartesian chart that displays these measure series.")
         palette = await _palette(ctx)
-        if not palette:
+        if any(color_index(value) is not None for value in colors.values()) and not palette:
             return {
                 "error": "chart_palette_unavailable",
                 "hint": "The chart palette could not be resolved. Restore chart style availability and retry; keep the existing chart.",
@@ -309,14 +376,23 @@ async def _edit_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         offered = {p["index"] for p in palette}
         columns = {c["key"]: c for c in editable_color_columns(canonical_view)}
         safe_keys = {c["key"] for c in editable_color_columns(safe_view)}
-        if not offered or (set(colors) | set(color_resets)) - (set(columns) & safe_keys):
-            return _invalid("/changes/series_colors", "Read the current chart and choose an editable measure and an available palette slot.")
+        if (set(colors) | set(color_resets)) - (set(columns) & safe_keys):
+            return _invalid("/changes/series_colors", "Read the current chart and choose an editable measure.")
         for key, value in colors.items():
-            if color_index(value) not in offered:
-                return _invalid(f"/changes/series_colors/{key}", "Choose an integer palette index returned by read_chart.")
-            columns[key]["color_index"] = value
+            if (hex_value := color_hex(value)) is not None:
+                columns[key]["color_hex"] = hex_value
+                columns[key].pop("color_index", None)
+            elif color_index(value) in offered:
+                columns[key]["color_index"] = value
+                columns[key].pop("color_hex", None)
+            else:
+                return _invalid(
+                    f"/changes/series_colors/{key}",
+                    "Use an offered integer palette index or opaque #RGB/#RRGGBB string; CSS and alpha colors are unsupported.",
+                )
         for key in color_resets:
             columns[key].pop("color_index", None)
+            columns[key].pop("color_hex", None)
     if "kind" in changes:
         kind = changes["kind"]
         if view_id is not None or not isinstance(kind, str) or kind not in _simple_chart_kinds(projected) or kind not in _simple_chart_kinds(spec):
@@ -436,7 +512,7 @@ async def _edit_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         "section_id": updated.id,
         "rev": updated.rev,
         "view_id": view_id,
-        "series_colors": {c["key"]: c.get("color_index") for c in editable_color_columns(canonical_view)},
+        "series_colors": {c["key"]: color_hex(c.get("color_hex")) or c.get("color_index") for c in editable_color_columns(canonical_view)},
         "color_options": palette if colors or color_resets else [],
         "display_receipt": chart_display_receipt(canonical_view, has_root_plan=bool(spec.get("presentation_plan"))),
     }

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { applyChartEdit } from "./composition";
 import { chartDatasetAvailable, evidencePlanForViewer, type EvidencePlanV1 } from "./presentation-plan";

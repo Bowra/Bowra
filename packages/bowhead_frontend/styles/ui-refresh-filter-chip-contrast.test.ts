@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Shared filter chip: selected text contrast.
  *

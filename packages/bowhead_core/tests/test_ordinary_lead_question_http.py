@@ -152,7 +152,8 @@ async def test_original_answer_continues_non_document_tools_without_replaying_he
             if mode == "unclassified_return":
                 return result
             record_rejection(ctx, result)
-            return {**result, "error": "A changed result cannot reuse the original rejection evidence."}
+            # Only the observed bytes change; a native refusal keeps its type, as the real helper does.
+            return type(result)({**result, "error": "A changed result cannot reuse the original rejection evidence."})
 
         monkeypatch.setattr(ordinary_lead_runtime, "note_ordinary_return_rejection", incomplete_evidence)
     monkeypatch.setitem(PROFILES, "lead", replace(PROFILES["lead"], tool_whitelist=("subagent_spawn", "clarification_ask", "skill_list", own_tool)))

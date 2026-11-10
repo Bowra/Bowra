@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Check, ChevronLeft, AlertCircle } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { RowActionsMenu, type RowAction } from "@/components/ui/row-actions-menu";
+import { formatTime } from "@/lib/locale";
 import { Spinner } from "./status-badge";
 import styles from "./canvas-object.module.css";
 
@@ -22,9 +23,7 @@ export function CanvasToolbarActions({ children }: { children: ReactNode }) {
 }
 
 export function formatSavedTime(value: number | string | Date, locale: string): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return formatTime(value, locale);
 }
 
 /** C2 · save state text (12 ink3, tabular); failures add “Retry save”. */

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Criteria for how many things can be done.
  *

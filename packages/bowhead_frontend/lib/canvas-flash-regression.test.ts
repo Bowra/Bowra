@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #3 canvas-pane FLASH regression (has been re-fixed many times — keep it locked).
  *

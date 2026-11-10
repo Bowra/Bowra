@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Footer-button styling contract for Agent management confirmation dialogs (disable, set / unset team default).
  *

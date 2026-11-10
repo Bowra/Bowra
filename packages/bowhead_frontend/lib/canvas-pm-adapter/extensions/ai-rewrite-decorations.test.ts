@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * AI rewrite revision-mode visuals (Feishu 07.06 #15b) — decoration-plugin unit tests.
  */

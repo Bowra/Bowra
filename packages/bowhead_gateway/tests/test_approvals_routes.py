@@ -19,7 +19,6 @@ from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from bowhead_router.types import ToolSchema
-from gateway_legacy_database import upgrade
 
 from bowhead_core import ApprovalStore
 
@@ -47,10 +46,10 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complete_community_http_installation):
+async def app_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complete_community_http_installation, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "1")
     db = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(db.with_name("bowhead.db"))
     store = ApprovalStore(db_path=str(tmp_path / "approvals.db"))
     await store.initialize()
     users = UserStore(db)

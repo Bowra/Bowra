@@ -155,7 +155,7 @@ describe("TurnContainer F2 · fast-path empty step list gate", () => {
 
     const summary = container.querySelector('[data-testid="step-summary"]');
     expect(summary).toBeTruthy();
-    expect(summary?.textContent).toContain("execution_done");
+    expect(summary?.textContent).toContain("execution_ended");
     expect(
       Boolean(summary!.compareDocumentPosition(answer!) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
@@ -185,7 +185,7 @@ describe("TurnContainer F2 · fast-path empty step list gate", () => {
             traceSteps: [],
             peersDispatched: [],
             errorReason: null,
-            archivedAt: Date.now(),
+            endedAt: Date.now(),
           }],
         })}
       />,
@@ -197,7 +197,7 @@ describe("TurnContainer F2 · fast-path empty step list gate", () => {
       (node) => node.textContent === "归档结论：未发现异常。",
     );
     expect(summary).toBeTruthy();
-    expect(summary?.textContent).toContain("execution_done");
+    expect(summary?.textContent).toContain("execution_ended");
     expect(answer).toBeTruthy();
     expect(
       Boolean(summary!.compareDocumentPosition(answer!) & Node.DOCUMENT_POSITION_FOLLOWING),

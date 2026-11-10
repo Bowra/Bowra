@@ -76,12 +76,12 @@ async def test_first_connection_import_is_one_use_encrypted_and_does_not_apply(c
         assert row[0] != state and row[1].startswith("FERNET:")
         assert "verifier" not in row[1]
     before = await store.get_team_llm_config_with_version("team_llm")
-    response = client.get(ROOT + "/callback", params={"state": state, "code": "authorization-code"}, cookies=setup.cookies, follow_redirects=False)
-    assert response.status_code == 303
+    response = client.post(ROOT + "/complete", json={"state": state, "code": "authorization-code"}, cookies=setup.cookies, follow_redirects=False)
+    assert response.status_code == 200
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["location"].startswith("/bowhead/team/settings/models/?")
-    token = parse_qs(urlsplit(response.headers["location"]).query)["bowra_import"][0]
+    token = response.json()["bowra_import"]
+    assert RESULT["api_key"] not in response.text
     url, kwargs = setup.calls[0]
     assert url == "https://auth.example.test/prefix/connect/exchange"
     assert set(kwargs["data"]) == {"code", "code_verifier", "redirect_uri"}
@@ -94,8 +94,8 @@ async def test_first_connection_import_is_one_use_encrypted_and_does_not_apply(c
     assert response.headers["cache-control"] == "no-store"
     assert await store.get_team_llm_config_with_version("team_llm") == before
     assert client.post(ROOT + "/imports/" + token, cookies=setup.cookies).status_code == 410
-    response = client.get(ROOT + "/callback", params={"state": state, "code": "authorization-code"}, cookies=setup.cookies, follow_redirects=False)
-    assert "invalid_callback" in response.headers["location"]
+    response = client.post(ROOT + "/complete", json={"state": state, "code": "authorization-code"}, cookies=setup.cookies, follow_redirects=False)
+    assert response.json() == {"bowra_error": "invalid_callback"}
     assert len(setup.calls) == 1
 
 
@@ -142,14 +142,12 @@ async def test_admin_permissions_and_current_team_binding(client, store, setup):
     assert await pending.take(state, user_id="bowra_owner", team_id="team_llm", kind="authorization") is not None
 
 
-@pytest.mark.parametrize(
-    "address", ["http://app.example.test", "https://localhost", "https://127.0.0.1", "https://app.example.test:444", "https://app.localhost"]
-)
-async def test_unsupported_callback_rejected_before_authorization(client, setup, monkeypatch, address):
+@pytest.mark.parametrize("address", ["file:///tmp/app", "http://", "https://user:pass@app.test", "http://app:bad", "http://app/path?query=1"])
+async def test_invalid_callback_address_rejected_before_authorization(client, setup, monkeypatch, address):
     monkeypatch.setattr(bowra_connect, "current_request_public_access_context", lambda: SimpleNamespace(base_url=address, prefix_known=True))
     response = client.post(ROOT + "/start", cookies=setup.cookies)
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "bowra_https_callback_required"
+    assert response.json()["detail"]["code"] == "bowra_callback_address_invalid"
 
 
 async def test_unconfigured_service_and_missing_encryption(client, setup, monkeypatch):
@@ -289,3 +287,104 @@ async def test_import_keeps_original_review_apply_and_encrypted_runtime_credenti
     assert version > 0
     assert RESULT["api_key"] not in applied.text
     assert client.put(url, json=body, cookies=setup.cookies).status_code == 409
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3100",
+        "http://192.168.1.20:8080",
+        "http://[::1]:8080",
+        "http://bowhead-internal:8080",
+        "https://app.example.test:8443",
+        "https://10.0.0.5:9443",
+    ],
+)
+@pytest.mark.parametrize("prefix", ["", "/bowhead", "/company/apps/bowhead"])
+async def test_frontend_handoff_accepts_browser_addresses_without_entries(client, setup, monkeypatch, origin, prefix):
+    address = origin + prefix
+    monkeypatch.setattr(bowra_connect, "current_request_public_access_context", lambda: SimpleNamespace(base_url=address, prefix_known=True))
+    query = start(client, setup)
+    assert query["redirect_uri"] == [address + bowra_connect.CALLBACK_PATH]
+    result = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": query["state"][0], "code": "temporary-code"})
+    assert result.status_code == 200, result.text
+    assert "bowra_import" in result.json()
+    assert setup.calls[0][1]["data"]["redirect_uri"] == query["redirect_uri"][0]
+    assert "api_key" not in result.json()
+
+
+@pytest.mark.parametrize(
+    "fields,reason",
+    [
+        ({"error": "access_denied"}, "cancelled"),
+        ({"code": "a", "error": "access_denied"}, "invalid_callback"),
+        ({}, "invalid_callback"),
+        ({"code": ""}, "invalid_callback"),
+    ],
+)
+async def test_frontend_completion_rejects_denied_and_invalid_results(client, setup, fields, reason):
+    state = start(client, setup)["state"][0]
+    response = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": state, **fields})
+    assert response.json() == {"bowra_error": reason}
+    assert not setup.calls
+
+
+async def test_frontend_completion_rechecks_permissions_and_expiry(client, setup, store):
+    await _seed_user(store, "bowra_member", "member@team.test", is_creator=False)
+    state = start(client, setup)["state"][0]
+    fields = {"state": state, "code": "a"}
+    assert client.post(ROOT + "/complete", json=fields).status_code == 401
+    assert client.post(ROOT + "/complete", cookies={"bowhead_jwt": _jwt_cookie("bowra_member")}, json=fields).status_code == 403
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE bowra_connect_pending SET expires_at=0")
+        await db.commit()
+    assert client.post(ROOT + "/complete", cookies=setup.cookies, json=fields).json() == {"bowra_error": "invalid_callback"}
+    assert not setup.calls
+
+
+async def test_legacy_callback_finishes_authorization_started_before_upgrade(client, setup, store):
+    redirect_uri = "http://internal:8080/nested/app" + bowra_connect.LEGACY_CALLBACK_PATH
+    state = await BowraConnectStore(store.db_path).put(
+        team_id="team_llm",
+        user_id="bowra_owner",
+        kind="authorization",
+        payload={"verifier": "old-verifier", "redirect_uri": redirect_uri, "service_url": "https://auth.example.test/prefix", "app_name": "Bowhead"},
+    )
+    response = client.get(ROOT + "/callback", params={"state": state, "code": "old-code"}, cookies=setup.cookies, follow_redirects=False)
+    assert response.status_code == 303
+    assert "bowra_import=" in response.headers["location"]
+    assert setup.calls[0][1]["data"]["redirect_uri"] == redirect_uri
+
+
+async def test_frontend_completion_rejects_client_exchange_context_without_consuming_state(client, setup):
+    state = start(client, setup)["state"][0]
+    for extra in ({"redirect_uri": "http://other/callback"}, {"code_verifier": "attacker"}, {"service_url": "http://other"}):
+        response = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": state, "code": "a", **extra})
+        assert response.status_code == 422
+    for fields in ({"code": None}, {"code": "a", "error": None}):
+        attempt = start(client, setup)["state"][0]
+        response = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": attempt, **fields})
+        assert response.json() == {"bowra_error": "invalid_callback"}
+    assert not setup.calls
+    result = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": state, "code": "a"})
+    assert "bowra_import" in result.json()
+
+
+async def test_frontend_completion_rechecks_readonly_before_consuming_state(client, setup, monkeypatch):
+    from fastapi import HTTPException
+
+    from bowhead_gateway import _entitlement_gate
+
+    state = start(client, setup)["state"][0]
+
+    async def deny(request):
+        raise HTTPException(403, "read-only")
+
+    monkeypatch.setattr(_entitlement_gate, "assert_not_readonly", deny)
+    response = client.post(ROOT + "/complete", cookies=setup.cookies, json={"state": state, "code": "a"})
+    assert response.status_code == 403
+    assert not setup.calls
+    assert (
+        await BowraConnectStore(client.app.state.user_store.db_path).take(state, team_id="team_llm", user_id="bowra_owner", kind="authorization")
+        is not None
+    )

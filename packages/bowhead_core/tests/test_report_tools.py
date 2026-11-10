@@ -670,6 +670,19 @@ async def test_read_report_lists_chat_hidden_figures_as_history(ctx) -> None:
     assert hist["fresh"] is False and "无需重画" in hist["note"]
 
 
+async def test_read_report_points_chat_hidden_chart_restyling_to_an_in_place_edit(ctx) -> None:
+    """116 1.7.18 `t_d4d4d3a87752`: a presentation change to a chart from an earlier
+    chat answer produced a recolored duplicate. The listing that exposes the chart's
+    real ID must also say that restyling edits that chart rather than drawing another."""
+    canvas = await ctx.canvas_store.get_canvas_by_session("s1")
+    hidden = await ctx.canvas_store.append_section(canvas_id=canvas.id, kind="chart", payload={"spec": {"title": "质数个数"}})
+    await ctx.canvas_store.set_section_surface_target(hidden.id, "chat")
+
+    r = await _read_report({}, ctx)
+    note = next(f["note"] for f in r["figures"] if f["id"] == hidden.id)
+    assert "read_chart" in note and "edit_chart" in note
+
+
 async def test_superseded_figure_is_not_promoted_and_the_rejection_says_why(ctx, monkeypatch) -> None:
     """A figure that was replaced by a newer version stays unreferenceable; when
     the gate does fire it says "replaced", not "unknown"."""

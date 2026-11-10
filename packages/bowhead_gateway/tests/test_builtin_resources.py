@@ -16,7 +16,6 @@ from bowhead_core.user_settings_store import UserSettingsStore
 from bowhead_core.user_store import UserStore, _id, _now
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
-from gateway_legacy_database import upgrade
 
 _SECRET = "test_builtin_resources_secret_32b"
 
@@ -29,13 +28,13 @@ def _client(app, user_id: str) -> httpx2.AsyncClient:
 
 
 @pytest.fixture
-async def context(tmp_path, monkeypatch, complete_community_http_installation):
+async def context(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", _SECRET)
     monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1")
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
     store = UserStore(str(path))
     await store.initialize()
     await complete_community_http_installation(store)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -24,6 +24,7 @@ import { withUiHooks } from "./ui-hook-classes";
 import rawStyles from "./public-entries.module.css";
 
 import { copyTextWithFallback } from "@/lib/clipboard";
+import { formatDateTime } from "@/lib/locale";
 
 // Append global ui-pe-* hooks to every class (styles/ui-refresh-pages-settings.css).
 const styles = withUiHooks(rawStyles, "ui-pe");
@@ -57,6 +58,7 @@ function isValidPublicBaseUrl(value: string): boolean {
 
 export function SettingsPublicEntries() {
   const t = useTranslations("settings.public_entries");
+  const locale = useLocale();
   const baseUrlId = useId();
   const [entries, setEntries] = useState<PublicEntryDTO[]>([]);
   const [baseUrl, setBaseUrl] = useState("");
@@ -309,7 +311,7 @@ export function SettingsPublicEntries() {
           {verification.expiresAt ? (
             <p>
               {t("verify_expires", {
-                expiresAt: new Date(verification.expiresAt).toLocaleString(),
+                expiresAt: formatDateTime(verification.expiresAt, locale, { dateStyle: "medium" }) || verification.expiresAt,
               })}
             </p>
           ) : null}

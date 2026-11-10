@@ -440,6 +440,15 @@ class FeishuEventStore:
             value=answer_message_id,
         )
 
+    async def set_steer_source_message_id(self, *, turn_id: str, message_id: str) -> None:
+        """Remember the latest message buffered into this Turn; its continuation replies to it."""
+        async with open_shared_ctx(self.db_path) as db:
+            await db.execute(
+                "UPDATE feishu_turn_links SET meta_json=json_set(meta_json, '$.steer_source_message_id', ?), updated_at=? WHERE turn_id=?",
+                (message_id, _now(), turn_id),
+            )
+            await db.commit()
+
     async def get_turn_link(self, turn_id: str) -> FeishuTurnLink | None:
         async with open_shared_ctx(self.db_path) as db:
             db.row_factory = aiosqlite.Row

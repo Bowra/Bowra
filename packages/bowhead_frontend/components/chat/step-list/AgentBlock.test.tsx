@@ -204,16 +204,16 @@ describe("AgentBlock", () => {
     [
       "zh-CN" as const,
       "Power BI 返回的结果不完整，系统已停止使用这份数据以避免得出错误结论；请缩小查询范围后重试。",
-      "查看技术详情",
+      "复制诊断",
     ],
     [
       "en-US" as const,
       `Power BI returned an incomplete result. ${PRODUCT_NAME} stopped using it to avoid an incorrect conclusion. Narrow the query and try again.`,
-      "View technical details",
+      "Copy diagnostics",
     ],
   ])(
-    "localizes a Power BI step failure in %s and preserves safe diagnostics",
-    (locale, friendlyMessage, disclosureLabel) => {
+    "localizes a Power BI step failure in %s and keeps its diagnostics copyable without showing codes",
+    (locale, friendlyMessage, copyLabel) => {
       const hostileRaw =
         "Authorization: Bearer raw-secret from provider response";
       const { container } = renderIntl(
@@ -251,10 +251,9 @@ describe("AgentBlock", () => {
 
       fireEvent.click(container.querySelector(".stp-head")!);
       expect(screen.getByText(friendlyMessage)).toBeTruthy();
-      expect(screen.getByText(disclosureLabel)).toBeTruthy();
-      expect(
-        screen.getByText("pbi_query_result_incomplete"),
-      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: copyLabel })).toBeTruthy();
+      expect(container.textContent).not.toContain("pbi_query_result_incomplete");
+      expect(container.textContent).not.toContain("phase=");
       expect(container.textContent).not.toContain(hostileRaw);
       expect(container.textContent).not.toContain("raw-secret");
     },

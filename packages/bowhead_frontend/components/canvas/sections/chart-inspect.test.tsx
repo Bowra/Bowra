@@ -11,8 +11,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChartInspect } from "./chart-inspect";
+import { ChartBlock } from "./chart-block";
 import { onChartFollowup } from "@/lib/chart/chart-followup";
 import type { ChartSpec } from "@/lib/chart/types";
+
+// Inspect owns data completion and controls; ChartBlock rendering has its own tests.
+vi.mock("./chart-block", () => ({ ChartBlock: vi.fn(() => null) }));
 
 vi.mock("next-intl", () => ({
   // Chart component localizes x-axis time buckets / granularity column names (2026-09-01) —
@@ -66,7 +70,10 @@ function spec(rowCount: number, inHand: number): ChartSpec {
 }
 
 afterEach(() => cleanup());
-beforeEach(() => mockEnsure.mockReset());
+beforeEach(() => {
+  mockEnsure.mockReset();
+  vi.mocked(ChartBlock).mockClear();
+});
 
 describe("ChartInspect", () => {
   it("discloses source and displayed units beside the data table", () => {
@@ -114,9 +121,10 @@ describe("ChartInspect", () => {
     expect(mockEnsure).not.toHaveBeenCalled();
     expect(screen.queryByText(/LOAD_FAILED/)).toBeNull();
     expect(screen.getByText(/rows 10000\/12000/)).toBeInTheDocument();
-    // jsdom cannot draw canvas, so chart falls back to 10,000-row table (~40,000 nodes); dialog shell searches panel for
-    // focusable elements on every DOM change, taking ~5s alone and >20s fully concurrent in jsdom; allow longer timeout.
-  }, 60_000);
+    const renderedSpec = vi.mocked(ChartBlock).mock.lastCall![0].spec;
+    expect(renderedSpec.rows).toHaveLength(10000);
+    expect(renderedSpec.row_count).toBe(12000);
+  });
 
   it("视图下拉显示本地化名称，不暴露 hbar 等内部 token", () => {
     render(<ChartInspect spec={spec(5, 5)} onClose={vi.fn()} />);

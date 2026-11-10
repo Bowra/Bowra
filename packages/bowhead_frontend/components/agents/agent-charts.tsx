@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, type MouseEvent } from "react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTimeZone, useTranslations } from "next-intl";
 import { ChartNoAxesColumnIncreasing, ChevronRight, TrendingUp } from "lucide-react";
 
 import { LucideGlyph } from "@/components/icon-refresh";
@@ -10,6 +10,7 @@ import { FilterMenuButton } from "@/components/ui/filter-menu-button";
 import { Segment, SegmentedControl } from "@/components/ui/segmented-control";
 import { useAuthSession } from "@/lib/auth/auth-session-context";
 import { appPath } from "@/lib/base-path";
+import { formatDate, formatShortDateTime } from "@/lib/locale";
 import { AGENT_CHART_DOMAINS, agentChartDetailHref, agentChartFilters, agentChartsHref, type AgentChartView } from "@/lib/agent-charts-navigation";
 import { listAgentCatalog, type AgentCatalogCollection, type AgentCatalogItem } from "@/lib/agents-api";
 import { listAgentRankings, type AgentRankingCollection, type AgentRankingRow } from "@/lib/agent-rankings-api";
@@ -31,6 +32,8 @@ function ChartCard({ item, row, view, domain, onNavigate }: {
 }) {
   const t = useTranslations("agents_marketplace");
   const format = useFormatter();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
   const { displayName, summary } = useAgentListingText();
   const name = displayName(item);
   const mark = useAgentMark(name);
@@ -45,7 +48,7 @@ function ChartCard({ item, row, view, domain, onNavigate }: {
     <div className="ac-signal">
       {row ? view === "trending" ? <><p className="ac-growth"><LucideGlyph icon={TrendingUp} size={16} aria-hidden="true" />{t("charts_growth", { count: format.number(row.active_members_7d! - row.active_members_previous_7d!) })}</p><span>{t("charts_trending_period")}</span></>
         : <><p>{t("charts_members", { count: format.number(row.active_members_28d!) })}</p><span>{t("charts_popular_period")}</span></>
-        : updatedAt && Number.isFinite(updatedAt.getTime()) ? <><p>{t("charts_saved", { date: format.dateTime(updatedAt, { year: "numeric", month: "short", day: "numeric" }) })}</p><span>{t("charts_saved_context")}</span></> : <p>{t("charts_saved_context")}</p>}
+        : updatedAt && Number.isFinite(updatedAt.getTime()) ? <><p>{t("charts_saved", { date: formatDate(updatedAt, locale, "medium", timeZone) })}</p><span>{t("charts_saved_context")}</span></> : <p>{t("charts_saved_context")}</p>}
     </div>
     <a className="settings-button settings-button--secondary settings-button--sm ac-details" href={appPath(href)} onClick={event => onNavigate(event, href)} aria-label={t("view_agent", { name })}>{t("details")}</a>
   </li>;
@@ -55,10 +58,10 @@ export function AgentCharts() {
   const t = useTranslations("agents_marketplace");
   const pageT = useTranslations("agents_page");
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const methodId = useId();
   const { displayName: listingName } = useAgentListingText();
   const [methodOpen, setMethodOpen] = useState(false);
-  const format = useFormatter();
   const router = useAppRouter();
   const session = useAuthSession();
   const [filters, setFilters] = useState<{ view: AgentChartView; domain: string }>({ view: "popular", domain: "all" });
@@ -116,7 +119,7 @@ export function AgentCharts() {
   const generatedAt = visibleRanking?.result?.generated_at;
   const availableAt = collecting && visibleRanking?.result?.available_at ? new Date(visibleRanking.result.available_at) : null;
   const collectingDate = availableAt && Number.isFinite(availableAt.getTime())
-    ? format.dateTime(availableAt, { year: "numeric", month: "short", day: "numeric" })
+    ? formatDate(availableAt, locale, "medium", timeZone)
     : null;
 
   function select(next: { view: AgentChartView; domain: string }) {
@@ -146,7 +149,7 @@ export function AgentCharts() {
         testId="ac-category-filter"
       />
     </div>
-    <div className="ac-context"><span>{t("charts_team_scope")} · {t(filters.view === "updated" ? "charts_updated_period" : filters.view === "trending" ? "charts_trending_period" : "charts_popular_period")}</span>{generatedAt && rows.length ? <span>{t("charts_generated", { date: format.dateTime(new Date(generatedAt), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })}</span> : null}</div>
+    <div className="ac-context"><span>{t("charts_team_scope")} · {t(filters.view === "updated" ? "charts_updated_period" : filters.view === "trending" ? "charts_trending_period" : "charts_popular_period")}</span>{generatedAt && rows.length ? <span>{t("charts_generated", { date: formatShortDateTime(generatedAt, locale, new Date(), timeZone) })}</span> : null}</div>
     {filters.view !== "updated" ? <div className="ac-method">
       <button type="button" className="ac-method-toggle" aria-expanded={methodOpen} aria-controls={methodId} onClick={() => setMethodOpen(open => !open)}>
         <LucideGlyph icon={ChevronRight} size={14} aria-hidden="true" className="ac-method-chevron" />

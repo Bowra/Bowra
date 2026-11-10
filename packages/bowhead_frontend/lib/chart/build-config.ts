@@ -285,8 +285,10 @@ export function buildChartJSConfig(spec: ChartSpec, theme: ChartTheme, opts: Bui
     }) as ChartData["datasets"];
   }
   formatted.data.datasets = formatted.data.datasets.map((dataset, index) => {
-    if (normalized.shape.series[index]?.paletteIndex === undefined) return dataset;
-    const color = seriesColor(theme.palette, presentation.effective.series[index]!.paletteIndex, theme.surface, theme.ink);
+    const series = normalized.shape.series[index];
+    if (series?.paletteIndex === undefined && series?.colorHex === undefined) return dataset;
+    const encoding = presentation.effective.series[index]!;
+    const color = series.colorHex ?? seriesColor(theme.palette, encoding.paletteIndex, theme.surface, theme.ink);
     return { ...dataset, borderColor: color, pointBackgroundColor: color, pointBorderColor: color,
       backgroundColor: (dataset as { fill?: unknown }).fill ? withAlpha(color, "33") : color, hoverBackgroundColor: color };
   }) as ChartData["datasets"];

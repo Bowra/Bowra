@@ -7,6 +7,8 @@ body-shape constant comparisons alone cannot detect."""
 
 from __future__ import annotations
 
+import json
+
 import bowhead_router.probe as probe_module
 import httpx2
 import pytest
@@ -231,3 +233,112 @@ def test_overrides_cannot_rewrite_runtime_inputs_in_the_probe_either() -> None:
 
     assert body["messages"] == [{"role": "user", "content": "hello"}]
     assert body["stream"] is True
+
+
+ANTHROPIC_THINKING_PROVIDER = {
+    "type": "anthropic_compatible",
+    "base_url": "https://api.example.com/anthropic",
+    "api_key": "secret",
+    "messages_path": "/messages",
+    "models": [
+        {
+            "id": "m1",
+            "capabilities": ["chat", "tool"],
+            "runtime_parameters": {
+                "profile": "anthropic-manual-v1",
+                "defaults": {"thinking_mode": "on", "thinking_budget": 1024, "outbound_params": {"temperature": {"mode": "omit"}}},
+            },
+        }
+    ],
+}
+_MESSAGE_START = {
+    "type": "message_start",
+    "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "m1-upstream", "content": [], "usage": {"input_tokens": 9}},
+}
+_THINKING_BLOCK = [
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Answer with OK."}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}},
+    {"type": "content_block_stop", "index": 0},
+]
+_TEXT_BLOCK = [
+    {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "OK"}},
+    {"type": "content_block_stop", "index": 1},
+]
+
+
+def _anthropic_sse(*frames: dict) -> str:
+    return "".join(f"event: {frame['type']}\ndata: {json.dumps(frame)}\n\n" for frame in frames)
+
+
+def _finished(stop_reason: str) -> list[dict]:
+    return [
+        {"type": "message_delta", "delta": {"stop_reason": stop_reason}, "usage": {"output_tokens": 12}},
+        {"type": "message_stop"},
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_anthropic_runtime_parameter_probe_decodes_the_stream_it_asked_for(monkeypatch) -> None:
+    """A thinking profile compiles a streaming Anthropic body; its SSE answer must verify.
+
+    116, 2026-11-09: DeepSeek answered HTTP 200 with Anthropic SSE and the probe
+    reported `invalid_response`, so no Anthropic model with request parameters could verify.
+    """
+    plan = _plan("chat", ANTHROPIC_THINKING_PROVIDER)
+    assert plan.body_shape["stream"] is True
+    assert plan.body_shape["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert "temperature" not in plan.body_shape
+    _serve(monkeypatch, _anthropic_sse(_MESSAGE_START, {"type": "ping"}, *_THINKING_BLOCK, *_TEXT_BLOCK, *_finished("end_turn")))
+
+    result = await CompatibleProbeRegistry().execute(plan, timeout=5)
+
+    assert result.terminal_state == "verified"
+    assert result.code == "ok"
+    assert result.actual_model_id == "m1-upstream"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_anthropic_runtime_parameter_tool_probe_decodes_a_streamed_tool_use(monkeypatch) -> None:
+    tool_use = [
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "tool_use", "id": "toolu_1", "name": "bowhead_connection_probe", "input": {}},
+        },
+        {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{}"}},
+        {"type": "content_block_stop", "index": 1},
+    ]
+    _serve(monkeypatch, _anthropic_sse(_MESSAGE_START, *_THINKING_BLOCK, *tool_use, *_finished("tool_use")))
+
+    result = await CompatibleProbeRegistry().execute(_plan("tool", ANTHROPIC_THINKING_PROVIDER), timeout=5)
+
+    assert result.terminal_state == "verified"
+    assert result.code == "ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("frames", "code"),
+    [
+        pytest.param([_MESSAGE_START, *_THINKING_BLOCK, *_finished("max_tokens")], "empty_completion", id="thinking-only"),
+        pytest.param([_MESSAGE_START, *_THINKING_BLOCK, *_TEXT_BLOCK], "invalid_response", id="no-message-stop"),
+        pytest.param(
+            [_MESSAGE_START, {"type": "error", "error": {"type": "overloaded_error", "message": "busy"}}],
+            "invalid_response",
+            id="error-event",
+        ),
+    ],
+)
+async def test_anthropic_probe_stream_without_an_answer_still_fails(monkeypatch, frames: list[dict], code: str) -> None:
+    """Negative controls: decoding Anthropic SSE must not accept reasoning alone, a cut stream or an error event."""
+    _serve(monkeypatch, _anthropic_sse(*frames))
+
+    result = await CompatibleProbeRegistry().execute(_plan("chat", ANTHROPIC_THINKING_PROVIDER), timeout=5)
+
+    assert result.terminal_state == "failed"
+    assert result.code == code

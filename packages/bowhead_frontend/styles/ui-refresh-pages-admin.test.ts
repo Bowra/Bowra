@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Page acceptance B administration style source contracts: access/approvals/replay/audit/credits.
  *

@@ -3527,3 +3527,35 @@ describe("alignment card continue through the real composer draft", () => {
   });
 });
 
+
+describe("Reference editor accessible name (2026-11-08 dogfood F11)", () => {
+  // Real deployments render the reference editor (`capabilities.composer.reference_input`), not the textarea;
+  // the earlier naming fix reached only the textarea, so the steering prompt stayed hidden from screen readers.
+  // Mutation: give the reference editor a fixed `aria-label` again → every case below fails.
+  // `DRAFT_SCOPE` is replaced before each case, so it is passed at render time.
+  const props = { onSend: () => {}, referenceInputEnabled: true };
+  const visiblePrompt = () =>
+    document.querySelector(".composer-reference-editor__placeholder")?.textContent;
+
+  it("is named by the ordinary prompt it shows", async () => {
+    render(<V2Composer {...props} draftPersistenceScope={DRAFT_SCOPE} />);
+    expect(await screen.findByRole("combobox", { name: "Ask…" })).toBeTruthy();
+    await waitFor(() => expect(visiblePrompt()).toBe("Ask…"));
+  });
+
+  it("switches to the steering prompt while an answer runs and back when it ends", async () => {
+    const onSteer = vi.fn();
+    const view = render(<V2Composer {...props} draftPersistenceScope={DRAFT_SCOPE} running onSteer={onSteer} onCancel={vi.fn()} />);
+    // The mocked translation returns the key; the real copy's leading ↻ glyph is stripped from the name.
+    expect(await screen.findByRole("combobox", { name: "steer_placeholder" })).toBeTruthy();
+    await waitFor(() => expect(visiblePrompt()).toBe("steer_placeholder"));
+    view.rerender(<V2Composer {...props} draftPersistenceScope={DRAFT_SCOPE} onSteer={onSteer} onCancel={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("combobox").getAttribute("aria-label")).toBe("Ask…"));
+  });
+
+  it("is named by the read-only prompt when sending is disabled", async () => {
+    render(<V2Composer {...props} draftPersistenceScope={DRAFT_SCOPE} readOnly />);
+    expect(await screen.findByRole("combobox", { name: "readonly_placeholder" })).toBeTruthy();
+    await waitFor(() => expect(visiblePrompt()).toBe("readonly_placeholder"));
+  });
+});

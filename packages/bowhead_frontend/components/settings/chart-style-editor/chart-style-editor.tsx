@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api-client";
+import { formatDateTime } from "@/lib/locale";
 import {
   chartThemeBaseForMode,
   resolveChartThemeForV2Snapshot,
@@ -1023,7 +1024,7 @@ function RevisionHistory({
             <Clock size={15} aria-hidden />
             <div>
               <strong>{t("revision", { sequence: revision.sequence })}</strong>
-              <span>{revision.name} · {new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(revision.createdAt))}</span>
+              <span>{revision.name} · {formatDateTime(revision.createdAt, locale, { dateStyle: "medium" })}</span>
             </div>
             {active ? <span className="cs-status cs-status--active">{t("current")}</span> : (
               <Button size="sm" disabled={!canRestore} onClick={() => onRestore(revision)}>{t("restore")}</Button>

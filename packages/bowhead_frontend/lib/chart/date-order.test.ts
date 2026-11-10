@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Date-axis label order: **two implementations of the same rule, here and backend chart/infer.py _date_axis_sort_key.**
  *

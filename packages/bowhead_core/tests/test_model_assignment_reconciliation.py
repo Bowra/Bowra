@@ -117,3 +117,39 @@ def test_verification_later_fills_saved_slots_without_a_provider_edit():
     assert not changes and not result["tiers"]
     result, changes = reconcile_model_assignments(current, current, facts("chat", "tool"), verification_completed=True)
     assert result["tiers"]["primary"]["model"] == "main" and changes
+
+
+@pytest.mark.parametrize("verified_embed", [True, False])
+def test_deleted_connection_replaces_only_affected_settings(verified_embed):
+    current = config([{"id": "main", "capabilities": ["chat", "tool", "embed"]}])
+    current["providers"]["other"] = copy.deepcopy(current["providers"]["corp"])
+    current["tiers"] = {"primary": {"provider": "corp", "model": "main"}, "judge": {"auto": True}}
+    current["kb"] = {
+        "models": {
+            "old": {"provider": "corp", "real_id": "main", "capability": "embed", "dim": 8},
+            "rerank": {"provider": "corp", "real_id": "ranker", "capability": "rerank"},
+            "other": {"provider": "other", "real_id": "main", "capability": "embed", "dim": 16},
+        },
+        "active": {"embed": "old", "rerank": "rerank"},
+        "auto_assign_disabled": ["vision"],
+    }
+    for section, cap in (("media", "image_gen"), ("search", "web_search")):
+        current[section] = {
+            "models": {name: {"provider": provider, "real_id": cap, "capability": cap} for name, provider in (("old", "corp"), ("other", "other"))},
+            "active": {cap: "old"},
+        }
+    draft = copy.deepcopy(current)
+    draft["providers"].pop("corp")
+    verified = facts("chat", "tool", provider="other")
+    if verified_embed:
+        verified |= facts("embed", provider="other")
+    result, changes = reconcile_model_assignments(current, draft, verified, deletion_only=True)
+    reviewed, review_changes = reconcile_model_assignments(current, result, verified, deletion_only=True)
+    assert reviewed == result
+    assert {change["path"]: change["selected"] for change in review_changes} == {change["path"]: change["selected"] for change in changes}
+    assert result["tiers"] == {"primary": {"provider": "other", "model": "main"}, "judge": {"auto": True}}
+    assert result["kb"]["active"] == ({"embed": "other"} if verified_embed else {})
+    assert result["kb"]["auto_assign_disabled"] == ["vision"]
+    assert result["media"]["active"] == {"image_gen": "other"}
+    assert result["search"]["active"] == {"web_search": "other"}
+    assert draft["kb"]["active"] == {"embed": "old", "rerank": "rerank"}

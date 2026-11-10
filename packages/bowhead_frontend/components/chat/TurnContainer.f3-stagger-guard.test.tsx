@@ -77,7 +77,7 @@ function archivedTurn(over: Partial<ArchivedTurn> = {}): ArchivedTurn {
     traceSteps: [],
     peersDispatched: [],
     errorReason: null,
-    archivedAt: Date.now(),
+    endedAt: Date.now(),
     ...over,
   };
 }

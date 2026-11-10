@@ -53,11 +53,12 @@ def test_render_attachments_block_injects_data_source_rule() -> None:
         summary_only=False,
     )
     block = render_attachments_block([att])
-    assert "数据源铁律" in block
+    assert "Attachment source boundary" in block
     assert "art_csv_1" in block
     assert "sales.csv" in block
-    assert "python_sandbox" in block
-    assert "禁止" in block and "bi_fetch_rows" in block
+    assert "authorized Python sandbox" in block
+    assert "Do not replace uploaded data with rows from any database or connector." in block
+    assert "Use another source only when the user's request calls for it" in block
 
 
 def test_render_attachments_block_no_rule_for_non_data_file() -> None:
@@ -78,7 +79,7 @@ def test_render_attachments_block_no_rule_for_non_data_file() -> None:
         summary_only=False,
     )
     block = render_attachments_block([att])
-    assert "数据源铁律" not in block
+    assert "Attachment source boundary" not in block
     # Still render the attachments block itself.
     assert "art_pdf_1" in block
 
@@ -101,7 +102,7 @@ def test_render_attachments_block_detects_xlsx_by_ext() -> None:
         summary_only=False,
     )
     block = render_attachments_block([att])
-    assert "数据源铁律" in block
+    assert "Attachment source boundary" in block
 
 
 # ─── #310 inline num src binding ─────────────────────────

@@ -164,6 +164,7 @@ class TerminalPendingExecutionRecovery:
         )
         turn_request = build_resume_turn_request(
             clarification,
+            app=self._app,
             source_db_path=getattr(clarification_store, "db_path", None),
             datarc_client=datarc.datarc_client,
             datarc_unavailable=datarc.datarc_unavailable,
@@ -217,15 +218,19 @@ class TerminalPendingExecutionRecovery:
 
         from bowhead_gateway.report_read_access import ReportReadAccess
 
+        report_access = ReportReadAccess(
+            SimpleNamespace(app=self._app),
+            context.scope.session_id,
+            clarification.workspace_id,
+            context.scope.team_id,
+            context.principals.requester_ref,
+        )
         turn_request = replace(
             turn_request,
-            report_read_access=ReportReadAccess(
-                SimpleNamespace(app=self._app),
-                context.scope.session_id,
-                clarification.workspace_id,
-                context.scope.team_id,
-                context.principals.requester_ref,
-            ),
+            report_read_access=report_access,
+            # Same pairing as the chat route: chart tools use the actor-bound
+            # report authority, never a missing browser request.
+            chart_authoring_projection=report_access.project_chart,
             session_id=context.scope.session_id,
             user_id=context.principals.requester_ref,
             workspace_id=clarification.workspace_id,
@@ -511,7 +516,14 @@ async def resolve_terminal_followup_request(
     )
     # The follow-up always has a resolved language context, so it carries the zone.
     language_context = language_context.with_time_zone(viewer_time_zone)
+    from bowhead_gateway.report_read_access import ReportReadAccess
+
+    # A queued follow-up continues the member's web conversation, so it keeps
+    # the chat route's report and chart authority, bound to the admitted actor.
+    report_access = ReportReadAccess(SimpleNamespace(app=app), parent_scope.session_id, workspace_id, parent_scope.team_id, user_id)
     return TurnRequest(
+        report_read_access=report_access,
+        chart_authoring_projection=report_access.project_chart,
         session_id=parent_scope.session_id,
         workspace_id=workspace_id,
         user_id=user_id,

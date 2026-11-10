@@ -29,11 +29,11 @@ Bowra 将专业 Agent、业务知识、文档审查、计算与报告放进共�
 
 当前为**源码预览**。你可以构建并初始化已审核的 Community 源码；模型服务、执行运行时及集成需要自行配置。Agent 评估与 CI/CD 按需启用，当前前置条件见[部署指南](deploy/README.zh-CN.md)。
 
-部分生产依赖的已知安全公告仍待复核。源码预览不代表部署安全验收完成；部署前请阅读[安全说明](SECURITY.zh-CN.md)并复核依赖锁。
+ChromaDB 仍有未修复的上游依赖安全公告，详见[当前评估和部署边界](SECURITY.zh-CN.md#chromadb-依赖安全公告)。
 
-## 源码快照 1.7.17
+## 源码快照 1.7.24
 
-本次改进历史资料读取、图表配色、知识引用、文件身份及会话导航。请阅读 [Community 发布说明](docs/help/release-notes/releases/v1.7.17.zh-CN.md)和[升级注意事项](deploy/README.md#upgrade-an-existing-installation)。
+本次更新支持图表原位修改与精确 HEX 配色，改进工具确认、对话续接和模型连接删除核对，并同步共享依赖安全修复。详见 [Community 发布说明](docs/help/release-notes/releases/v1.7.24.zh-CN.md)和[升级注意事项](deploy/README.md#upgrade-an-existing-installation)。
 
 SQLite 升级现统一协调十二个数据库文件和完整恢复归档。升级前停止全部写入并保留实例密钥及当前删除回执账本。Community 保留已审核沙箱源码与基础文档技能，原生模板创作 helper 需要单独验证执行环境。
 

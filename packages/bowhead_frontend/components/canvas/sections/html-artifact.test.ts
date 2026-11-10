@@ -2,7 +2,8 @@ import "@testing-library/jest-dom/vitest";
 
 import { createElement } from "react";
 import { cleanup, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installHtmlPreviewWorker } from "@/__tests__/helpers/html-preview-worker";
 
 import { renderIntl } from "@/__tests__/intl-render";
 import type { ReportSection } from "@/lib/types";
@@ -20,6 +21,8 @@ function makeArtifact(overrides: Partial<HtmlArtifact> = {}): HtmlArtifact {
     ...overrides,
   } as HtmlArtifact;
 }
+
+beforeEach(() => installHtmlPreviewWorker());
 
 afterEach(() => {
   cleanup();

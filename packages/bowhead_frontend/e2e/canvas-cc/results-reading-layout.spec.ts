@@ -342,8 +342,8 @@ test.describe("compact report entry and reading", () => {
   });
 });
 
-for (const width of [390, 1440]) {
-  test(`native palette color survives reload at ${width}px`, async ({ page }) => {
+for (const colorMode of ["palette", "HEX"] as const) for (const width of [390, 1440]) {
+  test(`native ${colorMode} color survives reload at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.route("**/api/v1/canvas/by-session/s_e2e**", async (route) => {
       const response = await route.fetch();
@@ -351,7 +351,7 @@ for (const width of [390, 1440]) {
       if (Array.isArray(dto.sections)) {
         const section = dto.sections.find((item: { id: string }) => item.id === "sec_results_data");
         section.spec = { kind: "bar", title: "Native green counts", row_count: 2,
-          columns: [{ key: "range", header: "Range", type: "categorical" }, { key: "count", header: "Count", type: "numeric", color_index: 4 }],
+          columns: [{ key: "range", header: "Range", type: "categorical" }, { key: "count", header: "Count", type: "numeric", ...(colorMode === "HEX" ? { color_hex: "#00A651" } : { color_index: 4 }) }],
           rows: [{ range: "1-100", count: 25 }, { range: "101-200", count: 21 }],
           explicit_presentation: { version: 1, mode: "plot", axes: { x: "range", y: ["count"], x_scale: "category" }, group_by: [] } };
       }
@@ -360,18 +360,20 @@ for (const width of [390, 1440]) {
     await openReport(page);
     await page.goto("/?session=s_e2e&result=report");
     const figure = page.getByRole("figure", { name: "Native green counts", exact: true });
-    const greenPixels = () => figure.locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
+    const greenPixels = () => figure.locator("canvas").first().evaluate((canvas: HTMLCanvasElement, exactHex: boolean) => {
       const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
       let count = 0;
       for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i + 3]! > 200 && pixels[i + 1]! > pixels[i]! * 1.05 && pixels[i + 1]! > pixels[i + 2]! * 1.1) count += 1;
+        if (pixels[i + 3]! > 200 && (exactHex
+          ? pixels[i] === 0 && pixels[i + 1] === 166 && pixels[i + 2] === 81
+          : pixels[i + 1]! > pixels[i]! * 1.05 && pixels[i + 1]! > pixels[i + 2]! * 1.1)) count += 1;
       }
       return count;
-    });
+    }, colorMode === "HEX");
     await expect(figure.locator("canvas").first()).toBeVisible();
     await expect.poll(greenPixels).toBeGreaterThan(500);
     await page.reload();
     await expect.poll(greenPixels).toBeGreaterThan(500);
-    await page.screenshot({ path: test.info().outputPath(`native-green-${width}.png`) });
+    await page.screenshot({ path: test.info().outputPath(`native-${colorMode}-${width}.png`) });
   });
 }

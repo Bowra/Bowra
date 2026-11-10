@@ -281,6 +281,7 @@ def test_serialize_hands_the_model_the_allowlist_number() -> None:
         tool_name="add_chart",
         result={"section_id": "sec_0dddee9305ef", "kind": "bar"},
         error=None,
+        material_refs=None,
     )
     blob = _serialize(inv, ref_allowlist=al)
     n = al.add("chart", "sec_0dddee9305ef")  # Idempotent: retrieve the previously issued number.
@@ -291,7 +292,7 @@ def test_serialize_hands_the_model_the_allowlist_number() -> None:
 def test_serialize_without_allowlist_keeps_the_real_id() -> None:
     from bowhead_core.subagent import _serialize
 
-    inv = SimpleNamespace(tool_name="add_chart", result={"section_id": "sec_x", "kind": "bar"}, error=None)
+    inv = SimpleNamespace(tool_name="add_chart", result={"section_id": "sec_x", "kind": "bar"}, error=None, material_refs=None)
     assert "[figure:sec_x]" in _serialize(inv)
 
 

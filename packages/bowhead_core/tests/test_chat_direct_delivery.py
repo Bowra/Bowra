@@ -413,7 +413,8 @@ def _ctx_for_loop() -> ToolExecutionContext:
 
 
 @pytest.fixture()
-def _lead_profile() -> Any:
+def _lead_profile(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     prev = PROFILES.get("lead")
     PROFILES["lead"] = SubagentProfile(
         name="lead",
@@ -472,9 +473,10 @@ async def test_loop_without_sentinel_runs_the_extra_round(_lead_profile: Any) ->
     router, calls = _counting_router(
         LLMResponse(content="", tool_calls=[ToolCall(id="c1", name="subagent_spawn", arguments={"profile": "compute", "task": "查"})]),
         LLMResponse(content="Lead 复述：" + SHORT_ANSWER, tool_calls=[]),
+        LLMResponse(content="Lead 复述：" + SHORT_ANSWER, tool_calls=[]),
     )
     result = await _run_lead_with_spawn_result({"ok": True, "final_answer": SHORT_ANSWER}, router)
-    assert calls[0] == 2
+    assert calls[0] == 3
     assert result.chat_direct_delivered is False
     assert result.final_answer.startswith("Lead 复述")
 
@@ -519,13 +521,14 @@ async def test_two_spawns_in_one_batch_must_not_short_circuit(_lead_profile: Any
             ],
         ),
         LLMResponse(content="Lead 整合两个 peer 的结论", tool_calls=[]),
+        LLMResponse(content="Lead 整合两个 peer 的结论", tool_calls=[]),
     )
     # Both spawns return sentinels (worst case: accepting the first would swallow the other).
     result = await _run_lead_with_spawn_result(
         {"ok": True, "final_answer": SHORT_ANSWER, "_chat_direct_delivery": {"text": SHORT_ANSWER}},
         router,
     )
-    assert calls[0] == 2, "多 peer 轮必须让 Lead 跑收尾轮做整合，不得短路"
+    assert calls[0] == 3, "Multiple peers require Lead integration and delivery review."
     assert result.chat_direct_delivered is False
     assert result.final_answer == "Lead 整合两个 peer 的结论"
 
@@ -661,6 +664,7 @@ async def test_lead_own_kb_result_blocks_direct_delivery(_lead_profile: Any, mon
             ],
         ),
         LLMResponse(content="Lead 整合：东湖街；星舰 Pro 6499 元起", tool_calls=[]),
+        LLMResponse(content="Lead 整合：东湖街；星舰 Pro 6499 元起", tool_calls=[]),
     )
     result = await _run_lead_with_results(
         {
@@ -674,7 +678,7 @@ async def test_lead_own_kb_result_blocks_direct_delivery(_lead_profile: Any, mon
         },
         router,
     )
-    assert len(seen) == 2, "Lead 自己有 kb_search 结果时不得直达"
+    assert len(seen) == 3, "Lead knowledge results require integration and delivery review."
     assert result.chat_direct_delivered is False
     assert result.final_answer.startswith("Lead 整合")
     spawn_msgs = [m.content for m in seen[1].messages if getattr(m, "role", None) == "tool" and getattr(m, "name", None) == "subagent_spawn"]
@@ -727,7 +731,8 @@ async def test_direct_delivery_keeps_only_current_native_review_witness(_lead_pr
         assert result.completion == "complete"
         assert delivery_summary_input(result) == {"_delivery_completion": "reviewed_complete"}
     elif origin == "json_copy":
-        assert delivery_summary_input(result) == {}
+        assert result.completion == "partial"
+        assert delivery_summary_input(result) == {"_delivery_completion": "partial"}
     else:
         assert result.completion == "partial"
         assert delivery_summary_input(result) == {"_delivery_completion": "partial"}

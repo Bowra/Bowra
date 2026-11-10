@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * canvas-update-turn batch B1-6 — the extra `canvas.opened{revised:true}` emitted at revision-turn completion only updates the title.
  *

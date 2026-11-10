@@ -9,8 +9,9 @@ edit to its covered prefix.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
+from bowhead_router.reasoning import message_record
 from bowhead_router.token_estimator import estimate_tokens
 from bowhead_router.types import Message
 
@@ -98,7 +99,7 @@ def eligible_context_range(messages: list[Message], *, current_request: int, can
     if current_request > 1 or (current_request == 1 and messages[0].name != "context_summary"):
 
         def size(region: list[Message]) -> int:
-            return estimate_tokens(json.dumps([asdict(message) for message in region], ensure_ascii=False, separators=(",", ":")))
+            return estimate_tokens(json.dumps([message_record(message) for message in region], ensure_ascii=False, separators=(",", ":")))
 
         if end <= start or size(messages[:current_request]) >= size(messages[start:end]):
             return 0, current_request

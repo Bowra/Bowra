@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { buildChartJSConfig } from "./build-config";
 import { chartThemeBaseForMode } from "../chart-theme";

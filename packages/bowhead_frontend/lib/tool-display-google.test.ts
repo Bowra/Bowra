@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { GOOGLE_DELIVERY_TOOL_REFS, builtinTools } from "./tool-display";

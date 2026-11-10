@@ -1,6 +1,25 @@
 "use client";
 
-import { apiJson } from "./api-client";
+import { apiJson, readApiError } from "./api-client";
+
+import { fetchWithRefresh } from "./auth-api";
+
+export interface BowraCallbackResult {
+  state: string;
+  code?: string;
+  error?: string;
+}
+
+export async function completeBowraConnection(result: BowraCallbackResult): Promise<Record<string, string>> {
+  // Refresh expired access cookies without forwarding the callback through login.
+  const response = await fetchWithRefresh("/api/v1/admin/llm-config/bowra/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(result),
+  });
+  if (!response.ok) throw await readApiError(response);
+  return response.json();
+}
 
 export interface BowraImport {
   base_url: string;

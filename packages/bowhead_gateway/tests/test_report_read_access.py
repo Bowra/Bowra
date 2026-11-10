@@ -621,6 +621,7 @@ async def test_report_source_uses_bound_team_not_home_team(report_case, monkeypa
 
 async def test_actor_bound_chart_projection_survives_http_credentials_but_rechecks_scope(report_case):
     ctx, _, canvas, request = report_case
+    from bowhead_core.chart.authoring_tools import ChartProjectionUnavailable
     from bowhead_gateway.chart_authoring_projection import project_chart_for_authoring
     from fastapi import HTTPException
 
@@ -662,13 +663,17 @@ async def test_actor_bound_chart_projection_survives_http_credentials_but_rechec
     projected = await access.project_chart(chart)
     assert projected["spec"]["rows"] == [{"label": "A", "value": 25}]
     request.app.state.artifact_store.available = False
-    assert await access.project_chart(chart) is None
+    with pytest.raises(ChartProjectionUnavailable) as denied_source:
+        await access.project_chart(chart)
+    assert denied_source.value.reason == "source_access_denied"
     request.app.state.artifact_store.available = True
     async with open_shared_ctx(ctx.session_store.db_path) as db:
         await db.execute("UPDATE workspace_members SET status='inactive' WHERE workspace_id=? AND user_id=?", (ctx.workspace_id, ctx.user_id))
         await db.commit()
-    with pytest.raises(ValueError, match="reference_scope_unavailable"):
+    with pytest.raises(ChartProjectionUnavailable) as revoked:
         await access.project_chart(chart)
+    assert revoked.value.reason == "scope_unavailable"
+    assert isinstance(revoked.value.__cause__, ValueError) and "reference_scope_unavailable" in str(revoked.value.__cause__)
 
 
 async def test_chart_palette_reuses_effective_style_and_offers_a_named_green(report_case, monkeypatch):

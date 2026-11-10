@@ -1,9 +1,6 @@
 "use client";
 
-import { ShopifyContentConfirmations } from "@/components/chat/shopify-content-confirmations";
-import { EmailSendConfirmations } from "@/components/chat/email-send-confirmations";
-import { PersonalMcpConfirmations } from "@/components/chat/personal-mcp-confirmations";
-import { TeamToolConfirmations } from "@/components/chat/team-tool-confirmations";
+import { ToolConfirmationSurfaces } from "@/components/chat/tool-confirmation/ToolConfirmationSurfaces";
 
 import { usePathname } from "next/navigation";
 
@@ -45,10 +42,7 @@ export function AuthenticatedAppRoot({
             pathname={pathname}
           >
             {children}
-            <PersonalMcpConfirmations />
-            <EmailSendConfirmations />
-            <ShopifyContentConfirmations />
-            <TeamToolConfirmations />
+            <ToolConfirmationSurfaces />
           </AuthenticatedAppChrome>
         </AuthenticatedAppBoundary>
       </AuthSessionProvider>

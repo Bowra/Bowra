@@ -37,3 +37,26 @@ Pour importer des outils que vous n’aviez pas sélectionnés lors de l’ajout
 La liste affiche tous les outils de la dernière liste enregistrée ; les outils importés sont cochés. Cochez ceux que les Agents doivent utiliser, puis sélectionnez **Enregistrer**. Gardez au moins un outil sélectionné ; pour n’en utiliser aucun, désactivez plutôt la source.
 
 Si vous décochez des outils actuellement importés, Bowra affiche d’abord l’impact : les outils qui seront supprimés de la sélection ainsi que les Agents, tâches en cours et tâches planifiées qui utilisent cette source. Aucune modification n’est appliquée avant que vous sélectionniez **Confirmer et enregistrer** ; **Retour** ramène à la liste. Après l’enregistrement, les Agents ne peuvent plus appeler ces outils et les tâches planifiées concernées sont mises en pause jusqu’à une nouvelle confirmation de leurs dépendances.
+
+## Confirmer chaque appel pouvant modifier des données
+
+Lorsque votre déploiement active la confirmation des appels, Bowra demande au membre qui a lancé une tâche de confirmer avant d’appeler un outil MCP susceptible de modifier des données. La fenêtre affiche la source d’outils, l’outil, sa description, si l’outil écrit des données, en supprime ou n’a pas de catégorie connue, et tous les arguments qui seront envoyés :
+
+- **Autoriser cet appel** exécute cet appel une fois avec les arguments affichés.
+- **Toujours autoriser dans cette conversation** autorise aussi les appels suivants au même outil dans la conversation actuelle. L’autorisation prend fin avec la conversation ou lorsque la définition de l’outil change.
+- **Refuser et passer** n’exécute pas l’appel.
+- Sans décision dans les trois minutes, l’appel est ignoré.
+
+Si votre déploiement active la confirmation dans la conversation, la demande apparaît sous l’étape en attente au lieu d’une fenêtre, puis reste affichée sous forme d’une ligne indiquant votre décision. Si vous êtes sur une autre page, un avis mène à la conversation et le titre de l’onglet indique le nombre d’actions en attente.
+
+Les outils que le service indique comme en lecture seule s’exécutent sans demande. Un outil indiqué à la fois comme en lecture seule et comme supprimant des données est traité comme non indiqué. Les outils indiqués comme écrivant ou supprimant des données peuvent alors être sélectionnés pour les Agents et sont confirmés à chaque appel. Les outils sans indication ne peuvent être sélectionnés pour les Agents qu’après la confirmation de leur catégorie par un propriétaire ou un administrateur ; lorsque l’assistant les utilise, chaque appel est confirmé. Chaque appel utilise le compte avec lequel la source a été connectée et agit donc avec ce compte pour tous les membres. Les tâches planifiées n’ont personne pour confirmer : leurs appels à ces outils sont ignorés.
+
+### Confirmer la catégorie d’un outil
+
+Les propriétaires et administrateurs peuvent indiquer ce que fait chaque outil d’une source MCP lorsque le service l’indique mal ou pas du tout :
+
+1. Choisissez **Confirmer les catégories d’outils** dans les actions de la source (menu **⋯** à droite de la carte).
+2. Pour chaque outil, choisissez **Lecture seule**, **Écrit des données** ou **Supprime des données**. Les catégories inférieures à l’indication du service ne sont pas proposées.
+3. Sélectionnez **Enregistrer**. La modification s’applique à partir de la tâche suivante.
+
+Un outil confirmé en lecture seule s’exécute sans demande, et un outil sans indication dont la catégorie est confirmée peut être sélectionné pour les Agents. Si le service modifie ensuite la définition d’un outil, sa confirmation ne s’applique plus et la liste demande de la confirmer à nouveau. Ne confirmez **Lecture seule** que pour les outils qui ne peuvent pas modifier de données.

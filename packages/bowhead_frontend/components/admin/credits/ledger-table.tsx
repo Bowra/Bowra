@@ -11,12 +11,13 @@
  */
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { ListRow, ListRows, useListRowsLayout } from "@/components/ui/list-rows";
 import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { fetchUserLedger, type LedgerEntry } from "@/lib/admin-credits-api";
 import { adminCreditsErrorKey } from "@/lib/admin-credits-error";
+import { formatDateTime } from "@/lib/locale";
 import { CharIcon } from "@/components/char-icon";
 
 interface Props {
@@ -190,10 +191,11 @@ function LedgerDelta({ delta }: { delta: number }) {
  * quota delta at row end (same as the rightmost table column).
  */
 function LedgerListRow({ entry }: { entry: LedgerEntry }) {
+  const locale = useLocale();
   return (
     <ListRow
       title={<LedgerType type={entry.type} />}
-      subtitle={<span className="ui-tabular">{formatDate(entry.created_at)}</span>}
+      subtitle={<span className="ui-tabular">{formatDate(entry.created_at, locale)}</span>}
       meta={[
         entry.workspace_id ? entry.workspace_id.slice(0, 8) : "—",
         entry.turn_id_short ?? "—",
@@ -210,11 +212,12 @@ function LedgerListRow({ entry }: { entry: LedgerEntry }) {
 }
 
 function LedgerRow({ entry }: { entry: LedgerEntry }) {
+  const locale = useLocale();
   return (
     <tr className="legacy-credits-ledger-row">
       <td className="legacy-credits-ledger-td">
-        <span className="legacy-credits-ledger-meta">
-          {formatDate(entry.created_at)}
+        <span className="legacy-credits-ledger-meta legacy-credits-ledger-time">
+          {formatDate(entry.created_at, locale)}
         </span>
       </td>
       <td className="legacy-credits-ledger-td">
@@ -257,13 +260,8 @@ function typeTone(type: string): string {
   }
 }
 
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return `${d.toISOString().slice(0, 16).replace("T", " ")}`;
-  } catch {
-    return iso;
-  }
+function formatDate(iso: string, locale: string): string {
+  return formatDateTime(iso, locale, { dateStyle: "medium" }) || iso;
 }
 
 function shorten(n: number): string {

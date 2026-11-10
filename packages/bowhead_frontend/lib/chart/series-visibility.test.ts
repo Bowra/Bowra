@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Series visibility consolidation — criteria + application to Chart.js configuration.
  *

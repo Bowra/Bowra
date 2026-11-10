@@ -407,10 +407,10 @@ async def test_scheduled_job_attributes_artifacts_to_the_job_owner(tmp_path, mon
     await _run_captured(runtime, captured.request, owner.id)
 
 
-async def test_feishu_attributes_artifacts_to_the_bound_bowhead_user(tmp_path, monkeypatch, faked_clients) -> None:
+async def test_feishu_attributes_artifacts_to_the_bound_bowhead_user(tmp_path, monkeypatch, faked_clients, initialize_migrated_core_database) -> None:
     from test_feishu_adapter import _answer_cards, _build_bridge_fixture, _message_event, _wait_for, _wait_for_dispatch_settlement_and_close
 
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"}))
     assert result["status"] == "started"
     await _wait_for(lambda: len(_answer_cards(fixture.fake_client)) == 1)

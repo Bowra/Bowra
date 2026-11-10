@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 
+from bowhead_router.reasoning import message_record
 from bowhead_router.token_estimator import estimate_tokens
 from bowhead_router.types import LLMRequest, LLMResponse, Message
 
@@ -56,7 +57,9 @@ class CompactionSpan:
 
 
 def message_digest(messages: list[Message]) -> str:
-    encoded = json.dumps([asdict(message) for message in messages], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    encoded = json.dumps(
+        [message_record(message) for message in messages], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
@@ -104,7 +107,7 @@ def select_compaction_span(messages: list[Message], *, start: int, protected_fro
     retained = 0
     while tail_start > start and retained < keep_recent_tokens:
         tail_start -= 1
-        retained += estimate_tokens(json.dumps(asdict(messages[tail_start]), ensure_ascii=False, separators=(",", ":")))
+        retained += estimate_tokens(json.dumps(message_record(messages[tail_start]), ensure_ascii=False, separators=(",", ":")))
     possible = [boundary for boundary in boundaries if start < boundary <= min(protected_from, tail_start)]
     if not possible:
         return None

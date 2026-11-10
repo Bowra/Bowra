@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * P3.1.6 — Round-trip unit tests.
  *

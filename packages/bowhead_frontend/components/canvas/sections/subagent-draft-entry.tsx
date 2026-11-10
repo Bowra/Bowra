@@ -9,6 +9,7 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { CanvasSection, FieldRow, SectionHeading } from "@/components/ui/section-heading";
 import { CanvasObjectFooter, CanvasObjectHeader, CanvasObjectSurface, StateBlock } from "@/components/canvas/object";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
+import { formatDateTime } from "@/lib/locale";
 import { TEAM_SETTINGS_ROLES, type SettingsTeamRole } from "@/lib/settings-navigation";
 import { listManualSubagentDrafts, type SubagentDraftListItem, type SubagentDraftRequestContext } from "@/lib/subagent-drafts-api";
 import { useAppRouter } from "@/lib/use-app-router";
@@ -37,7 +38,7 @@ export function SubagentDraftEntry({
   const { teamId, workspaceId } = requestContext;
   const noSpace = !workspaceId && !spaceLoading;
   const locale = useLocale();
-  const formatDate = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  const formatDate = (value: string) => formatDateTime(value, locale, { dateStyle: "medium" });
   const [drafts, setDrafts] = useState<SubagentDraftListItem[] | null>(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);

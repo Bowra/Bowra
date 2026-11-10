@@ -607,7 +607,7 @@ describe("MemorySettingsContent", () => {
     expect(await screen.findByRole("alertdialog")).toBeTruthy();
     expect(
       screen.getByText(
-        "原始对话、报告和空间术语有独立的数据生命周期，不会由此删除；自动学习会暂停。",
+        "原始对话和画布有独立的保留周期，不会被删除。自动学习将暂停。",
       ),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));

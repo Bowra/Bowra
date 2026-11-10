@@ -104,7 +104,7 @@ def test_previous_routine_delivery_strings_render_unchanged_in_zh_cn() -> None:
 @pytest.mark.parametrize("locale", ["de-DE", "fr-FR"])
 def test_new_channel_keys_are_translated(locale: str) -> None:
     new_keys = [key for key in IM_INTERFACE_MESSAGES["en-US"] if key.startswith(("channel_", "slack_", "teams_", "scheduled_"))]
-    assert len(new_keys) == 42
+    assert len(new_keys) == 45
     for key in new_keys:
         if key in {"scheduled_email_subject", "scheduled_email_job"}:
             if key == "scheduled_email_subject":

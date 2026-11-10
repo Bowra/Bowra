@@ -274,6 +274,23 @@ async def test_ordinary_lead_engages_only_for_a_current_member(ctx, monkeypatch,
     assert (getattr(lead, "ordinary_lead_state", None) is not None) is member
 
 
+async def test_ordinary_lead_does_not_engage_for_a_turn_without_a_chat_source(ctx):
+    # Scheduled runs and IM Turns do not come through /chat/send, so they have no chat source to retain.
+    # Engaging anyway made a question after a helper fail the whole Turn at capture (116 dogfood N1).
+    assert await ctx.sessions.claim_chat_spawn_dispatch_for_worker(turn_id="t_doc", owner_id="ordinary-producer", lease_seconds=600) == "claimed"
+    await _sql(ctx, "DELETE FROM chat_turn_user_sources WHERE turn_id=?", ("t_doc",))
+    lead = SimpleNamespace(
+        **SCOPE.model_dump(),
+        session_id="s_doc",
+        turn_id="t_doc",
+        execution_generation=1,
+        execution_owner_id="ordinary-producer",
+        session_store=ctx.sessions,
+    )
+    await initialize_ordinary_lead(lead, request_context={})
+    assert getattr(lead, "ordinary_lead_state", None) is None
+
+
 async def resume(ctx, card, worker):
     generation = await ctx.sessions.advance_turn_execution_generation(turn_id=worker.turn_id, clarification_id=card.request_id)
     assert generation is not None
@@ -519,3 +536,23 @@ async def test_root_report_read_checkpoint_requires_the_original_bound_observati
         retained.model_copy(update={"report_reads": None}).encode()
     with pytest.raises(OrdinaryContinuationUnavailable):
         retained.model_copy(update={"report_reads": [{**record, "result_hash": "0" * 64}]}).encode()
+
+
+async def test_paused_lead_keeps_assistant_reasoning_for_thinking_continuation(ctx, monkeypatch):
+    _, _, _, original = await prepare(ctx, monkeypatch)
+    envelope = {
+        "version": 1,
+        "protocol": "anthropic_messages",
+        "provider": "deepseek_anthropic",
+        "model": "deepseek-flash",
+        "blocks": [{"type": "thinking", "thinking": "Ask which metric.", "signature": "sig"}],
+    }
+    stored = json.loads(original.messages_json)
+    stored[1]["provider_reasoning"] = envelope
+    restored = OrdinaryLeadCheckpoint.decode(original.model_copy(update={"messages_json": canonical_json(stored)}).encode())
+    assert restored.messages()[1].provider_reasoning == envelope
+    # The original record without reasoning still decodes unchanged.
+    assert all(message.provider_reasoning is None for message in original.messages())
+    stored[0]["provider_reasoning"] = envelope
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        original.model_copy(update={"messages_json": canonical_json(stored)}).messages()

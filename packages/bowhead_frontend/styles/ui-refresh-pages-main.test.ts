@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Page acceptance B style-source contracts for main functional pages: Reports, Library/Capability Center entry,
  * Knowledge Base, personal Capability Center,

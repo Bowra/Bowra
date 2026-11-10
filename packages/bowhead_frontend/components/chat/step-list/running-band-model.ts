@@ -155,8 +155,14 @@ export function humanLabel(s: StepView, active: boolean): string {
  * branches both write `ns.running = false` in the same reducer update setting `errorReason`).
  * These conditions are mutually exclusive, making that state unreachable dead code in production; design §2-E is thus omitted.
  * Already-LIVE failure coloring + `FinalFailBanner` handle terminal failures. See inventory §2.1's correction.
+ *
+ * - `preparing`: the opening, before this Turn's first step. Only this phase reads "正在准备" (design §2-A).
+ * - `gap`: steps exist but none is active: the previous step finished and the next has not started, or Lead
+ *   waits on a helper. ★ 2026-11-08 dogfood F9: gaps used to share `preparing`, so the bar read "正在准备"
+ *   for a whole run ("Getting ready · Step 21 · 1m 43s"). Like `preparing`, it never names finished work (③).
+ * - `running`: an active step is the current row.
  */
-export type BandPhase = "preparing" | "running";
+export type BandPhase = "preparing" | "gap" | "running";
 
 /**
  * `rows` = persistent three rows (default); `single` = one row.
@@ -792,7 +798,7 @@ function peerTerminalRows(
  *   ① `history.length` always equals `HISTORY_ROWS` (density `rows`); pad with skeletons
  *      to maintain constant height;
  *   ② Empty steps mean phase = preparing, not no band; occupy space even during the opening three seconds;
- *   ③ No active step means preparing copy, **never** reporting completed work as `正在…`;
+ *   ③ No active step means preparing (opening) or gap copy, **never** reporting completed work as `正在…`;
  *   ④ Current step is the **last** active one (newest rather than oldest under concurrency);
  *   ⑤ **Concurrency never loses a step**: history contains the last two non-current steps in occurrence order.
  */
@@ -907,7 +913,7 @@ export function buildBandModel({
   }
   // ⚠ No active step = **gap** (previous step finished, next not started; PRD identifies this as the longest
   //    interval in long turns). **Do not** use the last step as current: that puts completed work
-  //    beside `正在…` + spinner + running seconds, misreporting for the entire gap. Use preparing copy.
+  //    beside `正在…` + spinner + running seconds, misreporting for the entire gap. Use gap copy.
   const cur = activeIdx >= 0 ? visibleSteps[activeIdx] : null;
 
   // History = last HISTORY_ROWS steps **excluding current**, in occurrence order.
@@ -947,8 +953,9 @@ export function buildBandModel({
   }
 
   if (!cur) {
-    // Both cases enter here: ① no steps yet (opening); ② previous finished, next not started (gap).
-    // Both mean thinking about the next step to users, so share preparing copy.
+    // Both cases enter here: ① no steps yet (opening → `preparing`); ② previous finished, next not started,
+    // or waiting on a helper (`gap`). Both name no finished work (③), but only the opening is "getting ready":
+    // after 21 steps, "正在准备" reads as if the run had not started (2026-11-08 dogfood F9).
     // ⚠ `agentName` must exist; omitting a footnote row makes this state shorter, whereas constant height
     //    applies from the first frame. This row implements it, rather than decorating.
     // ⚠ Ownership comes from the last **visible** step, but genuine opening must use **original** `steps`:
@@ -972,7 +979,7 @@ export function buildBandModel({
         && peerTerminalById[st.peerProseKey ?? ""] === undefined,
     ) ?? null;
     return {
-      phase: "preparing",
+      phase: trulyOpening ? "preparing" : "gap",
       density,
       stepOrdinal: steps.length,
       peerFailCount,

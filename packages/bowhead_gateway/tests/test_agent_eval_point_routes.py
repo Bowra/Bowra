@@ -12,17 +12,16 @@ from bowhead_gateway.agent_eval_runtime import AgentEvalRuntime
 from bowhead_gateway.routes import agents
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI
-from gateway_legacy_database import upgrade
 from test_agent_eval_run_insights_routes import _USERS, _seed
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-point-routes-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     _seed(db_path)
     scheduled: list[tuple[str, str]] = []
 

@@ -55,7 +55,11 @@ for (const [count, width] of [[1, 1440], [2, 768], [2, 390]]) {
       startHeader = route.request().headers()["x-bowhead-public-base"] || "";
       await route.fulfill({ json: { authorize_url: "https://auth.bowra.test/connect/authorize" } });
     });
-    const returnUrl = new URL("/team/settings/models/?bowra_import=opaque-import", page.url()).href;
+    await page.context().route("**/api/v1/admin/llm-config/bowra/complete", async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ state: "one-use", code: "temporary-code" });
+      await route.fulfill({ json: { bowra_import: "opaque-import" } });
+    });
+    const returnUrl = new URL("/connect/bowra/callback/?state=one-use&code=temporary-code", page.url()).href;
     await page.context().route("https://auth.bowra.test/connect/authorize", (route) => route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(returnUrl)})</script>` }));
     await page.getByRole("button", { name: "Use Bowra service" }).click();
     await expect(page.getByRole("heading", { name: "Confirm verification plan" })).toBeVisible();
@@ -83,9 +87,36 @@ for (const [count, width] of [[1, 1440], [2, 768], [2, 390]]) {
     });
     await expect(page.getByRole("button", { name: "Edit connection Bowra" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Verify", exact: true })).toBeVisible();
-    await expect(page.getByText("Chat · Verified", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Chat · Passed", { exact: true }).first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => Object.values(localStorage).join("") + Object.values(sessionStorage).join(""))).not.toContain(imported.api_key);
     await page.screenshot({ path: testInfo.outputPath(`connections-${width}.png`), fullPage: true });
+  });
+}
+
+for (const scenario of ["invalid", "expired-session"] as const) {
+  test(`Bowra public callback handles ${scenario} without authenticated shell requests`, async ({ page }) => {
+    let completions = 0;
+    const unexpected: string[] = [];
+    await page.context().addCookies([{ name: "NEXT_LOCALE", value: "en-US", domain: "localhost", path: "/" }]);
+    await page.route("**/api/v1/**", async (route) => {
+      if (new URL(route.request().url()).pathname.endsWith("/bowra/complete")) {
+        completions++;
+        expect(route.request().postDataJSON()).toEqual({ state: "one-use", code: "temporary-code" });
+        await route.fulfill({ status: 401, json: { detail: "unauthorized" } });
+      } else if (new URL(route.request().url()).pathname.endsWith("/auth/refresh")) {
+        await route.fulfill({ status: 401, json: { detail: "unauthorized" } });
+      } else {
+        unexpected.push(route.request().url());
+        await route.fulfill({ status: 401, json: { detail: "unexpected" } });
+      }
+    });
+    const query = scenario === "invalid" ? "state=one&code=a&code=b" : "state=one-use&code=temporary-code";
+    await page.goto(`/connect/bowra/callback/?${query}`);
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(scenario === "invalid" ? "invalid, expired or already processed" : "permissions changed");
+    await expect(page).toHaveURL(/\/connect\/bowra\/callback\/$/);
+    expect(completions).toBe(scenario === "invalid" ? 0 : 1);
+    expect(unexpected).toEqual([]);
+    await expect(page.getByRole("link", { name: "Return to Models" })).toHaveAttribute("href", "/team/settings/models/");
   });
 }

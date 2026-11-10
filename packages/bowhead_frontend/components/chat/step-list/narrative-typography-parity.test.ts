@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * chat-ux-2026-08 batch E — lock chat body font size.
  *

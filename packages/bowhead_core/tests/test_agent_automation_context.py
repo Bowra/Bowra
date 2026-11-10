@@ -321,7 +321,7 @@ async def test_inflight_monitor_cancels_subject_when_grant_is_revoked(tmp_path, 
     import time
 
     from bowhead_core.agent_eval_job_store import AgentEvalJobStore
-    from bowhead_core.agent_eval_service import AgentEvalService, _EvalCancellationRequested
+    from bowhead_core.agent_eval_service import AgentEvalService, _AttemptDeadline, _EvalCancellationRequested
     from bowhead_core.agent_eval_store import AgentEvalStore
 
     path, authority, store, _args, execution = await comparison_fixture(tmp_path, monkeypatch)
@@ -341,9 +341,14 @@ async def test_inflight_monitor_cancels_subject_when_grant_is_revoked(tmp_path, 
         finally:
             cancelled.set()
 
+    started = time.perf_counter()
     operation = asyncio.create_task(
         service._run_with_claim_controls(
-            operation=subject(), claim=claim, run_id=run_id, lease_seconds=120, started=time.perf_counter(), max_duration_ms=10000
+            operation=subject(),
+            claim=claim,
+            run_id=run_id,
+            lease_seconds=120,
+            deadline=_AttemptDeadline(run_started=started, run_limit_ms=10000, attempt_started=started, attempt_limit_ms=10000),
         )
     )
     await asyncio.wait_for(entered.wait(), timeout=2)

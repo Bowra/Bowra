@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sprint µ — fail-safe stripInlineNumMarkers tests.
  *

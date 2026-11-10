@@ -863,3 +863,29 @@ def test_public_document_title_follows_injected_brand(public_brand, expected) ->
     )
     encoded = json.dumps(expected, ensure_ascii=True)
     assert f'applyMetadata({encoded},href,"public-bootstrap",meta)' in html
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slash", ["", "/"])
+async def test_bowra_frontend_callback_does_not_cache_or_log_authorization(tmp_path: Path, slash: str) -> None:
+    callback = tmp_path / "connect/bowra/callback"
+    callback.mkdir(parents=True)
+    (callback / "index.html").write_text("<html><head></head><body>callback</body></html>")
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/connect/bowra/callback" + slash,
+        "root_path": "",
+        "scheme": "http",
+        "server": ("internal", 8000),
+        "headers": [],
+        "query_string": b"code=private-code&state=one-use",
+    }
+    response = await RuntimeBasePathStaticFiles(directory=tmp_path, html=True).get_response("connect/bowra/callback" + slash, scope)
+    assert response.status_code == (200 if slash else 307)
+    if not slash:
+        assert response.headers["location"] == "callback/?code=private-code&state=one-use"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert scope["query_string"] == b""
+    assert "private-code" not in response.body.decode()

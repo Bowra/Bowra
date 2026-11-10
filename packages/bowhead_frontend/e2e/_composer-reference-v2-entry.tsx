@@ -16,7 +16,7 @@ import zh from "../messages/zh-CN.json";
 import en from "../messages/en-US.json";
 
 const scope: ComposerPersistenceScope = { userId: "u_v2_reference", teamId: "team_ref", workspaceId: "ws_ref", requestedSessionId: null, authSessionGeneration: "auth_v2" };
-type Settings = { enabled: boolean; protocol: ComposerDraftWriteProtocol; otherScope: boolean; steer: boolean; prefill: string | null; sessionTexts: string[]; cleanupFailure: boolean };
+type Settings = { enabled: boolean; protocol: ComposerDraftWriteProtocol; otherScope: boolean; steer: boolean; readOnly: boolean; prefill: string | null; sessionTexts: string[]; cleanupFailure: boolean };
 const controller = {
   calls: [] as { message: string; context: ComposerDraftSubmissionContext | null }[],
   pending: [] as RecoveredSubmission[], settled: [] as boolean[],
@@ -31,7 +31,7 @@ const controller = {
 declare global { interface Window { referenceV2: typeof controller } }
 window.referenceV2 = controller;
 function Harness() {
-  const [settings, setSettings] = useState<Settings>({ enabled: true, protocol: "legacy_v0", otherScope: false, steer: false, prefill: null, sessionTexts: [], cleanupFailure: false });
+  const [settings, setSettings] = useState<Settings>({ enabled: true, protocol: "legacy_v0", otherScope: false, steer: false, readOnly: false, prefill: null, sessionTexts: [], cleanupFailure: false });
   const [intent, setIntent] = useState<Partial<UseTurnRunnerArgs>>({});
   const [recoveryLocked, setRecoveryLocked] = useState(false);
   const resolvers = useRef(new Map<string, (accepted: boolean) => void>());
@@ -72,7 +72,7 @@ function Harness() {
     <main><div className="test-composer">
       <V2Composer referenceInputEnabled={new URLSearchParams(location.search).has("auth") ? undefined : settings.enabled} draftPersistenceScope={activeScope} onSend={send}
         onResolveDraftSubmissionProtocol={async () => settings.protocol} running={settings.steer}
-        onSteer={send} recoveryLocked={recoveryLocked} sessionTexts={settings.sessionTexts} prefillText={settings.prefill} />
+        onSteer={send} readOnly={settings.readOnly} recoveryLocked={recoveryLocked} sessionTexts={settings.sessionTexts} prefillText={settings.prefill} />
     </div><button id="recover" onClick={() => void recover()}>Recover saved submission</button>
     <output id="turn">{runner.turnId ?? ""}</output><output id="error">{runner.sendErrorReason ?? ""}</output></main>
   </NextIntlClientProvider>;

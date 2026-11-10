@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   ArrowLeft,
@@ -46,6 +46,7 @@ import {
   feishuRuntimeState,
   type FeishuRuntimeProblemKey,
 } from "@/lib/feishu-integration-state";
+import { formatDateTime } from "@/lib/locale";
 import { useAppRouter } from "@/lib/use-app-router";
 
 import { withUiHooks } from "./ui-hook-classes";
@@ -1144,6 +1145,7 @@ function ConsoleStage({
   onNext: () => void;
 }) {
   const t = useTranslations("settings.integrations");
+  const locale = useLocale();
   return (
     <>
       <StageQuickExit stage="02" onExit={onExit} />
@@ -1241,7 +1243,7 @@ function ConsoleStage({
               <strong>{t("setup_link_ready")}</strong>
               <code data-copy-source="true">{setup.setup_url}</code>
               <p>
-                {t("setup_expires")}: {formatDateTime(setup.expires_at)}
+                {t("setup_expires")}: {formatSetupExpiry(setup.expires_at, locale)}
               </p>
               <div className={styles.actionButtons}>
                 <button
@@ -1819,9 +1821,8 @@ function errorText(_error: unknown, fallback: string): string {
   return fallback;
 }
 
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+function formatSetupExpiry(value: string, locale: string): string {
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 function allowNextUnload(ref: { current: boolean }): void {

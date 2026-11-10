@@ -22,6 +22,7 @@ import {
   upsertPyCell,
   getCanvasSnapshot,
 } from "./canvas-store";
+import { recordChatFigureRevision } from "./chat-figure-revisions";
 import { normalizeCanvasFailureReasonCode } from "./error-messages";
 import type { PyCellSpec } from "./types";
 
@@ -105,10 +106,15 @@ export function attachCanvasSSE(es: EventSource, gate?: CanvasSeqGate): () => vo
         });
         return;
       }
+      const patch = (p.patch as Record<string, unknown>) || {};
+      const rev = typeof p.rev === "number" ? p.rev : undefined;
+      // A chart edited in place also updates the chat answer that shows it.
+      if (patch.kind === "chart") recordChatFigureRevision(String(p.section_id), patch.spec, rev);
       onSectionPatched({
         section_id: String(p.section_id),
-        patch: (p.patch as Record<string, unknown>) || {},
-        rev: typeof p.rev === "number" ? p.rev : undefined,
+        patch,
+        rev,
+        hiddenForChatMode: p.hidden_for_chat_mode === true,
       });
     }],
     // chat-solidify 2026-07-03: remove canvas.section_removed handler — backend has 0 emit

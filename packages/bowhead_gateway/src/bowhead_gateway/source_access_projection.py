@@ -910,6 +910,68 @@ def _apply_v2_citation_row(
         )
 
 
+def _inline_chart_ids(payload: Mapping[str, Any]) -> set[str]:
+    artifacts = payload.get("inline_artifacts")
+    if not isinstance(artifacts, list):
+        return set()
+    return {
+        artifact["id"]
+        for artifact in artifacts
+        if isinstance(artifact, Mapping) and artifact.get("kind") == "chart" and isinstance(artifact.get("id"), str) and artifact["id"]
+    }
+
+
+async def _with_current_inline_charts(
+    request: Any,
+    turn_id: str,
+    events: list[tuple[str, Mapping[str, Any]]],
+) -> list[tuple[str, Mapping[str, Any]]]:
+    """Show each inline chat chart at its section's current revision.
+
+    A chart delivered in chat is edited in place, so the earlier answer must
+    show the saved revision rather than the spec frozen into its final
+    payload. This single rule serves live delivery, history reads and replay,
+    so the three always agree. Superseded, quarantined or missing sections
+    keep the delivered spec.
+    """
+    wanted = set().union(*(_inline_chart_ids(payload) for event_type, payload in events if event_type == "lead.final.payload"))
+    if not wanted:
+        return events
+    session_store = getattr(request.app.state, "session_store", None)
+    canvas_store = getattr(request.app.state, "canvas_store", None)
+    try:
+        turn = await session_store.get_turn(turn_id) if session_store is not None else None
+        canvas = await canvas_store.get_canvas_by_session(turn.session_id) if turn is not None and canvas_store is not None else None
+        sections = await canvas_store.list_sections(canvas.id, include_hidden=True) if canvas is not None else []
+    except Exception:
+        logger.warning("inline_chart_revision_lookup_failed turn=%s", turn_id, exc_info=True)
+        return events
+    current = {
+        section.id: section
+        for section in sections
+        if section.id in wanted
+        and getattr(section, "kind", None) == "chart"
+        and not getattr(section, "superseded", False)
+        and not getattr(section, "quarantined", False)
+        and isinstance((getattr(section, "payload", None) or {}).get("spec"), dict)
+    }
+    if not current:
+        return events
+    out: list[tuple[str, Mapping[str, Any]]] = []
+    for event_type, payload in events:
+        if event_type != "lead.final.payload" or not (_inline_chart_ids(payload) & set(current)):
+            out.append((event_type, payload))
+            continue
+        artifacts = []
+        for artifact in payload["inline_artifacts"]:
+            section = current.get(artifact.get("id")) if isinstance(artifact, Mapping) and artifact.get("kind") == "chart" else None
+            if section is not None:
+                artifact = {**artifact, "spec": copy.deepcopy(section.payload["spec"]), "rev": section.rev}
+            artifacts.append(artifact)
+        out.append((event_type, {**payload, "inline_artifacts": artifacts}))
+    return out
+
+
 async def project_event_payloads_for_viewer(
     request: Any,
     turn_id: str,
@@ -949,6 +1011,7 @@ async def project_event_payloads_for_viewer(
             (event_type, await project_document_draft_open(request, turn_id, payload) if event_type == "document.draft_open" else payload)
             for event_type, payload in events
         ]
+    events = await _with_current_inline_charts(request, turn_id, events)
     event_sections, descriptors = _event_sections(
         turn_id,
         events,

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** Batch 1-d WP-2: DTO ↔ ConnectDraft mapping (three type mismatches in tech-design-batch1d §7-2). */
 
 import { describe, expect, it } from "vitest";

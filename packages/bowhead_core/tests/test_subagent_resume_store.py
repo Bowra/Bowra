@@ -207,3 +207,23 @@ async def test_navigation_checkpoint_round_trips_in_its_own_version_without_chan
     checkpoint = await sr.claim(db_path, checkpoint_id=identity, user_id="u_1", session_id="s_1", turn_id="t_2")
     material = sr.open_material(checkpoint, db_path=db_path)
     assert material.knowledge_navigation == {"file-a": proof}
+
+
+@pytest.mark.parametrize("segmented", [False, True])
+def test_resumed_transcript_keeps_assistant_reasoning(segmented):
+    envelope = {
+        "version": 1,
+        "protocol": "anthropic_messages",
+        "provider": "deepseek_anthropic",
+        "model": "deepseek-flash",
+        "blocks": [{"type": "thinking", "thinking": "Query by province.", "signature": "sig"}],
+    }
+    messages = [
+        Message(role="user", content="task"),
+        Message(role="assistant", content="", tool_calls=[ToolCall(id="c1", name="bi_query", arguments={})], provider_reasoning=envelope),
+        Message(role="tool", content="rows", tool_call_id="c1"),
+    ]
+    packed, _ = sr.encode_material(messages, [], max_sealed=600_000, segmented=segmented)
+    restored = sr.decode_material(packed, segmented=segmented).messages
+    assert restored[1].provider_reasoning == envelope
+    assert restored[0].provider_reasoning is None and restored[2].provider_reasoning is None

@@ -231,6 +231,123 @@ def test_a_scheduled_result_becomes_recorded_emails_for_member_addresses_only(en
     assert [(r.user_id, r.channel, r.status) for r in rows] == [("u_owner", "email_delivery", "pending")]
 
 
+class _Jobs:
+    def __init__(self, job) -> None:
+        self.job = job
+
+    async def get(self, job_id):
+        return self.job if job_id == self.job.id else None
+
+
+def _routine(env, monkeypatch, emails: list[str]):
+    """A task emailing its results to ``emails``, and its run reference."""
+    from bowhead_core.types import ScheduledRunRef
+
+    async def members(team_id):
+        return {"owner@example.com": "u_owner", "admin@example.com": "u_admin"}
+
+    async def english(*args, **kwargs):
+        return "en-US"
+
+    monkeypatch.setattr("bowhead_gateway._scheduled_runner._delivery_locale", english)
+    env.users.team_member_ids_by_email = members
+    job = SimpleNamespace(
+        id="sj_1",
+        user_id="u_owner",
+        workspace_id="ws_b",
+        name="Daily",
+        public_entry_id=None,
+        query="",
+        notify_channels={"email": emails, "deliver_on_success": True},
+    )
+    env.app.state.notification_service = env.service
+    env.app.state.scheduled_store = _Jobs(job)
+    run = ScheduledRunRef(job_id="sj_1", run_id="t_1", owner_id="u_owner", workspace_id="ws_b", job_name="Daily", session_id="s_1")
+    return job, run
+
+
+def _urgent_alert(env, monkeypatch, run, probe=None):
+    """The run's Agent calls routine_notify at the urgent level."""
+    from bowhead_core.tool_registry import ToolRegistry
+    from bowhead_gateway._scheduled_runner import routine_result_email_reaches_owner
+
+    from bowhead_core import routine_notify_tool
+
+    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", "1")
+    routine_notify_tool.register_routine_notify_tool(
+        ToolRegistry(),
+        service_provider=lambda: env.service,
+        result_email_reaches_owner=probe or (lambda r: routine_result_email_reaches_owner(env.app, r)),
+    )
+    out = _run(routine_notify_tool._handler({"level": "urgent", "reason": "r"}, SimpleNamespace(scheduled_run=run)))
+    assert out["status"] == "queued"
+
+
+def _deliver(env, job, summary="Revenue down 30%"):
+    from bowhead_gateway._scheduled_runner import _deliver_run_result
+
+    _run(_deliver_run_result(env.app, job, summary=summary, session_id="s_1", run_id="t_1", team_id="team_b", locale="en-US"))
+
+
+def _alert_rows(env):
+    return [(r.status, r.outcome_code) for r in _run(env.store.deliveries_for_dedupe_keys(["routine.alert:sj_1:t_1"]))]
+
+
+def test_an_urgent_alert_rides_in_the_owners_result_email(env, monkeypatch):
+    job, run = _routine(env, monkeypatch, ["Owner@Example.com", "admin@example.com"])
+
+    _urgent_alert(env, monkeypatch, run)
+    _tick(env, now=datetime.now(UTC) + timedelta(minutes=1))
+    assert env.sent == [], "the alert email waits for the run's result email"
+
+    _deliver(env, job)
+    _tick(env)
+
+    by_address = {to: (subject, body) for to, subject, body in env.sent}
+    assert sorted(by_address) == ["admin@example.com", "owner@example.com"], "one email each, no separate alert email"
+    subject, body = by_address["owner@example.com"]
+    assert subject == f"[{product_name()} routine · urgent] Daily"
+    assert body.startswith("This run was flagged urgent.") and "Revenue down 30%" in body
+    assert by_address["admin@example.com"][0] == f"[{product_name()} routine] Daily", "only the owner's copy carries the alert"
+    assert "flagged urgent" not in by_address["admin@example.com"][1]
+    assert _alert_rows(env) == [("skipped", "merged_into_result")]
+
+
+@pytest.mark.parametrize("case", ["owner_not_a_recipient", "probe_failed"])
+def test_an_owner_without_a_result_email_gets_the_alert_email_at_once(env, monkeypatch, case):
+    emails = ["admin@example.com"] if case == "owner_not_a_recipient" else ["owner@example.com"]
+    job, run = _routine(env, monkeypatch, emails)
+
+    async def failing(r):
+        raise RuntimeError("scheduled store unavailable")
+
+    _urgent_alert(env, monkeypatch, run, probe=failing if case == "probe_failed" else None)
+    _tick(env, now=datetime.now(UTC) + timedelta(seconds=5))
+
+    assert [(to, subject) for to, subject, _ in env.sent] == [("owner@example.com", f"[{product_name()} routine alert] Daily")]
+    assert _alert_rows(env) == [("sent", None)]
+
+
+@pytest.mark.parametrize("end", ["no_result_email", "wait_ended"])
+def test_a_held_alert_email_goes_alone_when_no_result_email_carries_it(env, monkeypatch, end):
+    from bowhead_core.notification_service import ROUTINE_ALERT_EMAIL_HOLD_S
+
+    job, run = _routine(env, monkeypatch, ["owner@example.com"])
+    _urgent_alert(env, monkeypatch, run)
+
+    if end == "no_result_email":
+        # The run failed, paused for a question, or its task stopped emailing results.
+        job.notify_channels = {}
+        _deliver(env, job)
+        now = datetime.now(UTC) + timedelta(seconds=5)
+    else:
+        # The run never reached delivery (for example the process restarted).
+        now = datetime.now(UTC) + timedelta(seconds=ROUTINE_ALERT_EMAIL_HOLD_S + 5)
+    _tick(env, now=now)
+
+    assert [subject for _to, subject, _ in env.sent] == [f"[{product_name()} routine alert] Daily"]
+
+
 def test_run_history_shows_each_runs_delivery_outcome_without_addresses(env):
     from bowhead_gateway.routes.scheduled import ScheduledJobRunDTO, _attach_deliveries
 

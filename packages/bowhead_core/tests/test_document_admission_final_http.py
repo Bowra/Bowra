@@ -24,6 +24,7 @@ pytestmark = [
 
 @pytest.mark.parametrize("ending", ["prose", "protocol", "repair", "provider", "accepted"])
 async def test_known_admission_rejection_cannot_become_successful_prose(http_start, monkeypatch, ending):
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     case = http_start
     _, worker, attachment = await prepare_document_http(case, monkeypatch)
     original = "Use the attached PPTX as the template. Update its title for the next quarter, then prepare a draft and PDF."
@@ -76,8 +77,8 @@ async def test_known_admission_rejection_cannot_become_successful_prose(http_sta
                 }
                 finish = "tool_calls"
             else:
-                assert index == 1 or ending == "protocol" and index <= 3, (
-                    "Only the existing bounded final-answer correction may follow rejected admission"
+                assert 1 <= index <= (4 if ending == "protocol" else 2), (
+                    "Only bounded final-answer correction and delivery review may follow rejected admission"
                 )
                 message = {
                     "role": "assistant",
@@ -136,10 +137,10 @@ async def test_known_admission_rejection_cannot_become_successful_prose(http_sta
         assert rows(case, "document_jobs") == rows(case, "document_dispatches") == []
         assert turn.status == "failed"
         if ending == "provider":
-            assert terminal.get("reason_code") != "document_request_rejected"
-            assert turn.error_kind == terminal["error_kind"] != "document_request_rejected"
+            assert turn.error_kind == "llm_failed"
+            assert turn.error == terminal["reason_code"] == terminal["error_kind"] == "llm_provider_unavailable"
             return
-        assert len(calls) == (4 if ending == "protocol" else 2)
+        assert len(calls) == (5 if ending == "protocol" else 3)
         assert turn.error_kind == terminal["reason_code"] == terminal["error_kind"] == "document_request_rejected"
         assert terminal["narrative_superseded"] is True and terminal["diagnostics"]["retryable"] is False
         assert turn.final_answer != "The requested document work is complete."

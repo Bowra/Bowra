@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dashboardAgent, dashboardCollection } from "@/__tests__/fixtures/agent-dashboard";
 import { listManagedAgents } from "./agents-api";

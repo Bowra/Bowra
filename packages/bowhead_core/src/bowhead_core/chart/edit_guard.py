@@ -107,11 +107,70 @@ def clear(ctx: Any, section_id: str) -> None:
         guards.get(_key(ctx), set()).discard(section_id)
 
 
-def denial(*, history_unavailable: bool = False) -> dict[str, str]:
+def _title_key(value: Any) -> str | None:
+    text = " ".join(value.split()).casefold() if isinstance(value, str) else ""
+    return text or None
+
+
+def _chart_identity(spec: Any) -> tuple[set[str], set[str]]:
+    """Data artifacts and titles that identify one saved chart and its views."""
+    data: set[str] = set()
+    titles: set[str] = set()
+    specs = [spec] if isinstance(spec, dict) else []
+    specs += [view["spec"] for view in (spec.get("views") or []) if isinstance(view, dict) and isinstance(view.get("spec"), dict)] if specs else []
+    for item in specs:
+        source = item.get("source_meta") if isinstance(item.get("source_meta"), dict) else {}
+        plan = item.get("presentation_plan") if isinstance(item.get("presentation_plan"), dict) else {}
+        dataset = plan.get("dataset") if isinstance(plan.get("dataset"), dict) else {}
+        for value in (item.get("data_artifact_id"), source.get("artifact_id"), source.get("id"), dataset.get("artifact_id")):
+            if isinstance(value, str) and value.startswith("art_"):
+                data.add(value)
+        if title := _title_key(item.get("title")):
+            titles.add(title)
+    return data, titles
+
+
+async def replaced_protected_chart(ctx: Any, protected: set[str], args: dict[str, Any], *, resolve_data_ref: Callable[[str], str]) -> str | None:
+    """Return the protected chart an add_chart request would replace, if any.
+
+    A failed in-place edit protects only that chart: a new chart that reuses
+    its data or its title is treated as a replacement and refused, while an
+    unrelated chart remains allowed. An unverifiable comparison fails closed.
+    """
+    if not protected:
+        return None
+    requests = [args, *[view for view in args.get("views") or [] if isinstance(view, dict)]]
+    data = {resolve_data_ref(str(item.get("data_artifact_id") or "").strip()) for item in requests if item.get("data_artifact_id")}
+    titles = {title for item in requests if (title := _title_key(item.get("title")))}
+    ordered = sorted(protected)
+    try:
+        store, session = getattr(ctx, "canvas_store", None), getattr(ctx, "session_id", None)
+        canvas = await store.get_canvas_by_session(session) if store is not None and session else None
+        if canvas is None:
+            return ordered[0]
+        sections = await store.list_sections(canvas.id, include_hidden=True)
+    except Exception:
+        return ordered[0]
+    for section in sections:
+        if section.id not in protected or section.kind != "chart":
+            continue
+        protected_data, protected_titles = _chart_identity((section.payload or {}).get("spec"))
+        if data & protected_data or titles & protected_titles:
+            return section.id
+    return None
+
+
+def denial(*, history_unavailable: bool = False, section_id: str | None = None) -> dict[str, str]:
     if history_unavailable:
         return {
             "error": "chart_guard_history_unavailable",
             "hint": "The current turn's chart edit history could not be checked. Restore the turn history and retry.",
+        }
+    if section_id:
+        return {
+            "error": "chart_edit_incomplete",
+            "section_id": section_id,
+            "hint": f"This new chart reuses the data or title of chart {section_id}, whose in-place edit did not complete in this turn. Retry read_chart and edit_chart on that chart, or report why it cannot be edited; do not replace it with a new chart or image. Charts with other data and titles can still be added.",
         }
     return {
         "error": "chart_edit_incomplete",

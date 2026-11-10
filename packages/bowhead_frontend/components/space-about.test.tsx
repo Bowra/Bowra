@@ -32,7 +32,7 @@ it("shows members the instructions and whom to ask, without an edit action", asy
   renderIntl(<SpaceAboutButton />, { locale: "en-US" });
   fireEvent.click(screen.getByRole("button", { name: labels.button }));
   expect(await screen.findByText(value.content)).toBeTruthy();
-  expect(screen.getByRole("dialog", { name: "Instructions for “Pharma Sales”" })).toBeTruthy();
+  expect(screen.getByRole("dialog", { name: labels.title.replace("{name}", "Pharma Sales") })).toBeTruthy();
   expect(screen.getByText(labels.hint.replace("{names}", "Daniel Weber, Lin Yue"))).toBeTruthy();
   expect(screen.queryByRole("button", { name: labels.edit })).toBeNull();
   expect(getSpaceInstructions).toHaveBeenCalledWith("ws_a");

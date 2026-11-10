@@ -29,7 +29,9 @@ Remote calls require confirmation by default. Review the Agent, connection, tool
 - **Allow this call** permits one execution with the current parameters.
 - **Always allow in this session** permits later calls to the same tool only in this session; it expires when the session ends, refreshes, or the connection is disabled.
 - **Deny and skip** does not run the call.
-- Calls expire after two minutes without a decision.
+- Calls expire after three minutes without a decision.
+
+If your deployment turns on inline confirmation, the request appears in the conversation under the step that is waiting instead of in a dialog, and afterwards stays there as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
 
 External services can make irreversible changes. Personal ownership does not permit sending team-sensitive data outside the team policy.
 

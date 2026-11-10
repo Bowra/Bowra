@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import fixtures from "../../../contracts/chat-references/catalog-v1.json";
 import { ApiError, apiJson } from "./api-client";

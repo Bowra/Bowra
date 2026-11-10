@@ -8,6 +8,7 @@ import pytest
 from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.canvas_tools import _add_chart, _add_image, _remove_chart
 from bowhead_core.chart.authoring_tools import _simple_chart_kinds, edit_chart, read_chart
+from bowhead_core.tool_outcome import classify_tool_outcome
 from test_add_chart_validation import _FakeArtifact, _RichArtifactStore, _StubCtx
 
 
@@ -464,6 +465,9 @@ async def test_invalid_or_source_changing_patch_is_atomic(chart):
     before = (await store.list_sections(result["canvas_id"]))[0]
     response = await edit_chart({"section_id": section_id, "expected_rev": before.rev, "changes": {"title": "Changed", "rows": [{"value": 0}]}}, ctx)
     assert response["error"] == "invalid_chart_change"
+    # The trace classifies the refusal as rejected input and names the change.
+    outcome = classify_tool_outcome(response)
+    assert outcome.code == "tool_arguments_invalid" and outcome.field == response["path"]
     after = (await store.list_sections(result["canvas_id"]))[0]
     assert after.rev == before.rev and after.payload == before.payload
 
@@ -631,7 +635,7 @@ async def test_palette_edit_and_reset_keep_native_identity_rows_and_source(chart
     assert "color_index" not in ((await store.list_sections(created["canvas_id"]))[0]).payload["spec"]["columns"][1]
 
 
-@pytest.mark.parametrize("value", [True, -1, 6, "green", "#008000", {"backgroundColor": "green"}])
+@pytest.mark.parametrize("value", [True, -1, 6, "green", "#12", "#GG0000", "#008000FF", " #008000", "rgb(0,128,0)", {"backgroundColor": "green"}])
 async def test_color_edits_reject_unoffered_values_without_writing(chart, value):
     store, ctx, created = chart
 
@@ -644,6 +648,37 @@ async def test_color_edits_reject_unoffered_values_without_writing(chart, value)
     assert result["error"] == "invalid_chart_change"
     assert ((await store.list_sections(created["canvas_id"]))[0]).payload == before.payload
     assert ((await store.list_sections(created["canvas_id"]))[0]).rev == before.rev
+
+
+@pytest.mark.parametrize(("value", "canonical"), [("#00a651", "#00A651"), ("#0a6", "#00AA66"), ("#000000", "#000000")])
+async def test_exact_hex_edit_round_trip_palette_switch_and_reset(chart, value, canonical):
+    store, ctx, created = chart
+    before = (await store.list_sections(created["canvas_id"]))[0]
+    args = {"section_id": before.id}
+    # Exact colors and reset do not depend on palette availability.
+    result = await edit_chart({**args, "expected_rev": before.rev, "changes": {"series_colors": {"value": value}}}, ctx)
+    assert result["series_colors"] == {"value": canonical}
+    after = (await store.list_sections(created["canvas_id"]))[0]
+    assert after.id == before.id and after.rev == before.rev + 1
+    assert after.payload["spec"]["rows"] == before.payload["spec"]["rows"]
+    assert after.payload["spec"]["source_meta"] == before.payload["spec"]["source_meta"]
+    column = after.payload["spec"]["columns"][1]
+    assert column["color_hex"] == canonical and "color_index" not in column
+    read = await read_chart(args, ctx)
+    assert read["views"][0]["editable_color_series"][0]["color_hex"] == canonical
+
+    async def palette():
+        return [{"index": 0, "light": "#2563A7", "dark": "#8CA8BF"}]
+
+    ctx.report_read_access = SimpleNamespace(chart_palette=palette)
+    switched = await edit_chart({**args, "expected_rev": after.rev, "changes": {"series_colors": {"value": 0}}}, ctx)
+    column = (await store.list_sections(created["canvas_id"]))[0].payload["spec"]["columns"][1]
+    assert column["color_index"] == 0 and "color_hex" not in column
+    exact = await edit_chart({**args, "expected_rev": switched["rev"], "changes": {"series_colors": {"value": value}}}, ctx)
+    reset = await edit_chart({**args, "expected_rev": exact["rev"], "changes": {}, "reset": {"series_colors": ["value"]}}, ctx)
+    assert reset["series_colors"] == {"value": None}
+    column = (await store.list_sections(created["canvas_id"]))[0].payload["spec"]["columns"][1]
+    assert "color_hex" not in column and "color_index" not in column
 
 
 async def test_chart_tools_use_scoped_report_access_without_relying_on_http_projection(chart):
@@ -664,3 +699,120 @@ async def test_chart_tools_use_scoped_report_access_without_relying_on_http_proj
     ctx.report_read_access.user_id = "another-user"
     denied = await read_chart({"section_id": created["section_id"]}, ctx)
     assert denied["error"] == "chart_source_projection_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "reason"),
+    [
+        ("source_access_denied", "source_access_denied"),
+        ("section_outside_report_closure", "section_outside_report_closure"),
+        ("provenance_unavailable", "provenance_unavailable"),
+        ("error", "projection_error"),
+        ("none", "projection_unavailable"),
+        ("absent", "channel_unsupported"),
+    ],
+)
+async def test_projection_failures_report_the_failing_check_and_log_a_reference(chart, caplog, outcome, reason):
+    from bowhead_core.chart.authoring_tools import ChartProjectionUnavailable
+
+    store, ctx, result = chart
+    before = (await store.list_sections(result["canvas_id"]))[0]
+
+    async def project(section):
+        if outcome == "error":
+            raise RuntimeError("synthetic projection fault")
+        if outcome != "none":
+            raise ChartProjectionUnavailable(outcome)
+
+    ctx.chart_authoring_projection = None if outcome == "absent" else project
+    with caplog.at_level("WARNING", logger="bowhead_core.chart.authoring_tools"):
+        read = await read_chart({"section_id": result["section_id"]}, ctx)
+    assert read["error"] == "chart_source_projection_unavailable"
+    assert read["reason"] == reason
+    assert read["diagnostic_ref"].startswith("chp_")
+    # The hint names the failing check instead of always blaming source access.
+    assert ("access" in read["hint"]) == (reason in {"source_access_denied", "channel_unsupported"})
+    if reason in {"projection_error", "projection_unavailable"}:
+        assert read["diagnostic_ref"] in read["hint"]
+    logged = [record for record in caplog.records if "chart_source_projection_unavailable" in record.getMessage()]
+    assert len(logged) == 1 and f"reason={reason}" in logged[0].getMessage() and read["diagnostic_ref"] in logged[0].getMessage()
+    assert bool(logged[0].exc_info) == (reason == "projection_error")
+    after = (await store.list_sections(result["canvas_id"]))[0]
+    assert after.rev == before.rev and after.payload == before.payload
+
+
+async def test_failed_read_protects_only_that_chart_from_replacement(chart):
+    store, ctx, result = chart
+    section_id = result["section_id"]
+    other = _FakeArtifact(id="art_bbbbbbbbbbbb", filename="other.csv", path="other.csv")
+    ctx.artifact_store.artifacts[other.id] = other
+    ctx.artifact_store.backend.files[other.path] = b"region,amount\nNorth,3\nSouth,5\n"
+    ctx.chart_authoring_projection = None
+    assert (await read_chart({"section_id": section_id}, ctx))["chart_guarded"] is True
+    peer = copy.copy(ctx)
+    unrelated = await _add_chart(
+        {
+            "data_artifact_id": other.id,
+            "title": "Regional amounts",
+            "force_kind": "bar",
+            "axes": {"x": "region", "y": ["amount"], "x_scale": "category"},
+            "group_by": [],
+        },
+        peer,
+    )
+    assert "error" not in unrelated, unrelated
+    same_data = await _add_chart({"data_artifact_id": "art_aaaaaaaaaaaa", "title": "Replacement"}, peer)
+    assert same_data["error"] == "chart_edit_incomplete" and same_data["section_id"] == section_id
+    assert "Charts with other data and titles can still be added" in same_data["hint"]
+    bare_hex = await _add_chart({"data_artifact_id": "aaaaaaaaaaaa", "title": "Replacement"}, peer)
+    assert bare_hex["error"] == "chart_edit_incomplete"
+    same_title = await _add_chart(
+        {
+            "data_artifact_id": other.id,
+            "title": "  values ",
+            "force_kind": "bar",
+            "axes": {"x": "region", "y": ["amount"], "x_scale": "category"},
+            "group_by": [],
+        },
+        peer,
+    )
+    assert same_title["error"] == "chart_edit_incomplete" and same_title["section_id"] == section_id
+    composed = await _add_chart({"title": "Pair", "views": [{"id": "a", "data_artifact_id": "art_aaaaaaaaaaaa", "title": "A"}]}, peer)
+    assert composed["error"] == "chart_edit_incomplete"
+    sections = await store.list_sections(result["canvas_id"])
+    original = next(s for s in sections if s.id == section_id)
+    assert original.rev == 1 and not original.superseded
+    assert len(sections) == 2
+
+
+async def test_chat_delivered_chart_is_edited_in_place_without_opening_canvas(chart):
+    from bowhead_core.results_report_relations import project_report_relations
+
+    store, ctx, result = chart
+    section_id = result["section_id"]
+    await store.set_section_surface_target(section_id, "chat")
+    section = next(s for s in await store.list_sections(result["canvas_id"], include_hidden=True) if s.id == section_id)
+    assert section.hidden_for_chat_mode
+
+    class Bus:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, event):
+            self.events.append(event)
+            return True
+
+    later = copy.copy(ctx)
+    later.turn_id = "later_turn"
+    later.parent_bus = Bus()
+    changed = await edit_chart({"section_id": section_id, "expected_rev": section.rev, "changes": {"title": "Green values"}}, later)
+    assert "error" not in changed and changed["rev"] == section.rev + 1
+    # No Canvas turn is opened, and the browser is told to update the chat figure in place.
+    assert [event.event_type for event in later.parent_bus.events] == ["canvas.section_patched"]
+    payload = later.parent_bus.events[0].payload
+    assert payload["hidden_for_chat_mode"] is True and payload["rev"] == changed["rev"]
+    assert payload["patch"]["spec"]["title"] == "Green values"
+    stored = next(s for s in await store.list_sections(result["canvas_id"], include_hidden=True) if s.id == section_id)
+    assert stored.hidden_for_chat_mode and stored.payload["spec"]["title"] == "Green values"
+    assert section_id not in {s.id for s in await store.list_sections(result["canvas_id"])}
+    assert not project_report_relations([stored]).closure_ids

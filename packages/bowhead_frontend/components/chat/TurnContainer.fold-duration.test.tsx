@@ -98,7 +98,7 @@ function archivedTurn(turnId: string): ArchivedTurn {
     traceSteps: [],
     peersDispatched: [],
     errorReason: null,
-    archivedAt: Date.now(),
+    endedAt: Date.now(),
   } as ArchivedTurn;
 }
 
@@ -217,7 +217,7 @@ describe("折叠条时长 · 墙钟, 且 live == 归档", () => {
 });
 
 /** A turn that failed after two steps: one done, one failed, then a failed terminal. */
-function seedFailedTurn(turnId: string): void {
+function seedFailedTurn(turnId: string, doneOver: Record<string, unknown> = {}): void {
   dispatchToTurnStore("step_list_card_created", { card_id: turnId, seq: 1 });
   for (const [i, state] of (["success", "failure"] as const).entries()) {
     const stepId = `f${i + 1}`;
@@ -228,7 +228,9 @@ function seedFailedTurn(turnId: string): void {
     dispatchToTurnStore("step_done", { card_id: turnId, step_id: stepId, state, duration_ms: 2000, seq: 11 + i * 2 });
   }
   dispatchToTurnStore("step_list_card_finalized", { card_id: turnId, state: "failed", step_count: 2, seq: 21 });
-  dispatchToTurnStore("done", { turn_id: turnId, card_id: turnId, status: "failed", duration_ms: 124_000, seq: 22 });
+  dispatchToTurnStore("done", {
+    turn_id: turnId, card_id: turnId, status: "failed", duration_ms: 124_000, seq: 22, ...doneOver,
+  });
 }
 
 const FAILURE = { source: "turn_failed", reasonCode: "wallclock_exceeded" } as const;
@@ -269,5 +271,27 @@ describe("a failed turn folds into one 'Not finished' line (spec §8), live and 
     expect(open?.textContent).toContain("collapse_trace");
     await act(async () => { open!.click(); });
     expect(container.querySelector('[data-testid="step-summary"]')?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // Dogfood 2026-11-08 F7: a failed terminal without `duration_ms` must not read as the 4 s step sum.
+  it("shows no duration when the failed terminal carries none, live and archived alike", async () => {
+    seedFailedTurn("t-fail-nodur", { duration_ms: undefined });
+    const live = render(
+      <TurnContainer runner={runner({ turnId: "t-fail-nodur", user: "各地区销售同比", running: false, errorReason: FAILURE })} />,
+    );
+    await act(async () => {});
+    const liveSummary = live.container.querySelector('[data-testid="step-summary"]');
+    expect(liveSummary?.getAttribute("data-state")).toBe("failed");
+    expect(liveSummary?.querySelector('[data-testid="step-summary-duration"]')).toBeNull();
+    cleanup();
+
+    const turn = { ...archivedTurn("t-fail-nodur"), terminalStatus: "failed", answer: "", errorReason: FAILURE } as ArchivedTurn;
+    const { container } = render(
+      <TurnContainer runner={runner({ turnId: null, archivedTurns: [turn] } as Partial<TurnRunnerState>)} />,
+    );
+    const archivedSummary = container.querySelector('[data-testid="step-summary"]');
+    expect(archivedSummary?.getAttribute("data-state")).toBe("failed");
+    expect(archivedSummary?.querySelector('[data-testid="step-summary-progress"]')?.textContent).toBe(" · summary_steps_count:1");
+    expect(archivedSummary?.querySelector('[data-testid="step-summary-duration"]')).toBeNull();
   });
 });

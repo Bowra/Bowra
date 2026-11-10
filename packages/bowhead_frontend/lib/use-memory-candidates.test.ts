@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Parse write-gate rejection reasons (memory rebuild batch 2 review-fix round).
  *

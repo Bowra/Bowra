@@ -2644,6 +2644,8 @@ async def resume_turn(
     from bowhead_gateway.report_read_access import ReportReadAccess
 
     turn_req.report_read_access = ReportReadAccess(request, turn_req.session_id, turn_req.workspace_id, turn_req.team_id, turn_req.user_id)
+    # Same pairing as the chat route; chart tools recheck the resumed actor.
+    turn_req.chart_authoring_projection = turn_req.report_read_access.project_chart
 
     # Spawn the resume worker via the channel-neutral TurnService shared with the Feishu bridge.
     # The bus generation guard (close → get_or_create) lives

@@ -227,7 +227,7 @@ describe("步骤行工具名（live 与重放逐字相等）", () => {
     expect(stepRowName("bi_query", false, "zh-bi")).toBe(" 查询数据");
     expect(stepRowName("bi_query", true, "zh-bi-w")).toBe(" 正在写查询");
     expect(stepRowName("python_sandbox", true, "zh-py-w")).toBe(" 正在写代码");
-    expect(stepRowName("subagent_return", false, "zh-ret")).toBe(" 整理结果");
+    expect(stepRowName("subagent_return", false, "zh-ret")).toBe("");
     expect(stepRowName("canvas_add_kpi_row", false, "zh-kpi")).toBe(" 加 KPI");
     expect(stepRowName("memory_search", false, "zh-mem")).toBe(" 搜索记忆");
   });

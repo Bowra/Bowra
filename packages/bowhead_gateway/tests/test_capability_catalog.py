@@ -18,17 +18,16 @@ from bowhead_gateway.main import create_app
 from bowhead_gateway.routes import capability_catalog
 from bowhead_gateway.settings import Settings
 from cryptography.fernet import Fernet
-from gateway_legacy_database import upgrade
 
 
 @pytest.fixture
-async def catalog_context(tmp_path, monkeypatch, complete_community_http_installation):
+async def catalog_context(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_navigation_catalog_secret_32")
     monkeypatch.setenv("FEATURE_MULTI_TEAM_AUTHZ", "1")
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
     store = UserStore(str(path))
     await store.initialize()
     await complete_community_http_installation(store)

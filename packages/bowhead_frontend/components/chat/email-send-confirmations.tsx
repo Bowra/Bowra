@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   emailSendConfirmationApi,
   type EmailSendConfirmation,
 } from "@/lib/email-send-confirmation-api";
 import { useHasActiveToolStep } from "@/lib/turn-store";
 import { DialogShell } from "@/components/ui/dialog";
+import { formatTime } from "@/lib/locale";
 import { useConfirmationQueuePoll } from "@/lib/use-confirmation-queue-poll";
-import { formatByteSize } from "@/lib/format";
+import { EmailSendPreview } from "@/components/chat/tool-confirmation/previews";
 
 /**
  * The Lead's send_email tool waits here before delivery: the owner sees the exact
@@ -19,6 +20,7 @@ import { formatByteSize } from "@/lib/format";
  */
 export function EmailSendConfirmations() {
   const t = useTranslations("emailSendConfirmation");
+  const locale = useLocale();
   const [pending, setPending] = useState<EmailSendConfirmation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -79,24 +81,10 @@ export function EmailSendConfirmations() {
     >
       <h2 id="email-send-confirmation-title">{t("title")}</h2>
       <p>{t("warning")}</p>
-      <p>{t("to", { to: current.to })}</p>
-      <p>{t("subject", { subject: current.subject })}</p>
-      <pre>{current.body}</pre>
-      {current.attachments?.length ? (
-        <section aria-label={t("attachments")}>
-          <p>{t("attachments")}</p>
-          <ul>
-            {current.attachments.map((attachment) => (
-              <li key={attachment.artifact_id}>
-                {attachment.filename} ({formatByteSize(attachment.size) || "0 B"})
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <EmailSendPreview item={current} />
       <p>
         {t("expires", {
-          time: new Date(current.expires_at).toLocaleTimeString(),
+          time: formatTime(current.expires_at, locale, { seconds: true }),
         })}
       </p>
       {error ? <p role="alert">{t("decisionError")}</p> : null}

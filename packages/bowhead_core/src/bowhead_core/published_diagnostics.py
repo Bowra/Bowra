@@ -1557,6 +1557,23 @@ def publish_powerbi_admin_failure(
     )
 
 
+_SCHEMA_POINTER_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}|[0-9]{1,6}")
+
+
+def _schema_pointer_field(pointer: str) -> str:
+    """Publish a nested argument pointer ("changes/kind") as its dotted schema prefix ("changes.kind").
+
+    Only ASCII identifier or index segments are kept, at most four, stopping at the first other segment, so a
+    value key ("changes/series_colors/<measure>") publishes only its schema part ("changes.series_colors").
+    """
+    kept: list[str] = []
+    for segment in pointer.split("/")[:4]:
+        if not _SCHEMA_POINTER_SEGMENT.fullmatch(segment):
+            break
+        kept.append(segment)
+    return ".".join(kept)
+
+
 def publish_tool_failure(outcome: ToolOutcome) -> PublishedDiagnostic | None:
     """Publish bounded execution facts without provider prose or script output."""
     if outcome.state != "failure" or outcome.code not in TOOL_FAILURE_CODES:
@@ -1568,6 +1585,8 @@ def publish_tool_failure(outcome: ToolOutcome) -> PublishedDiagnostic | None:
         # Field paths are schema paths, not host filesystem paths. Only this
         # constrained vocabulary can be included in the published projection.
         candidate = value.removeprefix("/") if name == "field" else value
+        if name == "field" and "/" in candidate:
+            candidate = _schema_pointer_field(candidate)
         if re.fullmatch(r"[\w .()\[\]-]{1,80}", candidate) and _safe_detail_is_allowed(candidate, max_length=80):
             facts.append(f"{name}={candidate}")
     if type(outcome.exit_code) is int and -255 <= outcome.exit_code <= 255:

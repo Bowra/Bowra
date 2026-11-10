@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** Configuration-draft library contracts (tech-design-batch1b §5 tests 11, 15).
  *
  * Dispatcher insertion (per-turn idempotency / one card per turn across turns / discard bad payloads), hydrate (structured 404

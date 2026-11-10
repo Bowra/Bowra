@@ -488,6 +488,25 @@ describe("real React reference editor and catalog", () => {
       screen.getByRole("button", { name: "Continue Typing" }),
     ).toBeTruthy();
   });
+  it("takes its accessible name from the visible prompt the Composer passes, and follows it", async () => {
+    // 2026-11-08 dogfood F11: the name was fixed to "Task input", so steering mode went unannounced.
+    // Mutation: restore the fixed `aria-label` → the steering name is never found.
+    const props = { ...defaults(), placeholder: "Ask about your data…", accessibleName: "Ask about your data…" };
+    const rendered = render(ui(props, "en-US"));
+    expect(await screen.findByRole("combobox", { name: "Ask about your data…" })).toBeTruthy();
+    rendered.rerender(ui({
+      ...props,
+      placeholder: "↻ Add an instruction—queued until the current response finishes",
+      accessibleName: "Add an instruction—queued until the current response finishes",
+    }, "en-US"));
+    await waitFor(() => expect(
+      screen.getByRole("combobox", { name: "Add an instruction—queued until the current response finishes" }),
+    ).toBeTruthy());
+    // The visible prompt is not announced a second time.
+    expect(
+      document.querySelector(".composer-reference-editor__placeholder")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+  });
   it("retains a reference source and announces atomic removal", async () => {
     const value: InputDocument = {
       schema_version: 1,

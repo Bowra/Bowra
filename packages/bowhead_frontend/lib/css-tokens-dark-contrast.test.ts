@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Dark ink-ladder contrast guard: feedback-triage-2026-08-24 batch 5.
  *

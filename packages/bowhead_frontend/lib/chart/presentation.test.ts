@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch 1 2.1b · presentation resolver unit tests (contract = design D, D5 frame).
  */

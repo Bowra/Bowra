@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Phase 1.5 E2E UT — exercises the full SSE event → dispatch → turn-store →
  * snapshot pipeline for a realistic turn cycle:

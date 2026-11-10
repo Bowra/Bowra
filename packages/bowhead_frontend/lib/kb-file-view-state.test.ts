@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { readKbFileView, writeKbFileView } from "./kb-file-view-state";
 

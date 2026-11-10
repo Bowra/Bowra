@@ -137,10 +137,13 @@ def _guard_lock(canvas_id: str) -> asyncio.Lock:
 # for whether anchor points to a figure, or drift makes one path strip what other retains.
 _FIGURE_KINDS = FIGURE_KINDS
 
-# Note shown to the writer next to a chat-hidden figure. It says the figure
-# exists and what referencing it does, so the writer reuses it instead of
-# redrawing an identical chart.
-CHAT_HIDDEN_FIGURE_NOTE = "历史图:之前一轮在对话里展示过、当前未在画布显示;用 [figure:id] 引用后会按原样放回画布,无需重画"
+# Note shown to the reader next to a chat-hidden figure. It says the figure
+# exists, what referencing it does and how to restyle it, so the agent reuses or
+# edits it in place instead of redrawing an identical chart.
+CHAT_HIDDEN_FIGURE_NOTE = (
+    "历史图:之前一轮在对话里展示过、当前未在画布显示;用 [figure:id] 引用后会按原样放回画布,无需重画;"
+    "只改它的展示(标题、颜色、标签、图例、格式)就用 read_chart + edit_chart 就地改这张图,不要另画"
+)
 
 
 def chat_hidden_figures(sections_including_hidden: list[Any], exclude_ids: set[str] | frozenset[str] = frozenset()) -> list[Any]:
@@ -866,11 +869,16 @@ async def _write_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     # This guard is specific to report prose; requested charts/files retain
     # their existing Tools and delivery contracts.
     if getattr(getattr(ctx, "parent_bus", None), "_d6_plan_deliverable_kind", None) == "answer":
-        return {
-            "ok": False,
-            "error": "plan_answer_only",
-            "hint": "This Plan delivers a chat answer. Return findings through subagent_return instead of creating or editing report sections.",
-        }
+        from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal
+
+        # Refused before any report write: a routing correction, not failed business work.
+        return TerminalCorrectionRefusal(
+            {
+                "ok": False,
+                "error": "plan_answer_only",
+                "hint": "This Plan delivers a chat answer. Return findings through subagent_return instead of creating or editing report sections.",
+            }
+        )
     content = args.get("content")
     if not content or not isinstance(content, str):
         return {"error": "content 必填(markdown 字符串)"}

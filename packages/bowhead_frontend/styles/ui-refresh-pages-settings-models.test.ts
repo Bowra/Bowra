@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance, page-by-page acceptance A · source contract for team Models settings (/team/settings/models and its section pages).
  *

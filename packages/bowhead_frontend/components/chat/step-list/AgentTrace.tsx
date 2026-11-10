@@ -17,6 +17,7 @@
 import { formatObservedValue } from "@/lib/chart/format";
 import type { ReactNode } from "react";
 import { AgentBlock } from "./AgentBlock";
+import { agentDisplayName } from "./agent-meta";
 import { CollaborationTrace } from "./CollaborationTrace";
 import { ContextActivityRows, useContextActivities } from "./ContextActivity";
 import { useCollaborationTrace } from "./collaboration-trace-state";
@@ -32,8 +33,10 @@ import {
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
 import { extractWritingContent } from "@/lib/extract-writing-content";
 import { SKILL_UNAVAILABLE_CODE_PREFIX } from "@/lib/sse-events";
+import { TOOL_FAILURE_CODES } from "@/lib/tool-failure";
 import type { PeerTerminal } from "@/lib/turn-store";
 import { FailureAckCard } from "./FailureAckCard";
+import { StepFailureDetail } from "./StepFailureDetail";
 import { ErrorDiagnosticsDisclosure } from "@/components/error-notice";
 import { isInternalCloseoutStep } from "./step-view";
 import { Step } from "./Step";
@@ -48,6 +51,7 @@ import { Chunks, Code, Hits, ParallelRail, ResultTable } from "./tool-results";
 import { stepDisplayToolName, writingDisplayKey } from "./tool-catalog";
 import type { StepView } from "./types";
 import { CharIcon } from "@/components/char-icon";
+import { ToolConfirmationCard, useIsConfirmationRequester } from "@/components/chat/tool-confirmation/ToolConfirmationCard";
 import { appPath } from "@/lib/base-path";
 import { personalSettingsPath } from "@/lib/personal-settings-paths";
 
@@ -205,6 +209,22 @@ export function stepErrorMessage(
   return tStep("step_failed_generic");
 }
 
+/**
+ * The reason line of an opened failed row. The shared Tool failure codes have one-line step copy (their
+ * turn-level sentences also instruct the agent); every other code keeps its `stepErrorMessage` sentence.
+ */
+export function stepFailureReason(
+  error: NonNullable<StepView["error"]>,
+  tStep: ReturnType<typeof useTranslations<"step_list">>,
+  tReasons: ReturnType<typeof useTranslations<"error_messages.reasons">>,
+): string {
+  const { code, message } = error;
+  if (code && TOOL_FAILURE_CODES.has(code) && !(code === "tool_execution_failed" && message === "non_query_text")) {
+    return tStep(`failure_detail.reason.${code}`);
+  }
+  return stepErrorMessage(error, tStep, tReasons);
+}
+
 export interface AgentTraceProps {
   steps: StepView[];
   /** turn-store `peerNames` — peer subagent id → backend agent_name. */
@@ -355,10 +375,19 @@ function deriveRightSummary(
 
 interface StepFromViewProps {
   s: StepView;
+  /** Display name of the Agent block this step belongs to (the confirmation card's "who"). */
+  agentName?: string;
 }
 
-function StepFromView({ s }: StepFromViewProps) {
+/** A confirmation on this step is still waiting for a decision. */
+function hasPendingConfirmation(s: StepView): boolean {
+  return Boolean(s.confirmation && !s.confirmation.outcome);
+}
+
+function StepFromView({ s, agentName }: StepFromViewProps) {
   const tChat = useTranslations("chat");
+  const tConfirm = useTranslations("toolConfirmation");
+  const isRequester = useIsConfirmationRequester(s.confirmation);
   const turnRunning = useTurnRunning();
   const tStep = useTranslations("step_list");
   const tReasons = useTranslations("error_messages.reasons");
@@ -426,13 +455,7 @@ function StepFromView({ s }: StepFromViewProps) {
   ));
   const ack =
     redundantBatchFeedback ? null : s.state === "failed" && s.error ? (
-      <FailureAckCard
-        kind={s.error.uiKind ?? (s.error.kind === "permanent" ? "permanent" : "transient")}
-        message={stepErrorMessage(s.error, tStep, tReasons)}
-        diagnostics={s.error.diagnostics}
-        retryable={s.error.retryable}
-        inset
-      />
+      <StepFailureDetail error={s.error} reason={stepFailureReason(s.error, tStep, tReasons)} />
     ) : s.state === "partial" && !s.subSteps?.length ? (
       // Only explicit completed substeps count as successes; absent outcomes stay unknown.
       <FailureAckCard
@@ -447,12 +470,15 @@ function StepFromView({ s }: StepFromViewProps) {
     ) : s.state === "partial" && s.error?.diagnostics ? (
       <ErrorDiagnosticsDisclosure diagnostics={s.error.diagnostics} surface="chat" />
     ) : null;
+  // An opened failed row answers "why" first, above any recorded code or output.
+  const failureFirst = s.state === "failed";
   const body =
     detail || outputArtifacts || ack ? (
       <>
+        {failureFirst ? ack : null}
         {detail}
         {outputArtifacts}
-        {ack}
+        {failureFirst ? null : ack}
       </>
     ) : null;
   // UX-1: code-like detail (python/sql/stdout: sandbox code/SQL/output) collapses automatically after completion;
@@ -467,19 +493,27 @@ function StepFromView({ s }: StepFromViewProps) {
     recoverableFailure && s.state === "failed" ? "part" : stepStateToStatus(s.state);
   const showPartialDetails = s.state === "partial" && (ack || s.subSteps?.length)
     && !(turnRunning && recoverableFailure);
+  // A step held for confirmation says so instead of only spinning.
+  const waitingSummary = hasPendingConfirmation(s) && (s.state === "active" || s.state === "pending")
+    ? tConfirm(isRequester ? "waitingForYou" : "waitingForConfirmation")
+    : null;
   return (
-    <Step
-      toolName={stepDisplayToolName(s.stepType, s.toolName)}
-      label={s.label}
-      summary={deriveRightSummary(s, tChat)}
-      time={s.state === "done" ? s.durationText : undefined}
-      status={stepStatus}
-      failed={s.state === "failed"}
-      open={showPartialDetails ? true : undefined}
-      autoCollapseOnDone={codeLike && !ack}
-    >
-      {body}
-    </Step>
+    <>
+      <Step
+        toolName={stepDisplayToolName(s.stepType, s.toolName)}
+        label={s.label}
+        summary={waitingSummary ?? deriveRightSummary(s, tChat)}
+        time={s.state === "done" ? s.durationText : undefined}
+        status={stepStatus}
+        failed={s.state === "failed"}
+        open={showPartialDetails ? true : undefined}
+        autoCollapseOnDone={codeLike && !ack}
+      >
+        {body}
+      </Step>
+      {/* Outside the collapsible detail and the header button: visible without expanding anything. */}
+      {s.confirmation ? <ToolConfirmationCard confirmation={s.confirmation} agentName={agentName} /> : null}
+    </>
   );
 }
 
@@ -548,11 +582,13 @@ function PeerBlockView({ block }: PeerBlockViewProps) {
       }
       outcomeDiagnostics={block.failureDiagnostics ?? undefined}
       open={block.status === "run"}
+      forceOpen={block.steps.some(hasPendingConfirmation)}
     >
       {block.steps.filter((s) => !isInternalCloseoutStep(s)).map((s) => (
         <StepFromView
           key={s.stepId}
           s={s}
+          agentName={agentDisplayName(block.agent, block.displayName)}
         />
       ))}
       {block.prose ? <Prose>{block.prose}</Prose> : null}
@@ -615,6 +651,7 @@ export function AgentTrace({
             <StepFromView
               key={s.stepId}
               s={s}
+              agentName={agentDisplayName("lead")}
             />
           ))}
           <ContextActivityRows subagentId={null} />

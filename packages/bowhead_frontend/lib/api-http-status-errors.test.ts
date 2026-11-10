@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Handwritten fetch failures in lib/api.ts now throw HttpStatusError: keep message as “label: status”
  * (preserving callers' 404/503 checks), and attach status codes and request IDs so Copy Diagnostics can access them.

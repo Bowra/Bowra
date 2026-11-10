@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * V2.8 L · Trace-L reducer unit tests.
  *

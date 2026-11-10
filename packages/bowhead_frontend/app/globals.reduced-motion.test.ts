@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Apply the system Reduce Motion preference globally (UI redesign P0-3, docs/design/界面改版-Apple设计方向.md).
  *

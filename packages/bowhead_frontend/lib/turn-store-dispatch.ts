@@ -50,8 +50,11 @@ import {
   applyCardFinalized,
   applyCardResumed,
   applyCollaborationRevision,
+  applyConfirmationRequested,
+  applyConfirmationResolved,
   applyContextActivity,
   applyTurnDuration,
+  applyTurnEnded,
   applyTurnStarted,
   applyCoachCanvasTarget,
   applyEmojiAck,
@@ -110,7 +113,13 @@ import type {
   WireStepError,
   WireSubStep,
 } from "./sse-events";
-import { normalizeStepError, normalizeStepState, parseStreamRestartWithdrawal } from "./sse-events";
+import {
+  normalizeStepError,
+  normalizeStepState,
+  parseConfirmationRequested,
+  parseConfirmationResolved,
+  parseStreamRestartWithdrawal,
+} from "./sse-events";
 
 /**
  * Phase 1.7-A — per-turn narrative cursor. A contiguous run of
@@ -443,6 +452,50 @@ export function dispatchToTurnStore(
         outputArtifacts: mapOutputArtifacts(payload),
         durationMs: ev.duration_ms ?? null,
         error: mapError(ev.error ?? null),
+      });
+      return true;
+    }
+
+    // ── Inline tool call confirmation: both events attach to the waiting tool step. Live SSE and
+    //    replay share these branches, so the card and its record agree on every path. ──
+    case "confirmation_requested": {
+      const turnId = cardId ?? pickTurnId(payload) ?? streamTurnId ?? null;
+      if (!turnId) return false;
+      const parsed = parseConfirmationRequested(payload);
+      if (!parsed) return true;
+      if (shouldSkipAppliedSeq(turnId, payload)) return true;
+      applyConfirmationRequested({
+        turnId,
+        stepId: parsed.stepId,
+        callId: parsed.callId,
+        parentAgentId: parsed.parentAgentId,
+        confirmation: {
+          id: parsed.confirmationId,
+          kind: parsed.kind,
+          requesterUserId: parsed.requesterUserId,
+          title: parsed.title,
+          sourceLabel: parsed.sourceLabel,
+          category: parsed.category,
+          choices: parsed.choices,
+          expiresAt: parsed.expiresAt,
+          timeoutSeconds: parsed.timeoutSeconds,
+        },
+      });
+      return true;
+    }
+
+    case "confirmation_resolved": {
+      const turnId = cardId ?? pickTurnId(payload) ?? streamTurnId ?? null;
+      if (!turnId) return false;
+      const parsed = parseConfirmationResolved(payload);
+      if (!parsed) return true;
+      if (shouldSkipAppliedSeq(turnId, payload)) return true;
+      applyConfirmationResolved({
+        turnId,
+        stepId: parsed.stepId,
+        confirmationId: parsed.confirmationId,
+        outcome: parsed.outcome,
+        decidedAt: parsed.decidedAt,
       });
       return true;
     }
@@ -943,6 +996,11 @@ export function dispatchToTurnStore(
       if (turnId && eventName === "done" && typeof payload.duration_ms === "number") {
         applyTurnDuration({ turnId, totalDurationMs: payload.duration_ms });
       }
+      // The reply byline time is the root terminal's server time, through this same shared branch: live,
+      // archived and reloaded turns read one persisted value instead of the browser clock (dogfood N3).
+      if (turnId && eventName === "done" && !payload.parent_agent_id && typeof payload.ended_at === "string") {
+        applyTurnEnded({ turnId, endedAt: payload.ended_at });
+      }
       // Chat turn feedback D6: `done.step_outcome` through this shared branch, like duration_ms.
       if (turnId && eventName === "done") {
         // Cancellation and recovery can emit done without a card-finalized
@@ -991,6 +1049,9 @@ const MODEL_RETRY_PRESERVING_EVENTS: ReadonlySet<string> = new Set([
   "agent.collaboration",
   "agent.context",
   "emoji_ack",
+  // A tool handler waiting for (or receiving) the user's decision is not model output.
+  "confirmation_requested",
+  "confirmation_resolved",
 ]);
 
 function preservesModelRetry(eventName: string, payload: Record<string, unknown>): boolean {

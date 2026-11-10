@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
 

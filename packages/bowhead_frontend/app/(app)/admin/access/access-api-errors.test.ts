@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** Access control API failures: raw detail stays out of message; the page chooses a localized reason from the status code and known detail. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 

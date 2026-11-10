@@ -13,11 +13,10 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import type { AgentPluginUpdate, AgentSkillUpdate } from "@/lib/agents-api";
+import { formatDate } from "@/lib/locale";
 
 function formatDay(value: string | null, locale: string): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(parsed);
+  return formatDate(value, locale) || null;
 }
 
 export function PluginUpdateNotice({ updates, skillUpdates, onReevaluate }: {

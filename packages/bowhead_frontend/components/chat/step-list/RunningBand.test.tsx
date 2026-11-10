@@ -229,6 +229,71 @@ describe("披露条与当前行是两个粒度", () => {
   });
 });
 
+describe("Bar copy without an active step (2026-11-08 dogfood F9)", () => {
+  // 116 showed "正在准备 · 第 21 步 · 1 分 43 秒": every gap reused the opening's copy.
+  // Mutation: render `band_preparing` for every phase other than `running` → the gap and helper cases fail.
+  const band = (container: HTMLElement) => ({
+    phase: container.querySelector('[data-testid="running-band"]')?.getAttribute("data-phase"),
+    bar: container.querySelector(".bh-band__txt")?.textContent,
+    act: container.querySelector(".bh-band__act")?.textContent,
+  });
+
+  it("the opening, before any step, is the only state that reads as getting ready", () => {
+    const { container } = render(<RunningBand steps={[]} running startedAt={null} />);
+    expect(band(container)).toEqual({ phase: "preparing", bar: "band_preparing", act: "band_thinking" });
+  });
+
+  it("a gap between steps uses neutral working copy, never the opening's", () => {
+    const { container } = render(
+      <RunningBand steps={[step("a", { state: "done" })]} running startedAt={null} />,
+    );
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_working", act: "band_thinking" });
+    expect(container.querySelector(".bh-band__meta")?.textContent).toContain("band_step_n:1");
+  });
+
+  it("waiting on a helper reads as collaboration, naming the helper on the current row", () => {
+    const { container } = render(
+      <RunningBand
+        steps={[
+          step("q", { state: "done" }),
+          step("spawn", {
+            state: "active", toolName: "subagent_spawn", headerZh: "派子 agent",
+            subagentId: "lead_1", peerProseKey: "p1",
+          }),
+        ]}
+        peerNames={{ p1: "compute" }}
+        peerDisplayNames={{ p1: "主分析" }}
+        running
+        startedAt={null}
+      />,
+    );
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_phase_agent", act: "band_waiting_peer:主分析" });
+  });
+
+  it("waiting on a helper whose name has not arrived is still collaboration", () => {
+    const { container } = render(
+      <RunningBand
+        steps={[step("spawn", {
+          state: "active", toolName: "subagent_spawn", headerZh: "派子 agent",
+          subagentId: "lead_1", peerProseKey: "p1",
+        })]}
+        running
+        startedAt={null}
+      />,
+    );
+    expect(band(container)).toEqual({ phase: "gap", bar: "band_phase_agent", act: "band_waiting_peer_anon" });
+  });
+
+  it.each([
+    ["the opening", [] as StepView[]],
+    ["a gap", [step("a", { state: "done" })]],
+    ["a running step", [step("a", { state: "active" })]],
+  ])("%s keeps the band's three rows (constant height)", (_label, steps) => {
+    const { container } = render(<RunningBand steps={steps} running startedAt={null} />);
+    expect(rowCount(container)).toBe(3);
+  });
+});
+
 describe("禁词与兜底", () => {
   it("★ 抬头被禁词滤空的**已完成**步骤画成完成行，不是骨架", () => {
     // Checking only whether label is empty would make finished work look like it is still loading.

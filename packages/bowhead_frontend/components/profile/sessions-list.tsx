@@ -18,6 +18,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RowActionsMenu } from "@/components/ui/row-actions-menu";
 import { CharIcon } from "@/components/char-icon";
+import { formatDateTime } from "@/lib/locale";
 
 
 interface Props {
@@ -29,17 +30,7 @@ interface Props {
 
 function formatTime(iso: string | null, locale: string): string {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString(locale, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso, locale, { dateStyle: "medium" }) || iso;
 }
 
 

@@ -90,7 +90,7 @@ describe("TurnContainer · narrative-vs-answer dedup (0.39.8 #5)", () => {
     });
     applyFinalAnswer({ turnId, text: answer, payload: { ...finalPayload, turnId } });
     const { container } = render(<TurnContainer runner={runner(archived ? {
-      archivedTurns: [{ turnId, user: "Create HTML", userAttachments: [], answer, traceSteps: [], peersDispatched: [], errorReason: null, finalPayload, archivedAt: 0 }],
+      archivedTurns: [{ turnId, user: "Create HTML", userAttachments: [], answer, traceSteps: [], peersDispatched: [], errorReason: null, finalPayload, endedAt: 0 }],
     } : { turnId, user: "Create HTML", answer, finalPayload })} />);
     expect(container.querySelectorAll('[data-testid="chat-inline-file"]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="chat-inline-file"]')?.textContent).toContain("18.2 KB");

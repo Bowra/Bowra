@@ -125,7 +125,7 @@ describe("Coach evaluation consent", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Allow and start evaluation…" }));
     const dialog = await screen.findByRole("dialog", { name: "Allow Coach to start this evaluation?" });
     expect(dialog.textContent).toContain("Your latest saved draft runs the same cases as released v7.");
-    expect(dialog.textContent).toMatch(/30 min \(until \d{2}:\d{2}\)/);
+    expect(dialog.textContent).toMatch(/30 min \(until \d{1,2}:\d{2}(?:\s?[AP]M)?\)/);
     expect(dialog.textContent).toContain("About 12K–18K tokens · 90–115 model requests · 5–9 min");
     expect(authorizeCoachCI).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

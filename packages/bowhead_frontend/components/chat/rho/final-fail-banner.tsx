@@ -18,6 +18,7 @@ import { clarificationFailureStage } from "@/lib/clarification-failure-stage";
 import { copyDiagnostics } from "@/components/error-notice";
 import { ChatCard, type ChatCardAction } from "@/components/ui/card";
 import { normalizeReasonCode, type ReasonCode } from "@/lib/error-messages";
+import { formatTime, getCurrentLocale } from "@/lib/locale";
 import type { ErrorDiagnostics } from "@/lib/error-presentation";
 import { normalizeErrorDiagnostics } from "@/lib/error-presentation";
 import { chooseFailureCardAction, type RecoveryAction } from "@/lib/turn-feedback";
@@ -137,11 +138,10 @@ function bannerDiagnostics(
   return normalizeErrorDiagnostics(withTurn) ?? normalizeErrorDiagnostics(base);
 }
 
+/** Observation time in the interface language's clock. `getCurrentLocale()` rather than `useLocale()`: the banner
+ *  renders inside TurnContainer, whose tests replace next-intl with translation-only mocks. */
 function timeOf(observedAt: string | undefined): string | undefined {
-  if (!observedAt) return undefined;
-  const date = new Date(observedAt);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return formatTime(observedAt, getCurrentLocale()) || undefined;
 }
 
 export function FinalFailBanner({

@@ -520,11 +520,8 @@ describe("SettingsPeople", () => {
     expect(
       screen.getByText(
         new Date("2026-06-30T02:00:00Z").toLocaleString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
+          dateStyle: "medium",
+          timeStyle: "short",
         }),
       ),
     ).toBeTruthy();

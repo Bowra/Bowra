@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for P2 batch 6 (content type scale, brand appears once): styles/ui-refresh-content.css.
  *

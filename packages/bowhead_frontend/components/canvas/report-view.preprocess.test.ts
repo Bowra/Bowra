@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * feedback-0713 #3 — preprocessSections image folding + buildImageLookup.
  *

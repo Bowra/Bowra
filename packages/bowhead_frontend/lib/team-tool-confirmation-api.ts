@@ -10,6 +10,8 @@ export interface TeamToolConfirmation {
   tool_ref: string;
   tool_name: string;
   description: string;
+  /** Effective category of the tool; older servers omit it, which reads as unknown. */
+  category?: "external_write" | "destructive" | "unknown";
   arguments: Record<string, unknown>;
   expires_at: string;
 }

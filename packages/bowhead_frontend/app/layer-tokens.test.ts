@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Layer-token guard (docs/design/组件统一-技术设计.md “图层”).
  *

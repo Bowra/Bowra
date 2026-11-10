@@ -920,6 +920,241 @@
         "renderShapeVersion": "chart-shape/1",
         "presentationPolicyVersion": "chart-presentation/1"
       }
+    },
+    {
+      "name": "literal-and-palette-hex-share-encoding-identity",
+      "shape": {
+        "version": "chart-shape/1",
+        "kind": "line",
+        "family": "trend",
+        "rowCount": 40,
+        "categoryCount": 40,
+        "seriesCount": 3,
+        "longestLabelGraphemes": 3,
+        "series": [
+          {
+            "key": "line:0",
+            "role": "line",
+            "pointCount": 40,
+            "stackKey": null,
+            "hasPositive": true,
+            "hasNegative": false,
+            "colorHex": "#777777"
+          },
+          {
+            "key": "line:1",
+            "role": "line",
+            "pointCount": 40,
+            "stackKey": null,
+            "hasPositive": true,
+            "hasNegative": true,
+            "paletteIndex": 1
+          },
+          {
+            "key": "line:2",
+            "role": "line",
+            "pointCount": 40,
+            "stackKey": null,
+            "hasPositive": true,
+            "hasNegative": false,
+            "colorHex": "#777777"
+          }
+        ],
+        "flags": {
+          "stacked": false,
+          "crossesZero": true,
+          "hasMissingValues": false
+        }
+      },
+      "kindTokens": {
+        "line": {
+          "tooltip": "disabled",
+          "grid": "hidden",
+          "line": {
+            "curve": "monotone",
+            "widthPx": 1.5,
+            "points": "show",
+            "pointRadiusPx": 3
+          }
+        }
+      },
+      "categoricalSeriesPalette": [
+        "#111111",
+        "#777777"
+      ],
+      "accessibility": {
+        "contrast": "high",
+        "colorVision": "color-safe"
+      },
+      "renderContext": {
+        "placement": "chat",
+        "bounds": {
+          "widthPx": 344,
+          "heightPx": 320,
+          "devicePixelRatio": 2
+        },
+        "input": {
+          "hover": true,
+          "pointer": "fine",
+          "keyboard": true
+        },
+        "output": {
+          "medium": "screen",
+          "static": false
+        },
+        "mode": "light",
+        "locale": "zh-CN",
+        "reducedMotion": false,
+        "forcedColors": false,
+        "exactDataAlternative": {
+          "kind": "none"
+        }
+      },
+      "expected": {
+        "requested": {
+          "tooltip": "disabled",
+          "grid": "hidden",
+          "series": [
+            {
+              "key": "line:0",
+              "paletteIndex": 0,
+              "colorHex": "#777777",
+              "lineDash": [],
+              "pointStyle": "circle",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            },
+            {
+              "key": "line:1",
+              "paletteIndex": 1,
+              "lineDash": [],
+              "pointStyle": "circle",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            },
+            {
+              "key": "line:2",
+              "paletteIndex": 2,
+              "colorHex": "#777777",
+              "lineDash": [],
+              "pointStyle": "circle",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            }
+          ],
+          "line": {
+            "curve": "monotone",
+            "widthPx": 1.5,
+            "points": "show",
+            "pointRadiusPx": 3,
+            "hitRadiusPx": 8,
+            "pointHoverRadiusPx": 4
+          }
+        },
+        "effective": {
+          "tooltip": "enabled",
+          "grid": "standard",
+          "series": [
+            {
+              "key": "line:0",
+              "paletteIndex": 0,
+              "colorHex": "#777777",
+              "lineDash": [],
+              "pointStyle": "circle",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            },
+            {
+              "key": "line:1",
+              "paletteIndex": 1,
+              "lineDash": [
+                7,
+                4
+              ],
+              "pointStyle": "rect",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            },
+            {
+              "key": "line:2",
+              "paletteIndex": 0,
+              "colorHex": "#777777",
+              "lineDash": [
+                2,
+                3
+              ],
+              "pointStyle": "triangle",
+              "fillPattern": "solid",
+              "boundaryWidthPx": 0
+            }
+          ],
+          "line": {
+            "curve": "monotone",
+            "widthPx": 2,
+            "points": "auto",
+            "pointRadiusPx": 0,
+            "hitRadiusPx": 8,
+            "pointHoverRadiusPx": 4
+          }
+        },
+        "adjustments": [
+          {
+            "path": "grid",
+            "requested": "hidden",
+            "effective": "standard",
+            "adjustedBy": "accessibility",
+            "reasonCodes": [
+              "accessibility.grid_structure_required"
+            ]
+          },
+          {
+            "path": "line.points",
+            "requested": "show",
+            "effective": "auto",
+            "adjustedBy": "correctness",
+            "reasonCodes": [
+              "legibility.points_density_limited"
+            ]
+          },
+          {
+            "path": "line.widthPx",
+            "requested": 1.5,
+            "effective": 2,
+            "adjustedBy": "accessibility",
+            "reasonCodes": [
+              "accessibility.line_width_minimum"
+            ]
+          },
+          {
+            "path": "seriesEncodings",
+            "requested": [
+              "line:0:color",
+              "line:1:color",
+              "line:2:color"
+            ],
+            "effective": [
+              "line:0:dash=:point=circle:fill=solid:boundary=0",
+              "line:1:dash=7-4:point=rect:fill=solid:boundary=0",
+              "line:2:dash=2-3:point=triangle:fill=solid:boundary=0"
+            ],
+            "adjustedBy": "accessibility",
+            "reasonCodes": [
+              "accessibility.non_color_encoding_required"
+            ]
+          },
+          {
+            "path": "tooltip",
+            "requested": "disabled",
+            "effective": "enabled",
+            "adjustedBy": "capability",
+            "reasonCodes": [
+              "capability.tooltip_exact_data_unavailable"
+            ]
+          }
+        ],
+        "renderShapeVersion": "chart-shape/1",
+        "presentationPolicyVersion": "chart-presentation/1"
+      }
     }
   ]
 }

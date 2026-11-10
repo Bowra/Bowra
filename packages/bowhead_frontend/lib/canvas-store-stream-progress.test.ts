@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * WP3 (design D6 + review): canvas-store reducer correctness; selectStreamProgress
  * progress selector + onCanvasReordered preserves sections.

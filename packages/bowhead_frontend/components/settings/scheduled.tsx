@@ -31,7 +31,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { entitlementErrorMessage } from "@/lib/entitlement-error";
-import type { Locale } from "@/lib/locale";
+import { formatShortDateTime, formatTime, type Locale } from "@/lib/locale";
 import {
   createScheduledJob,
   deleteScheduledJob,
@@ -412,8 +412,16 @@ function cronToShape(cron: string): CronShape {
   return { preset: "custom", time: "09:00", weekday: "mon" };
 }
 
-/** cron → readable Chinese/English (list row + readout). @manual → manual. */
-function cronToHuman(cron: string, t: ScheduleT): string {
+/**
+ * A cron wall-clock time in the interface language's clock ("3:00 PM" / "15:00"). The hour and minute are the
+ * schedule's own, so they are formatted as-is (UTC in, UTC out) and never shifted into the viewer's time zone.
+ */
+function cronClock(hour: number, minute: number, locale: string): string {
+  return formatTime(Date.UTC(2000, 0, 1, hour, minute), locale, { timeZone: "UTC" });
+}
+
+/** cron → readable text in the interface language (list row + readout). @manual → manual. */
+export function cronToHuman(cron: string, t: ScheduleT, locale: string): string {
   const c = (cron || "").trim();
   if (c === MANUAL_CRON) return t("human_manual");
   const f = c.split(/\s+/).filter(Boolean);
@@ -427,7 +435,7 @@ function cronToHuman(cron: string, t: ScheduleT): string {
   const simpleTime = Number.isInteger(minN) && Number.isInteger(hourN)
     && minN >= 0 && minN <= 59 && hourN >= 0 && hourN <= 23;
   if (!simpleTime || dom !== "*" || mon !== "*") return t("human_cron", { cron: c });
-  const time = `${pad2(hourN)}:${pad2(minN)}`;
+  const time = cronClock(hourN, minN, locale);
   if (dow === "*") return t("human_daily", { time });
   if (dow === "1-5") return t("human_weekday", { time });
   if (/^[0-6]$/.test(dow)) {
@@ -451,21 +459,17 @@ function presetIcon(cron: string): ReactNode {
 }
 
 // ─── time formatting ──────────────────────────────────────────────────────────
-function formatAbsolute(iso?: string | null): string {
+function formatAbsolute(iso: string | null | undefined, locale: string): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  }).format(d);
+  return formatShortDateTime(iso, locale) || iso;
 }
 
-function formatRelative(iso?: string | null): string {
+function formatRelative(iso: string | null | undefined, locale: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const abs = Math.abs(diffMs);
   const min = Math.round(diffMs / 60000);
   const hr = Math.round(diffMs / 3_600_000);
@@ -726,6 +730,7 @@ function RoutineRow({
   ) => void;
 }) {
   const presentError = useScheduledErrorPresentation();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [runs, setRuns] = useState<ScheduledJobRunDTO[] | null>(null);
   const [runsError, setRunsError] =
@@ -735,7 +740,7 @@ function RoutineRow({
   const paused = job.status === "paused";
   const expired = job.status === "expired";
   const inactive = paused || expired;  // visually "off" — expired is not a healthy active job
-  const human = cronToHuman(job.cron, t);
+  const human = cronToHuman(job.cron, t, locale);
 
   const loadRuns = useCallback(async () => {
     setRunsError(null);
@@ -873,10 +878,10 @@ function RoutineRow({
         <div className="legacy-sched-r-meta">
           <div className={`legacy-sched-meta-ln${paused ? " is-dim" : ""}`}>
             <span className="legacy-sched-meta-ic"><Clock size={14} /></span>
-            <span>{t("next_run")} <span className="legacy-sched-mono">{paused ? t("no_next_run") : formatAbsolute(job.next_run_at)}</span></span>
+            <span>{t("next_run")} <span className="legacy-sched-mono">{paused ? t("no_next_run") : formatAbsolute(job.next_run_at, locale)}</span></span>
           </div>
           <div className="legacy-sched-meta-ln-meta-sub">
-            {paused ? t("next_run_paused_hint") : formatRelative(job.next_run_at)}
+            {paused ? t("next_run_paused_hint") : formatRelative(job.next_run_at, locale)}
           </div>
           {failBadge ? <div className="legacy-sched-meta-ln">{failBadge}</div> : null}
         </div>
@@ -928,8 +933,8 @@ function RoutineRow({
           {boundChip ? <div className="legacy-sched-meta-ln">{boundChip}</div> : null}
           <div className={`legacy-sched-meta-ln${paused ? " is-dim" : ""}`}>
             <span className="legacy-sched-meta-ic"><Clock size={14} /></span>
-            <span>{t("next_run")} <span className="legacy-sched-mono">{paused ? t("no_next_run") : formatAbsolute(job.next_run_at)}</span>
-              {!paused && job.next_run_at ? ` · ${formatRelative(job.next_run_at)}` : ""}</span>
+            <span>{t("next_run")} <span className="legacy-sched-mono">{paused ? t("no_next_run") : formatAbsolute(job.next_run_at, locale)}</span>
+              {!paused && job.next_run_at ? ` · ${formatRelative(job.next_run_at, locale)}` : ""}</span>
           </div>
           {failBadge ? <div className="legacy-sched-meta-ln">{failBadge}</div> : null}
         </div>
@@ -985,7 +990,7 @@ function RoutineRow({
 
 const DELIVERY_OUTCOMES = new Set([
   "resolved", "read", "archived", "not_member", "opted_out", "smtp_unconfigured", "item_missing", "not_recipient",
-  "rejected", "retries_exhausted", "send_failed", "check_failed",
+  "rejected", "retries_exhausted", "send_failed", "check_failed", "merged_into_result",
 ]);
 
 /**
@@ -1016,6 +1021,7 @@ function RunDeliveries({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
 }
 
 function RunRow({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
+  const locale = useLocale();
   // State colors: styles/ui-controls-legacy.css .legacy-badge-sched-run.is-* (original inline state colors moved verbatim).
   // Awaiting your answer is unfinished like running, but without pulse: waiting for a person, not executing.
   const tone: Record<ScheduledRunStatus, string> = {
@@ -1049,7 +1055,7 @@ function RunRow({ run, t }: { run: ScheduledJobRunDTO; t: ScheduleT }) {
       </span>
       <div className="legacy-sched-run-main">
         <div className="legacy-sched-run-line">
-          {formatAbsolute(run.started_at)} {dur ? <span className="legacy-sched-run-time">· {dur}</span> : null}
+          {formatAbsolute(run.started_at, locale)} {dur ? <span className="legacy-sched-run-time">· {dur}</span> : null}
         </div>
         {runError ? (
           <ErrorNotice
@@ -1106,6 +1112,7 @@ export function RoutineDrawer({
   onDiscard?: () => void;
 }) {
   const embedded = variant === "embedded";
+  const locale = useLocale();
   const presentError = useScheduledErrorPresentation();
   // Batch 0.5 P2-13: copilot UI copy moves to settings.config_copilot namespace; FieldAi/AiFillPanel
   // no longer depend on settings.scheduled, so other forms directly reuse the same copy.
@@ -1300,7 +1307,7 @@ export function RoutineDrawer({
     ? customCron.trim()
     : presetToCron(preset, time, weekday);
 
-  const humanReadout = cronToHuman(effectiveCron, t);
+  const humanReadout = cronToHuman(effectiveCron, t, locale);
   const isManual = effectiveCron === MANUAL_CRON;
 
   const addEmail = (raw: string) => {

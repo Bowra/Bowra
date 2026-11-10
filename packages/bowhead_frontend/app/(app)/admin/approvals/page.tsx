@@ -9,6 +9,7 @@ import { AdminShell } from "@/components/admin-shell";
 import { AccessWhoCanHelpWhenEnabled } from "@/components/access/access-request-panel";
 import { AdminRouteState } from "@/components/shell/AdminRouteState";
 import { useAuthRedirect } from "@/lib/auth/use-auth-redirect";
+import { formatDate, getCurrentLocale } from "@/lib/locale";
 import { TEAM_SETTINGS_ROLES } from "@/lib/settings-navigation";
 import { notifySettingsNavCountsChanged } from "@/lib/settings-nav-signal";
 import { ErrorDiagnosticsInline, type ShownError, shownError } from "@/components/error-notice";
@@ -348,7 +349,7 @@ function relTime(iso: string, t: TFn): string {
     if (sec < 60) return t("rel_seconds_ago", { n: sec });
     if (sec < 3600) return t("rel_minutes_ago", { n: Math.floor(sec / 60) });
     if (sec < 86400) return t("rel_hours_ago", { n: Math.floor(sec / 3600) });
-    return d.toLocaleDateString();
+    return formatDate(d, getCurrentLocale()) || iso;
   } catch {
     return iso;
   }

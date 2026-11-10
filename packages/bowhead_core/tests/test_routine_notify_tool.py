@@ -80,6 +80,15 @@ def test_the_turn_adapter_hides_the_tool_unless_the_turn_is_a_scheduled_run(monk
     assert "routine_notify" not in _run(turn_runner._resolve_unconfigured_capability_tools(object(), scheduled))
 
 
+def test_the_agent_is_told_it_is_in_a_scheduled_run():
+    # The tool is offered only in scheduled runs; a conditional wording made the Agent decide the
+    # current conversation was not one and refuse to alert.
+    description = routine_notify_tool._schema().description
+
+    assert description.startswith("This Turn is a run of the owner's scheduled task")
+    assert "a condition the task's instructions ask to be alerted about holds" in description
+
+
 def test_a_call_outside_a_scheduled_run_is_refused(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     out = _call({"level": "urgent", "reason": REASON}, SimpleNamespace(scheduled_run=None))

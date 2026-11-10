@@ -152,25 +152,39 @@ async def document_instruction_in_tx(db: Connection, *, worker: DocumentTurnOwne
 
     if prior:
         await job_task_source_in_tx(db, job=job)
-        text = prior[0]
+        request = prior[0]
     else:
-        text = await task_instruction_in_tx(db, job=job, fallback=source.user_text)
-    legacy_text = text
+        request = await task_instruction_in_tx(db, job=job, fallback=source.user_text)
     try:
         answers = await prior_document_answers_in_tx(db, worker=worker, job_id=job_id)
     except ValueError as exc:
         # Unsupported history cannot be reconstructed from displayed prose.
         raise DocumentRequestError("document_history_unavailable") from exc
-    history = legacy_history = None
-    if answers:
-        legacy_history = WorkerInput("Document clarification history.json", "data", _json({"request": text, "prior_answers": answers}).encode())
-        # Control fields such as option_index are not business facts the model may copy into a slide.
-        history = _answer_history(answers)
-        legacy_text += "\n\nUse the canonical earlier answers in Document clarification history.json to resolve the prior questions."
-        text = _clarified_instruction_v5(text, answers) if runtime.planner_profile == CURRENT_PROFILE else _clarified_instruction(text)
+
+    def compose(request: str) -> tuple[str, str, WorkerInput | None, WorkerInput | None]:
+        text = legacy_text = request
+        history = legacy_history = None
+        if answers:
+            legacy_history = WorkerInput("Document clarification history.json", "data", _json({"request": text, "prior_answers": answers}).encode())
+            # Control fields such as option_index are not business facts the model may copy into a slide.
+            history = _answer_history(answers)
+            legacy_text += "\n\nUse the canonical earlier answers in Document clarification history.json to resolve the prior questions."
+            text = _clarified_instruction_v5(text, answers) if runtime.planner_profile == CURRENT_PROFILE else _clarified_instruction(text)
+        return text, legacy_text, history, legacy_history
+
+    text, legacy_text, history, legacy_history = compose(request)
     async with db.execute("SELECT instruction,context_json FROM document_planning_attempts WHERE job_id=? AND attempt_no=1", (job_id,)) as cursor:
         retained = await cursor.fetchone()
     if retained is not None:
+        if not prior and retained[0] not in {text, legacy_text}:
+            # Attempts retained before repeated supplements were collapsed keep their exact rendered bytes.
+            try:
+                expanded = await task_instruction_in_tx(db, job=job, fallback=source.user_text, collapse_repeats=False)
+            except DocumentRequestError:
+                # A newer job may exceed the old rendering limit; the checkpoint check below still fails closed.
+                expanded = request
+            if expanded != request:
+                text, legacy_text, history, legacy_history = compose(expanded)
         # Preserve immutable old checkpoints, but never trust arbitrary retained instructions.
         if runtime.planner_profile != CURRENT_PROFILE and retained[0] == legacy_text:
             history = legacy_history

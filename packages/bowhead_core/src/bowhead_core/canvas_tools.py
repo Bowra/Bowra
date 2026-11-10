@@ -368,7 +368,7 @@ async def _add_chart(
     _dataset_cache: list[_PreparedChartDataset] | None = None,
     _binding_id: str | None = None,
 ) -> Any:
-    from bowhead_core.chart.edit_guard import blocked, denial
+    from bowhead_core.chart.edit_guard import blocked, denial, replaced_protected_chart
 
     if "views" in args:
         unsupported = set(args) & {"series", "hint", "limit", "sort_by", "columns", "axes", "group_by", "force_kind"}
@@ -384,8 +384,12 @@ async def _add_chart(
             return {"error": str(exc), "error_kind": "invalid_chart_expression", "path": exc.path}
 
     protected = await blocked(ctx)
-    if protected:
-        return denial(history_unavailable="chart_guard_history_unavailable" in protected)
+    if "chart_guard_history_unavailable" in protected:
+        return denial(history_unavailable=True)
+    # A failed in-place edit protects that chart only; an unrelated new chart
+    # in the same turn is still allowed.
+    if replaced := await replaced_protected_chart(ctx, protected, args, resolve_data_ref=lambda ref: _guard_data_ref(ref, ctx)):
+        return denial(section_id=replaced)
     if args.get("_args_parse_error"):
         return {"error": f"args parse failed: {args['_args_parse_error']}"}
     for field in ("show_legend", "show_data_labels"):
@@ -1128,6 +1132,7 @@ def _remove_chart_schema() -> ToolSchema:
             "收起画布上**上一轮**的图表（图、图片、数据表都算）。两种情况用它：\n"
             '- 你刚用 add_chart 画的新图取代了上一轮的某张图（同一主题换了口径/范围/只留前 N）→ reason="replaced"；\n'
             '- 用户要求去掉某张图 → reason="removed"。\n'
+            "只改上一轮某张图的展示（标题、颜色、标签、图例、格式、支持的图表类型）不要新画再收旧图：用 read_chart + edit_chart 就地改它。\n"
             "收起不是删除：图进报告末尾的「已收起的图表」，用户展开可以查看。只收你确定不再需要的；没被取代的旧图不要动。"
             "正文里还引用着它（`[figure:id]`）的图会被拒——先用 write_report 把那处锚改成新图或删掉。"
             "id 用 add_chart 返回的 prior_charts 或 read_report 的 figures 里的真实 id，**绝不编造**。"
@@ -1872,6 +1877,13 @@ async def _flatten_design(args: dict[str, Any], ctx: ToolExecutionContext) -> An
 
 #: Bare 12-digit hex artifact ID, missing only the art_ prefix for validity.
 _BARE_ARTIFACT_HEX_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _guard_data_ref(ref: str, ctx: ToolExecutionContext) -> str:
+    """Normalize a requested data reference the same way add_chart resolves it."""
+    if _BARE_ARTIFACT_HEX_RE.match(ref):
+        ref = f"art_{ref}"
+    return resolve_simple_data_ref(ref, ctx)[0]
 
 
 #: Number of named ranking entries in notes: sufficient to identify leaders without bloating note text.

@@ -24,19 +24,19 @@ from bowhead_core.user_store import UserStore, _id, _now
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
 from fastapi import FastAPI
-from gateway_legacy_database import TARGET_FILES, upgrade
+from gateway_legacy_database import TARGET_FILES
 
 from bowhead_core import SessionStore
 
 
 @pytest.fixture
-async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation):
+async def app_ctx(tmp_path, monkeypatch, complete_community_http_installation, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_secret_credits_admin_e2e_xxx")
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "prod")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
     monkeypatch.delenv("BOWHEAD_PROD", raising=False)
     db = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(db.with_name("bowhead.db"))
     sess = SessionStore(str(db))
     await sess.initialize()
     user_store = UserStore(str(db))

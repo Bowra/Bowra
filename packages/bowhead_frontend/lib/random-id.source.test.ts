@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `crypto.randomUUID` is allowed only in `lib/random-id.ts`.
  *

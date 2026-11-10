@@ -160,6 +160,33 @@ async def test_retained_instruction_is_verified_without_rewriting(ctx: Context, 
     assert not native.calls and not native.worker.runs
 
 
+@pytest.mark.parametrize("retained", ["expanded", "changed"])
+async def test_attempt_retained_before_supplement_collapse_still_resumes(ctx: Context, native: SimpleNamespace, retained: str, monkeypatch) -> None:
+    receipt = await native.service.submit(native.context, ctx.proposal)
+    await DocumentInputStore(ctx.artifacts).freeze(scope=SCOPE, job_id=receipt.job_id)
+    collapsed = ctx.source.user_text + "\n\nCurrent user supplement:\nShow the draft."
+    expanded = ctx.source.user_text + "\n\nEarlier user supplement:\nShow the draft.\n\nCurrent user supplement:\nShow the draft."
+
+    async def rendered(db, *, job, fallback, collapse_repeats=True):
+        return collapsed if collapse_repeats else expanded
+
+    monkeypatch.setattr("bowhead_core.documents.task_sources.task_instruction_in_tx", rendered)
+    async with open_shared_ctx(ctx.path) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        assert (await document_instruction_in_tx(db, worker=owner(native), job_id=receipt.job_id)).text == collapsed
+        text = expanded if retained == "expanded" else expanded + " Changed instruction"
+        await begin_document_planning_in_tx(db, worker=owner(native), job_id=receipt.job_id, instruction=text)
+        await db.commit()
+    async with open_shared_ctx(ctx.path) as db:
+        await db.execute("BEGIN")
+        if retained == "changed":
+            with pytest.raises(DocumentRequestError, match="document_checkpoint_unavailable"):
+                await document_instruction_in_tx(db, worker=owner(native), job_id=receipt.job_id)
+        else:
+            assert (await document_instruction_in_tx(db, worker=owner(native), job_id=receipt.job_id)).text == expanded
+    assert not native.calls and not native.worker.runs
+
+
 async def test_no_history_preserves_the_original_instruction(ctx: Context, native: SimpleNamespace) -> None:
     receipt = await native.service.submit(native.context, ctx.proposal)
     async with open_shared_ctx(ctx.path) as db:

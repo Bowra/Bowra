@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,7 +54,7 @@ from bowhead_gateway.settings import Settings
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gateway_legacy_database import TARGET_FILES, upgrade
+from gateway_legacy_database import TARGET_FILES
 from lark_oapi.ws.const import (
     HEADER_MESSAGE_ID,
     HEADER_SEQ,
@@ -1786,9 +1787,10 @@ def test_composed_children_follow_the_existing_card_chart_budget() -> None:
 async def test_bridge_auto_binds_email_and_mirrors_turn_events(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
 
     user_store = UserStore(db_path)
     await user_store.initialize()
@@ -1906,8 +1908,9 @@ async def test_bridge_auto_binds_email_and_mirrors_turn_events(
 async def test_bridge_threads_team_datarc_client_into_turn_request(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     team_datarc_client = object()
     factory = FakeDatarcClientFactory(team_datarc_client)
     fixture.bridge.app.state.datarc_connection_store = FakeDatarcConnectionStore(
@@ -1931,8 +1934,9 @@ async def test_bridge_threads_team_datarc_client_into_turn_request(
 async def test_bridge_fails_closed_when_team_datarc_connection_is_broken(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fixture.bridge.app.state.datarc_connection_store = FakeDatarcConnectionStore(auth_key=None)
     fixture.bridge.app.state.datarc_client_factory = FakeDatarcClientFactory(object())
 
@@ -1946,10 +1950,12 @@ async def test_bridge_fails_closed_when_team_datarc_connection_is_broken(
 async def test_bridge_email_miss_creates_manual_binding_session(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
     )
     fixture.fake_client.email = "missing@example.com"
@@ -1981,10 +1987,12 @@ async def test_bridge_email_miss_creates_manual_binding_session(
 async def test_bridge_binding_link_fails_closed_without_public_entry(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
     )
     fixture.fake_client.email = "missing@example.com"
@@ -2008,8 +2016,9 @@ async def test_bridge_binding_link_fails_closed_without_public_entry(
 async def test_long_connection_message_status_moves_to_done_after_turn_completion(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     worker = FeishuLongConnectionWorker(
         bridge=fixture.bridge,
         store=fixture.feishu_store,
@@ -2031,10 +2040,12 @@ async def test_long_connection_message_status_moves_to_done_after_turn_completio
 async def test_bridge_throttles_progress_card_patches_and_flushes_final(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
         orchestrator_cls=BurstProgressOrchestrator,
     )
@@ -2059,10 +2070,12 @@ async def test_bridge_throttles_progress_card_patches_and_flushes_final(
 async def test_group_public_policy_disabled_blocks_group_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
         group_public=False,
     )
@@ -2078,11 +2091,13 @@ async def test_group_public_policy_disabled_blocks_group_turn(
 async def test_bridge_blocks_unverified_user_when_email_verification_required(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "1")
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
         email_verified=False,
     )
@@ -2106,8 +2121,9 @@ async def test_bridge_blocks_unverified_user_when_email_verification_required(
 async def test_bridge_fails_closed_when_member_uid_missing_in_prod_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fixture.bridge.app.state.member_resolver = None
     fixture.bridge.app.state.settings = Settings(auth_mode="jwt")
 
@@ -2127,8 +2143,9 @@ async def test_bridge_fails_closed_when_member_uid_missing_in_prod_mode(
 async def test_bridge_resolves_member_uid_with_datarc_workspace_and_user_email(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fake_datarc = FakeDatarcMembers(member_uid="member_from_datarc")
     fixture.bridge.app.state.member_resolver = MemberUidResolver(fake_datarc)  # type: ignore[arg-type]
     fixture.bridge.app.state.datarc_client_factory = FakeDatarcClientFactory(fake_datarc)
@@ -2152,8 +2169,9 @@ async def test_bridge_resolves_member_uid_with_datarc_workspace_and_user_email(
 async def test_bridge_member_uid_transient_error_sends_retryable_card(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fixture.bridge.app.state.member_resolver = BoomMemberResolver()
     fixture.bridge.app.state.settings = Settings(auth_mode="jwt")
 
@@ -2169,8 +2187,9 @@ async def test_bridge_member_uid_transient_error_sends_retryable_card(
 async def test_bridge_credit_deny_does_not_start_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     async with open_shared_ctx(fixture.feishu_store.db_path) as db:
         await db.execute(
             "UPDATE users SET credit_balance=0 WHERE id=?",
@@ -2194,10 +2213,12 @@ async def test_bridge_credit_deny_does_not_start_turn(
 async def test_group_entitlement_deny_is_ephemeral_and_does_not_start_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
         group_public=True,
     )
@@ -2220,10 +2241,12 @@ async def test_group_entitlement_deny_is_ephemeral_and_does_not_start_turn(
 async def test_group_public_policy_enabled_allows_group_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
         group_public=True,
     )
@@ -2245,8 +2268,9 @@ async def test_group_public_policy_enabled_allows_group_turn(
 async def test_multi_workspace_requires_picker_then_uses_selected_binding(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=2)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=2)
 
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"}))
 
@@ -2309,8 +2333,9 @@ async def test_multi_workspace_requires_picker_then_uses_selected_binding(
 async def test_switch_workspace_command_prompts_picker_without_starting_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=2)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=2)
     await fixture.feishu_store.upsert_binding(
         tenant_key="tenant_1",
         open_id="ou_user",
@@ -2364,8 +2389,9 @@ async def test_switch_workspace_command_prompts_picker_without_starting_turn(
 async def test_switch_workspace_picker_follows_message_language_not_account_column(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=2, locale="en-US")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=2, locale="en-US")
     await fixture.feishu_store.upsert_binding(
         tenant_key="tenant_1",
         open_id="ou_user",
@@ -2392,10 +2418,11 @@ async def test_switch_workspace_picker_follows_message_language_not_account_colu
 async def test_mirror_fallback_locale_uses_saved_preference_not_account_column(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_core.user_settings_store import UserSettingsStore
 
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale="zh-CN")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale="zh-CN")
     await fixture.feishu_store.upsert_binding(
         tenant_key="tenant_1",
         open_id="ou_user",
@@ -2419,8 +2446,11 @@ async def test_mirror_fallback_locale_uses_saved_preference_not_account_column(
 async def test_group_disabled_notice_follows_message_language_not_account_column(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, group_public=False, locale="en-US")
+    fixture = await _build_bridge_fixture(
+        tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, group_public=False, locale="en-US"
+    )
     await fixture.feishu_store.upsert_binding(
         tenant_key="tenant_1",
         open_id="ou_user",
@@ -2441,8 +2471,9 @@ async def test_group_disabled_notice_follows_message_language_not_account_column
 async def test_invalid_workspace_binding_prompts_picker(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=2)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=2)
     await fixture.feishu_store.upsert_workspace_binding(
         tenant_key="tenant_1",
         chat_id="oc_chat",
@@ -2462,8 +2493,9 @@ async def test_invalid_workspace_binding_prompts_picker(
 async def test_workspace_select_rejects_workspace_without_datarc_mapping(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=2)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=2)
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"}))
 
     assert result["status"] == "needs_workspace"
@@ -2502,8 +2534,9 @@ async def test_workspace_select_rejects_workspace_without_datarc_mapping(
 async def test_clarification_callback_requires_clicker_and_resolves_owner(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
     await clarification_store.initialize()
     fixture.bridge.app.state.clarification_store = clarification_store
@@ -2604,10 +2637,11 @@ async def test_clarification_callback_requires_clicker_and_resolves_owner(
 async def test_clarification_readiness_failure_keeps_feishu_choice_pending(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_gateway import turn_service
 
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
     await clarification_store.initialize()
     fixture.bridge.app.state.clarification_store = clarification_store
@@ -2675,10 +2709,11 @@ async def test_clarification_readiness_failure_keeps_feishu_choice_pending(
 async def test_clarification_model_unavailable_leaves_feishu_card_pending(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_gateway import turn_service
 
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
     await clarification_store.initialize()
     fixture.bridge.app.state.clarification_store = clarification_store
@@ -2735,10 +2770,12 @@ async def test_clarification_terminal_surface_guard_blocks_source_write(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
     protocol_store,
+    initialize_migrated_core_database,
 ) -> None:
     fixture = await _build_bridge_fixture(
         tmp_path,
         monkeypatch,
+        initialize_migrated_core_database,
         workspace_count=1,
     )
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
@@ -2794,8 +2831,9 @@ async def test_clarification_terminal_surface_guard_blocks_source_write(
 async def test_lifecycle_rejection_sends_finite_error_card_without_turn(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
 
     class RejectingLifecycle:
         async def revive(self, **_kwargs):
@@ -2823,8 +2861,9 @@ async def test_lifecycle_rejection_sends_finite_error_card_without_turn(
 async def test_clarification_resume_rejection_returns_warning_not_false_success(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
     await clarification_store.initialize()
     fixture.bridge.app.state.clarification_store = clarification_store
@@ -2909,10 +2948,11 @@ async def test_clarification_resume_rejection_returns_warning_not_false_success(
 async def test_clarification_resume_credit_exhausted_keeps_card_pending(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     """卡片续跑与新消息同一 credit 准入：拦在答案被消费之前——卡片保持 pending、如实告知额度用完，
     充值后再点同一张卡就继续（web 侧同形，见 test_clarifications_routes）。"""
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     clarification_store = ClarificationStore(fixture.feishu_store.db_path)
     await clarification_store.initialize()
     fixture.bridge.app.state.clarification_store = clarification_store
@@ -3038,8 +3078,9 @@ async def test_clarification_resume_credit_exhausted_keeps_card_pending(
 async def test_retry_skip_callbacks_return_honest_ack_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     turn_log_store = TurnLogStore(str(fixture.feishu_store.db_path))
     await turn_log_store.initialize()
     fixture.bridge.app.state.turn_log_store = turn_log_store
@@ -3091,8 +3132,9 @@ async def test_retry_skip_callbacks_return_honest_ack_only(
 async def test_member_uid_dev_fallback_is_dev_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fixture.bridge.app.state.member_resolver = None
     fixture.bridge.app.state.settings = Settings(auth_mode="jwt")
 
@@ -3118,6 +3160,7 @@ class BridgeFixture:
 async def _build_bridge_fixture(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_database: Callable[[Path], None],
     *,
     workspace_count: int,
     group_public: bool = False,
@@ -3126,7 +3169,7 @@ async def _build_bridge_fixture(
     orchestrator_cls: type[Any] | None = None,
 ) -> BridgeFixture:
     db_path = tmp_path / TARGET_FILES["core"]
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_database(db_path)
 
     user_store = UserStore(db_path)
     await user_store.initialize()
@@ -3700,11 +3743,13 @@ def _answer_cards(client: FakeFeishuClient) -> list[dict[str, Any]]:
     return [reply for reply in client.card_replies if str(reply.get("uuid") or "").startswith("feishu_answer_")]
 
 
-async def test_bridge_replies_unconfigured_card_and_skips_turn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bridge_replies_unconfigured_card_and_skips_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialize_migrated_core_database
+) -> None:
     """credential-readiness 批2：有团队但解析不出团队 router → 渠道内 error_card
     （文案走 IM 双语目录单源）+ 不建 turn；此前不带 router 继续跑，prod 下 turn 内
     打到 RefusalAdapter loud 失败但无渠道级归因。"""
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
     fixture.bridge.app.state.team_router_registry = None  # Unconfigured state.
 
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"}))
@@ -3737,12 +3782,13 @@ async def test_card_snapshot_then_saved_preference_reach_real_card_callbacks(
     selected: str,
     choice: str,
     approval: str,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_core.user_settings_store import UserSettingsStore
     from bowhead_gateway.im.error_messages import im_interface_message
 
     # The account column disagrees on purpose: only the saved preference selects card copy.
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale="zh-CN")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale="zh-CN")
     settings = UserSettingsStore(fixture.feishu_store.db_path)
     await settings.init()
     await settings.set(fixture.user.id, "ui_language", locale)
@@ -3823,13 +3869,14 @@ async def test_saved_interface_language_reaches_mirrored_cards_and_answer_langua
     locale: str,
     processing: str,
     answer: str,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_core.team_settings_store import TeamSettingsStore
     from bowhead_core.user_settings_store import UserSettingsStore
 
     monkeypatch.setenv("FEATURE_GERMAN_AI_OUTPUT", "1")
     # The account locale column is not a saved preference; the saved interface setting is.
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale="zh-CN")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale="zh-CN")
     settings = UserSettingsStore(fixture.feishu_store.db_path)
     await settings.init()
     await settings.set(fixture.user.id, "ui_language", locale)
@@ -3871,10 +3918,11 @@ async def test_saved_interface_language_reaches_mirrored_cards_and_answer_langua
 async def test_answer_card_title_follows_answer_language_while_other_cards_follow_interface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_core.user_settings_store import UserSettingsStore
 
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale="zh-CN")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale="zh-CN")
     settings = UserSettingsStore(fixture.feishu_store.db_path)
     await settings.init()
     await settings.set(fixture.user.id, "ui_language", "zh-CN")
@@ -3902,11 +3950,12 @@ def test_feishu_answer_card_uses_answer_locale_for_title_and_empty_fallback() ->
 async def test_unset_language_follows_the_feishu_message_then_the_previous_answer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    initialize_migrated_core_database,
 ) -> None:
     from bowhead_gateway.im.error_messages import im_interface_message
 
     # The account locale column says English; nothing is saved, so the Chinese question wins.
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale="en-US")
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale="en-US")
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": "看一下上个月的 GMV"}))
     assert result["status"] == "started"
     await _wait_for(lambda: len(_answer_cards(fixture.fake_client)) == 1)
@@ -3928,8 +3977,10 @@ async def test_unset_language_follows_the_feishu_message_then_the_previous_answe
 
 
 @pytest.mark.asyncio
-async def test_unbound_feishu_messages_and_callbacks_default_to_english(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, workspace_count=1, locale=None)
+async def test_unbound_feishu_messages_and_callbacks_default_to_english(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialize_migrated_core_database
+) -> None:
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, locale=None)
     result = await fixture.bridge.handle_message_event(_message_event(content={"text": ""}))
     assert result["status"] == "empty_message"
     card = fixture.fake_client.card_replies[-1]["content"]
@@ -4001,3 +4052,129 @@ def test_feishu_step_errors_use_safe_localized_copy(locale: str, expected: str) 
     assert state.steps["step_1"].output == expected
     renderer.apply_event_to_state(state, "step_done", {"step_id": "step_1", "state": "failure", "error": {"message_zh": "HTTP 500 raw secret"}})
     assert "raw secret" not in state.steps["step_1"].output
+
+
+class FollowUpOrchestrator(FakeOrchestrator):
+    """The first Turn waits for a buffered message, then hands it to a continuation Turn."""
+
+    follow_up_turn_id = "t_followup001"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.steer_buffered = asyncio.Event()
+
+    async def run_turn(self, req: TurnRequest) -> TurnResult:
+        assert self.requests is not None
+        self.requests.append(req)
+        await asyncio.wait_for(self.steer_buffered.wait(), timeout=3)
+        bus, _floor = await self.event_registry.projection_checkpoint(req.turn_id)
+        assert bus is not None
+        await bus.emit(OrchestratorEvent(event_type="final_answer", turn_id=req.turn_id, payload={"text": "GMV 是 100 万"}))
+        # The shared executor announces the continuation before the parent's done.
+        await bus.emit(
+            OrchestratorEvent(
+                event_type="turn.follow_up",
+                turn_id=req.turn_id,
+                payload={"follow_up_turn_id": self.follow_up_turn_id, "reason": "steer_drain", "buffered_count": 1},
+            )
+        )
+        assert await self.session_store.mark_completed(
+            turn_id=req.turn_id,
+            intent=IntentType.LOOKUP.value,
+            final_answer="GMV 是 100 万",
+            tokens_input=0,
+            tokens_output=0,
+            cost_usd=0.0,
+        )
+        await bus.emit(OrchestratorEvent(event_type="done", turn_id=req.turn_id, payload={"status": "completed"}))
+        # It then admits and runs the continuation Turn on its own bus.
+        child = await self.event_registry.get_or_create(self.follow_up_turn_id, exclusive_producer=True)
+        for event_type, payload in (
+            ("step_list_card_created", {}),
+            ("final_answer", {"text": "华东 60 万，华南 40 万"}),
+            ("done", {"status": "completed"}),
+        ):
+            await child.emit(OrchestratorEvent(event_type=event_type, turn_id=self.follow_up_turn_id, payload=payload))
+        return TurnResult(turn_id=req.turn_id, status=TurnStatus.COMPLETED, intent=IntentType.LOOKUP, final_answer="GMV 是 100 万")
+
+
+@pytest.mark.asyncio
+async def test_message_buffered_during_a_turn_gets_its_continuation_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialize_migrated_core_database
+) -> None:
+    fixture = await _build_bridge_fixture(
+        tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1, orchestrator_cls=FollowUpOrchestrator
+    )
+    orchestrator = fixture.orchestrator
+    follow_up_turn_id = FollowUpOrchestrator.follow_up_turn_id
+
+    assert (await fixture.bridge.handle_message_event(_message_event(content={"text": "看 GMV"})))["status"] == "started"
+    await _wait_for(lambda: len(orchestrator.requests) == 1)
+    steer = _message_event(content={"text": "按区域拆一下"})
+    steer["header"]["event_id"] = "evt_2"
+    steer["event"]["message"]["message_id"] = "om_msg_2"
+    assert (await fixture.bridge.handle_message_event(steer))["status"] == "buffered"
+    orchestrator.steer_buffered.set()
+
+    await _wait_for(lambda: len(_answer_cards(fixture.fake_client)) == 2, timeout_s=3)
+    first, follow_up = _answer_cards(fixture.fake_client)
+    assert first["message_id"] == "om_msg"
+    # The continuation answers the buffered message, with its own status card under it.
+    assert follow_up["message_id"] == "om_msg_2"
+    assert follow_up["uuid"] == f"feishu_answer_{follow_up_turn_id}"
+    assert "华东 60 万，华南 40 万" in json.dumps(follow_up["content"], ensure_ascii=False)
+    status_cards = [reply for reply in fixture.fake_client.card_replies if reply["uuid"] == f"feishu_card_{follow_up_turn_id}"]
+    assert [reply["message_id"] for reply in status_cards] == ["om_msg_2"]
+    link = await fixture.feishu_store.get_turn_link(follow_up_turn_id)
+    assert link is not None and link.source_message_id == "om_msg_2" and link.card_message_id
+    assert "steer_source_message_id" not in link.meta
+    await _wait_for(lambda: any(patch["message_id"] == link.card_message_id for patch in fixture.fake_client.patches), timeout_s=3)
+    # This fake Turn never drains the steer buffer, so its dispatch is not settled here.
+    await orchestrator.event_registry.close(orchestrator.requests[0].turn_id)
+    await orchestrator.event_registry.close(follow_up_turn_id)
+
+
+@pytest.mark.asyncio
+async def test_continuation_that_never_starts_reports_its_persisted_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initialize_migrated_core_database
+) -> None:
+    from bowhead_gateway.feishu import bridge as feishu_bridge
+    from bowhead_gateway.im.error_messages import im_error_message
+
+    monkeypatch.setattr(feishu_bridge, "_UNSTARTED_TURN_CHECK_S", 0.01)
+    fixture = await _build_bridge_fixture(tmp_path, monkeypatch, initialize_migrated_core_database, workspace_count=1)
+    store = fixture.orchestrator.session_store
+    session_id = "feishu:tenant_1:oc_chat:ou_user"
+    await store.ensure_session(session_id=session_id, workspace_id=fixture.workspace_ids[0], user_id=fixture.user.id)
+    # Credits ran out before the continuation could run: it settles without a producer.
+    await store.record_turn(turn_id="t_child000001", session_id=session_id, user_text="按区域拆一下")
+    assert await store.mark_failed(turn_id="t_child000001", error="accepted steer could not be executed", error_kind="user_credit_exhausted")
+    await fixture.feishu_store.upsert_turn_link(
+        turn_id="t_parent00001",
+        session_id=session_id,
+        tenant_key="tenant_1",
+        chat_id="oc_chat",
+        sender_open_id="ou_user",
+        source_message_id="om_msg",
+    )
+    await fixture.feishu_store.set_steer_source_message_id(turn_id="t_parent00001", message_id="om_msg_2")
+
+    await asyncio.wait_for(
+        fixture.bridge._mirror_follow_up(
+            parent_turn_id="t_parent00001",
+            follow_up_turn_id="t_child000001",
+            tenant_key="tenant_1",
+            sender_open_id="ou_user",
+            locale="en-US",
+            answer_locale="en-US",
+        ),
+        timeout=3,
+    )
+
+    status_card = next(reply for reply in fixture.fake_client.card_replies if reply["uuid"] == "feishu_card_t_child000001")
+    assert status_card["message_id"] == "om_msg_2"
+    assert "按区域拆一下" in json.dumps(status_card["content"], ensure_ascii=False)
+    patch = fixture.fake_client.patches[-1]
+    assert patch["message_id"] == "card_1"
+    assert im_error_message("user_credit_exhausted", "en-US") in json.dumps(patch["card"], ensure_ascii=False)
+    assert _answer_cards(fixture.fake_client) == []

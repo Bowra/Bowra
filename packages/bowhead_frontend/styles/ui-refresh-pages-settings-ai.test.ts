@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance, page-by-page acceptance A · team-settings AI and Data / Routine Management groups:
  * data sources, tools, system-built-in Agents, team workflows and scheduled tasks.

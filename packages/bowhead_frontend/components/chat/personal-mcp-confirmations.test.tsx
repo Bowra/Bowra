@@ -185,7 +185,7 @@ describe("personal MCP consent", () => {
     await screen.findByRole("dialog");
     const deadline = screen.getByText(/^expires /);
     expect(deadline.textContent).toBe(
-      `expires ${JSON.stringify({ time: new Date(expiresAt).toLocaleTimeString("zh-CN") })}`,
+      `expires ${JSON.stringify({ time: new Date(expiresAt).toLocaleTimeString("zh-CN", { hourCycle: "h23" }) })}`,
     );
     expect(deadline.textContent).not.toMatch(/AM|PM/);
   });

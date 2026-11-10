@@ -7,9 +7,10 @@
  */
 
 import { AlertCircle, Check, ChevronRight, Info, Sparkles, X } from "@/components/icons";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useSyncExternalStore } from "react";
 
+import { formatShortDateTime } from "@/lib/locale";
 import { useAppRouter } from "@/lib/use-app-router";
 import {
   draftVersion,
@@ -83,6 +84,7 @@ function SubagentConsumedReceipt({ name, refId, workingCopy }: { name: string | 
 
 function ConsumedReceipt({ name, nextRunAt }: { name: string | null; nextRunAt: string | null }) {
   const t = useTranslations("settings.config_copilot_drawer");
+  const locale = useLocale();
   const router = useAppRouter();
   return (
     <div className="draft-receipt-wrap" data-testid="draft-receipt">
@@ -97,20 +99,13 @@ function ConsumedReceipt({ name, nextRunAt }: { name: string | null; nextRunAt: 
       {nextRunAt ? (
         <div className="sysline">
           <span className="ic"><Info size={13} /></span>
-          {t("next_run", { time: formatNextRun(nextRunAt) })}
+          {t("next_run", { time: formatNextRun(nextRunAt, locale) })}
         </div>
       ) : null}
     </div>
   );
 }
 
-function formatNextRun(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatNextRun(value: string, locale: string): string {
+  return formatShortDateTime(value, locale) || value;
 }

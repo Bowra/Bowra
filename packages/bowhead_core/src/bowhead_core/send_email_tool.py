@@ -37,6 +37,7 @@ from bowhead_core.email_config import deliver_email, resolve_team_smtp_config
 from bowhead_core.email_send_confirmation import EmailSendConfirmations, default_email_send_confirmations
 from bowhead_core.email_sender import EmailAttachment
 from bowhead_core.number_verifier import expand_for_unit_scale, extract_numbers, unsourced_quantities
+from bowhead_core.tool_confirmation_events import confirmation_callbacks
 from bowhead_core.tool_registry import ToolExecutionContext, ToolRegistry, ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -232,11 +233,15 @@ async def _send_email(arguments: dict[str, Any], ctx: ToolExecutionContext) -> d
                     "artifact_id": aid,
                 }
 
+    requester = str(getattr(ctx, "user_id", "") or "")
+    on_pending, on_resolved = confirmation_callbacks(
+        ctx, kind="email_send", requester_user_id=requester, title=subject, source_label=to, choices=["reject", "approve"]
+    )
     decision = (
         "approved"
         if owner_granted
         else await _confirmations.request(
-            owner_user_id=str(getattr(ctx, "user_id", "") or ""),
+            owner_user_id=requester,
             turn_id=str(getattr(ctx, "turn_id", "") or ""),
             session_id=str(getattr(ctx, "session_id", "") or ""),
             to=to,
@@ -244,6 +249,8 @@ async def _send_email(arguments: dict[str, Any], ctx: ToolExecutionContext) -> d
             body=body,
             timeout_seconds=_confirmation_window(),
             attachments=attachment_details,
+            on_pending=on_pending,
+            on_resolved=on_resolved,
         )
     )
     if decision != "approved":

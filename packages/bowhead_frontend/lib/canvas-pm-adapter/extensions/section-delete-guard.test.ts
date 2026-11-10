@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * A0-2 (report-edit-audit P0-2 containment) — pure-function logic for top-level section deletion guards.
  */

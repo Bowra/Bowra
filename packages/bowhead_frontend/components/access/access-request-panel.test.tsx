@@ -139,7 +139,7 @@ describe("AccessRequestPanel states", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开" }));
     expect(onOpen).toHaveBeenCalled();
     cleanup();
-    await renderPanel(status("approved", { grant_expires_at: "2026-10-30T00:00:00Z" }), "team_skill");
+    await renderPanel(status("approved", { grant_expires_at: new Date(Date.now() + 86_400_000).toISOString() }), "team_skill");
     expect(screen.getByText(/可以使用这个技能。权限到 .+ 为止。/)).toBeTruthy();
   });
 

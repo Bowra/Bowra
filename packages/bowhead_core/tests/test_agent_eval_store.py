@@ -18,7 +18,7 @@ from bowhead_core.agent_eval_store import (
 from bowhead_core.agent_revision_store import AgentAudience, AgentPublicationBlockedError
 from bowhead_core.notification_store import NotificationStore
 from bowhead_core.user_store import UserStore
-from core_legacy_database import upgrade
+from test_agent_revision_store import _db
 
 _HASH_A = "sha256:" + "1" * 64
 _HASH_B = "sha256:" + "2" * 64
@@ -26,8 +26,7 @@ _HASH_C = "sha256:" + "3" * 64
 
 
 async def _team_agent_fixture(tmp_path: Path):
-    db_path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    db_path = _db(tmp_path)
     users = UserStore(db_path)
     team = await users.create_team(name="Eval", max_seats=3)
     owner = await users.create_user(team_id=team.id, email="eval-owner@example.com")

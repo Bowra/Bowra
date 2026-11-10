@@ -255,17 +255,23 @@ def project_report_relations(
     sections: list[Any],
     *,
     source_refs: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    include_chat_hidden: bool = False,
 ) -> ReportRelations:
     """Project closure and direct roles from persisted Canvas state.
 
     Superseded sections remain in the readable closure because the report UI
     exposes their collapsed history, but they cannot populate the "current
     report" lens. Chat-hidden sections are excluded from both sets.
+
+    ``include_chat_hidden`` is only for authorizing one explicitly targeted
+    section that was delivered in chat (for example, editing a chat chart in
+    place). Report, Results and Canvas callers keep the default so a
+    chat-delivered section never enters their closure or lens.
     """
 
     builder = _RelationBuilder()
     for section in sections:
-        if bool(getattr(section, "hidden_for_chat_mode", False)):
+        if not include_chat_hidden and bool(getattr(section, "hidden_for_chat_mode", False)):
             continue
         payload = getattr(section, "payload", None)
         kind = getattr(section, "kind", None)

@@ -26,7 +26,7 @@ dependencies = [
     # previously a usable transitive dependency; declare it explicitly to prevent upstream drift, review P3-4).
     "python-dateutil>=2.9.0",
     # Attachment text extraction (user-uploaded PDF/PPTX/DOCX/XLSX -> agent context).
-    "pypdf>=6.21.2",
+    "pypdf>=6.21.4",
     # Canvas Export V2 PDF fallback consumes frozen ExportIR + materialized
     # visuals. It does not reinterpret charts.
     "reportlab>=5.1.0",

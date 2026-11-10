@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Why Save is disabled—one enforced contract per reason.
  *

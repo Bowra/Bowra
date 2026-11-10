@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { defaultChartTheme } from "../chart-theme";
 import { describe, expect, it } from "vitest";
 import { preparedFramesFixture } from "../../e2e/_chart-prepared-frames-fixture";

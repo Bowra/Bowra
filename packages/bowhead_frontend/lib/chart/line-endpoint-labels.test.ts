@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { endpointGutterWidth, endpointName, lastFiniteObservation, lineEndpointLabelsPlugin } from "./line-endpoint-labels";

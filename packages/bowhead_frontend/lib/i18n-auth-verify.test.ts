@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * §C (real-auth) — i18n key parity for the verify notice (Task #8 FE).
  *
@@ -14,12 +15,17 @@ import zh from "@/messages/zh-CN.json";
 type Bundle = { auth: { verify?: Record<string, string> } };
 
 const EXPECTED = [
+  "account_ready_title",
+  "not_sent_app_address",
+  "not_sent_email_settings",
   "pending_message",
   "pending_title",
   "resend",
   "resending",
   "resent",
   "resend_failed",
+  "resend_requested",
+  "resend_too_frequent",
   "sent_title",
 ].sort();
 

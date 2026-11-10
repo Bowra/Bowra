@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Knowledge base UX cleanup FR8: the template list seeds once only if the space is unseeded; concurrent requests for the same list are coalesced.
 import { afterEach, describe, expect, it, vi } from "vitest";
 

@@ -37,7 +37,7 @@ import { runtimeParametersValid, type ParameterPreview, type ParameterProfile, t
 
 import {
   AlertTriangle, Bolt, Bot, Check, ChevronDown, ChevronRight, Cpu, Database, Edit, Info,
-  Layers, Lock, Palette, Plug, Plus, RefreshCw, Search, Server, Slash, Spinner, Trash,
+  Layers, Lock, Palette, Plug, Plus, RefreshCw, Search, Server, Spinner, Trash,
   Users, XSm,
 } from "@/components/icons";
 import { AiFillPanel, type AiFillApplyReceipt } from "@/components/config-copilot/ai-fill-panel";
@@ -2005,9 +2005,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     () => retryIndexRequested || stableJson(configForWrite(config)) !== stableJson(configForWrite(baseConfig)),
     [baseConfig, config, retryIndexRequested],
   );
-  const localIssues = useMemo(() => validateDraftLocally(config, t, assignmentMaintenance).filter((issue) =>
+  const deletingConnection = Object.keys(baseConfig.providers).some((key) => !config.providers[key]);
+  const localIssues = useMemo(() => validateDraftLocally(config, t, assignmentMaintenance || deletingConnection).filter((issue) =>
     !(scoped && section !== "assignments" && ((!config.tiers.primary?.provider && issue.path === "tiers.primary") || (assignmentMaintenance && !issue.path.startsWith("providers"))))),
-  [config, scoped, section, assignmentMaintenance, t]);
+  [config, scoped, section, assignmentMaintenance, deletingConnection, t]);
   const connectionDirty = Boolean(connect && connectionBaselineRef.current !== null && connectionBaselineRef.current !== stableJson({ ...connect, test: undefined, testing: false, providerId: undefined }));
   draftDirtyRef.current = isDirty || connectionDirty;
   useEffect(() => {
@@ -2108,7 +2109,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
       window.location.assign(result.authorize_url);
     } catch (cause) {
       const code = cause instanceof ApiError ? cause.code : undefined;
-      setError(t(code === "bowra_https_callback_required" ? "bowra.https_required"
+      setError(t(code === "bowra_callback_address_invalid" ? "bowra.callback_address_invalid"
         : code === "bowra_encryption_required" ? "bowra.encryption_required"
         : code === "bowra_service_url_invalid" ? "bowra.service_url_invalid" : "bowra.start_failed"));
       setBusy(false);
@@ -2125,8 +2126,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   );
   const desiredEmbed = config.kb.active.embed;
   const servingEmbed = baseConfig.kb.active.embed;
-  const embedChanged = desiredEmbed !== servingEmbed;
+  const embedChanged = Boolean(desiredEmbed) && desiredEmbed !== servingEmbed;
   const reindexRequested = embedChanged || retryIndexRequested;
+  const servingEmbedProvider = baseConfig.kb.models[servingEmbed]?.provider;
+  const deletingServingEmbed = Boolean(servingEmbedProvider && !config.providers[servingEmbedProvider]);
 
   useEffect(() => {
     if (!LLM_SETTINGS_V4_ENABLED || loading) return;
@@ -2681,7 +2684,6 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
   // ─── delete provider ─────────────────────────────────────────────
   const delInfo = useMemo(() => {
     if (!del) return null;
-    const hardBlock = !LLM_SETTINGS_V4_ENABLED && Boolean(activeEmbed && activeEmbed.provider === del);
     const refs: string[] = [];
     const tr = config.tiers || {};
     if (tr.primary?.provider === del) refs.push(`${t("tier.primary_label")} · ${tr.primary.model}`);
@@ -2694,22 +2696,42 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
     if (activeImage?.provider === del) refs.push(`${t("media.del_ref")} · ${activeImage.real_id}`);
     // ⑤ Web-search references (soft block, same as above).
     if (activeSearch?.provider === del) refs.push(`${t("search.del_ref")} · ${activeSearch.real_id}`);
-    if (scoped) {
-      for (const sectionModels of [config.kb.models, config.media?.models || {}, config.search?.models || {}]) {
-        for (const [name, model] of Object.entries(sectionModels)) {
-          if (model.provider === del) refs.push(name);
-        }
+    for (const [name, model] of Object.entries(config.kb.models)) {
+      if (model.provider === del) refs.push(model.capability === "embed" ? `${t("kb.vector")} · ${model.real_id}` : name);
+    }
+    for (const sectionConfig of [config.media, config.search]) {
+      const activeNames = new Set(Object.values(sectionConfig?.active || {}));
+      for (const [name, model] of Object.entries(sectionConfig?.models || {})) {
+        if (model.provider === del && !activeNames.has(name)) refs.push(name);
       }
     }
-    return { hardBlock: hardBlock || (scoped && !assignmentMaintenance && refs.length > 0), refs };
-  }, [scoped, assignmentMaintenance, del, activeEmbed, activeImage, activeSearch, config.kb.models, config.media?.models, config.search?.models, config.tiers, t]);
+    return { refs: [...new Set(refs)], embedding: activeEmbed?.provider === del };
+  }, [del, activeEmbed, activeImage, activeSearch, config.kb.models, config.media, config.search, config.tiers, t]);
 
-  const confirmDelete = useCallback(() => {
-    if (!del || !delInfo || delInfo.hardBlock) return;
+  const confirmDelete = useCallback(async () => {
+    if (!del || !delInfo || busy) return;
     const providers = { ...config.providers };
     delete providers[del];
-    void persist({ ...config, providers }).then((ok) => { if (ok) { setDel(null); if (scoped) setConnect(null); if (expanded === del) setExpanded(null); } });
-  }, [scoped, del, delInfo, config, persist, expanded]);
+    let next = { ...config, providers };
+    setBusy(true);
+    setError(null);
+    try {
+      if (delInfo.refs.length > 0) {
+        const checked = await validateAdminLlmConfig(configForWrite(next), data?.version);
+        if (!checked.assignment_config) throw new Error("Deletion assignment preview is unavailable.");
+        next = normConfig({ ...next, ...checked.assignment_config });
+      }
+      if (await persist(next)) {
+        setDel(null);
+        if (scoped) setConnect(null);
+        if (expanded === del) setExpanded(null);
+      }
+    } catch (cause) {
+      setError(`${t("del.repair_failed")} ${userFacingError(cause)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [scoped, del, delInfo, config, persist, expanded, busy, data?.version, t, userFacingError]);
 
   // ─── ③ KB ────────────────────────────────────────────────────────
   const openRebuild = useCallback((provider: string, id: string) => {
@@ -4977,31 +4999,19 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           backdropClassName="mset-scrim"
           panelClassName="mset-modal"
         >
-          <span className="modal-ico danger">{delInfo.hardBlock ? <Slash size={18} /> : <Trash size={18} />}</span>
-          <h3 id="mset-del-title" className="modal-title">{delInfo.hardBlock ? t("del.hard_title") : t("del.title", { name: del })}</h3>
-          {delInfo.hardBlock ? (
-            <>
-              <p id="mset-del-body" className="modal-body">{t("del.hard_body")}</p>
-              <div className="modal-foot"><button type="button" className="btn ghost sm" onClick={() => setDel(null)}>{t("common.cancel")}</button></div>
-            </>
-          ) : (
-            <>
-              <p id="mset-del-body" className="modal-body">{
-                delInfo.refs.length > 0
-                  ? (assignmentMaintenance ? t("sections.delete_repair", { count: delInfo.refs.length }) : LLM_SETTINGS_V4_ENABLED ? t("v4.delete_ref_body", { count: delInfo.refs.length }) : t("del.soft_body", { count: delInfo.refs.length }))
-                  : t("del.clean_body")
-              }</p>
-              {delInfo.refs.length > 0 ? (
-                <div className="modal-warn"><AlertTriangle size={15} /><div>{delInfo.refs.slice(0, 4).join(" · ")}</div></div>
-              ) : null}
-              <div className="modal-foot">
-                <button type="button" className="btn ghost sm" disabled={busy} onClick={() => setDel(null)}>{t("common.cancel")}</button>
-                <button type="button" className="btn danger sm" disabled={busy} onClick={confirmDelete}><Trash size={13} /> {
-                  LLM_SETTINGS_V4_ENABLED ? t("v4.delete_draft") : delInfo.refs.length > 0 ? t("del.confirm_refs") : t("del.confirm")
-                }</button>
-              </div>
-            </>
-          )}
+          <div className="modal-head">
+            <span className="modal-ico danger" aria-hidden="true"><Trash size={20} /></span>
+            <h3 id="mset-del-title" className="modal-title">{t("del.title", { name: del })}</h3>
+          </div>
+          <p id="mset-del-body" className="modal-body">{delInfo.refs.length > 0 ? t("del.soft_body", { count: delInfo.refs.length }) : t("del.clean_body")}</p>
+          {delInfo.refs.length > 0 ? <div className="modal-warn"><AlertTriangle size={15} /><div>{delInfo.refs.join(" · ")}</div></div> : null}
+          {delInfo.embedding ? <p className="modal-body">{t("del.embedding_body")}</p> : null}
+          {LLM_SETTINGS_V4_ENABLED ? <p className="modal-body">{t("del.draft_body")}</p> : null}
+          {error ? <p role="alert" className="modal-body">{error}</p> : null}
+          <div className="modal-foot">
+            <button type="button" className="btn ghost sm" disabled={busy} onClick={() => setDel(null)}>{t("common.cancel")}</button>
+            <button type="button" className="btn danger sm" disabled={busy} onClick={() => void confirmDelete()}><Trash size={13} /> {t("del.confirm")}</button>
+          </div>
         </DialogShell>
       ) : null}
 
@@ -5149,7 +5159,7 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
             {reindexRequested ? (
               <section className="review-section impact">
                 <h3>{t("v4.reindex_title")}</h3>
-                <p>{t("v4.reindex_body", { count: validation?.impact?.active_files ?? "—" })}</p>
+                <p>{t(deletingServingEmbed ? "del.reindex_body" : "v4.reindex_body", { count: validation?.impact?.active_files ?? "—" })}</p>
                 <label className="review-check">
                   <input
                     type="checkbox"
@@ -5211,8 +5221,10 @@ export function SettingsModels({ section = "overview", newConnection = false }: 
           backdropClassName="mset-scrim"
           panelClassName="mset-modal"
         >
-          <span className="modal-ico danger"><Database size={18} /></span>
-          <h3 id="mset-rebuild-title" className="modal-title">{t("kb.rebuild_title")}</h3>
+          <div className="modal-head">
+            <span className="modal-ico danger" aria-hidden="true"><Database size={20} /></span>
+            <h3 id="mset-rebuild-title" className="modal-title">{t("kb.rebuild_title")}</h3>
+          </div>
           <p id="mset-rebuild-body" className="modal-body">{t("kb.rebuild_body", { model: rebuild.id })}</p>
           <div className="fld">
             <span className="configuration-field-label"><label htmlFor="mset-embedding-dim">{t("kb.dim_label")}</label><ConfigurationFieldHelp field="team_model_config.kb.models.*.dim" label={t("kb.dim_label")} /></span>

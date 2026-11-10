@@ -10,6 +10,8 @@ Geben Sie im Chat Empfänger, Betreff und Inhalt an und bitten Sie Bowra, die E-
 
 Vor jedem Versand zeigt ein Fenster **E-Mail bestätigen** die vollständige Empfängerliste, den Betreff und den Inhalt. Prüfen Sie die Angaben und wählen Sie dann **Senden**. Wählen Sie **Nicht senden** oder tun Sie innerhalb der angezeigten Zeit nichts, wird die E-Mail nicht versendet; Bowra teilt Ihnen das im Chat mit. Eine versendete E-Mail kann nicht zurückgerufen werden.
 
+Wenn Ihre Bereitstellung die Bestätigung im Chat aktiviert, erscheint die Anfrage in der Unterhaltung unter dem wartenden Schritt statt in einem Dialog und bleibt danach als einzeiliger Vermerk Ihrer Entscheidung stehen. Sind Sie auf einer anderen Seite, führt ein Hinweis zur Unterhaltung, und der Titel des Browser-Tabs zeigt, wie viele Aktionen warten.
+
 Nur Sie, also die Person, die diesen Chat gestartet hat, können die E-Mail sehen und bestätigen. E-Mails werden niemals über geplante Aufgaben, Feishu oder andere Bereiche versendet, in denen Sie sie nicht auf der Webseite bestätigen können.
 
 ### Zahlen in der E-Mail

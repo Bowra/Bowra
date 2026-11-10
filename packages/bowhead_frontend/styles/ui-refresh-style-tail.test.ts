@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance style tail: dialog/drawer inline styles, Agents-page cards, Tools-page mobile card layout.
  *

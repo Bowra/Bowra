@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch B (report-edit-audit P1-2) — bookkeeping for pending inline edits.
  */

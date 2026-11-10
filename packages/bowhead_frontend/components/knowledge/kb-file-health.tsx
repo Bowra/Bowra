@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import { getKbFileHealth, restoreKbSource, rebuildKbSource, type KbHealthObservation } from "@/lib/kb-api";
+import { formatDateTime } from "@/lib/locale";
 
 export function KbFileHealth({ fileId, version, allowActions = false }: { fileId: string; version: number; allowActions?: boolean }) {
   const capabilities = useOptionalAuthSession()?.me?.capabilities;
   const enabled = capabilities?.kb_health_observation === true;
   const guarded = capabilities?.kb_use_guard === true;
   const t = useTranslations("knowledge_base.health");
+  const locale = useLocale();
   const [health, setHealth] = useState<KbHealthObservation | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -112,7 +114,7 @@ export function KbFileHealth({ fileId, version, allowActions = false }: { fileId
           </dl>
           {health.use_state && <p className="why">{t(`use_${health.use_state}`)}</p>}
           <p className="why">{t(guarded ? "evidence_guarded" : "evidence_unknown")}</p>
-          <p className="why">{t("checked_at", { time: new Date(health.checked_at).toLocaleString() })}</p>
+          <p className="why">{t("checked_at", { time: formatDateTime(health.checked_at, locale, { dateStyle: "medium" }) || health.checked_at })}</p>
         </>}
       </div>
     </section>

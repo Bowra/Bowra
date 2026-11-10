@@ -25,7 +25,6 @@ from bowhead_gateway.routes import auth as auth_routes
 from bowhead_gateway.routes import theme, user_settings
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from gateway_legacy_database import upgrade
 
 SECRET = "personal-theme-routes-secret-long-enough-for-hs256"
 
@@ -91,14 +90,14 @@ class _LegacyResolver:
 
 
 @pytest.fixture
-async def app_ctx(tmp_path, monkeypatch):
+async def app_ctx(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", SECRET)
     monkeypatch.setenv("BOWHEAD_AUTH_MODE", "prod")
     monkeypatch.setenv("BOWHEAD_DEV_USER_FALLBACK", "0")
     auth_routes._RATE_BUCKET.clear()
 
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     users = UserStore(db_path)
     await users.initialize()
     user_store = UserSettingsStore(db_path)

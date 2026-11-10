@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   personalMcpApi,
   type PersonalMcpConnection,
   type PersonalMcpAgent,
 } from "@/lib/personal-mcp-api";
 import { Dialog } from "@/components/ui/dialog";
+import { formatDateTime } from "@/lib/locale";
 import { Tab, TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 
 type PersonalMcpTab = "connections" | "agents" | "history";
@@ -774,6 +775,7 @@ function selectedIds(value: string): Set<string> {
 
 function PersonalMcpHistory() {
   const t = useTranslations("personalMcp");
+  const locale = useLocale();
   const [calls, setCalls] = useState<
     {
       id: string;
@@ -825,7 +827,7 @@ function PersonalMcpHistory() {
                   <strong>{call.tool_name}</strong>
                 </p>
                 <time dateTime={call.created_at}>
-                  {new Date(call.created_at).toLocaleString()}
+                  {formatDateTime(call.created_at, locale, { dateStyle: "medium" }) || call.created_at}
                   {call.duration_ms !== null ? ` · ${call.duration_ms} ms` : ""}
                 </time>
               </div>

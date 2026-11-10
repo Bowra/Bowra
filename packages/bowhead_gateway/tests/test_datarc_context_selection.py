@@ -15,7 +15,6 @@ from bowhead_gateway.datarc_context import resolve_datarc_recovery_context, reso
 from bowhead_gateway.datarc_switch import DatarcContextSwitcher
 from bowhead_gateway.member_resolver import MemberNotFoundError, MemberUidResolver
 from cryptography.fernet import Fernet
-from gateway_legacy_database import upgrade
 
 
 class SourceClient:
@@ -38,10 +37,10 @@ class SourceClient:
 
 
 @pytest.fixture
-async def datarc_environment(tmp_path, monkeypatch):
+async def datarc_environment(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     path = tmp_path / "bowhead.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
     users = UserStore(path)
     team = await users.create_team(name="Selection tests", max_seats=5)
     user = await users.create_user(team_id=team.id, email="actor@example.com", display_name="Actor", email_verified=True)

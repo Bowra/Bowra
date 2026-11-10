@@ -17,11 +17,10 @@ from bowhead_core.events import (
     OrchestratorEvent,
     TerminalDurabilityAbort,
 )
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.plan_store import PlanStatus, PlanStore
 from bowhead_core.session_store import SessionProtocolManagedError, SessionStore
 from bowhead_core.turn_log_store import OrderedTurnLogSink, TurnLogStore
-from core_legacy_database import upgrade
+from test_agent_revision_store import _db
 
 
 def _chain_head() -> str:
@@ -130,11 +129,7 @@ def _record_completed_clarification_decision(
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
-    path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
+    path = _db(tmp_path)
     now = datetime.now(tz=UTC).isoformat()
     with sqlite3.connect(path) as connection:
         connection.executemany(
@@ -706,6 +701,243 @@ async def test_materialize_steer_requires_active_parent_dispatch_atomically(
             "SELECT COUNT(*) FROM chat_turn_spawn_dispatch WHERE turn_id=?",
             (child_turn_id,),
         ).fetchone() == (0,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dispatch_fence", "releases_active_fence"),
+    [
+        ("live", True),
+        ("expired", True),
+        ("claimed", False),
+        ("generation_mismatch", False),
+        ("missing", False),
+    ],
+)
+async def test_empty_steer_buffer_never_fences_parent_terminal_on_lease(
+    db_path: str,
+    dispatch_fence: str,
+    releases_active_fence: bool,
+) -> None:
+    """Chat dogfood 2026-11-08 F2: nothing to materialize must not block the parent ``done``.
+
+    A lapsed lease that nobody took over still releases this Turn's active fence.
+    A dispatch held by another attempt or generation is left untouched.
+    """
+    store = SessionStore(db_path)
+    session_id = f"s_empty_steer_{dispatch_fence}"
+    parent_turn_id = f"t_empty_steer_{dispatch_fence}"
+    await store.ensure_session(
+        session_id=session_id,
+        workspace_id="ws_1",
+        user_id="u_1",
+    )
+    await store.record_turn(
+        turn_id=parent_turn_id,
+        session_id=session_id,
+        user_text="parent",
+    )
+    now = datetime.now(tz=UTC)
+    if dispatch_fence == "claimed":
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                "INSERT INTO chat_turn_spawn_dispatch("
+                "turn_id,session_id,source_submission_ids_json,dispatch_kind,state,"
+                "lease_kind,lease_execution_generation,owner_id,lease_expires_at,"
+                "created_at,updated_at"
+                ") VALUES (?,?,'[]','start','claimed','turn',1,NULL,?,?,?)",
+                (
+                    parent_turn_id,
+                    session_id,
+                    (now + timedelta(minutes=1)).isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            connection.commit()
+    elif dispatch_fence != "missing":
+        assert (
+            await store.claim_chat_spawn_dispatch_for_worker(
+                turn_id=parent_turn_id,
+                owner_id="gateway-owner",
+            )
+            == "claimed"
+        )
+        with sqlite3.connect(db_path) as connection:
+            if dispatch_fence == "expired":
+                connection.execute(
+                    "UPDATE chat_turn_spawn_dispatch SET lease_expires_at=? WHERE turn_id=?",
+                    ((now - timedelta(seconds=40)).isoformat(), parent_turn_id),
+                )
+            elif dispatch_fence == "generation_mismatch":
+                connection.execute(
+                    "UPDATE chat_turn_spawn_dispatch SET lease_execution_generation=2 WHERE turn_id=?",
+                    (parent_turn_id,),
+                )
+            connection.commit()
+    with sqlite3.connect(db_path) as connection:
+        dispatch_before = connection.execute(
+            "SELECT state,owner_id,lease_expires_at,lease_execution_generation FROM chat_turn_spawn_dispatch WHERE turn_id=?",
+            (parent_turn_id,),
+        ).fetchone()
+
+    assert (
+        await store.materialize_steer_follow_up(
+            session_id=session_id,
+            current_turn_id=parent_turn_id,
+            next_turn_id=f"{parent_turn_id}_child",
+        )
+        == []
+    )
+
+    assert await store.get_active_turn(session_id) == (None if releases_active_fence else parent_turn_id)
+    with sqlite3.connect(db_path) as connection:
+        # The dispatch row stays as found: settlement and recovery own it.
+        assert (
+            connection.execute(
+                "SELECT state,owner_id,lease_expires_at,lease_execution_generation FROM chat_turn_spawn_dispatch WHERE turn_id=?",
+                (parent_turn_id,),
+            ).fetchone()
+            == dispatch_before
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM turns WHERE session_id=?",
+            (session_id,),
+        ).fetchone() == (1,)
+
+
+def _insert_turn_event(
+    connection: sqlite3.Connection,
+    *,
+    turn_id: str,
+    seq: int,
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    connection.execute(
+        "INSERT INTO turn_events(id,turn_id,seq,event_type,payload_json,occurred_at) VALUES (?,?,?,?,?,?)",
+        (
+            f"evt_{turn_id}_{seq}",
+            turn_id,
+            seq,
+            event_type,
+            json.dumps({**payload, "seq": seq, "evt_seq": seq}, ensure_ascii=False),
+            datetime.now(tz=UTC).isoformat(),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resumed_generation_started",
+    [True, False],
+    ids=["resumed_start_known", "resumed_start_unknown"],
+)
+async def test_recovered_done_reuses_persisted_failure_and_generation_duration(
+    db_path: str,
+    resumed_generation_started: bool,
+) -> None:
+    """Chat dogfood 2026-11-08 F2/F7: recovery must not contradict the generation's ``turn_failed``.
+
+    The worker persisted ``turn_failed`` for resumed generation 2 but its ``done``
+    never committed. Recovery reuses that failure and measures generation 2 from
+    its own ``turn_started`` to ``turns.ended_at``; an unknown start is omitted,
+    never borrowed from generation 1.
+    """
+    store = SessionStore(db_path)
+    session_id = f"s_recovered_failure_{resumed_generation_started}"
+    turn_id = f"t_recovered_failure_{resumed_generation_started}"
+    await store.ensure_session(session_id=session_id, workspace_id="ws_1", user_id="u_1")
+    await store.record_turn(turn_id=turn_id, session_id=session_id, user_text="ask first, then draw")
+    now = datetime.now(tz=UTC)
+    with sqlite3.connect(db_path) as connection:
+        _insert_turn_event(
+            connection,
+            turn_id=turn_id,
+            seq=1,
+            event_type="turn_started",
+            payload={"started_at": (now - timedelta(seconds=120)).isoformat()},
+        )
+        _insert_turn_event(
+            connection,
+            turn_id=turn_id,
+            seq=2,
+            event_type="done",
+            payload={"turn_id": turn_id, "status": "clarification_pending", "duration_ms": 6646},
+        )
+        connection.commit()
+    assert await store.mark_clarification_pending(turn_id=turn_id, intent="ambiguous")
+    assert await store.advance_turn_execution_generation(turn_id=turn_id) == 2
+    assert await store.claim_chat_spawn_dispatch_for_worker(turn_id=turn_id, owner_id="resume_owner") == "claimed"
+    generation_started_at = now - timedelta(seconds=55)
+    diagnostics = {
+        "schema_version": 1,
+        "disclosure": "authenticated",
+        "diagnostic_code": "chat_turn_failed",
+        "occurrence_id": "4d6a18f09a3f4d6cb1b15af36b6e126a",
+        "turn_id": turn_id,
+        "safe_detail": "phase=chat; failure_class=internal; outcome=unknown",
+        "retryable": False,
+    }
+    with sqlite3.connect(db_path) as connection:
+        _insert_turn_event(
+            connection,
+            turn_id=turn_id,
+            seq=3,
+            event_type="turn.resumed",
+            payload={"turn_id": turn_id, "execution_generation": 2},
+        )
+        if resumed_generation_started:
+            _insert_turn_event(
+                connection,
+                turn_id=turn_id,
+                seq=4,
+                event_type="turn_started",
+                payload={"started_at": generation_started_at.isoformat()},
+            )
+        connection.commit()
+    assert await store.mark_failed(turn_id=turn_id, error="lead_internal_error", error_kind="lead_internal_error")
+    persisted_failure = {
+        "turn_id": turn_id,
+        "message": "internal_error",
+        "reason_code": "lead_internal_error",
+        "diagnostics": diagnostics,
+        "recovery_action": "copy_diagnostics",
+    }
+    with sqlite3.connect(db_path) as connection:
+        _insert_turn_event(connection, turn_id=turn_id, seq=5, event_type="turn_failed", payload=persisted_failure)
+        connection.execute(
+            "UPDATE chat_turn_spawn_dispatch SET lease_expires_at=? WHERE turn_id=?",
+            ((now - timedelta(seconds=1)).isoformat(), turn_id),
+        )
+        connection.commit()
+
+    assert await store.recover_expired_chat_spawn_dispatches() == [turn_id]
+
+    with sqlite3.connect(db_path) as connection:
+        tail = [
+            (event_type, json.loads(payload_json))
+            for event_type, payload_json in connection.execute(
+                "SELECT event_type,payload_json FROM turn_events WHERE turn_id=? AND seq>5 ORDER BY seq",
+                (turn_id,),
+            ).fetchall()
+        ]
+        ended_at = connection.execute("SELECT ended_at FROM turns WHERE id=?", (turn_id,)).fetchone()[0]
+    # The persisted failure stays the only semantic failure fact of generation 2.
+    assert [event_type for event_type, _ in tail] == ["done"]
+    done = tail[0][1]
+    assert done["status"] == "failed"
+    assert done["reason_code"] == persisted_failure["reason_code"]
+    assert done["error"] == persisted_failure["message"]
+    assert done["error_kind"] == "lead_internal_error"
+    assert done["diagnostics"] == diagnostics
+    assert done["recovery_action"] == "copy_diagnostics"
+    if resumed_generation_started:
+        expected_ms = int((datetime.fromisoformat(ended_at) - generation_started_at).total_seconds() * 1000)
+        assert done["duration_ms"] == expected_ms
+        assert 50_000 <= done["duration_ms"] < 65_000
+    else:
+        assert "duration_ms" not in done
 
 
 @pytest.mark.asyncio
@@ -4110,6 +4342,8 @@ async def test_expired_dispatch_reconstructs_missing_done_from_terminal_turn(
         "seq": events[-1].seq,
         "evt_seq": events[-1].payload["evt_seq"],
         "intent": "lookup",
+        # The reconstructed terminal carries the Turn row's own end time (the reply byline).
+        "ended_at": ended_at,
         **({"error": "internal_error"} if terminal_status in {"failed", "error"} else {}),
         **({"error_kind": expected_error_kind} if expected_error_kind else {}),
         # Chat turn feedback D5: the reconstructed failed done names its public reason and action.

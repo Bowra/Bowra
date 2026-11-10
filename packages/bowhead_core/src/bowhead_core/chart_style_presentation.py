@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
-from bowhead_core.chart.series_colors import color_index, editable_color_columns
+from bowhead_core.chart.series_colors import color_hex, color_index, editable_color_columns
 from bowhead_core.chart_style_registry_generated import CHART_STYLE_PRESENTATION_POLICY
 
 
@@ -411,7 +411,9 @@ def derive_normalized_chart_render_shape_v1(normalized_spec: Mapping[str, Any] |
             bars, lines = _dual_axis_columns(columns)
             color_columns = [*bars, *lines]
         for item, column in zip(series, color_columns, strict=True):
-            if (index := color_index(column.get("color_index"))) is not None:
+            if (hex_value := color_hex(column.get("color_hex"))) is not None:
+                item["colorHex"] = hex_value
+            elif (index := color_index(column.get("color_index"))) is not None:
                 item["paletteIndex"] = index
     analytical = spec.get("_export_analytical", {})
     if analytical.get("preset") == "series_plot":
@@ -542,6 +544,7 @@ def assign_series_encodings(
     color_safe: bool,
     stacked: bool,
     palette_indices: list[int] | None = None,
+    color_keys: list[str] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Assign every series its (color, second channel) pair, or ``None`` when color alone is enough.
 
@@ -572,13 +575,13 @@ def assign_series_encodings(
     if not color_safe and len(roles) <= capacity:
         return None
     line_variants = min(len(policy["lineDashes"]), len(policy["pointStyles"]))
-    used: dict[tuple[str, int], set[int]] = {}
+    used: dict[tuple[str, int | str], set[int]] = {}
     encodings: list[dict[str, Any]] = []
     for index, role in enumerate(roles):
         family = "fill" if role in _FILLED_ROLES else "line"
         variants = len(policy["fillPatterns"]) if family == "fill" else line_variants
         color = (palette_indices[index] if palette_indices is not None else index) % palette_length
-        taken = used.setdefault((family, color), set())
+        taken = used.setdefault((family, color_keys[index] if color_keys is not None else color), set())
         if len(taken) >= variants:
             taken.clear()
         preferred_channel = (index if color_safe else index // capacity) % variants
@@ -624,6 +627,7 @@ def resolve_chart_presentation_v2(
             {
                 "key": item["key"],
                 "paletteIndex": item.get("paletteIndex", index),
+                **({"colorHex": item["colorHex"]} if "colorHex" in item else {}),
                 "lineDash": [],
                 "pointStyle": "circle",
                 "fillPattern": "solid",
@@ -716,7 +720,8 @@ def resolve_chart_presentation_v2(
     palette_length = max(1, len(categorical_series_palette))
     capacity = palette_length if color_only_series_capacity is None else color_only_series_capacity
     color_safe = accessibility.get("colorVision") == "color-safe" or bool(render_context.get("forcedColors"))
-    color_safe = color_safe or len(shape["series"]) > 1 and any("paletteIndex" in item for item in shape["series"])
+    has_hex = any("colorHex" in item for item in shape["series"])
+    color_safe = color_safe or len(shape["series"]) > 1 and any("paletteIndex" in item or "colorHex" in item for item in shape["series"])
     encodings = assign_series_encodings(
         [item["role"] for item in shape["series"]],
         palette_length=palette_length,
@@ -724,6 +729,13 @@ def resolve_chart_presentation_v2(
         color_safe=color_safe,
         stacked=bool(shape["flags"]["stacked"]),
         palette_indices=[item.get("paletteIndex", index) for index, item in enumerate(shape["series"])],
+        color_keys=[
+            item.get("colorHex")
+            or (categorical_series_palette[item.get("paletteIndex", index) % palette_length].upper() if categorical_series_palette else str(index))
+            for index, item in enumerate(shape["series"])
+        ]
+        if has_hex
+        else None,
     )
     if encodings is not None:
         effective["series"] = [{**series, **encodings[index]} for index, series in enumerate(effective["series"])]

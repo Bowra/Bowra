@@ -92,7 +92,7 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
     const { container } = renderIntl(trace([business, accepted]));
     fireEvent.click(container.querySelector(".stp.is-fail .stp-head")!);
     expect(container.querySelector(".stp.is-fail .stp-detail")).toBeTruthy();
-    expect(screen.getByText(/交付尚未核实/)).toBeVisible();
+    expect(screen.getByText(/交付结果尚未核实/)).toBeVisible();
   });
 
   it.each(["tool_execution_unknown", "source_access_denied", "provider_unavailable"])("retains exceptional return outcome %s", (code) => {
@@ -111,7 +111,7 @@ describe.each(["subagent_return", "review_delivery"] as const)("Result-focused e
     const { container } = renderIntl(trace([native, business, accepted]));
     expect(container.querySelectorAll(".stp")).toHaveLength(1);
     fireEvent.click(container.querySelector(".stp-head")!);
-    expect(container.querySelector(".bh-step-failure")).toBeTruthy();
+    expect(container.querySelector('[data-testid="step-failure-detail"]')).toBeTruthy();
     expect(container.textContent).not.toContain("Private repair");
   });
 

@@ -28,11 +28,13 @@ from bowhead_core.openapi_tool_source import TeamToolEntry
 from bowhead_core.scrub import scrub as _scrub
 from bowhead_core.team_tool_confirmation import (
     MAX_ARGUMENT_BYTES,
+    TeamMcpCategory,
     default_team_tool_confirmations,
     resolve_team_mcp_category,
     team_tool_confirmation_enabled,
     team_tool_schema_digest,
 )
+from bowhead_core.tool_confirmation_events import confirmation_callbacks
 from bowhead_core.tool_registry import TeamToolExecutionBinding, ToolExecutionContext, ToolSpec
 from bowhead_core.types import ToolAnnotations
 
@@ -134,6 +136,7 @@ class _CallConfirmation:
     description: str
     schema_digest: str
     source_fallback: str
+    category: TeamMcpCategory
 
 
 # Model-facing outcomes. The call did not run in any of these cases.
@@ -175,17 +178,31 @@ async def _confirm_call(
         return _confirmation_outcome("unavailable"), dict(args or {})
     snapshot = json.loads(blob)
     labels = getattr(ctx, "team_tool_source_labels", None) or {}
+    owner_user_id = getattr(ctx, "user_id", "") or ""
+    source_name = str(labels.get(advertised_name) or confirmation.source_fallback)
+    on_pending, on_resolved = confirmation_callbacks(
+        ctx,
+        kind="team_mcp",
+        requester_user_id=owner_user_id,
+        title=confirmation.tool_name,
+        source_label=source_name,
+        choices=["reject", "approve", "approve_session"],
+        category=confirmation.category,
+    )
     decision = await default_team_tool_confirmations().request(
-        owner_user_id=getattr(ctx, "user_id", "") or "",
+        owner_user_id=owner_user_id,
         turn_id=getattr(ctx, "turn_id", "") or "",
         session_id=getattr(ctx, "session_id", "") or "",
         team_id=team_id,
-        source_name=str(labels.get(advertised_name) or confirmation.source_fallback),
+        source_name=source_name,
         tool_ref=advertised_name,
         tool_name=confirmation.tool_name,
         description=confirmation.description,
         schema_digest=confirmation.schema_digest,
         arguments=snapshot,
+        category=confirmation.category,
+        on_pending=on_pending,
+        on_resolved=on_resolved,
     )
     if decision != "approved":
         return _confirmation_outcome(decision), snapshot
@@ -346,6 +363,7 @@ def build_team_specs(
                         annotations={"readOnlyHint": entry.read_only_hint, "destructiveHint": entry.destructive_hint},
                     ),
                     source_fallback=entry.source_id,
+                    category=category,
                 )
         # advertised_name is the stable teammcp.<src>.<op> identity (LLM schema + whitelist +
         # grants); dispatch_name is what the ClientSession is called with (== advertised for an

@@ -14,17 +14,15 @@ from types import SimpleNamespace
 import httpx2
 import jwt
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.user_store import UserStore
 from bowhead_gateway.main import create_app
 from bowhead_gateway.settings import Settings
-from gateway_legacy_database import upgrade
 
 from bowhead_core import SessionStore
 
 
 @pytest.fixture
-async def app_ctx_auth(tmp_path, monkeypatch):
+async def app_ctx_auth(tmp_path, monkeypatch, initialize_migrated_core_database):
     # Set JWT secret or registration returns 500.
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test_secret_for_e2e_only_32bytes_xxx")
     monkeypatch.setenv(
@@ -47,10 +45,7 @@ async def app_ctx_auth(tmp_path, monkeypatch):
 
     monkeypatch.setattr(auth_routes, "_enqueue_verify_email", _skip_identity_email)
     db = tmp_path / "bowhead.db"
-    with sqlite3.connect(db) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(db).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db.with_name("bowhead.db"))
     sess = SessionStore(str(db))
     await sess.initialize()
     user = UserStore(str(db))

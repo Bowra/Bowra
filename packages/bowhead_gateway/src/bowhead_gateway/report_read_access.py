@@ -42,8 +42,11 @@ class ReportReadAccess:
     team_id: str
     user_id: str
 
-    async def project_chart(self, section: Any) -> dict[str, Any] | None:
-        """Use the admitted actor and rechecked scope, including after HTTP/resume boundaries."""
+    async def project_chart(self, section: Any) -> dict[str, Any]:
+        """Use the admitted actor and rechecked scope, including after HTTP/resume boundaries.
+
+        Raises ``ChartProjectionUnavailable`` with the failing check.
+        """
         from bowhead_gateway.chart_authoring_projection import project_chart_for_authoring
 
         return await project_chart_for_authoring(self.request, self.session_id, section, access=self)

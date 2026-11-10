@@ -1355,7 +1355,11 @@ async def test_eval_service_renews_lease_during_long_attempt(tmp_path: Path) -> 
 
 
 @pytest.mark.anyio
-async def test_eval_service_total_duration_budget_interrupts_judge(tmp_path: Path) -> None:
+async def test_eval_service_total_duration_budget_interrupts_judge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(agent_eval_service_module, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
     db_path, _users, _team, owner, workspace_id, eval_store, source_revision, source_run = await _fixture(tmp_path)
     source_case = source_revision.cases[0]
     judge_revision = await eval_store.create_suite_revision(
@@ -1390,6 +1394,8 @@ async def test_eval_service_total_duration_budget_interrupts_judge(tmp_path: Pat
     class Router:
         async def invoke(self, role: str, request: Any) -> LLMResponse:
             judge_started.set()
+            # Exhaust the unchanged run budget after the Judge starts, independent of setup load.
+            clock[0] = 2.0
             try:
                 await asyncio.sleep(30)
             except asyncio.CancelledError:

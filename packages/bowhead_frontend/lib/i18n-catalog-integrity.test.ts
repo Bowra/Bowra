@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import en from "@/messages/en-US.json";
@@ -62,11 +63,6 @@ describe("i18n catalog integrity", () => {
 
   it("keeps the French catalog on the same key set", () => {
     expect(Object.keys(frFlat).sort()).toEqual(Object.keys(enFlat).sort());
-  });
-
-  it("keeps all four catalogs on one key set", () => {
-    const keySets = [zhFlat, enFlat, deFlat, frFlat].map((flat) => Object.keys(flat).sort());
-    for (const keys of keySets) expect(keys).toEqual(keySets[0]);
   });
 
   it("does not contain Chinese characters in the French catalog", () => {

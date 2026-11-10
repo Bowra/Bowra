@@ -19,7 +19,6 @@ from bowhead_core.user_store import User, UserStore
 from bowhead_gateway.routes import agents
 from bowhead_gateway.routes.auth import _current_user, _store
 from fastapi import FastAPI
-from gateway_legacy_database import upgrade
 
 pytestmark = pytest.mark.integration
 
@@ -64,10 +63,10 @@ def _seed(db_path) -> None:
 
 
 @pytest.fixture
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-insights-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     _seed(db_path)
     user_store = UserStore(db_path)
     current = {"user": _USERS["owner"]}
@@ -336,10 +335,10 @@ async def _queued_comparison(db_path) -> str:
 
 
 @pytest.fixture
-async def real_client(tmp_path, monkeypatch):
+async def real_client(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("BOWHEAD_JWT_SECRET", "test-agent-eval-insights-jwt-secret")
     db_path = tmp_path / "bowhead.db"
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     _seed_real(db_path)
     execution_id = await _queued_comparison(db_path)
     user_store = UserStore(db_path)

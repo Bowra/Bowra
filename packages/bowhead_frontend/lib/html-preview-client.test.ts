@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareHtmlInWorker } from "./html-preview-client";
 import { HTML_PREVIEW_BUDGET } from "./html-preview-budget";

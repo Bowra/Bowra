@@ -724,11 +724,16 @@ export interface TurnRunnerState {
    *  so emoji_ack lookup can find the bubble target. null until the user
    *  sends a message; copied into ArchivedTurn.userMsgId at archive time. */
   userMsgId?: string | null;
-  /** chat-redesign Phase 1.7-A — submit timestamp for the current turn
-   *  (Date.now() at runner.setState time when `s.user = text`). Used by
-   *  BotByline (1.7-B) to render the turn-start time stamp during
-   *  streaming. null until the user sends a message. */
+  /** Elapsed-time anchor of the current execution generation: the browser clock at submit, replaced by the
+   *  server `turn_started.started_at` of the latest generation when it arrives. Drives the running band's
+   *  elapsed counter only — never a byline time (bylines use server times, see lib/turn-user-time.ts).
+   *  null until the user sends a message. */
   startedAt?: number | null;
+  /** Session-DTO server times of a hydrated last turn (`turns.started_at` / `turns.ended_at`, epoch ms):
+   *  byline fallbacks until the event log supplies `turn_started` / `done.ended_at`. Null for turns started
+   *  in this page. */
+  persistedStartedAt?: number | null;
+  persistedEndedAt?: number | null;
   /* O5 (2026-07-03): lastFailedTurnId removed; only supplied sticky targets for fake retry/skip buttons,
    * with no consumers after removing those buttons. */
   /** prod-bug-bash-039 Phase 5 (0.39.3) — turn-scoped citation registry,
@@ -840,10 +845,13 @@ export interface ArchivedTurn {
    *  from runner.citations at archive time. Empty array for legacy archived
    *  turns; ArtifactChip falls through to chip-as-no-op (toast) for those. */
   citations?: Citation[];
-  archivedAt: number;
-  /** User submitted this turn at (ms). User bubble shows this, **not** archivedAt (completion time).
-   *  Live archival uses first turn_started (fallback: send time); hydration uses turns.started_at.
-   *  See lib/turn-user-time.ts. Old snapshots default to archivedAt. */
+  /** Server end time (epoch ms) of the turn's root terminal, the reply byline fallback when the turn store
+   *  has no `done.ended_at`: live archival copies the turn store (or the hydrated DTO value); hydration uses
+   *  `turns.ended_at`. Null = unknown, and no time is shown. Never the browser clock. */
+  endedAt?: number | null;
+  /** Server start time (epoch ms) of the turn's first generation, the user byline fallback when the turn store
+   *  has no first `turn_started`: live archival copies the turn store; hydration uses `turns.started_at`.
+   *  Null = unknown. See lib/turn-user-time.ts. */
   userSentAt?: number | null;
 }
 

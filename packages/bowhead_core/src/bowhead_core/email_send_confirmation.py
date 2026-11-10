@@ -12,6 +12,9 @@ own instance so the email dialog only ever sees emails.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from bowhead_core.delivery_confirmation import CONFIRM_SECONDS, MAX_PENDING_PER_OWNER, Decision, DeliveryConfirmations
 
 __all__ = ["CONFIRM_SECONDS", "MAX_PENDING_PER_OWNER", "Decision", "EmailSendConfirmations", "default_email_send_confirmations"]
@@ -32,6 +35,8 @@ class EmailSendConfirmations(DeliveryConfirmations):
         body: str,
         timeout_seconds: float | None = None,
         attachments: list[dict[str, str | int]] | None = None,
+        on_pending: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_resolved: Callable[[str], Awaitable[None]] | None = None,
     ) -> Decision:
         """Wait for the owner's decision on this exact email snapshot."""
         return await self.request_snapshot(
@@ -40,6 +45,8 @@ class EmailSendConfirmations(DeliveryConfirmations):
             session_id=session_id,
             payload={"to": to, "subject": subject, "body": body, "attachments": [dict(item) for item in attachments or []]},
             timeout_seconds=timeout_seconds,
+            on_pending=on_pending,
+            on_resolved=on_resolved,
         )
 
 

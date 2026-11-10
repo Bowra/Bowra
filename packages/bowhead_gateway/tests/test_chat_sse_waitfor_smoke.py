@@ -470,6 +470,7 @@ async def test_sse_untracked_legacy_terminal_keeps_synthetic_done_fallback(
                 session_id="s_legacy_terminal",
                 status="failed" if self.terminal else "running",
                 error_kind="legacy_worker_crash" if self.terminal else None,
+                ended_at="2026-11-08T02:41:53+00:00" if self.terminal else None,
             )
 
         async def get_session(self, _session_id: str):
@@ -520,6 +521,8 @@ async def test_sse_untracked_legacy_terminal_keeps_synthetic_done_fallback(
     # StopAsyncIteration guard keeps the original crash fallback.
     assert connected_response.text.count("event: done") == 1
     assert '"status": "failed"' in connected_response.text
+    # The reply byline reads the persisted end time, as it does after reload.
+    assert '"ended_at": "2026-11-08T02:41:53+00:00"' in connected_response.text
 
     # A later reconnect uses the terminal shortcut and must not loop forever.
     async with httpx2.AsyncClient(transport=transport, base_url="http://gw") as client:
@@ -549,6 +552,7 @@ async def test_sse_synthetic_done_uses_exact_durable_status(
                 session_id="s_synthetic_exact",
                 status=terminal_status,
                 error_kind=None,
+                ended_at="2026-11-08T02:49:21+00:00",
             )
 
         async def get_session(self, _session_id: str):
@@ -575,6 +579,8 @@ async def test_sse_synthetic_done_uses_exact_durable_status(
 
     assert response.text.count("event: done") == 1
     assert f'"status": "{terminal_status}"' in response.text
+    # Transport recovery carries the Turn row's end time for the reply byline (dogfood N3).
+    assert '"ended_at": "2026-11-08T02:49:21+00:00"' in response.text
 
 
 @pytest.mark.integration

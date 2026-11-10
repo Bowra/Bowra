@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * A3 (report-edit-audit) — display-order → full database-order mapping.
  *

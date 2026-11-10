@@ -12,6 +12,7 @@ from bowhead_core.reference_skill_compatibility import ReferenceSkillMetadata, r
 from bowhead_core.skill_read_material import prepare_skill_read, validate_prepared_skill_read
 from bowhead_core.skill_reference_metadata import build_builtin_skill_metadata
 from bowhead_skill.loader import load_skill
+from test_reference_skill_compatibility import behavior as behavior
 from test_skill_read_extensions import policy_for
 
 from bowhead_skill.catalog import builtin_catalog_dir
@@ -20,17 +21,19 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("permissions", [("read",), ("invoke", "read")])
-def test_installed_dupont_projects_independent_method_without_changing_grants(permissions):
+def test_installed_dupont_projects_independent_method_without_changing_grants(permissions, behavior):
     root = builtin_catalog_dir()
     item = next(item for item in build_builtin_skill_metadata().items if item.name == "analyst-method-roe-dupont")
     resource = SkillResourceRef(kind="skill", source_kind="builtin", id=item.id, version=item.revision)
     grant = ExactSkillGrant("builtin", item.id, item.name, permissions, item.revision, "reference")
-    receiver = ReferenceReceiverMetadata((grant,))
+    receiver = ReferenceReceiverMetadata((grant,), behavior=behavior)
     metadata = {resource: ReferenceSkillMetadata(item.name, item.read_only_entry_json, True, True)}
 
     assert reference_skill_modes(receiver, [resource], metadata) == ("baseline",)
-    assert reference_skill_modes(ReferenceReceiverMetadata(()), [resource], metadata) is None
-    assert reference_skill_modes(ReferenceReceiverMetadata((), policy_for(resource)), [resource], metadata) == ("readonly_extension",)
+    assert reference_skill_modes(ReferenceReceiverMetadata((), behavior=behavior), [resource], metadata) is None
+    assert reference_skill_modes(ReferenceReceiverMetadata((), policy_for(resource), behavior=behavior), [resource], metadata) == (
+        "readonly_extension",
+    )
     assert receiver.grants == (grant,)
 
     path = Path(root) / item.name

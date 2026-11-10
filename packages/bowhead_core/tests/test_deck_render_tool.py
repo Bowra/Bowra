@@ -260,6 +260,7 @@ async def test_uploaded_deck_keeps_inspection_possible_until_rendering_starts(de
 
     from bowhead_router import LLMResponse, ToolCall
 
+    monkeypatch.setenv("FEATURE_TOOL_DELIVERY_REVIEW", "1")
     ctx, store, _render, runtime = deck_case
     await store.put_bytes(
         content=Path(_materialize_default_template()).read_bytes(),
@@ -296,6 +297,13 @@ async def test_uploaded_deck_keeps_inspection_possible_until_rendering_starts(de
             ],
         )
     )
+    if attempt_render:
+        responses.extend(
+            [
+                LLMResponse(content="The attempted render did not produce a deck."),
+                LLMResponse(content="The attempted render did not produce a deck."),
+            ]
+        )
     result = await SubagentRunner(router=ScriptedRouter(responses), tool_registry=registry).run(
         profile_name="consultant",
         task="Summarize the uploaded presentation.",
@@ -305,7 +313,9 @@ async def test_uploaded_deck_keeps_inspection_possible_until_rendering_starts(de
         parent_turn_id=ctx.turn_id,
     )
     if attempt_render:
-        assert result.ok is False and result.error == "deck_delivery_missing"
+        assert result.ok is False and result.error == "deck_delivery_missing", [
+            (inv.tool_name, inv.result, inv.error) for inv in result.tool_invocations
+        ]
     else:
         assert result.ok is True, [(inv.tool_name, inv.result, inv.error) for inv in result.tool_invocations]
         assert not (result.payload or {}).get("deliverables")

@@ -29,7 +29,9 @@ Les appels distants nécessitent par défaut votre confirmation. Vérifiez Agent
 - **Autoriser cet appel** permet une exécution avec les paramètres actuels.
 - **Toujours autoriser dans cette session** permet les appels suivants au même outil uniquement dans cette session ; l’autorisation expire à sa fin, à l’actualisation ou à la désactivation de la connexion.
 - **Refuser et passer** n’exécute pas l’appel.
-- Sans décision, l’appel expire après deux minutes.
+- Sans décision, l’appel expire après trois minutes.
+
+Si votre déploiement active la confirmation dans la conversation, la demande apparaît sous l’étape en attente au lieu d’une fenêtre, puis reste affichée sous forme d’une ligne indiquant votre décision. Si vous êtes sur une autre page, un avis mène à la conversation et le titre de l’onglet indique le nombre d’actions en attente.
 
 Un service externe peut produire des changements irréversibles. Posséder une connexion personnelle n’autorise pas l’envoi de données sensibles contraire à la politique de l’équipe.
 

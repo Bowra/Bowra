@@ -604,663 +604,218 @@ async def test_all_activation_errors_have_localized_messages(
 @pytest.mark.parametrize(
     "code",
     [
-        "not_local_deployment",
-        "pubkeys_unavailable",
-        "managed_by_license",
-        "cross_team_not_allowed",
-        "stale_license",
-        "tamper",
-        "team_not_found",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_team_license_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "rate_limited",
-        "rate_limit",
-        "invite_expired",
-        "invite_invalid",
-        "invite_revoked",
-        "invite_consumed",
-        "policy_blocked",
-        "trusted_idp_required",
-        "identity_already_exists",
-        "identity_blocked",
-        "verification_delivery_failed",
-        "public_entry_team_mismatch",
-        "feature_disabled",
-        "invite_intent_missing",
-        "invite_email_mismatch",
-        "invite_cross_team_not_allowed",
-        "invite_accept_failed",
-        "auth_required",
-        "invalid_token",
-        "user_inactive",
-        "password_changed_relogin_required",
-        "email_not_verified",
-        "password_length_invalid",
-        "password_letter_required",
-        "password_digit_required",
-        "password_too_common",
-        "json_content_type_required",
-        "cross_origin_mutation_rejected",
-        "same_origin_required",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_invite_flow_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "self_recovery_not_allowed",
-        "member_not_found",
-        "shared_identity_recovery_requires_self_service",
-        "owner_recovery_requires_owner",
-        "credential_recovery_not_allowed",
-        "recovery_invalid_or_expired",
-        "recovery_intent_missing",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_credential_recovery_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "invalid_oauth_flow",
-        "oauth_provider_unsupported",
-        "oauth_not_configured",
-        "oauth_state_invalid",
-        "oauth_authorization_incomplete",
-        "oauth_token_exchange_failed",
-        "oauth_userinfo_failed",
-        "oauth_identity_missing",
-        "provider_email_untrusted",
-        "federated_identity_conflict",
-        "invite_activation_failed",
-        "oauth_registration_disabled",
-        "whitelist_domain_no_team_provisioned",
-        "oauth_callback_failed",
-        "seat_exceeded",
-        "over_grace",
-        "suspended",
-        "needs_license",
-        "tamper",
-        "clock_tamper",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_oauth_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "admin_direct_password_disabled",
-        "local_only",
-        "team_not_found",
-        "member_create_conflict",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_direct_member_creation_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "feature_disabled_use_direct_create",
-        "seat_full",
-        "user_not_found",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_team_invite_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "resend_cooldown_1min",
-        "invite_not_found",
-        "invite_status_revoked",
-        "invite_status_consumed",
-        "invite_status_satisfied",
-        "invite_status_expired",
-        "invite_not_reissuable",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_team_invite_lifecycle_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "team_membership_required",
-        "user_not_active",
-        "insufficient_role",
-        "owner_immutable",
-        "last_team_admin_cannot_self_demote",
-        "target_user_not_found",
-        "cross_team_target_not_allowed",
-        "feature_unlicensed",
-        "entitlement_unavailable",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_team_role_change_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "insufficient_credits",
-        "kb_quota_exceeded",
-        "matrix_active_runs_cap",
-        "ws_active_runs_cap",
-        "no_pending_cells",
-        "run_not_cancellable",
-        "invalid_matrix_run_scope",
-        "matrix_service_unavailable",
-        "matrix_not_found",
-        "matrix_column_not_found",
-        "matrix_file_not_found",
-        "matrix_run_not_found",
         "access_control_unavailable",
-        "workspace_required",
-        "workspace_access_denied",
-        "workspace_role_unknown",
-        "workspace_member_role_required",
-        "owner_or_admin_required",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_kb_matrix_run_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "matrix_data_service_unavailable",
-        "matrix_source_file_unavailable",
-        "personal_files_not_allowed",
-        "invalid_column_type",
-        "invalid_matrix_request",
-        "matrix_template_not_found",
-        "template_use_new_matrix_flow",
-        "options_required",
-        "option_empty",
-        "option_too_long",
-        "option_duplicate",
-        "options_too_many",
-        "options_not_applicable",
-        "cross_verify_not_applicable",
-        "promote_must_be_sole_change",
-        "invalid_promotion",
-        "too_many_columns_to_graduate",
-        "empty_matrix",
-        "duplicate_column_names",
-        "invalid_column_name",
-        "column_name_too_long",
-        "too_many_files_to_graduate",
-        "graduation_rows_failed",
-        "doc_type_name_taken",
-        "invalid_graduation_request",
-        "matrix_cell_not_found",
-        "cell_value_too_large",
-        "cell_value_not_serializable",
-        "not_edited",
-        "verified_required",
-        "verify_requires_done",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_kb_matrix_mutation_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "kb_doc_type_service_unavailable",
-        "kb_doc_type_write_unavailable",
-        "doc_type_not_found",
-        "doc_type_name_taken",
-        "graduated_fields_frozen",
-        "too_many_doc_type_fields",
-        "duplicate_field_names",
-        "invalid_doc_type_schema",
-        "doc_type_draft_service_unavailable",
-        "doc_type_draft_failed",
-        "doc_type_draft_invalid_response",
-        "workspace_admin_or_creator_required",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_kb_doc_type_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "team_template_not_found",
-        "team_template_service_unavailable",
-        "team_template_copy_refresh_required",
-        "not_publishable",
-        "empty_template",
-        "schema_too_large",
-        "invalid_template_schema",
-        "revoke_not_allowed",
-        "copy_into_source_space",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_kb_team_template_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "owner_transfer_same_user",
-        "owner_transfer_target_not_active",
-        "owner_transfer_conflict",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_owner_transfer_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "workspace_not_found",
-        "last_workspace_admin",
-        "workspace_team_mismatch",
-        "grant_not_found",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_member_workspace_grant_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "cannot_self_deactivate",
-        "last_team_admin",
+        "admin_direct_password_disabled",
         "already_inactive",
-        "subagent_lifecycle_action_required",
-        "deactivate_failed",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_member_deactivation_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "member_service_unavailable",
-        "not_workspace_member",
-        "too_many_checks",
-        "workspace_member_not_found",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_space_member_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "provider_not_configured",
+        "auth_required",
+        "blocked_url",
+        "cannot_self_deactivate",
+        "cell_value_not_serializable",
+        "cell_value_too_large",
+        "clock_tamper",
+        "column_name_too_long",
         "config_decrypt_failed",
         "config_version_conflict",
-        "invalid_llm_config",
-        "embed_reindex_required",
-        "llm_config_encryption_required",
-        "provider_not_in_v2_config",
-        "reindex_task_not_found",
-        "reindex_failed",
-        "provider_not_testable",
-        "provider_type_unsupported",
-        "invalid_schema",
-        "blocked_url",
-        "unknown_reference",
-        "required",
-        "unsupported",
-        "invalid_value",
-    ],
-)
-@pytest.mark.parametrize("language", ["zh-CN", "en-US"])
-@pytest.mark.asyncio
-async def test_all_admin_billing_errors_have_localized_messages(
-    app_with_handler: FastAPI,
-    code: str,
-    language: str,
-) -> None:
-    transport = httpx2.ASGITransport(app=app_with_handler)
-    async with httpx2.AsyncClient(
-        transport=transport,
-        base_url="http://gw",
-        cookies={"NEXT_LOCALE": language},
-    ) as client:
-        response = await client.post(f"/raise/http-coded?code={code}")
-
-    detail = response.json()["detail"]
-    assert detail["code"] == code
-    assert detail["message"]
-    assert detail["message"] != code
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        "insufficient_credit_capability",
-        "invalid_credit_pagination",
-        "credit_changes_required",
-        "credit_user_inactive",
-        "credit_team_pool_insufficient",
-        "credit_period_reset_cooldown",
+        "copy_into_source_space",
+        "credential_recovery_not_allowed",
         "credit_attention_not_found",
         "credit_attention_reason_required",
+        "credit_changes_required",
+        "credit_period_reset_cooldown",
+        "credit_team_pool_insufficient",
         "credit_user_id_required",
+        "credit_user_inactive",
+        "cross_origin_mutation_rejected",
+        "cross_team_not_allowed",
+        "cross_team_target_not_allowed",
+        "cross_verify_not_applicable",
+        "deactivate_failed",
+        "doc_type_draft_failed",
+        "doc_type_draft_invalid_response",
+        "doc_type_draft_service_unavailable",
+        "doc_type_name_taken",
+        "doc_type_not_found",
+        "duplicate_column_names",
+        "duplicate_field_names",
         "email_config_encryption_required",
-        "invalid_smtp_config",
-        "smtp_control_characters",
-        "smtp_host_required",
-        "smtp_host_invalid",
-        "smtp_port_unsupported",
-        "smtp_from_address_invalid",
-        "smtp_password_required",
-        "smtp_host_blocked",
         "email_not_configured",
+        "email_not_verified",
         "email_test_delivery_failed",
         "email_test_env_delivery_failed",
+        "embed_reindex_required",
+        "empty_matrix",
+        "empty_template",
+        "entitlement_unavailable",
+        "feature_disabled",
+        "feature_disabled_use_direct_create",
+        "feature_unlicensed",
+        "federated_identity_conflict",
+        "graduated_fields_frozen",
+        "graduation_rows_failed",
+        "grant_not_found",
+        "identity_already_exists",
+        "identity_blocked",
+        "insufficient_credit_capability",
+        "insufficient_credits",
+        "insufficient_role",
+        "invalid_column_name",
+        "invalid_column_type",
+        "invalid_credit_pagination",
+        "invalid_doc_type_schema",
+        "invalid_graduation_request",
+        "invalid_llm_config",
+        "invalid_matrix_request",
+        "invalid_matrix_run_scope",
+        "invalid_oauth_flow",
+        "invalid_promotion",
+        "invalid_schema",
+        "invalid_smtp_config",
+        "invalid_template_schema",
+        "invalid_token",
+        "invalid_value",
+        "invite_accept_failed",
+        "invite_activation_failed",
+        "invite_consumed",
+        "invite_cross_team_not_allowed",
+        "invite_email_mismatch",
+        "invite_expired",
+        "invite_intent_missing",
+        "invite_invalid",
+        "invite_not_found",
+        "invite_not_reissuable",
+        "invite_revoked",
+        "invite_status_consumed",
+        "invite_status_expired",
+        "invite_status_revoked",
+        "invite_status_satisfied",
+        "json_content_type_required",
+        "kb_doc_type_service_unavailable",
+        "kb_doc_type_write_unavailable",
+        "kb_quota_exceeded",
+        "last_team_admin",
+        "last_team_admin_cannot_self_demote",
+        "last_workspace_admin",
+        "llm_config_encryption_required",
+        "local_only",
+        "managed_by_license",
+        "matrix_active_runs_cap",
+        "matrix_cell_not_found",
+        "matrix_column_not_found",
+        "matrix_data_service_unavailable",
+        "matrix_file_not_found",
+        "matrix_not_found",
+        "matrix_run_not_found",
+        "matrix_service_unavailable",
+        "matrix_source_file_unavailable",
+        "matrix_template_not_found",
+        "member_create_conflict",
+        "member_not_found",
+        "member_service_unavailable",
+        "needs_license",
+        "no_pending_cells",
+        "not_edited",
+        "not_local_deployment",
+        "not_publishable",
+        "not_workspace_member",
+        "oauth_authorization_incomplete",
+        "oauth_callback_failed",
+        "oauth_identity_missing",
+        "oauth_not_configured",
+        "oauth_provider_unsupported",
+        "oauth_registration_disabled",
+        "oauth_state_invalid",
+        "oauth_token_exchange_failed",
+        "oauth_userinfo_failed",
+        "option_duplicate",
+        "option_empty",
+        "option_too_long",
+        "options_not_applicable",
+        "options_required",
+        "options_too_many",
+        "over_grace",
+        "owner_immutable",
+        "owner_or_admin_required",
+        "owner_recovery_requires_owner",
+        "owner_transfer_conflict",
+        "owner_transfer_same_user",
+        "owner_transfer_target_not_active",
+        "password_changed_relogin_required",
+        "password_digit_required",
+        "password_length_invalid",
+        "password_letter_required",
+        "password_too_common",
+        "personal_files_not_allowed",
+        "policy_blocked",
+        "promote_must_be_sole_change",
+        "provider_email_untrusted",
+        "provider_not_configured",
+        "provider_not_in_v2_config",
+        "provider_not_testable",
+        "provider_type_unsupported",
+        "pubkeys_unavailable",
+        "public_entry_team_mismatch",
+        "rate_limit",
+        "rate_limited",
+        "recovery_intent_missing",
+        "recovery_invalid_or_expired",
+        "reindex_failed",
+        "reindex_task_not_found",
+        "required",
+        "resend_cooldown_1min",
+        "revoke_not_allowed",
+        "run_not_cancellable",
+        "same_origin_required",
+        "schema_too_large",
+        "seat_exceeded",
+        "seat_full",
+        "self_recovery_not_allowed",
+        "shared_identity_recovery_requires_self_service",
+        "smtp_control_characters",
+        "smtp_from_address_invalid",
+        "smtp_host_blocked",
+        "smtp_host_invalid",
+        "smtp_host_required",
+        "smtp_password_required",
+        "smtp_port_unsupported",
+        "stale_license",
+        "subagent_lifecycle_action_required",
+        "suspended",
+        "tamper",
+        "target_user_not_found",
+        "team_membership_required",
+        "team_not_found",
+        "team_template_copy_refresh_required",
+        "team_template_not_found",
+        "team_template_service_unavailable",
+        "template_use_new_matrix_flow",
+        "too_many_checks",
+        "too_many_columns_to_graduate",
+        "too_many_doc_type_fields",
+        "too_many_files_to_graduate",
+        "trusted_idp_required",
+        "unknown_reference",
+        "unsupported",
+        "user_inactive",
+        "user_not_active",
+        "user_not_found",
+        "verification_delivery_failed",
+        "verified_required",
+        "verify_requires_done",
+        "whitelist_domain_no_team_provisioned",
+        "workspace_access_denied",
+        "workspace_admin_or_creator_required",
+        "workspace_member_not_found",
+        "workspace_member_role_required",
+        "workspace_not_found",
+        "workspace_required",
+        "workspace_role_unknown",
+        "workspace_team_mismatch",
+        "ws_active_runs_cap",
     ],
 )
 @pytest.mark.parametrize("language", ["zh-CN", "en-US"])
 @pytest.mark.asyncio
-async def test_all_admin_credit_email_errors_have_localized_messages(
+async def test_registered_http_error_codes_have_localized_messages(
     app_with_handler: FastAPI,
     code: str,
     language: str,

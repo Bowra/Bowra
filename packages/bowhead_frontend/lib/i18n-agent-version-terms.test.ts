@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Copy contract for the Agent version terms (docs/design/agent-release-beginner-experience.md, Item 1).
  *

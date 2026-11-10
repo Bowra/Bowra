@@ -105,6 +105,13 @@ type Props = {
   ghostHint?: string;
   autoFocus?: boolean;
   placeholder?: string;
+  /**
+   * The input's accessible name. The Composer passes its visible prompt (ordinary, steering or read-only) so the
+   * name says what the reader sees: the prompt is the only visible label (WCAG 2.5.3 label in name), and screen
+   * readers announce a name on focus while a description is often delayed or suppressed by verbosity settings,
+   * which would leave a switch to steering unannounced. Defaults to the generic "Task input".
+   */
+  accessibleName?: string;
   onCompositionStateChange?: (blocked: boolean, scope: ComposerPersistenceScope) => void;
 };
 
@@ -402,7 +409,9 @@ function ScopedReferenceEditor(
       },
       attributes: {
         role: "combobox",
-        "aria-label": t("input_label"),
+        // Follows the visible prompt (see `accessibleName`); the placeholder below stays aria-hidden so it is not
+        // read twice. 2026-11-08 dogfood F11: a fixed "Task input" hid the steering prompt from screen readers.
+        "aria-label": props.accessibleName || t("input_label"),
         "aria-autocomplete": "list",
         "aria-expanded": String(open),
         "aria-haspopup": "listbox",

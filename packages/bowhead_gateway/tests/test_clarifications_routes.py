@@ -1443,10 +1443,16 @@ async def test_fast_resolve_waits_for_pause_settlement_then_resumes(
     session_store._statuses[req.turn_id] = "running"
     dispatch_state = {"settled": False}
     probe_results: list[bool] = []
+    running_probe = asyncio.Event()
+    pending_probe = asyncio.Event()
 
     async def _is_turn_resume_ready(turn_id: str) -> bool:
         ready = bool(session_store._statuses.get(turn_id) == "clarification_pending" and dispatch_state["settled"])
         probe_results.append(ready)
+        if session_store._statuses.get(turn_id) == "running":
+            running_probe.set()
+        elif not dispatch_state["settled"]:
+            pending_probe.set()
         return ready
 
     monkeypatch.setattr(
@@ -1467,9 +1473,9 @@ async def test_fast_resolve_waits_for_pause_settlement_then_resumes(
     )
 
     async def _settle_pause() -> None:
-        await asyncio.sleep(0.02)
+        await running_probe.wait()
         session_store._statuses[req.turn_id] = "clarification_pending"
-        await asyncio.sleep(0.02)
+        await pending_probe.wait()
         dispatch_state["settled"] = True
 
     settlement = asyncio.create_task(_settle_pause())

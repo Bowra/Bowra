@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Collision-avoidance criteria for per-point scatter labels (chart-config-ux batch 1).
  *

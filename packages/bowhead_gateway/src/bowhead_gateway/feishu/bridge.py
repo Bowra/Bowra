@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# A continuation Turn that never starts leaves no producer on its bus; check its persisted state.
+_UNSTARTED_TURN_CHECK_S = 5.0
+_SETTLED_TURN_STATUSES = frozenset({"completed", "failed", "cancelled", "aborted"})
 _AT_TAG_RE = re.compile(r"<at\b[^>]*>.*?</at>", re.IGNORECASE | re.DOTALL)
 
 
@@ -299,6 +302,11 @@ class FeishuTurnBridge:
                 "code": "terminal_dependency_recovering",
             }
         if _steer.kind == "buffered":
+            # The continuation Turn that runs this message answers it in reply to this message.
+            try:
+                await self.store.set_steer_source_message_id(turn_id=str(_steer.active_turn_id), message_id=inbound.message_id)
+            except Exception as exc:  # noqa: BLE001 - The continuation falls back to the original question.
+                logger.warning("feishu.steer_source_record_failed turn=%s err=%s", _steer.active_turn_id, type(exc).__name__)
             # Feishu-specific UX: a FISTBUMP reaction on the user's own message (the emoji_ack
             # bus event for the card mirror is already emitted by steer_or_proceed).
             await self._best_effort_reaction(
@@ -894,6 +902,138 @@ class FeishuTurnBridge:
         self._mirror_tasks.add(task)
         task.add_done_callback(self._mirror_tasks.discard)
 
+    def _start_follow_up_mirror(
+        self,
+        *,
+        parent_turn_id: str,
+        follow_up_turn_id: str,
+        tenant_key: str,
+        sender_open_id: str,
+        locale: str,
+        answer_locale: str,
+    ) -> None:
+        task = asyncio.create_task(
+            self._mirror_follow_up(
+                parent_turn_id=parent_turn_id,
+                follow_up_turn_id=follow_up_turn_id,
+                tenant_key=tenant_key,
+                sender_open_id=sender_open_id,
+                locale=locale,
+                answer_locale=answer_locale,
+            ),
+            name=f"feishu_mirror:{follow_up_turn_id}",
+        )
+        self._mirror_tasks.add(task)
+        task.add_done_callback(self._mirror_tasks.discard)
+
+    async def _mirror_follow_up(
+        self,
+        *,
+        parent_turn_id: str,
+        follow_up_turn_id: str,
+        tenant_key: str,
+        sender_open_id: str,
+        locale: str,
+        answer_locale: str,
+    ) -> None:
+        """Mirror the continuation Turn that runs messages buffered during ``parent_turn_id``."""
+        # Hold the bus before any Feishu call: its ring replays from the start even if the
+        # continuation finishes and leaves the registry while the cards are being sent.
+        bus = await get_event_registry().get_or_create(follow_up_turn_id, producer=False)
+        parent = await self.store.get_turn_link(parent_turn_id)
+        if parent is None:
+            logger.warning("feishu.follow_up_parent_link_missing parent=%s turn=%s", parent_turn_id, follow_up_turn_id)
+            return
+        meta = dict(parent.meta)
+        source_message_id = str(meta.pop("steer_source_message_id", None) or parent.source_message_id)
+        await self.store.upsert_turn_link(
+            turn_id=follow_up_turn_id,
+            session_id=parent.session_id,
+            tenant_key=tenant_key,
+            chat_id=parent.chat_id,
+            sender_open_id=sender_open_id,
+            source_message_id=source_message_id,
+            meta=meta,
+        )
+        card_resp = await self._reply_card(
+            source_message_id,
+            renderer.processing_card(text=await self._turn_user_text(follow_up_turn_id), locale=locale),
+            uuid=f"feishu_card_{follow_up_turn_id}",
+            tenant_key=tenant_key,
+        )
+        card_message_id = _response_message_id(card_resp)
+        if card_message_id:
+            await self.store.set_card_message_id(turn_id=follow_up_turn_id, card_message_id=card_message_id)
+        await self._mirror_turn_events(
+            turn_id=follow_up_turn_id,
+            tenant_key=tenant_key,
+            card_message_id=card_message_id,
+            source_message_id=source_message_id,
+            sender_open_id=sender_open_id,
+            locale=locale,
+            answer_locale=answer_locale,
+            bus=bus,
+            release_unstarted=True,
+        )
+
+    async def _turn_user_text(self, turn_id: str) -> str:
+        session_store = getattr(getattr(self.app.state, "orchestrator", None), "session_store", None)
+        try:
+            turn = await session_store.get_turn(turn_id) if session_store is not None else None
+        except Exception as exc:  # noqa: BLE001 - The processing card falls back to "received".
+            logger.warning("feishu.turn_text_unavailable turn=%s err=%s", turn_id, type(exc).__name__)
+            return ""
+        return str(getattr(turn, "user_text", "") or "")
+
+    async def _release_unstarted_turn(self, turn_id: str, bus: Any, progress: dict[str, Any]) -> None:
+        """End the mirror of a continuation that settled without emitting, such as one stopped for credits."""
+        session_store = getattr(getattr(self.app.state, "orchestrator", None), "session_store", None)
+        while session_store is not None and not progress["events"]:
+            await asyncio.sleep(_UNSTARTED_TURN_CHECK_S)
+            if progress["events"]:
+                return
+            try:
+                turn = await session_store.get_turn(turn_id)
+            except Exception as exc:  # noqa: BLE001 - Check again on the next interval.
+                logger.warning("feishu.unstarted_turn_check_failed turn=%s err=%s", turn_id, type(exc).__name__)
+                continue
+            # Events may have arrived while the Turn was read; then the live mirror owns the outcome.
+            if not progress["events"] and turn is not None and str(turn.status) in _SETTLED_TURN_STATUSES:
+                progress["settled"] = turn
+                await get_event_registry().close(turn_id, expected=bus)
+                return
+
+    async def _report_turn_without_events(
+        self,
+        turn: Any,
+        *,
+        card_message_id: str | None,
+        source_message_id: str,
+        tenant_key: str,
+        locale: str | None,
+        answer_locale: str | None,
+    ) -> None:
+        """Answer from the persisted Turn when its live events never reached this mirror."""
+        answer = str(getattr(turn, "final_answer", "") or "")
+        if str(turn.status) == "completed" and answer.strip():
+            await self._reply_card(
+                source_message_id,
+                renderer.answer_card(answer, locale=locale, answer_locale=answer_locale),
+                uuid=f"feishu_answer_{turn.id}",
+                tenant_key=tenant_key,
+            )
+            await self.store.mark_message_status(message_id=source_message_id, status="done")
+            return
+        card = renderer.error_card(
+            title=im_interface_message("status_failed", locale),
+            body=im_error_message(str(getattr(turn, "error_kind", "") or "lead_internal_error"), locale),
+        )
+        if card_message_id:
+            await self._patch_card(card_message_id, card, tenant_key=tenant_key)
+        else:
+            await self._reply_card(source_message_id, card, tenant_key=tenant_key)
+        await self.store.mark_message_status(message_id=source_message_id, status="failed")
+
     async def _mirror_turn_events(
         self,
         *,
@@ -904,6 +1044,8 @@ class FeishuTurnBridge:
         sender_open_id: str,
         locale: str | None = None,
         answer_locale: str | None = None,
+        bus: Any = None,
+        release_unstarted: bool = False,
     ) -> None:
         # Turn cards use the turn's language snapshot; mirrors started without one fall back
         # to the shared resolver without a message. The answer card's title and empty-answer
@@ -915,13 +1057,77 @@ class FeishuTurnBridge:
         # Accumulate the canvas section tree + citations the old renderer
         # drops, so the answer card can carry the trust line + sources (§4.1/§4.3).
         neutral = NeutralTurnState(turn_id=turn_id)
+        if bus is None:
+            bus = await get_event_registry().get_or_create(turn_id, producer=False)
+        progress: dict[str, Any] = {"events": 0}
+        watchdog = (
+            asyncio.create_task(self._release_unstarted_turn(turn_id, bus, progress), name=f"feishu_unstarted_watch:{turn_id}")
+            if release_unstarted
+            else None
+        )
+        try:
+            await self._mirror_bus_events(
+                bus,
+                progress,
+                turn_id=turn_id,
+                tenant_key=tenant_key,
+                card_message_id=card_message_id,
+                source_message_id=source_message_id,
+                sender_open_id=sender_open_id,
+                locale=locale,
+                answer_locale=answer_locale,
+                state=state,
+                neutral=neutral,
+            )
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+        settled = progress.get("settled")
+        if settled is not None and progress["events"] == 0:
+            await self._report_turn_without_events(
+                settled,
+                card_message_id=card_message_id,
+                source_message_id=source_message_id,
+                tenant_key=tenant_key,
+                locale=locale,
+                answer_locale=answer_locale,
+            )
+
+    async def _mirror_bus_events(
+        self,
+        bus: Any,
+        progress: dict[str, Any],
+        *,
+        turn_id: str,
+        tenant_key: str,
+        card_message_id: str | None,
+        source_message_id: str,
+        sender_open_id: str,
+        locale: str,
+        answer_locale: str,
+        state: renderer.FeishuTurnCardState,
+        neutral: NeutralTurnState,
+    ) -> None:
         answer_message_id: str | None = None
         last_patch_at = 0.0
         pending_patch = False
-        bus = await get_event_registry().get_or_create(turn_id, producer=False)
         async for event in bus.subscribe():
+            progress["events"] += 1
             payload = event.payload if isinstance(event.payload, dict) else {}
             apply_event(neutral, event)  # fold canvas.section_*/citation/etc. into the neutral state
+            if event.event_type == "turn.follow_up":
+                # Messages buffered during this Turn run as a continuation Turn; answer them in Feishu too.
+                follow_up_turn_id = str(payload.get("follow_up_turn_id") or "")
+                if follow_up_turn_id and follow_up_turn_id != turn_id:
+                    self._start_follow_up_mirror(
+                        parent_turn_id=turn_id,
+                        follow_up_turn_id=follow_up_turn_id,
+                        tenant_key=tenant_key,
+                        sender_open_id=sender_open_id,
+                        locale=locale,
+                        answer_locale=answer_locale,
+                    )
+                continue
             if event.event_type == "canvas.opened" or event.event_type in {
                 "done",
                 "error",

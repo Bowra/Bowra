@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Licensing FE slice A (§13.2) — resumeTurnAfterClarification must surface a 402/403 entitlement denial:
  * extract the nested-dict {error:{code,message}} (not render "[object Object]") and attach .status so the

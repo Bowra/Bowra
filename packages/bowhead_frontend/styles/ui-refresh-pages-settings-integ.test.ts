@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance page-by-page acceptance A · integration/security (overview, Feishu, Slack, Teams, email service, public entries, OIDC)
  * source contract. Development slices: styles/ui-refresh-pages-settings.css (mappings) and ui-controls-legacy.css (legacy appearance).

@@ -815,6 +815,22 @@ class TurnIdentity:
         }
 
 
+@dataclass(frozen=True)
+class ToolStepRef:
+    """The chat step of the tool call a handler is serving (server-owned, never model input).
+
+    ``bus`` is the Turn event bus the step was emitted on; events attached to the step
+    (for example a confirmation card) go on the same bus so they persist and replay
+    with it. ``parent_agent_id`` is None for Lead calls, matching ``step_started``.
+    """
+
+    bus: Any
+    card_id: str
+    step_id: str
+    call_id: str
+    parent_agent_id: str | None = None
+
+
 @dataclass
 class BIOutageLatch:
     """Share a mutable BI outage marker across shallow-copied execution contexts.
@@ -1098,6 +1114,8 @@ class ToolExecutionContext:
     # Set only by the actual user-entry runner dispatch; helper runs clear it.
     artifact_presentation_entry: bool = False
     artifact_presentation_call: tuple[str, str] | None = field(default=None, repr=False)
+    # Set per call by SubagentRunner._execute_tool on its private copy of the context.
+    tool_step: ToolStepRef | None = field(default=None, repr=False)
     # Historical pointers only; domain readers still enforce current authority.
     coach_operation_history: CoachOperationHistory | None = field(default=None, repr=False)
     # Terminal approval provider fence. Write-capable handlers must forward

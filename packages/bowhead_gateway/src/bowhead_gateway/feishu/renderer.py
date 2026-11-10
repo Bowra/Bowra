@@ -68,6 +68,13 @@ class FeishuTurnCardState:
     # Unclipped streamed Lead narrative; `narrative` is its card-sized view. A model
     # attempt restarted after output withdraws characters from the end of this text.
     narrative_stream: str = ""
+    # Like the browser: a superseded narrative (`done` / clarification `turn_started`)
+    # is replaced by the final answer, so the card no longer shows it.
+    narrative_superseded: bool = False
+    # Offsets in `narrative_stream` where a new beat starts (a step started between
+    # deltas), kept separately so restart withdrawals still count raw code points.
+    narrative_breaks: list[int] = field(default_factory=list)
+    narrative_break_pending: bool = False
     final_answer: str = ""
     inline_artifacts: list[dict[str, Any]] = field(default_factory=list)
     steps: dict[str, FeishuStepView] = field(default_factory=dict)
@@ -193,7 +200,7 @@ def turn_status_card(state: FeishuTurnCardState) -> dict[str, Any]:
         title = im_interface_message("status_failed", locale)
     elements: list[dict[str, Any]] = []
     # R-1: strip/resolve inline markers from the process narrative too (not just the answer card).
-    narrative = resolve_markers(state.narrative, locale=normalize_im_locale(locale)).strip()
+    narrative = "" if state.narrative_superseded else resolve_markers(state.narrative, locale=normalize_im_locale(locale)).strip()
     has_final_answer = bool(state.final_answer.strip())
     show_narrative = bool(narrative) and not (
         state.status == "completed"
@@ -311,8 +318,15 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
     if event_type == "narrative.delta":
         delta = str(payload.get("delta") or "")
         if delta:
+            if (
+                state.narrative_break_pending
+                and state.narrative_stream
+                and (not state.narrative_breaks or state.narrative_breaks[-1] != len(state.narrative_stream))
+            ):
+                state.narrative_breaks.append(len(state.narrative_stream))
+            state.narrative_break_pending = False
             state.narrative_stream += delta
-            state.narrative = _clip(state.narrative_stream, 2500)
+            state.narrative = _clip(_narrative_beats(state), 2500)
             return True
         return False
     if event_type == "llm.stream_restarted":
@@ -322,12 +336,23 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
         if withdrawn <= 0 or not state.narrative_stream:
             return False
         state.narrative_stream = state.narrative_stream[: max(0, len(state.narrative_stream) - withdrawn)]
-        state.narrative = _clip(state.narrative_stream, 2500)
+        state.narrative_breaks = [offset for offset in state.narrative_breaks if offset < len(state.narrative_stream)]
+        state.narrative = _clip(_narrative_beats(state), 2500)
         return True
+    if event_type == "done" or (event_type == "turn_started" and payload.get("clarification_id") is not None):
+        # The browser's rule (turn-store-dispatch): the backend supersedes a narrative that a
+        # rejected or replaced answer streamed; the answer card carries the final text.
+        if payload.get("narrative_superseded") is True and not state.narrative_superseded:
+            state.narrative_superseded = True
+            return True
+        return False
     if event_type == "step_started":
         step_id = str(payload.get("step_id") or "")
         if not step_id:
             return False
+        # A step between deltas starts a new narrative beat (the clarification hand-off is no step).
+        if payload.get("tool_name") != "clarification_ask":
+            state.narrative_break_pending = True
         title = _step_title(payload, state.locale)
         step = state.steps.get(step_id) or FeishuStepView(step_id=step_id, title=title)
         step.title = title
@@ -377,6 +402,19 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
         state.status = "failed"
         return True
     return event_type in {"turn.step_retry_requested", "turn.step_skip_requested"}
+
+
+def _narrative_beats(state: FeishuTurnCardState) -> str:
+    """The streamed narrative with one paragraph break per beat, as the browser shows it.
+
+    Beats split where a step started between deltas; the raw stream stays unchanged.
+    """
+    stream = state.narrative_stream
+    if not state.narrative_breaks:
+        return stream
+    bounds = [0, *state.narrative_breaks, len(stream)]
+    beats = [stream[start:end].strip() for start, end in zip(bounds, bounds[1:], strict=False)]
+    return "\n\n".join(beat for beat in beats if beat)
 
 
 def _step_title(payload: dict[str, Any], locale: object) -> str:

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source drift gate: KPI value tiers must be wired into **every** `.v2-kpi-cell .val` rendering implementation.
  *

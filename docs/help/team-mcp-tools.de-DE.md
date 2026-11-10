@@ -39,3 +39,26 @@ Um Tools zu importieren, die Sie beim Hinzufügen der Quelle nicht ausgewählt h
 Die Liste zeigt alle Tools der zuletzt gespeicherten Tool-Liste; importierte Tools sind angehakt. Haken Sie die Tools an, die Agents verwenden sollen, und wählen Sie **Speichern**. Mindestens ein Tool muss ausgewählt bleiben; wenn kein Tool mehr verwendet werden soll, deaktivieren Sie stattdessen die Quelle.
 
 Wenn Sie derzeit importierte Tools abwählen, zeigt Bowra zuerst die Auswirkungen: die Tools, die entfernt werden, sowie die Agents, laufenden Aufgaben und Zeitpläne, die diese Quelle verwenden. Erst mit **Bestätigen und speichern** wird die Änderung übernommen; **Zurück** führt zur Liste zurück. Nach dem Speichern können Agents die entfernten Tools nicht mehr aufrufen, und betroffene Zeitpläne werden pausiert, bis ihre Abhängigkeiten erneut bestätigt wurden.
+
+## Jeden Aufruf bestätigen, der Daten ändern kann
+
+Wenn Ihre Bereitstellung die Aufrufbestätigung aktiviert, fragt Bowra das Mitglied, das eine Aufgabe gestartet hat, bevor ein MCP-Tool aufgerufen wird, das Daten ändern kann. Der Dialog zeigt die Tool-Quelle, das Tool, seine Beschreibung, ob das Tool Daten schreibt, Daten löscht oder keine bekannte Kategorie hat, und die vollständigen Argumente, die gesendet werden:
+
+- **Diesen Aufruf erlauben** führt diesen Aufruf einmal mit den angezeigten Argumenten aus.
+- **In dieser Sitzung immer erlauben** erlaubt auch spätere Aufrufe desselben Tools in der aktuellen Sitzung. Die Freigabe endet mit der Sitzung oder wenn sich die Tooldefinition ändert.
+- **Ablehnen und überspringen** führt den Aufruf nicht aus.
+- Entscheidet niemand innerhalb von drei Minuten, wird der Aufruf übersprungen.
+
+Wenn Ihre Bereitstellung die Bestätigung im Chat aktiviert, erscheint die Anfrage in der Unterhaltung unter dem wartenden Schritt statt in einem Dialog und bleibt danach als einzeiliger Vermerk Ihrer Entscheidung stehen. Sind Sie auf einer anderen Seite, führt ein Hinweis zur Unterhaltung, und der Titel des Browser-Tabs zeigt, wie viele Aktionen warten.
+
+Tools, die der Dienst als nur lesend kennzeichnet, laufen ohne Rückfrage. Ein Tool, das zugleich als nur lesend und als löschend gekennzeichnet ist, gilt als nicht gekennzeichnet. Tools, die der Dienst als schreibend oder löschend kennzeichnet, können dann für Agents ausgewählt werden und werden bei jedem Aufruf bestätigt. Tools ohne Kennzeichnung können erst für Agents ausgewählt werden, wenn ein Inhaber oder Administrator ihre Kategorie bestätigt; verwendet der Assistent sie, wird jeder Aufruf bestätigt. Jeder Aufruf verwendet das Konto, mit dem die Quelle verbunden wurde, und handelt daher für jedes Mitglied als dieses Konto. Geplante Aufgaben haben niemanden, der bestätigen kann; ihre Aufrufe dieser Tools werden übersprungen.
+
+### Kategorie eines Tools bestätigen
+
+Inhaber und Administratoren können festhalten, was jedes Tool einer MCP-Quelle tut, wenn der Dienst es falsch oder gar nicht kennzeichnet:
+
+1. Wählen Sie in den Aktionen der Quelle (im Menü **⋯** rechts auf der Karte) **Toolkategorien bestätigen**.
+2. Wählen Sie für jedes Tool **Nur lesend**, **Schreibt Daten** oder **Löscht Daten**. Kategorien unterhalb der Kennzeichnung des Dienstes werden nicht angeboten.
+3. Wählen Sie **Speichern**. Die Änderung gilt ab der nächsten Aufgabe.
+
+Ein als nur lesend bestätigtes Tool läuft ohne Rückfrage, und ein nicht gekennzeichnetes Tool mit bestätigter Kategorie kann für Agents ausgewählt werden. Ändert der Dienst später die Definition eines Tools, gilt dessen Bestätigung nicht mehr und die Liste fordert eine erneute Bestätigung an. Bestätigen Sie **Nur lesend** nur für Tools, die keine Daten ändern können.

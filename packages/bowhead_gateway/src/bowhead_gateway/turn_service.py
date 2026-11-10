@@ -47,6 +47,7 @@ from bowhead_core.events import (
     OrchestratorEvent,
     TerminalDurabilityAbort,
     get_event_registry,
+    make_steer_ack_event,
 )
 from bowhead_core.types import (
     LEGACY_TURN_WORKER_SETTLED_STATUSES,
@@ -406,6 +407,25 @@ async def is_session_deleted(orchestrator: Any, session_id: str) -> bool:
     return bool(sess is not None and getattr(sess, "deleted_at", None))
 
 
+async def session_has_active_turn(orchestrator: Any, session_id: str) -> bool:
+    """Pre-check for channels without steer; ``spawn_turn`` stays the authoritative check."""
+    reader = getattr(orchestrator.session_store, "get_active_turn_identity", None)
+    if not callable(reader):
+        return False
+    try:
+        active_turn_id, _protocol_version = await reader(session_id)
+    except Exception as exc:
+        # Starting the Turn re-checks the Session atomically and reports it busy.
+        _log.warning("session.active_turn_precheck_failed sid=%s err=%s", session_id, type(exc).__name__)
+        return False
+    return bool(active_turn_id)
+
+
+def is_session_busy_rejection(error: BaseException) -> bool:
+    """The Session already has a running Turn, as reported by ``record_turn``."""
+    return isinstance(error, ValueError) and str(error) == "submission_session_active"
+
+
 async def steer_or_proceed(
     orchestrator: Any,
     *,
@@ -491,11 +511,7 @@ async def steer_or_proceed(
         try:
             await get_event_registry().emit_if_local_producer(
                 active_turn_id,
-                OrchestratorEvent(
-                    event_type="emoji_ack",
-                    turn_id=active_turn_id,
-                    payload={"target_msg_id": user_msg_id, "emoji": "🤝", "text": text},
-                ),
+                make_steer_ack_event(active_turn_id, target_msg_id=user_msg_id, text=text),
             )
         except Exception as exc:
             _log.warning("steer.emoji_ack_emit_failed turn=%s err=%s", active_turn_id, exc)
@@ -2550,9 +2566,18 @@ async def spawn_resume_turn(
             raise
 
 
+def _resume_chart_projection(app: Any, *, session_id: str, workspace_id: str, team_id: str, user_id: str) -> Any:
+    if app is None or not (session_id and workspace_id and user_id):
+        return None
+    from bowhead_gateway.chart_authoring_projection import actor_chart_authoring_projection
+
+    return actor_chart_authoring_projection(app, session_id=session_id, workspace_id=workspace_id, team_id=team_id, user_id=user_id)
+
+
 def build_resume_turn_request(
     req: Any,
     *,
+    app: Any = None,
     source_db_path: str | None = None,
     datarc_client: Any = None,
     datarc_binding: Any = None,
@@ -2571,6 +2596,9 @@ def build_resume_turn_request(
     Legacy empty-token cards append choices to their saved ask; bounded cards
     restore canonical text and separate answer data in spawn_resume_turn. Token
     cards carry a resume_glossary so Lead does not repeat the same question.
+
+    With ``app``, the resumed Turn verifies chart authoring through the
+    resumed actor's report authority (the same projection as the chat route).
     """
     from bowhead_core.coach_canvas_target import unrestored_coach_canvas_target
     from bowhead_core.configuration_settings_target import unrestored_settings_target
@@ -2613,6 +2641,9 @@ def build_resume_turn_request(
             text=decoded.user_text,
             turn_id=decoded.turn_id,
             team_id=decoded.team_id,
+            chart_authoring_projection=_resume_chart_projection(
+                app, session_id=decoded.session_id, workspace_id=decoded.workspace_id, team_id=decoded.team_id, user_id=decoded.user_id
+            ),
             resume_turn_id=decoded.turn_id,
             document_clarification_id=req.request_id,
             document_checkpoint=decoded.continuation.checkpoint,
@@ -2635,11 +2666,16 @@ def build_resume_turn_request(
     session_id = str(rc.get("session_id") or "")
     if not (user_text and session_id):
         return None
+    workspace_id = rc.get("workspace_id") or getattr(req, "workspace_id", "")
+    user_id = rc.get("user_id") or getattr(req, "user_id", "")
     return TurnRequest(
         session_id=session_id,
+        chart_authoring_projection=_resume_chart_projection(
+            app, session_id=session_id, workspace_id=workspace_id, team_id=rc.get("team_id") or "", user_id=user_id
+        ),
         configuration_settings_target=unrestored_settings_target(rc),
         coach_canvas_target=unrestored_coach_canvas_target(rc),
-        workspace_id=rc.get("workspace_id") or getattr(req, "workspace_id", ""),
+        workspace_id=workspace_id,
         active_datarc_project=rc.get("active_datarc_project") or rc.get("datarc_workspace_id"),
         datarc_binding=datarc_binding,
         datarc_source_evidence=rc.get("datarc_selection"),
@@ -2652,7 +2688,7 @@ def build_resume_turn_request(
         # is unavailable.
         team_router=team_router,
         team_kb_retriever=team_kb_retriever,
-        user_id=rc.get("user_id") or getattr(req, "user_id", ""),
+        user_id=user_id,
         member_uid=rc.get("member_uid") or "",
         text=user_text,
         turn_id=req.turn_id,

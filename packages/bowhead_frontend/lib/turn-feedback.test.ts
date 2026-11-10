@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Chat turn feedback signals (D3 / D5 / D6): pure projections plus the shared live/replay
  * dispatcher path. Live SSE and F5 replay feed the same persisted events through

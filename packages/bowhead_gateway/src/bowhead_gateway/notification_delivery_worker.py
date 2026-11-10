@@ -126,10 +126,14 @@ async def _compose(app: Any, delivery: NotificationDelivery, item: NotificationI
             link = await _deep_link(app, job, session_id, item.team_id)
         else:
             locale, link = await _locale(app, delivery.user_id), None
-        lines = [im_interface_message("scheduled_email_job", locale, name=name), "", item.body or ""]
+        # The run raised an urgent alert: the owner's result email carries it (no separate alert email).
+        urgent = bool(meta.get("flaggedUrgent")) and job is not None and delivery.user_id == job.user_id
+        lines = [im_interface_message("scheduled_email_flagged_urgent", locale), ""] if urgent else []
+        lines += [im_interface_message("scheduled_email_job", locale, name=name), "", item.body or ""]
         if link:
             lines += ["", im_interface_message("scheduled_email_view_result", locale, url=link)]
-        return im_interface_message("scheduled_email_subject", locale, name=name), "\n".join([*lines, "", "— Bowhead"])
+        subject_key = "scheduled_email_subject_urgent" if urgent else "scheduled_email_subject"
+        return im_interface_message(subject_key, locale, name=name), "\n".join([*lines, "", "— Bowhead"])
     locale = await _locale(app, delivery.user_id)
     link = await _link(app, item.team_id, item.action_url)
     if item.type == "routine.alert":

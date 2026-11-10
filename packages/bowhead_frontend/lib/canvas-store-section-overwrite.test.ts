@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * 0.39.7 #2 — canvas stream→F5 inconsistency repro + regression guard.
  *

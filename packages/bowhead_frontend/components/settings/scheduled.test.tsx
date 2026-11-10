@@ -49,9 +49,12 @@ vi.mock("@/lib/use-space", () => ({
   readSpaces: (...args: unknown[]) => readSpacesMock(...args),
 }));
 
+import { createTranslator } from "next-intl";
+
 import {
   SCHEDULED_ERROR_MESSAGE_KEYS,
   SettingsScheduled,
+  cronToHuman,
 } from "./scheduled";
 import { resetViewerTimeZoneForTests } from "@/lib/time-zone";
 
@@ -755,5 +758,20 @@ describe("SettingsScheduled default time zone", () => {
   it("falls back to UTC when the browser reports no zone", async () => {
     stubBrowserZone(undefined);
     expect(await createWithDefaultZone()).toBe("UTC");
+  });
+});
+
+describe("cronToHuman", () => {
+  it.each([
+    { locale: "en-US", messages: enMessages, cron: "0 15 * * 1", expected: "Every Mon at 3:00 PM" },
+    { locale: "en-US", messages: enMessages, cron: "5 9 * * 1-5", expected: "Weekdays at 9:05 AM" },
+    { locale: "zh-CN", messages: zhMessages, cron: "0 15 * * 1", expected: "每周一 15:00" },
+    { locale: "de-DE", messages: deMessages, cron: "5 9 * * *", expected: "Täglich um 09:05" },
+  ])("reads $cron in the $locale clock as $expected", ({ locale, messages, cron, expected }) => {
+    const t = createTranslator({ locale, messages, namespace: "settings.scheduled" }) as unknown as Parameters<
+      typeof cronToHuman
+    >[1];
+    // The cron hour is the schedule's wall clock: no viewer time-zone shift, only the locale's clock convention.
+    expect(cronToHuman(cron, t, locale)).toBe(expected);
   });
 });

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Desktop-sidebar session “⋯” (including Delete Session) appears with inline buttons on hover-capable devices (technical design, Behavior Batch A: Menus, Delete Session).
  * Previously `.unified-work-more-wrap` appeared only under `(hover: none)`, preventing desktop session deletion. jsdom cannot measure cascade-based visibility,

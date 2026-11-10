@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiJson } from "./api-client";
 import { getReferenceRetention, setReferenceRetention } from "./reference-retention-api";

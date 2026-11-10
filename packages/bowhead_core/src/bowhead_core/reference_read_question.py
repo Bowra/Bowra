@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict
 from typing import TYPE_CHECKING, Literal
 
+from bowhead_router.reasoning import message_record
 from bowhead_router.types import ImageRef, Message, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -343,7 +343,7 @@ class ReferenceReadQuestion(BaseModel):
             return None
         try:
             fingerprint = _attachment_fingerprint(attachment_context, messages[0].images)
-            raw = [asdict(message) for message in transcript]
+            raw = [message_record(message, keep_reasoning=False) for message in transcript]
             raw[0]["images"] = []
             payload = {"messages": raw, "attachment_fingerprint": fingerprint} if fingerprint else raw
             if mcp_receipts:

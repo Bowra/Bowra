@@ -318,7 +318,8 @@ export function RunningBand({
     peerTerminalById, peerProse, peerIdsWithSteps, peerIdsWithSpawnRow,
   });
   const elapsed = useElapsedText(startedAt, running, t, elapsedKey);
-  const preparing = model.phase === "preparing";
+  /** No active step (opening or gap): never present finished work as ongoing (invariant ③). */
+  const noActiveStep = model.phase !== "running";
 
   // ★Disclosure and current row have **two granularities**; do not render the same sentence.
   //   Design: disclosure "正在分析 · 第 7 步 · 3 分 25 秒" / current row "正在按门店汇总客流量并排名".
@@ -332,9 +333,15 @@ export function RunningBand({
     agent: "band_phase_agent",
   };
   const cat = model.current?.toolCat ?? "";
-  const barText = preparing
+  // "正在准备" belongs to the opening only (design §2-A). A gap between steps reads as neutral work, and a wait on
+  // a helper as collaboration; neither names a finished step. 2026-11-08 dogfood F9: gaps used the opening copy,
+  // so the bar read "Getting ready · Step 21 · 1m 43s".
+  const waitingOnHelper = Boolean(model.current?.waitingOnPeer || model.current?.waitingOnPeerUnknown);
+  const barText = model.phase === "preparing"
     ? t("band_preparing")
-    : t((PHASE_KEY[cat] ?? "band_working") as never);
+    : model.phase === "gap"
+      ? t(waitingOnHelper ? "band_phase_agent" : "band_working")
+      : t((PHASE_KEY[cat] ?? "band_working") as never);
   // Only the current row states the specific action. During silence use "仍在等模型响应", more honest than continuing
   // "正在运行代码": backend explicitly says no new chunks arrived in this interval. Keep disclosure/spinner unchanged (healthy connection).
   // stream-liveness ③: **first in the decision chain**.
@@ -394,7 +401,7 @@ export function RunningBand({
     //   which would show "正在等 Bowhead 返回" = Lead waiting for itself (one frame observed on 116).
     : model.current?.waitingOnPeerUnknown
       ? t("band_waiting_peer_anon")
-    : preparing
+    : noActiveStep
       ? t("band_thinking")
       : model.current?.what
         ? t("band_doing", { what: model.current.what })

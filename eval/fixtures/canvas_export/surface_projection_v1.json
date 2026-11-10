@@ -583,10 +583,10 @@
     }
   ],
   "expected_visual_input_sha256": {
-    "sec_design": "sha256:d58fefa11a8856fbd6f5de63a9dc04923e505c9678877fd9cd21f16060ebcf8a",
-    "sec_spec": "sha256:0fff96b9b9f63f479b4e16162d619097a094730f44ed6fdb8891540b448e6e2b",
-    "sec_chart": "sha256:22c552a68ded9cb59bb05f9ecbcfc9be7b75da31659cc14d8dfa5dcdad73bdb1",
-    "sec_image": "sha256:36355657e0ca85ad6a453bd097f22c6b6312bf856ba2a4085848602564a79b8b",
-    "sec_orphan_chart": "sha256:68118c29e9c205fbefa01ef0e61c72a56d126aa9f2bcbf53d8e51a5f4c71ef80"
+    "sec_design": "sha256:b3f5a9f4222de2a2556a46278aff2c2ca542f3f2e474663f23a519d267b38423",
+    "sec_spec": "sha256:5c056aadda47afe67bcd3202efc982f99ced2f710b8296a031f8a4542f6849a8",
+    "sec_chart": "sha256:cc61ce61ed6c7d5444c1fb63dba7dbc4d938f852fd6c8be97f320d3502901cd6",
+    "sec_image": "sha256:c533b90f0912d797414e7daeb92c72400208a35764cbacb85c2c7f58447d434e",
+    "sec_orphan_chart": "sha256:7bd8fb904fa5e6119785157b8451a1f2c83c01270fc2e0db4d220d95212f02db"
   }
 }

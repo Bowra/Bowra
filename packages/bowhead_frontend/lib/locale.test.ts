@@ -4,13 +4,18 @@ import {
   buildLocale,
   buildLocaleDescription,
   browserLocale,
+  clockOptions,
   DEFAULT_LOCALE,
   formatDate,
+  formatDateTime,
+  formatMessageTime,
   formatNumber,
   formatPercent,
   formatListDate,
   formatShortDateTime,
+  formatTime,
   getCurrentLocale,
+  SUPPORTED_LOCALES,
 } from "./locale";
 
 describe("buildLocale", () => {
@@ -165,17 +170,100 @@ describe("browserLocale", () => {
   });
 });
 
+/** ICU separates "PM" with a narrow no-break space; compare with plain spaces. */
+const plain = (text: string) => text.replace(/[  ]/g, " ");
+
 describe("formatShortDateTime", () => {
   const now = new Date(2026, 9, 1, 12, 0);
-  it("writes month, day and 24-hour time without seconds; the year only when it differs", () => {
+  it("writes month, day and the locale's clock without seconds; the year only when it differs", () => {
     expect(formatShortDateTime(new Date(2026, 8, 20, 14, 23, 45), "zh-CN", now)).toBe("9月20日 14:23");
     expect(formatShortDateTime(new Date(2025, 8, 20, 8, 5), "zh-CN", now)).toBe("2025年9月20日 08:05");
-    expect(formatShortDateTime(new Date(2026, 8, 20, 14, 23, 45), "de-DE", now)).not.toMatch(/:45|2026/);
+    expect(plain(formatShortDateTime(new Date(2026, 8, 20, 14, 23, 45), "en-US", now))).toBe("Sep 20, 2:23 PM");
+    expect(formatShortDateTime(new Date(2026, 8, 20, 14, 23, 45), "de-DE", now)).toBe("20. Sept., 14:23");
+    expect(formatShortDateTime(new Date(2026, 8, 20, 14, 23, 45), "fr-FR", now)).toBe("20 sept., 14:23");
   });
 
   it("returns an empty string for missing or invalid values", () => {
     expect(formatShortDateTime(null, "en-US", now)).toBe("");
     expect(formatShortDateTime("not a date", "en-US", now)).toBe("");
+  });
+});
+
+describe("clock rule per interface language", () => {
+  const evening = new Date(2026, 10, 8, 18, 39, 5);
+  const morning = new Date(2026, 10, 8, 8, 5, 0);
+
+  it("reads English as a 12-hour clock and Chinese, German and French as 24-hour time", () => {
+    expect(plain(formatTime(evening, "en-US"))).toBe("6:39 PM");
+    expect(plain(formatTime(morning, "en-US"))).toBe("8:05 AM");
+    for (const locale of ["zh-CN", "de-DE", "fr-FR"]) {
+      expect(formatTime(evening, locale)).toBe("18:39");
+      expect(formatTime(morning, locale)).toBe("08:05");
+    }
+    expect(plain(formatTime(evening, "en-US", { seconds: true }))).toBe("6:39:05 PM");
+    expect(formatTime(evening, "de-DE", { seconds: true })).toBe("18:39:05");
+  });
+
+  it("keeps the same clock in full date-time text", () => {
+    expect(plain(formatDateTime(evening, "en-US", { dateStyle: "medium" }))).toBe("Nov 8, 2026, 6:39 PM");
+    expect(formatDateTime(evening, "zh-CN", { dateStyle: "medium" })).toBe("2026年11月8日 18:39");
+    expect(formatDateTime(evening, "fr-FR", { dateStyle: "medium" })).toBe("8 nov. 2026, 18:39");
+  });
+
+  it("returns an empty string instead of throwing for missing or invalid values", () => {
+    expect(formatTime(undefined, "en-US")).toBe("");
+    expect(formatTime(Number.NaN, "en-US")).toBe("");
+    expect(formatDate("not a date", "en-US")).toBe("");
+    expect(formatDateTime(null, "zh-CN")).toBe("");
+  });
+
+  it("exposes the hour cycle so custom formats keep the rule", () => {
+    expect(clockOptions("en-US")).toMatchObject({ hourCycle: "h12", hour: "numeric" });
+    expect(clockOptions("zh-CN")).toMatchObject({ hourCycle: "h23", hour: "2-digit" });
+    expect(clockOptions("de-DE")).toMatchObject({ hourCycle: "h23" });
+    expect(clockOptions("fr-FR")).toMatchObject({ hourCycle: "h23" });
+  });
+});
+
+describe("formatMessageTime (chat bylines)", () => {
+  const now = new Date(2026, 10, 8, 20, 0);
+  const sameDay = new Date(2026, 10, 8, 18, 39);
+  const earlierDay = new Date(2026, 10, 7, 18, 39);
+  const earlierYear = new Date(2025, 10, 7, 18, 39);
+
+  it.each([
+    ["en-US", "6:39 PM", "Nov 7, 6:39 PM", "Nov 7, 2025, 6:39 PM"],
+    ["zh-CN", "18:39", "11月7日 18:39", "2025年11月7日 18:39"],
+    ["de-DE", "18:39", "7. Nov., 18:39", "7. Nov. 2025, 18:39"],
+    ["fr-FR", "18:39", "7 nov., 18:39", "7 nov. 2025, 18:39"],
+  ])("%s: time today, short date and time earlier, the year for another year", (locale, today, earlier, otherYear) => {
+    expect(plain(formatMessageTime(sameDay, locale, { now }))).toBe(today);
+    expect(plain(formatMessageTime(earlierDay, locale, { now }))).toBe(earlier);
+    expect(plain(formatMessageTime(earlierYear, locale, { now }))).toBe(otherYear);
+  });
+
+  it("covers every shipped interface language", () => {
+    expect([...SUPPORTED_LOCALES].sort()).toEqual(["de-DE", "en-US", "fr-FR", "zh-CN"]);
+  });
+
+  it("reads a server time a few seconds ahead of the browser clock as today", () => {
+    const browserNow = new Date(2026, 10, 8, 23, 59, 30);
+    const serverTime = new Date(2026, 10, 9, 0, 0, 10);
+    expect(formatMessageTime(serverTime, "zh-CN", { now: browserNow })).toBe("00:00");
+  });
+
+  it("compares calendar days in the given time zone", () => {
+    // 2026-11-08T02:41Z is still Nov 7 in Los Angeles.
+    const value = "2026-11-08T02:41:53Z";
+    const laNow = new Date("2026-11-08T05:00:00Z");
+    expect(formatMessageTime(value, "zh-CN", { now: laNow, timeZone: "America/Los_Angeles" })).toBe("18:41");
+    expect(formatMessageTime(value, "zh-CN", { now: new Date("2026-11-08T20:00:00Z"), timeZone: "America/Los_Angeles" }))
+      .toBe("11月7日 18:41");
+  });
+
+  it("is empty for a missing or invalid time", () => {
+    expect(formatMessageTime(null, "en-US", { now })).toBe("");
+    expect(formatMessageTime("nope", "en-US", { now })).toBe("");
   });
 });
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Admin datarc-connections API wrapper tests.
  * Asserts request shape, secret boundaries, typed errors, and diagnostics

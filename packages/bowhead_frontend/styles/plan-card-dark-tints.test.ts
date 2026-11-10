@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Plan-card / plan-graph *-tint values must not be light literals in dark mode (workbench batch 4a fix, active in both appearances).
  *

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { DialogShell } from "@/components/ui/dialog";
+import { formatTime } from "@/lib/locale";
+import { ShopifyContentPreview } from "@/components/chat/tool-confirmation/previews";
 import { shopifyContentConfirmationApi, type ShopifyContentConfirmation } from "@/lib/shopify-content-confirmation-api";
 import { useAuthSession } from "@/lib/auth/auth-session-context";
 import { useHasActiveToolStep } from "@/lib/turn-store";
@@ -15,6 +17,7 @@ export function ShopifyContentConfirmations() {
 
 function ShopifyContentConfirmationQueue() {
   const t = useTranslations("shopifyContentConfirmation");
+  const locale = useLocale();
   const [pending, setPending] = useState<ShopifyContentConfirmation[]>([]);
   const [mountCheck, setMountCheck] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -66,23 +69,10 @@ function ShopifyContentConfirmationQueue() {
     >
       <h2 id="shopify-content-confirmation-title">{t("title")}</h2>
       <p>{t("notice")}</p>
-      <p>{current.shop_domain}</p>
-      <p>
-        {t(current.resource)}: {current.title} · {current.handle}
-      </p>
-      <p>{current.object_id}</p>
-      {current.edits.map((edit) => (
-        <section key={edit.field}>
-          <h3>{t(`fields.${edit.field}`)}</h3>
-          <p>{t("before")}</p>
-          <pre>{edit.before === null ? t("defaultValue") : edit.before || t("emptyValue")}</pre>
-          <p>{t("after")}</p>
-          <pre>{edit.after || t("emptyValue")}</pre>
-        </section>
-      ))}
+      <ShopifyContentPreview item={current} />
       <p>
         {t("expires", {
-          time: new Date(current.expires_at).toLocaleTimeString(),
+          time: formatTime(current.expires_at, locale, { seconds: true }),
         })}
       </p>
       {error ? <p role="alert">{t("decisionError")}</p> : null}

@@ -2,10 +2,21 @@
 
 import { useTranslations } from "next-intl";
 import { CharIcon } from "@/components/char-icon";
+import { formatMessageTime } from "@/lib/locale";
 
+
+/**
+ * The acknowledgement's server time in the interface locale, formatted like every chat byline
+ * ({@link formatMessageTime}); empty when the event carries no time or an unreadable one, so the byline leaves
+ * the segment out instead of showing a blank.
+ */
+export function formatSteerTime(ts: string | null | undefined, locale: string, now?: Date): string {
+  return formatMessageTime(ts, locale, { now });
+}
 
 export interface SteerMessageProps {
   who: string;
+  /** Formatted time of the interjection; omitted from the byline when empty. */
   time: string;
   text: string;
   /** Emoji used as the bot's "got it" ack — defaults to 🤝. */
@@ -85,7 +96,8 @@ export function SteerMessage({
           marginBottom: 4,
         }}
       >
-        {who} · {time} · {tStep("steer_byline_suffix")}
+        {/* 2026-11-08 dogfood F10: an empty time used to render "You · · interjected". */}
+        {[who, time, tStep("steer_byline_suffix")].filter(Boolean).join(" · ")}
       </div>
       <div
         style={{

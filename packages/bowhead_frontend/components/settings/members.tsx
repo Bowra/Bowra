@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { fetchMe } from "@/lib/auth-api";
 import { spaceMemberErrorKey } from "@/lib/space-member-error";
 import { ErrorDiagnosticsInline } from "@/components/error-notice";
 import { apiJson, apiVoid } from "@/lib/api-client";
+import { formatDate } from "@/lib/locale";
 import { TEAM_SETTINGS_ROLES, teamRoleForUser } from "@/lib/settings-navigation";
 import { useAppRouter } from "@/lib/use-app-router";
 import { useSpace } from "@/lib/use-space";
@@ -24,6 +25,7 @@ type Candidate = { user_id: string; email: string; display_name: string | null }
 
 export function SettingsMembers() {
   const t = useTranslations("settings.members");
+  const locale = useLocale();
   // Below 640 use list rows instead of a table.
   const listLayout = useListRowsLayout();
   const router = useAppRouter();
@@ -178,7 +180,7 @@ export function SettingsMembers() {
               // Ellipsize long email in the row; retain full node text for screen readers and expose it on hover (same contract as credit list rows).
               return <ListRow key={member.user_id} title={<span title={name}>{name}</span>}
                 subtitle={member.display_name && member.email ? <span title={member.email}>{member.email}</span> : undefined}
-                meta={<span className="ui-tabular">{t("table.joined")} {formatDate(member.joined_at)}</span>}
+                meta={<span className="ui-tabular">{t("table.joined")} {formatJoinedDate(member.joined_at, locale)}</span>}
                 status={<select aria-label={t("role_for", { userId: member.email || member.user_id })} value={member.role} disabled={busy || locked} onChange={(event) => void updateRole(member.user_id, event.target.value as Role)} className="ui-input legacy-input-members"><RoleOptions t={t} /></select>}
                 actions={<RowActionsMenu label={t("more_actions_for", { name })} pending={busy} actions={[{ id: "remove", label: t("remove"), danger: true, disabled: busy || locked, disabledReason: locked ? t("remove_last_admin_reason") : undefined, onSelect: () => setRemoveTarget(member.user_id) }]} />} />;
             })}
@@ -186,7 +188,7 @@ export function SettingsMembers() {
         ) : <TableFrame><table className="ui-table legacy-members-table"><thead><tr><th className="legacy-members-cell">{t("table.member")}</th><th className="legacy-members-cell">{t("table.role")}</th><th className="legacy-members-cell">{t("table.joined")}</th><th className="legacy-members-cell ui-table-actions" /></tr></thead><tbody>{members.map((member) => {
           const lastAdmin = member.role === "admin" && members.filter((item) => item.role === "admin").length === 1;
           const locked = member.user_id === meId && lastAdmin;
-          return <tr key={member.user_id}><td className="legacy-members-cell">{member.display_name || member.email || member.user_id}</td><td className="legacy-members-cell"><select aria-label={t("role_for", { userId: member.email || member.user_id })} value={member.role} disabled={busy || locked} onChange={(event) => void updateRole(member.user_id, event.target.value as Role)} className="ui-input legacy-input-members"><RoleOptions t={t} /></select></td><td className="legacy-members-cell ui-tabular">{formatDate(member.joined_at)}</td><td className="legacy-members-cell ui-table-actions"><RowActionsMenu label={t("more_actions_for", { name: member.display_name || member.email || member.user_id })} pending={busy} actions={[{ id: "remove", label: t("remove"), danger: true, disabled: busy || locked, disabledReason: locked ? t("remove_last_admin_reason") : undefined, onSelect: () => setRemoveTarget(member.user_id) }]} /></td></tr>;
+          return <tr key={member.user_id}><td className="legacy-members-cell">{member.display_name || member.email || member.user_id}</td><td className="legacy-members-cell"><select aria-label={t("role_for", { userId: member.email || member.user_id })} value={member.role} disabled={busy || locked} onChange={(event) => void updateRole(member.user_id, event.target.value as Role)} className="ui-input legacy-input-members"><RoleOptions t={t} /></select></td><td className="legacy-members-cell ui-tabular">{formatJoinedDate(member.joined_at, locale)}</td><td className="legacy-members-cell ui-table-actions"><RowActionsMenu label={t("more_actions_for", { name: member.display_name || member.email || member.user_id })} pending={busy} actions={[{ id: "remove", label: t("remove"), danger: true, disabled: busy || locked, disabledReason: locked ? t("remove_last_admin_reason") : undefined, onSelect: () => setRemoveTarget(member.user_id) }]} /></td></tr>;
         })}</tbody></table></TableFrame>}
       </section>
     </> : null}
@@ -195,5 +197,5 @@ export function SettingsMembers() {
 }
 
 function RoleOptions({ t }: { t: ReturnType<typeof useTranslations<"settings.members">> }) { return <><option value="admin">{t("role_admin")}</option><option value="member">{t("role_member")}</option><option value="viewer">{t("role_viewer")}</option></>; }
-function formatDate(value: string) { return value ? new Intl.DateTimeFormat(undefined, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value)) : "—"; }
+function formatJoinedDate(value: string, locale: string) { return formatDate(value, locale) || "—"; }
 

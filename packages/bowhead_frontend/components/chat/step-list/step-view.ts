@@ -113,6 +113,8 @@ export function stepToStepView(
     subagentId: step.subagentId ?? undefined,
     // chat-ux-2026-08: order basis for placing step and peer terminal events in one running-band history.
     evtSeq: step.evtSeq ?? undefined,
+    // Inline tool call confirmation: the same object on live, archived and replayed surfaces.
+    ...(step.confirmation ? { confirmation: step.confirmation } : {}),
   };
 }
 

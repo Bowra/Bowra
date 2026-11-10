@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.team_llm_batch_store import (
     IdempotencyConflict,
     ItemCompletion,
@@ -23,7 +21,6 @@ from bowhead_core.team_llm_control_token import (
 from bowhead_gateway.llm_verification_runner import (
     LlmVerificationRunner,
 )
-from gateway_legacy_database import upgrade
 
 from bowhead_router import ProbeResult
 
@@ -32,11 +29,9 @@ NOW = datetime(2026, 7, 30, 8, tzinfo=UTC)
 
 
 @pytest.fixture
-def migrated_db(tmp_path, monkeypatch):
+def migrated_db(tmp_path, monkeypatch, initialize_migrated_core_database):
     db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-    upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", ROOT_KEY)
     return db_path
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatchToTurnStore } from "./turn-store-dispatch";
 
@@ -561,6 +562,9 @@ it("observes qualified Shopify writes without widening existing exact Tool obser
   expect(hasActiveToolStep(".shopify_apply_content_update", "suffix")).toBe(true);
   expect(hasActiveToolStep("shopify_apply_content_update")).toBe(false);
   expect(hasActiveToolStep("send_email")).toBe(false);
+  expect(hasActiveToolStep("teammcp.", "prefix")).toBe(true);
+  expect(hasActiveToolStep("teammcp.", "suffix")).toBe(false);
   applyStepDone({ turnId: T, stepId: "content", state: "done" });
   expect(hasActiveToolStep(".shopify_apply_content_update", "suffix")).toBe(false);
+  expect(hasActiveToolStep("teammcp.", "prefix")).toBe(false);
 });

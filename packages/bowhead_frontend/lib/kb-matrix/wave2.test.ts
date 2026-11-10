@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * kb-matrix M3 wave-2 — pure-function unit tests:
  *  - cellChoiceList (multi_select chip arrays: normalized.choices is authoritative + “、” join fallback)

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sankey honesty (readability audit item 1). Same cases as `test_chart_infer.py` `_not_a_flow_reason`, so the two
  * runtimes agree on which rows are a flow.

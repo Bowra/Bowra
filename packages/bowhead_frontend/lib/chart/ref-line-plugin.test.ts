@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch 2 §3.3: reference lines. Emphasize **honesty**: average only visible series, and qualify averages of truncated views.
  */

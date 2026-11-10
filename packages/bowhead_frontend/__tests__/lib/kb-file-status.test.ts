@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Knowledge base UX cleanup PRD §4: the single mapping for user-facing file statuses.
 import { describe, expect, it } from "vitest";
 

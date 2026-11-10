@@ -1,5 +1,6 @@
 """Native Office read and settled system Compute resume through one original card."""
 
+import hashlib
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -38,6 +39,42 @@ pytestmark = [
 ]
 
 
+def review_retained_scope(body, *, allow_unavailable_question=False):
+    marker = "review_context (JSON data): "
+    note = next(message["content"] for message in reversed(body["messages"]) if marker in str(message.get("content", "")))
+    context, _ = json.JSONDecoder().raw_decode(note.split(marker, 1)[1])
+    failures = context["failed_calls"]
+    assert not failures or (allow_unavailable_question and all(item["tool"] == "clarification_ask" for item in failures))
+    identities = [item["call_id"] for item in context["successful_calls"] if item["tool"] == "subagent_spawn"]
+    assert len(identities) == 2
+    return call(
+        "review-retained-scope",
+        "review_delivery",
+        {
+            "payload": {
+                "delivery_review": {
+                    "requirements": [
+                        {
+                            "requirement": "Inspect and calculate for the selected audience",
+                            "status": "unfulfilled" if failures else "fulfilled",
+                            "evidence_call_ids": [] if failures else identities,
+                        }
+                    ],
+                    "issues": [
+                        {
+                            "call_id": item["call_id"],
+                            "resolution": "unfulfilled",
+                            "evidence_call_ids": [],
+                            "explanation": "The audience question could not be prepared.",
+                        }
+                        for item in failures
+                    ],
+                }
+            }
+        },
+    )
+
+
 @pytest.mark.parametrize(
     "answer_mode,completion_order,collaboration",
     [
@@ -69,7 +106,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
     monkeypatch.setitem(PROFILES, "compute", replace(compute, tool_whitelist=(*compute.tool_whitelist, "subagent_return")))
     orch = case.app.state.orchestrator
     if not collaboration:
-        # Exercise the retained v8 writer as well as current Web admission.
+        # Exercise the original flow without collaboration ownership.
         async def no_collaboration(*args, **kwargs):
             return None
 
@@ -123,6 +160,11 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
                 await first_completed.wait()
         assert spec.name == "python_sandbox" and entry_script == "runner.py"
         executions.append(input_data["code"])
+        input_evidence = []
+        for key, item in (input_data.get("inputs") or {}).items():
+            artifact = await artifacts.get(item["artifact_id"])
+            content = await artifacts.backend.read_bounded(artifact.path, limit=artifact.size)
+            input_evidence.append({"key": key, "artifact_id": artifact.id, "size": len(content), "sha256": hashlib.sha256(content).hexdigest()})
         output = await artifacts.put_bytes(
             content=b"42\n",
             filename="sandbox-stdout.txt",
@@ -145,7 +187,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
             error=None,
             result_json={
                 "ok": True,
-                "input_artifacts": [],
+                "input_artifacts": input_evidence,
                 "execution": {
                     "contract": "sandbox-execution.v1",
                     "id": "bowhead-sandbox-" + "1" * 24,
@@ -202,6 +244,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
                             "profile": case.fixture.case.args["reference_start"].profile_name,
                             "task": "Read the attached profit.",
                             "delegation_role": "helper",
+                            "required_source_urls": [],
                         },
                     )
                     message["tool_calls"].extend(
@@ -212,6 +255,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
                                 "profile": "compute",
                                 "task": "Independently calculate 40 + 2.",
                                 "delegation_role": "helper",
+                                "required_source_urls": [],
                             },
                         )["tool_calls"]
                     )
@@ -225,11 +269,18 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
                         "profile": case.fixture.case.args["reference_start"].profile_name if index == 1 else "compute",
                         "task": "Read the attached profit." if index == 1 else "Calculate 40 + 2 from the retained read result.",
                         "delegation_role": "helper",
+                        "required_source_urls": [],
                     },
                 )
             elif index == 3:
                 message = call("question", "clarification_ask", {"questions": [question]})
+            elif index == 4:
+                return response(body, {"role": "assistant", "content": "The retained synthetic profit is 42."}, "stop")
+            elif index == 5:
+                message = review_retained_scope(body)
             else:
+                review = next(message for message in reversed(body["messages"]) if message.get("tool_call_id") == "review-retained-scope")
+                assert json.loads(review["content"]).get("ok") is True, json.loads(review["content"]).get("review_context")
                 return response(body, {"role": "assistant", "content": "The retained synthetic profit is 42."}, "stop")
         elif "attachment_read" in names:
             office_calls.append(body)
@@ -300,9 +351,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card_id))
         assert len(checkpoint.helper_materials()) == 2
-        assert checkpoint.contract == (
-            "ordinary-lead-loop.v11" if completion_order else "ordinary-lead-loop.v9" if collaboration else "ordinary-lead-loop.v8"
-        )
+        assert checkpoint.contract == "ordinary-lead-loop.v12" and checkpoint.knowledge_read is not None
         if completion_order:
             assert completion_ids == (["helper-1", "helper-2"] if completion_order == "office_first" else ["helper-2", "helper-1"])
             assert [helper["dispatch_key"] for helper in checkpoint.helper_materials()] == ["call:helper-1", "call:helper-2"]
@@ -337,6 +386,6 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
         turn = next(row for row in rows(case, "turns") if row["id"] == turn_id)
         assert turn["status"] == "completed" and turn["execution_generation"] == 2, turn
         assert parses == [attachment["file_id"]] and executions == ["print(40 + 2)"]
-        assert len(lead_calls) == (3 if completion_order else 5 if protocol_repair else 4) and len(office_calls) == len(compute_calls) == 2
+        assert len(lead_calls) == (5 if completion_order else 7 if protocol_repair else 6) and len(office_calls) == len(compute_calls) == 2
         if document_tool_available:
             assert not rows(case, "document_jobs")

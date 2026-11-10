@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { normalizeChartForRenderingV1 } from "./normalize-chart-for-rendering";

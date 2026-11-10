@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Literal
 
+from bowhead_router.reasoning import message_record, record_reasoning, valid_record_keys
 from bowhead_router.types import ImageRef, Message, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -74,11 +75,10 @@ def seal_context_messages(
     """Split storage bytes only; never truncate or split model-visible messages."""
     try:
         balanced_boundaries(messages)
-        for message in messages:
-            _message(asdict(message))
-        encoded = json.dumps(
-            [asdict(message) for message in messages], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
+        records = [message_record(message) for message in messages]
+        for record in records:
+            _message(record)
+        encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     except (ValueError, TypeError) as exc:
         raise ContextSegmentError("context_messages_invalid") from exc
     if len(encoded) > MAX_CONTEXT_BYTES:
@@ -139,9 +139,14 @@ def open_context_messages(
 
 
 def _message(row: object) -> Message:
-    fields = {"role", "content", "name", "tool_call_id", "tool_calls", "images"}
-    if not isinstance(row, dict) or set(row) != fields or not isinstance(row["content"], str):
+    if not isinstance(row, dict) or not valid_record_keys(row) or not isinstance(row["content"], str):
         raise ContextSegmentError("context_message_shape_invalid")
+    try:
+        reasoning = record_reasoning(row)
+    except ValueError as exc:
+        raise ContextSegmentError("context_message_reasoning_invalid") from exc
+    if reasoning is not None and row["role"] != "assistant":
+        raise ContextSegmentError("context_message_reasoning_invalid")
     if any(row[key] is not None and not isinstance(row[key], str) for key in ("name", "tool_call_id")):
         raise ContextSegmentError("context_message_identity_invalid")
     images = row["images"]
@@ -168,5 +173,10 @@ def _message(row: object) -> Message:
             ):
                 raise ContextSegmentError("context_tool_call_shape_invalid")
     return Message(
-        **{**row, "images": [ImageRef(**image) for image in images], "tool_calls": [ToolCall(**call) for call in calls] if calls else None}
+        **{
+            **row,
+            "images": [ImageRef(**image) for image in images],
+            "tool_calls": [ToolCall(**call) for call in calls] if calls else None,
+            "provider_reasoning": reasoning,
+        }
     )

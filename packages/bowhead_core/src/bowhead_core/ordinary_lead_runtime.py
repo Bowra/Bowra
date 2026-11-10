@@ -94,18 +94,30 @@ async def initialize_ordinary_lead(ctx: ToolExecutionContext, *, request_context
     """Engage the optional ordinary continuation only for a live, fully scoped worker.
 
     The continuation is an optional capability of ordinary Lead. When its
-    preconditions do not hold (no Team, no current membership, or no live
-    worker lease), it stays off and the Turn proceeds without it; it never
-    fails the Turn on its own.
+    preconditions do not hold (no Team, no current membership, no live
+    worker lease, or no chat source for the Turn), it stays off and the Turn
+    proceeds without it; it never fails the Turn on its own.
     """
     if getattr(ctx, "ordinary_lead_state", None) is not None or not _ordinary_lead_may_engage(ctx):
         return
+    from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+
     async with open_shared_ctx(ctx.session_store.db_path) as db:
         await db.execute("BEGIN")
         try:
             await require_live_worker_in_tx(db, worker=worker_identity(ctx))
         except OrdinaryContinuationUnavailable:
             logger.info("ordinary_lead.continuation_not_engaged turn=%s reason=worker_scope_unavailable", ctx.turn_id)
+            return
+        # Capture retains the user's original message from the chat source that
+        # /chat/send writes. Turns started elsewhere (scheduled runs, IM
+        # channels) have none, so a question after a helper failed the whole
+        # Turn at capture; they ask through the plain Lead question instead.
+        source = await _read_chat_turn_user_source_in_tx(
+            db, turn_id=ctx.turn_id, expected_user_id=ctx.user_id, expected_workspace_id=ctx.workspace_id
+        )
+        if source is None:
+            logger.info("ordinary_lead.continuation_not_engaged turn=%s reason=source_unavailable", ctx.turn_id)
             return
         async with db.execute("SELECT llm_config_version FROM teams WHERE id=?", (ctx.team_id,)) as cursor:
             row = await cursor.fetchone()
@@ -188,7 +200,10 @@ def note_ordinary_return_rejection(ctx: ToolExecutionContext, result: dict) -> d
         state.rejected_returns[identity] = content_hash(result)
     from bowhead_core.tool_delivery_review import TerminalCorrectionRefusal
 
-    return TerminalCorrectionRefusal(result) if result.get("ok") is False else result
+    # Keep a native refusal subtype, such as delivery review's bounded rejection count.
+    if isinstance(result, TerminalCorrectionRefusal) or result.get("ok") is not False:
+        return result
+    return TerminalCorrectionRefusal(result)
 
 
 def _require_settled_returns(helper: ToolInvocation, state: OrdinaryLeadRunState) -> None:
@@ -421,7 +436,7 @@ async def capture_ordinary_lead_loop(
 
     await revalidate_tool_materials(ctx, report_reads)
     for entry in helper_materials:
-        await revalidate_tool_materials(ctx, entry["tools"])
+        await revalidate_tool_materials(ctx, entry["tools"], prepared_pins=pinned)
     if parallel or retained_knowledge:
         material["input_context"] = None
     if has_retained_context:
@@ -434,9 +449,13 @@ async def capture_ordinary_lead_loop(
     from bowhead_core.language_context import language_context_snapshot
 
     material["attachments"] = await seal_source_attachment_snapshot(source, ctx, attachment_context or "") if source.attachment_ids else None
-    from bowhead_core.ordinary_lead_material import canvas_evidence
+    from bowhead_core.ordinary_lead_material import canvas_evidence, retained_sandbox_inputs
 
-    material["canvas"] = await canvas_evidence(ctx)
+    material["canvas"] = await canvas_evidence(
+        ctx,
+        contract="ordinary-lead-loop.v10" if has_retained_context else "ordinary-lead-loop.v3",
+        tool_inputs=retained_sandbox_inputs(helper_materials),
+    )
     context = {
         "parsed": [{**asdict(item), "local_path": None} for item in parsed],
         "payloads": getattr(ctx, "_m137_subagent_payloads", []) or [],
@@ -604,9 +623,13 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
     for entry in checkpoint.helper_materials():
         await revalidate_tool_materials(ctx, entry.get("tools", []), contract=checkpoint.contract)
     await revalidate_tool_materials(ctx, checkpoint.report_reads or [], contract=checkpoint.contract)
-    from bowhead_core.ordinary_lead_material import canvas_evidence
+    from bowhead_core.ordinary_lead_material import canvas_evidence, retained_sandbox_inputs
 
-    if "canvas" in material and await canvas_evidence(ctx, contract=checkpoint.contract) != material["canvas"]:
+    if (
+        "canvas" in material
+        and await canvas_evidence(ctx, contract=checkpoint.contract, tool_inputs=retained_sandbox_inputs(checkpoint.helper_materials()))
+        != material["canvas"]
+    ):
         raise OrdinaryContinuationUnavailable()
     if source.attachment_ids:
         from bowhead_core.chat_reference_attachment_snapshot import reopen_source_attachment_snapshot

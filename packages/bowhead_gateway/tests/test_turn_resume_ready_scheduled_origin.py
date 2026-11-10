@@ -15,19 +15,14 @@ import sqlite3
 
 import anyio
 import pytest
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.session_store import SessionStore
-from gateway_legacy_database import upgrade
 
 
 @pytest.fixture
-def migrated_db(tmp_path):
+def migrated_db(tmp_path, initialize_migrated_core_database):
     """1.0.0 基线 → 跑到 head 的库（= 生产形状，dispatch 表在）。"""
     db_path = tmp_path / "bowhead.db"
-    with sqlite3.connect(db_path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    assert upgrade(f"sqlite+aiosqlite:///{(db_path).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(db_path.with_name("bowhead.db"))
     with sqlite3.connect(db_path) as connection:
         assert (
             connection.execute(

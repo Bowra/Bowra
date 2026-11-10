@@ -227,6 +227,42 @@ async def test_session_allowance_is_exact_and_revoked_with_the_connection(person
     assert await personal.registry.rows("SELECT * FROM personal_mcp_session_tool_allowance") == []
 
 
+async def test_confirmation_card_records_each_decision_on_the_step(personal, monkeypatch):
+    from bowhead_core.tool_registry import ToolStepRef
+
+    class Bus:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, event):
+            self.events.append((event.event_type, dict(event.payload)))
+            return True
+
+    monkeypatch.setenv("FEATURE_INLINE_TOOL_CONFIRMATION", "1")
+    _remote(monkeypatch)
+    spec = (await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx))[0]
+    bus = Bus()
+    personal.ctx.tool_step = ToolStepRef(bus=bus, card_id=personal.ctx.turn_id, step_id="step_call_one", call_id="call_one")
+    first = asyncio.create_task(spec.handler({"query": "private-query"}, personal.ctx))
+    pending = await _wait_pending(personal, first)
+    async with await _client(personal) as client:
+        response = await client.post(f"/personal/calls/{pending['id']}/decision", json={"decision": "approve_session"})
+        assert response.status_code == 200, response.text
+    assert (await asyncio.wait_for(first, 3))["ok"] is True
+    (requested, req), (resolved, res) = bus.events
+    assert (requested, resolved) == ("confirmation_requested", "confirmation_resolved")
+    assert req["kind"] == "personal_mcp" and req["confirmation_id"] == res["confirmation_id"] == pending["id"]
+    assert req["step_id"] == "step_call_one" and req["requester_user_id"] == personal.ctx.user_id
+    assert req["choices"] == ["reject", "approve", "approve_session"] and req["category"] == "unknown"
+    assert "private-query" not in canonical(req)
+    assert res["outcome"] == "approved_session"
+    # The session allowance runs the next call without asking, so no card.
+    bus.events.clear()
+    personal.ctx.personal_mcp_call_id = "call_two"
+    assert (await asyncio.wait_for(spec.handler({"query": "again"}, personal.ctx), 3))["ok"] is True
+    assert bus.events == []
+
+
 async def test_timeout_and_restart_never_resend_an_external_action(personal, monkeypatch):
     calls = _remote(monkeypatch, failure=True)
     spec = (await build_personal_specs(personal.registry, personal.ctx.user_id, personal.binding, personal.ctx))[0]

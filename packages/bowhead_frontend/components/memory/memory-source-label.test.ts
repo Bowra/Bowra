@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Memory source line: rendered from the structured `source_label_key` in the interface language, never the
  * Gateway's Chinese `source_label` (116 dogfood 1.5.25: en-US showed 「你在对话中告诉 Bowhead」).

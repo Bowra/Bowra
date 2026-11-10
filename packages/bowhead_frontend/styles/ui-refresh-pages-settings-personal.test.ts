@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Interface appearance page-by-page acceptance A · personal group: account, security, appearance, memory, export, access
  * requests, My Connections, Feishu account binding.

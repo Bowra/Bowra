@@ -13,6 +13,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import nullcontext
@@ -751,6 +752,8 @@ async def _materialize_blocked_reference_recovery_child_in_tx(
                     "error_kind": "reference_queue_blocked",
                     "reason_code": "reference_continuation_unavailable",
                     "recovery_action": chat_recovery_action("reference_continuation_unavailable"),
+                    # Direct SQL bypasses TurnEventBus.emit, so add the server end time here too.
+                    "ended_at": now,
                     "seq": 2,
                     "evt_seq": 2,
                 },
@@ -939,6 +942,96 @@ async def _legacy_root_terminal_matches_in_tx(
     except (json.JSONDecodeError, TypeError):
         return False
     return bool(isinstance(answer_payload, dict) and answer_payload.get("text") == canonical_final_answer)
+
+
+def _parse_utc_instant(value: object) -> datetime | None:
+    """Parse one persisted ISO-8601 instant; naive values are UTC."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        # Event ``occurred_at`` values may carry a ``#N`` uniqueness suffix.
+        parsed = datetime.fromisoformat(value.split("#", 1)[0])
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+async def _recovered_generation_duration_ms_in_tx(
+    db: aiosqlite.Connection,
+    *,
+    turn_id: str,
+    generation_floor: int,
+    ended_at: object,
+) -> int | None:
+    """Wall time of the recovered generation: its last ``turn_started`` to ``ended_at``.
+
+    Only a ``turn_started`` after the latest ``turn.resumed`` belongs to the
+    current generation. ``None`` means the start (or end) is unknown; recovery
+    then omits ``duration_ms`` instead of inventing one.
+    """
+    async with db.execute(
+        "SELECT payload_json FROM turn_events WHERE turn_id=? AND event_type='turn_started' "
+        "AND seq>MAX(?,(SELECT COALESCE(MAX(seq),0) FROM turn_events "
+        "WHERE turn_id=? AND event_type='turn.resumed')) ORDER BY seq DESC LIMIT 1",
+        (turn_id, generation_floor, turn_id),
+    ) as cursor:
+        started_row = await cursor.fetchone()
+    if started_row is None:
+        return None
+    try:
+        started_payload = json.loads(str(started_row[0]))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    started = _parse_utc_instant(started_payload.get("started_at") if isinstance(started_payload, dict) else None)
+    ended = _parse_utc_instant(ended_at)
+    if started is None or ended is None or ended < started:
+        return None
+    return int((ended - started).total_seconds() * 1000)
+
+
+_RECOVERED_ERROR_KIND_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _recovered_failure_fields(
+    turn_failed_payload_json: object,
+    *,
+    settled_error_kind: object,
+) -> dict[str, Any] | None:
+    """Project a generation's persisted root ``turn_failed`` onto its recovered ``done``.
+
+    The browser already received that failure live and replays it, so the
+    reconstructed terminal reuses its public reason, diagnostics and recovery
+    action. ``error_kind`` is the Turn row's canonical kind written by the same
+    terminal transition (the public reason when none is usable).
+    """
+    try:
+        payload = json.loads(str(turn_failed_payload_json))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    from bowhead_core.published_diagnostics import PUBLIC_TURN_FAILURE_CODES, RECOVERY_ACTIONS, failure_event_reason_code
+
+    reason_code = failure_event_reason_code(payload)
+    if reason_code is None:
+        return None
+    message = payload.get("message")
+    fields: dict[str, Any] = {
+        "error": message if isinstance(message, str) and (message in PUBLIC_TURN_FAILURE_CODES or message == "internal_error") else reason_code,
+        "error_kind": (
+            settled_error_kind if isinstance(settled_error_kind, str) and _RECOVERED_ERROR_KIND_RE.fullmatch(settled_error_kind) else reason_code
+        ),
+        "reason_code": reason_code,
+    }
+    diagnostics = payload.get("diagnostics")
+    if isinstance(diagnostics, dict) and diagnostics:
+        fields["diagnostics"] = diagnostics
+    action = payload.get("recovery_action")
+    if not (isinstance(action, str) and action in RECOVERY_ACTIONS):
+        action = chat_recovery_action(reason_code)
+    if action is not None:
+        fields["recovery_action"] = action
+    return fields
 
 
 async def _terminal_protocol_schema_mode(
@@ -4308,7 +4401,7 @@ class SessionStore:
                     "d.lease_execution_generation,s.workspace_id,s.user_id,"
                     "s.steer_buffer_json,t.status AS turn_status,t.error_kind,"
                     "t.intent,t.final_answer,t.tokens_input,"
-                    "t.tokens_output,t.cost_usd,t.execution_generation "
+                    "t.tokens_output,t.cost_usd,t.execution_generation,t.ended_at "
                     "FROM chat_turn_spawn_dispatch d "
                     "JOIN sessions s ON s.id=d.session_id "
                     "JOIN turns t ON t.id=d.turn_id "
@@ -4348,7 +4441,7 @@ class SessionStore:
                                 "s.steer_buffer_json,t.status AS turn_status,"
                                 "t.error_kind,t.intent,t.final_answer,"
                                 "t.tokens_input,t.tokens_output,t.cost_usd,"
-                                "t.execution_generation "
+                                "t.execution_generation,t.ended_at "
                                 "FROM turns t JOIN sessions s ON s.id=t.session_id "
                                 "WHERE t.id=?",
                                 (turn_id,),
@@ -4654,6 +4747,7 @@ class SessionStore:
                                             "error_kind": "steer_recovery_required",
                                             "reason_code": "lead_internal_error",
                                             "recovery_action": chat_recovery_action("lead_internal_error"),
+                                            "ended_at": now,
                                             "seq": 2,
                                             "evt_seq": 2,
                                         },
@@ -4814,7 +4908,7 @@ class SessionStore:
                             semantic_event = None
                             if semantic_event_type is not None:
                                 async with db.execute(
-                                    "SELECT 1 FROM turn_events WHERE turn_id=? AND seq>? AND event_type=? LIMIT 1",
+                                    "SELECT payload_json FROM turn_events WHERE turn_id=? AND seq>? AND event_type=? ORDER BY seq DESC LIMIT 1",
                                     (
                                         turn_id,
                                         generation_floor,
@@ -4906,15 +5000,47 @@ class SessionStore:
                             }
                             if row["intent"] is not None:
                                 done_payload["intent"] = str(row["intent"])
-                            if recovered_error:
-                                done_payload["error"] = recovered_error
-                            if recovered_error_kind:
-                                done_payload["error_kind"] = recovered_error_kind
-                            if recovered_reason_code is not None:
-                                done_payload["reason_code"] = recovered_reason_code
-                                recovered_action = chat_recovery_action(recovered_reason_code)
-                                if recovered_action is not None:
-                                    done_payload["recovery_action"] = recovered_action
+                            # The browser already received and replays this
+                            # generation's persisted failure; its terminal must
+                            # not contradict that reason, diagnosis or action.
+                            persisted_failure = (
+                                _recovered_failure_fields(
+                                    semantic_event[0],
+                                    settled_error_kind=(row["error_kind"] if normalize_legacy_turn_status(turn_status) == "failed" else None),
+                                )
+                                if recovered_status == "failed" and semantic_event is not None
+                                else None
+                            )
+                            if persisted_failure is not None:
+                                done_payload.update(persisted_failure)
+                            else:
+                                if recovered_error:
+                                    done_payload["error"] = recovered_error
+                                if recovered_error_kind:
+                                    done_payload["error_kind"] = recovered_error_kind
+                                if recovered_reason_code is not None:
+                                    done_payload["reason_code"] = recovered_reason_code
+                                    recovered_action = chat_recovery_action(recovered_reason_code)
+                                    if recovered_action is not None:
+                                        done_payload["recovery_action"] = recovered_action
+                            # Generation wall time ends at the ended_at this
+                            # transaction leaves on the Turn row; the terminal
+                            # carries that same server end time.
+                            recovered_ended_at = (
+                                now
+                                if turn_status == "running" or (unrecoverable_reference_pause and turn_status == "clarification_pending")
+                                else row["ended_at"]
+                            )
+                            if recovered_ended_at:
+                                done_payload["ended_at"] = str(recovered_ended_at)
+                            recovered_duration_ms = await _recovered_generation_duration_ms_in_tx(
+                                db,
+                                turn_id=turn_id,
+                                generation_floor=generation_floor,
+                                ended_at=recovered_ended_at,
+                            )
+                            if recovered_duration_ms is not None:
+                                done_payload["duration_ms"] = recovered_duration_ms
                             await db.execute(
                                 "INSERT INTO turn_events(id,turn_id,seq,event_type,payload_json,occurred_at) VALUES (?,?,?,'done',?,?)",
                                 (
@@ -5043,6 +5169,9 @@ class SessionStore:
 
         The centralized adapter must already own a live parent dispatch. The
         child relation cannot become visible outside that ordered-tail fence.
+        An empty buffer materializes nothing and never raises for a lapsed or
+        moved lease; it releases the active fence only while this generation's
+        dispatch is still the spawned owner.
         """
         now = _now()
         async with open_shared_ctx(self._db_path) as db:
@@ -5120,21 +5249,25 @@ class SessionStore:
                     json.dumps(steer_segment.items, ensure_ascii=False),
                 )
                 async with db.execute(
-                    "SELECT 1 FROM chat_turn_spawn_dispatch d JOIN turns t "
+                    "SELECT d.lease_expires_at>? FROM chat_turn_spawn_dispatch d JOIN turns t "
                     "ON t.id=d.turn_id WHERE d.turn_id=? AND d.session_id=? "
                     "AND d.state='spawned' AND d.owner_id IS NOT NULL "
-                    "AND d.lease_expires_at>? AND d.lease_kind IN ('turn','resume') "
+                    "AND d.lease_kind IN ('turn','resume') "
                     "AND d.lease_execution_generation=t.execution_generation",
-                    (current_turn_id, session_id, now),
+                    (now, current_turn_id, session_id),
                 ) as dispatch_cursor:
-                    parent_dispatch_active = await dispatch_cursor.fetchone()
-                if parent_dispatch_active is None:
-                    await db.execute("ROLLBACK")
-                    raise RuntimeError("legacy_parent_dispatch_not_active")
+                    parent_dispatch = await dispatch_cursor.fetchone()
                 if not steer_projection.source_parts:
-                    if reference_parent:
+                    # Nothing to materialize, so a lapsed lease is not a failure
+                    # here: the parent terminal may still be published. Only the
+                    # active-fence release below mutates, and it requires that no
+                    # other owner or generation has taken this dispatch. Expiry
+                    # alone is not a takeover (heartbeats renew an expired lease
+                    # until recovery changes its state under this writer lock).
+                    if reference_parent or parent_dispatch is None:
                         # A BI clarification emits a terminal wire marker while
-                        # retaining this same Turn for resume. With no accepted
+                        # retaining this same Turn for resume, and a moved
+                        # dispatch belongs to another owner. With no accepted
                         # continuation there is nothing to drain here.
                         await db.execute("ROLLBACK")
                         return []
@@ -5148,6 +5281,11 @@ class SessionStore:
                     )
                     await db.commit()
                     return []
+                if parent_dispatch is None or not parent_dispatch[0]:
+                    # Accepted steer work becomes a child Turn only inside the
+                    # live parent lease's ordered-tail fence.
+                    await db.execute("ROLLBACK")
+                    raise RuntimeError("legacy_parent_dispatch_not_active")
                 if reference_parent and str(parent_turn["status"]) == "clarification_pending":
                     # The same reference Turn must remain active until its BI
                     # answer advances the execution generation. Accepted steer
@@ -8030,6 +8168,7 @@ class SessionStore:
                             "status": "clarification_pending",
                             "schema_version": "0.9.0",
                             "execution_generation": expected_execution_generation,
+                            "ended_at": now,
                             "tokens_input": int(parent_turn["tokens_input"] or 0),
                             "tokens_output": int(parent_turn["tokens_output"] or 0),
                             "cost_usd": float(parent_turn["cost_usd"] or 0.0),

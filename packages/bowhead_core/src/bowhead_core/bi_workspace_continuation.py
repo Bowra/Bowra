@@ -194,7 +194,7 @@ class BiWorkspaceContinuation(BaseModel):
 
 
 def _capture_read_history(**args) -> str | None:
-    from dataclasses import asdict
+    from bowhead_router.reasoning import message_record
 
     messages, invocations, iteration, ctx = (args[key] for key in ("messages", "invocations", "iteration", "ctx"))
     if (
@@ -215,7 +215,10 @@ def _capture_read_history(**args) -> str | None:
     ):
         return None
     try:
-        return json.dumps([asdict(message) for message in messages[1:-2]], ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        # Rebuilt read rounds carry no reasoning; a thinking-mode continuation falls back to non-thinking.
+        return json.dumps(
+            [message_record(message, keep_reasoning=False) for message in messages[1:-2]], ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
     except (ValueError, TypeError, RecursionError):
         return None
 

@@ -113,11 +113,11 @@ def test_crud_roundtrip_and_team_scoping(tmp_path, monkeypatch):
     assert client.get(f"/api/v1/team-tool-sources/{src_id}").status_code == 404
 
 
-def test_impact_guard_requires_preview_and_replays_delete_receipt(tmp_path, monkeypatch):
+def test_impact_guard_requires_preview_and_replays_delete_receipt(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "guard.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -191,11 +191,11 @@ def test_impact_guard_requires_preview_and_replays_delete_receipt(tmp_path, monk
         ).fetchone() == (1,)
 
 
-def test_impact_guard_rejects_stale_patch_preview(tmp_path, monkeypatch):
+def test_impact_guard_rejects_stale_patch_preview(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "stale.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -236,11 +236,12 @@ def test_impact_guard_rejects_stale_patch_preview(tmp_path, monkeypatch):
 def test_impact_guard_treats_legacy_empty_selection_as_all_operations(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "legacy-selection.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -272,10 +273,11 @@ def test_impact_guard_treats_legacy_empty_selection_as_all_operations(
 def test_delete_preview_blocks_when_current_agents_still_depend_on_source(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "blocking-delete.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     store = UserStore(str(tmp_path / "bowhead.db"))
     _run(store.initialize())
     source = TeamToolSource(
@@ -320,11 +322,12 @@ def test_delete_preview_blocks_when_current_agents_still_depend_on_source(
 def test_mcp_refresh_preview_apply_uses_server_candidate_and_replays_receipt(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "refresh-guard.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())
@@ -957,10 +960,10 @@ def test_mcp_preview_only_marks_explicit_destructive_tools_as_approval_gated(tmp
     assert {op["operation_id"]: op["approval_executable"] for op in confirmed.json()["operations"]} == {"search": None, "delete": True}
 
 
-def test_mcp_prompt_preview_and_create_persist_metadata_cache(tmp_path, monkeypatch):
+def test_mcp_prompt_preview_and_create_persist_metadata_cache(tmp_path, monkeypatch, initialize_migrated_core_database):
     monkeypatch.setenv("FEATURE_CHAT_REFERENCE_MCP_PROMPT", "1")
     requested = tmp_path / "prompt-cache.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     store = UserStore(str(tmp_path / "bowhead.db"))
     _run(store.initialize())
     team = _run(store.create_team(name="Prompts", max_seats=2))
@@ -1685,9 +1688,10 @@ def test_mcp_preview_without_a_credential_still_routes_to_oauth(tmp_path, monkey
 def test_usage_projection_lists_source_and_operation_dependencies(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     requested = tmp_path / "requested.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     store = UserStore(str(tmp_path / "bowhead.db"))
     team = _run(store.create_team(name="Usage", max_seats=2))
     user = _run(store.create_user(team_id=team.id, email="usage@example.com"))
@@ -1725,11 +1729,12 @@ def test_usage_projection_lists_source_and_operation_dependencies(
 def test_impact_guard_replays_disable_after_source_is_already_disabled(
     tmp_path,
     monkeypatch,
+    initialize_migrated_core_database,
 ):
     monkeypatch.setenv("FEATURE_RESOURCE_IMPACT_GUARD", "1")
     monkeypatch.setenv("BOWHEAD_FERNET_KEY", Fernet.generate_key().decode())
     requested = tmp_path / "disable-retry.db"
-    assert upgrade(f"sqlite+aiosqlite:///{(requested).with_name('bowhead.db')}", target="core") == ("core",)
+    initialize_migrated_core_database(requested.with_name("bowhead.db"))
     path = tmp_path / "bowhead.db"
     store = UserStore(str(path))
     _run(store.initialize())

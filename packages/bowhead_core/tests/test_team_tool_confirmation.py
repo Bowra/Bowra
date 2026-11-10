@@ -21,6 +21,8 @@ def test_category_follows_explicit_annotations_and_keeps_conflicts_unknown() -> 
     assert team_mcp_category(read_only=True, destructive=False) == ("read", "mcp_annotation")
     assert team_mcp_category(read_only=False, destructive=True) == ("destructive", "mcp_annotation")
     assert team_mcp_category(read_only=False, destructive=False) == ("external_write", "mcp_annotation")
+    # MCP defines destructiveHint only for tools that are not read-only, so its absence keeps read.
+    assert team_mcp_category(read_only=True, destructive=None) == ("read", "mcp_annotation")
     assert team_mcp_category(read_only=True, destructive=True) == ("unknown", "unknown_default")
     assert team_mcp_category(read_only=None, destructive=None) == ("unknown", "unknown_default")
     assert team_mcp_category(read_only=None, destructive=False) == ("unknown", "unknown_default")
@@ -120,6 +122,7 @@ def _mcp(name: str, annotations: dict | None) -> object:
 def _entries() -> list:
     return [
         _mcp("lookup", {"readOnlyHint": True, "destructiveHint": False}),
+        _mcp("search", {"readOnlyHint": True}),
         _mcp("create_note", {"readOnlyHint": False, "destructiveHint": False}),
         _mcp("delete_note", {"readOnlyHint": False, "destructiveHint": True}),
         _mcp("unlabeled", None),
@@ -138,7 +141,8 @@ def test_with_the_switch_only_read_mcp_tools_skip_confirmation(monkeypatch) -> N
     monkeypatch.setenv("FEATURE_TEAM_TOOL_CONFIRMATION", "1")
     specs = {spec.schema.name.rsplit(".", 1)[-1]: spec for spec in build_team_specs(_TEAM, _entries(), _Client())}
     assert all(spec.needs_approval is False for spec in specs.values())
-    assert specs["lookup"].annotations.read_only is True and specs["lookup"].risk_level == "low"
+    for name in ("lookup", "search"):
+        assert specs[name].annotations.read_only is True and specs[name].risk_level == "low"
     for name in ("create_note", "delete_note", "unlabeled"):
         assert specs[name].annotations.read_only is False
         assert specs[name].risk_level == "medium"
@@ -172,6 +176,7 @@ async def test_write_call_runs_only_after_the_requester_approves_the_shown_argum
     running = asyncio.create_task(specs["create_note"].handler(args, _ctx()))
     item = await _first_pending(queue)
     assert item["source_name"] == "CRM" and item["tool_ref"] == f"teammcp.{_SRC}.create_note"
+    assert item["category"] == "external_write"
     args["text"] = "changed after review"
     assert queue.decide("usr_a", item["id"], True)
     result = await running

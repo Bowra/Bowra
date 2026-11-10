@@ -144,6 +144,8 @@ _LEGACY_RESULT_ERROR_PREFIX_TO_PUBLIC_CODE = {
     "peer_llm_deadline_exceeded": "peer_dispatch_timeout",
     "subagent_internal_error": "lead_internal_error",
     "token_cap_exhausted": "token_cap_exhausted",
+    # The Turn's collaboration effort budget refused Lead's next model decision.
+    "collaboration_effort_exhausted": "agent_step_limit",
 }
 
 
@@ -281,11 +283,18 @@ _DATA_INT_MARKER_RE = re.compile(r"\[data:(\d+)\]")
 
 
 def _strip_bare_artifact_ids(text: str) -> str:
-    """Remove prose code wrappers only when their content is a suppressed ID."""
+    """Remove internal artifact and canvas/section/revision IDs from user-visible prose.
+
+    Prose code wrappers go only when their content is a suppressed ID. Canvas, section
+    and revision IDs follow the shared `strip_internal_object_ids` rule (116
+    t_7edbc155f8d8 exposed `sec_…` in the final answer).
+    """
+    from bowhead_core.analysis_payload import strip_internal_object_ids
+
     parts = _FENCE_SPLIT_RE.split(text)
     for index in range(0, len(parts), 2):
         parts[index] = _INLINE_CODE_RE.sub(lambda match: "" if _BARE_ART_RE.fullmatch(match.group("content")) else match.group(0), parts[index])
-    return _BARE_ART_RE.sub("", "".join(parts))
+    return strip_internal_object_ids(_BARE_ART_RE.sub("", "".join(parts)))
 
 
 def _strip_data_markers(text: str) -> str:
@@ -5222,24 +5231,48 @@ async def _compose_turn_output_unchecked(
             _chat_drifted = bool(text_for_chat) and narrative_restates_payload_incorrectly(text_for_chat, aggregated_payload)
             if is_chat_text_fabricated(text_for_chat, _fab_observed) or _chat_drifted:
                 _chat_reason = "restatement_drift" if _chat_drifted else "unmatched_vs_tool_results"
-                logger.warning(
-                    "lead.chat_fabrication_guard turn=%s swapping chat prose → grounded exec_summary reason=%s",
-                    sctx.turn_id,
-                    _chat_reason,
-                )
-                text_for_chat = _resolve_citations(
+                # The replacement must pass the same user-facing checks. A summary that is itself
+                # unsupported or still shows Tool names, result codes or internal IDs is not a better
+                # answer (116 t_7edbc155f8d8); keep the original prose rather than suppress it.
+                _replacement_problem = _chat_replacement_problem(
                     str(aggregated_payload.get("exec_summary") or ""),
-                    runtime.parent_ctx,
-                    invocations=getattr(result, "tool_invocations", None),
+                    observed=_fab_observed,
+                    results=_fab_results,
+                    tool_names=_turn_tool_names(runtime),
                 )
+                if _replacement_problem is None:
+                    logger.warning(
+                        "lead.chat_fabrication_guard turn=%s swapping chat prose → grounded exec_summary reason=%s",
+                        sctx.turn_id,
+                        _chat_reason,
+                    )
+                    text_for_chat = _resolve_citations(
+                        str(aggregated_payload.get("exec_summary") or ""),
+                        runtime.parent_ctx,
+                        invocations=getattr(result, "tool_invocations", None),
+                    )
+                else:
+                    logger.warning(
+                        "lead.chat_fabrication_guard turn=%s keeping chat prose reason=%s replacement_problem=%s",
+                        sctx.turn_id,
+                        _chat_reason,
+                        _replacement_problem,
+                    )
                 try:
                     from bowhead_core import metrics as _m_fab
 
-                    _m_fab.inc(
-                        "bowhead_lead_chat_fabrication_swapped_total",
-                        {"reason": _chat_reason},
-                        help="P1: chat free-text swapped to grounded exec_summary — reason=unmatched_vs_tool_results (numbers absent from tool results) | restatement_drift (restates payload's authoritative numbers inaccurately).",
-                    )
+                    if _replacement_problem is None:
+                        _m_fab.inc(
+                            "bowhead_lead_chat_fabrication_swapped_total",
+                            {"reason": _chat_reason},
+                            help="P1: chat free-text swapped to grounded exec_summary — reason=unmatched_vs_tool_results (numbers absent from tool results) | restatement_drift (restates payload's authoritative numbers inaccurately).",
+                        )
+                    else:
+                        _m_fab.inc(
+                            "bowhead_lead_chat_fabrication_swap_refused_total",
+                            {"reason": _chat_reason, "problem": _replacement_problem},
+                            help="Chat prose kept because the exec_summary replacement failed the user-facing checks — problem=unsupported_numbers | internal_identifiers.",
+                        )
                 except Exception:  # noqa: S110
                     pass
     except Exception as _fab_e:
@@ -7067,6 +7100,10 @@ async def _lead_loop(
         return _bounce("zero_evidence_numbers")
 
     runtime.parent_ctx._final_answer_gate = _final_answer_gate  # type: ignore[attr-defined]
+    # Every bounce of an already streamed Lead final (this gate, delivery review or
+    # collaboration guidance) supersedes that narrative through the same hook, so the
+    # live, persisted and replayed views all show the done answer instead.
+    runtime.parent_ctx._final_answer_rejected = _reject_final_narrative  # type: ignore[attr-defined]
 
     # In-place resume (agent run limits, phase 2 §6): list this session's resumable helper runs,
     # and continue the runs a Continue click asked for with server-chosen resume dispatches.
@@ -9239,6 +9276,34 @@ def collect_fabrication_tool_results(result: Any, parent_ctx: Any) -> list[Any]:
         if r is not None:
             out.append(r)
     return out
+
+
+def _turn_tool_names(runtime: Any) -> list[str]:
+    """Registered Tool names of this Turn (its view and the shared registry)."""
+    names: list[str] = []
+    for registry in (getattr(getattr(runtime, "parent_ctx", None), "tool_view", None), getattr(runtime, "tool_registry", None)):
+        with contextlib.suppress(Exception):
+            if registry is not None:
+                names.extend(registry.list_names())
+    return names
+
+
+def _chat_replacement_problem(replacement: str, *, observed: set[float], results: list[Any], tool_names: list[str]) -> str | None:
+    """Why the grounded summary cannot replace flagged chat prose, or None when it can.
+
+    Uses the replacement as the user would see it (markers and internal IDs already
+    removed) and applies the same number check plus the internal-identifier check.
+    """
+    from bowhead_core.analysis_payload import exposes_internal_identifiers, is_chat_text_fabricated, observed_result_codes
+
+    visible = _strip_data_markers(replacement)
+    if not visible.strip():
+        return "empty"
+    if is_chat_text_fabricated(visible, observed):
+        return "unsupported_numbers"
+    if exposes_internal_identifiers(visible, [*tool_names, *observed_result_codes(results)]):
+        return "internal_identifiers"
+    return None
 
 
 def _narrative_superseded_fields(parent_ctx: Any) -> dict[str, bool]:

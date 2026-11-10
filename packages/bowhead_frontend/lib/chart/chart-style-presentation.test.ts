@@ -1,4 +1,6 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
+import type { ChartDataset } from "chart.js";
 
 import fixtures from "../../../../config/chart_style/normalization_fixtures.json";
 import presentationFixtures from "../../../../config/chart_style/presentation_fixtures.json";
@@ -396,4 +398,38 @@ it("keeps two requested green series distinguishable with existing non-color enc
   const presentation = resolveChartPresentation(normalizeChartForRenderingV1(spec).shape, theme, context());
   expect(presentation.effective.series.map((series) => series.paletteIndex)).toEqual([4, 4]);
   expect(presentation.effective.series[0]!.lineDash).not.toEqual(presentation.effective.series[1]!.lineDash);
+});
+
+it.each(["bar", "hbar", "stacked_bar", "line", "area_stacked", "combo", "dual_axis"] as const)("keeps exact HEX in native %s across modes and output surfaces", (kind) => {
+  const spec: ChartSpec = { kind, title: "Exact HEX", row_count: 2,
+    columns: [{ key: "month", header: "Month", type: "categorical" }, { key: "value", header: "Value", type: "numeric", color_hex: "#00a651" }],
+    rows: [{ month: "Jan", value: 12 }, { month: "Feb", value: 21 }] };
+  if (kind === "combo" || kind === "dual_axis") {
+    spec.columns.push({ key: "other", header: "Other", type: "numeric", y_axis_id: 1 });
+    spec.rows!.forEach((row) => { row.other = 10; });
+  }
+  for (const mode of ["light", "dark"] as const) {
+    const theme = resolveChartThemeForStyle("bowhead-editorial", { contrast: "standard", colorVision: "standard" }, chartThemeBaseForMode(mode), mode);
+    for (const surface of ["canvas", "chat", "export"] as const) {
+      const config = buildChartJSConfig(spec, theme, { surface, renderContext: context({ mode }) });
+      const dataset = config.data.datasets[0]! as ChartDataset<"line">;
+      expect(dataset.pointBackgroundColor).toBe("#00A651");
+      expect(dataset.hoverBackgroundColor).toBe("#00A651");
+      expect(dataset.backgroundColor).toBe((kind === "area_stacked" || kind === "line") ? "#00a65133" : "#00A651");
+      const shape = normalizeChartForRenderingV1(spec).shape;
+      expect(shape.series[0]!.colorHex).toBe("#00A651");
+      expect(resolveChartPresentation(shape, theme, context({ mode })).effective.series[0]!.colorHex).toBe("#00A651");
+    }
+  }
+});
+
+it("distinguishes identical literal and palette colors using the existing encoding allocator", () => {
+  const theme = themeFor("line");
+  const sameColor = theme.chartStyleV2!.categoricalSeriesPalette[1]!;
+  const spec = lineSpec(3);
+  spec.columns[1]!.color_hex = sameColor;
+  spec.columns[2]!.color_index = 1;
+  spec.columns[3]!.color_hex = sameColor.toLowerCase();
+  const result = resolveChartPresentation(normalizeChartForRenderingV1(spec).shape, theme, context());
+  expect(new Set(result.effective.series.map((series) => `${series.lineDash.join(",")}:${series.pointStyle}`)).size).toBe(3);
 });

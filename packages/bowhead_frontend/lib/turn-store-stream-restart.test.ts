@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `llm.stream_restarted` → withdraw the output a restarted model attempt had
  * already streamed (Lead narrative, or a peer's `partial_answer` prose).

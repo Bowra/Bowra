@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * JSON in the messages directory must not contain duplicate keys.
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +42,8 @@ const STATUS_OR_CODE = new RegExp(
 
 // Deliberate exceptions: not Bowhead’s own error wording.
 const ALLOWED = new Set([
+  // The chat contract explicitly displays screened upstream model HTTP status (2026-10-26).
+  "chat.failure_card.model_http_status",
   // Model-connection validation panel: upstream model-service status codes belong in administrator diagnostics.
   "settings.models.v2.failure_http_status",
   // Email encryption port number, not status code.

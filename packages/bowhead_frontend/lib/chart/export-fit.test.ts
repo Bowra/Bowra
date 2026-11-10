@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Long horizontal bars in the fixed export frame. Before, `tallH = 0` squeezed 50 categories into ~590px (11.8px
  * each, names touching, every other value label dropped); now the export draws the rows that fit and discloses it.

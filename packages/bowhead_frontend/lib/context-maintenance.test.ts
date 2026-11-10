@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { captureContextMaintenanceSubmission, type SubmissionRecoveryDraft } from "./composer-submission-recovery";
 import { assertComposerTextDraftFormat } from "./composer-draft-format";

@@ -4,6 +4,7 @@ import { SaveBar } from "@/components/ui/save-bar";
 import { canvasCloseGuardOptions } from "@/components/canvas/object";
 import { BEFORE_APP_NAVIGATION_EVENT, type AppNavigationDetail } from "@/lib/use-app-router";
 import { useSpaceSelection } from "@/lib/use-space";
+import { formatDateTime } from "@/lib/locale";
 import { registerSubagentDraftNavigationGuard } from "@/lib/canvas-navigation-guard";
 import type { CoachEditorSnapshot } from "@/lib/coach-canvas-target";
 import type { SkillEditorPort } from "@/components/skill-drawer";
@@ -385,11 +386,7 @@ function errorText(_error: unknown, fallback: string): string {
 }
 
 function formatDate(value: string, locale: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? value : new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(parsed);
+  return formatDateTime(value, locale, { dateStyle: "medium" }) || value;
 }
 
 function audienceCount(draft: EditorDraft): number {

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * **Specificity** guard for chart-table-ux batch 1 §2.1 figure-caption attachment.
  *

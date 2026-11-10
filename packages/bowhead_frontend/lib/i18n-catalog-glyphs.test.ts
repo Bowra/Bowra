@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Icon glyphs (arrows, check marks, warning signs, emoji, disclosure triangles) belong at the call
 // site as `<CharIcon>`, not inside translated copy: there they render as Lucide glyphs and
 // every locale gets the same icon. This guard keeps leading/trailing icon glyphs out of the

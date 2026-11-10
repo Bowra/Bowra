@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Results titles follow the interface language: the Gateway names the session's code result with fixed Chinese
  * text, so the client shows its own title for the structured `object_type: "code"`.

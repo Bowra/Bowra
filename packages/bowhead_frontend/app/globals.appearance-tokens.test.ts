@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Component appearance-section tokens (docs/design/组件统一-技术设计.md, “外观段 token 对照”).
  *

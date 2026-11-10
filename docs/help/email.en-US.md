@@ -12,6 +12,8 @@ When you say “send it to my email”, Bowra can look up your own account email
 
 Before each email is sent, a **Confirm email** window shows the full recipient list, subject, body, and the names and sizes of any attachments. Check them, then choose **Send**. If you choose **Don't send**, or do nothing within the time shown, the email is not sent, and Bowra says so in the chat. A sent email cannot be recalled.
 
+If your deployment turns on inline confirmation, the request appears in the conversation under the step that is waiting instead of in a dialog, and afterwards stays there as a one-line record of what you decided. If you are on another page, a notice links to the conversation, and the browser tab title shows how many actions are waiting.
+
 Only you, the person who started this chat, can see and confirm the email. Lead cannot send from scheduled tasks, Feishu, or other places where you cannot confirm on the web page.
 
 ### Numbers in the email

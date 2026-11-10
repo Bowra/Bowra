@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * findCitedNumberRanges — Phase F "numeric phrase + [N]" adjacency detection (pure function).
  */

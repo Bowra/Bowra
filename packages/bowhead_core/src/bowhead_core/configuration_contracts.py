@@ -20,7 +20,11 @@ DOMAINS = {
     "workspace_metadata": ConfigurationDomain("settings-space-metadata", "space", "/space/settings/general/", "Current Space name and description."),
     "space_instructions": ConfigurationDomain("settings-space-instructions", "space", "/space/settings/instructions/", "Current Space instructions."),
     "personal_appearance": ConfigurationDomain(
-        "settings-personal-appearance", "user", "/settings/appearance/", "Personal appearance and supported scalar resets."
+        "settings-personal-appearance",
+        "user",
+        "/settings/appearance/",
+        "Personal color mode, font, text size, density, corners and motion, with resets. "
+        "Accent, background and palette colors are manual controls on the original appearance page, not Agent changes.",
     ),
     "user_language": ConfigurationDomain(
         "settings-language-preferences", "user", "/settings/profile/", "Persistent AI-answer language; not interface language."

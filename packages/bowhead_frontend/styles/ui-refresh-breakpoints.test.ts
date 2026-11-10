@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * P2 batch 4: the desktop layout starts at 1024 instead of 1200
  * (docs/design/组件统一-技术设计.md "P2 第 4 批结果", breakpoint table). Every former `max-width: 1199.98px` block is

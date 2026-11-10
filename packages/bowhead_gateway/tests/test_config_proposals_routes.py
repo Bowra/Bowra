@@ -63,12 +63,9 @@ class _FakeUserStore:
 
 
 @pytest.fixture
-def db_path(tmp_path: Path) -> str:
+def db_path(tmp_path: Path, initialize_migrated_core_database) -> str:
     path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
+    initialize_migrated_core_database(path.with_name("bowhead.db"))
     return str(path)
 
 

@@ -86,6 +86,24 @@ async def test_original_task_and_current_supplement_reach_reader_and_exact_recov
     assert (await _sql(ctx, "SELECT count(*) FROM document_confirmations"))[0][0] == 0
 
 
+async def test_repeated_supplements_keep_only_their_latest_position(ctx):
+    retry = "Use the confirmed scope and show me the draft."
+    for turn_id, text in [("t_a", "Use demo stores."), ("t_b", retry), ("t_c", "Rank the top 20."), ("t_d", "Use demo stores."), ("t_e", retry)]:
+        await follow_up(ctx, text=text, turn_id=turn_id)
+    current = await follow_up(ctx, text=retry, turn_id="t_apply")
+    _, receipt = await admit(ctx, current, proposal_for(ctx, current))
+    async with open_shared_ctx(ctx.path) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute("SELECT * FROM document_jobs WHERE id=?", (receipt.job_id,))).fetchone()
+        collapsed = await task_instruction_in_tx(db, job=row, fallback="")
+        expanded = await task_instruction_in_tx(db, job=row, fallback="", collapse_repeats=False)
+    # A retry repeats no new requirement; the latest copy keeps later changes ordered after earlier ones.
+    assert collapsed.count("Earlier user supplement:") == 2 and collapsed.count(retry) == 1
+    assert collapsed.endswith("Current user supplement:\n" + retry)
+    assert collapsed.index("Original user request:") < collapsed.index("Rank the top 20.") < collapsed.index("Use demo stores.")
+    assert expanded.count("Earlier user supplement:") == 5 and expanded.count(retry) == 3
+
+
 async def test_ambiguous_source_requires_a_unique_user_quotation_before_admission(ctx):
     await follow_up(ctx, text=ctx.source.user_text, turn_id="t_duplicate")
     current = await follow_up(ctx)

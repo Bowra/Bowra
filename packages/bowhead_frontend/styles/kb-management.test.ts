@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Source contract for styles/kb-management.css narrow-screen controls.
  *

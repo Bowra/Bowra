@@ -2773,6 +2773,16 @@ function V2ComposerScope({
   const referencePlanningUnavailable = composerCapabilities.planning && planningMode === "planning"
     && authSession?.me?.capabilities?.composer?.reference_plan !== true;
   const showReferenceEditor = Boolean(draftPersistenceScope && referenceInputEnabled || inputDocument?.nodes.some((node) => node.type === "reference"));
+  // One visible prompt for both inputs: read-only (licensing §13.2, sending disabled), steering (prod-bug-bash-038 #11:
+  // mid-turn Enter adds an instruction) or ordinary. The input's accessible name follows it, without the decorative
+  // steering glyph. ⚠ Both the textarea and the reference editor read these: real deployments render the reference
+  // editor, so a rule applied to the textarea alone never reached users (2026-11-08 dogfood F11).
+  const inputPrompt = readOnly
+    ? t("readonly_placeholder")
+    : inSteerMode
+      ? t("steer_placeholder")
+      : (placeholder ?? t("placeholder"));
+  const inputName = inputPrompt.replace(/^↻\s*/u, "");
   const hasInputReferences = Boolean(inputDocument?.nodes.some((node) => node.type === "reference"));
   const hasTaskText = hasInputReferences ? Boolean(inputDocumentTextContent(inputDocument!).trim()) : Boolean(val.trim());
   const referenceEntryBlocked = hasInputReferences && (!referenceInputEnabled || referencePlanningUnavailable);
@@ -3223,7 +3233,8 @@ function V2ComposerScope({
               snapshot={draftPersistenceScope ? { scope: draftPersistenceScope, resetKey: String(inputResetKey), document: inputDocument ?? { schema_version: 1, nodes: [{ type: "text", text: val }] } } : null}
               readOnly={textareaMutationLocked || !referenceInputEnabled || Boolean(disabled && !inSteerMode)}
               autoFocus={autoFocus || restoreInputFocusRef.current}
-              placeholder={placeholder ?? t("placeholder")}
+              placeholder={inputPrompt}
+              accessibleName={inputName}
               hasAttachments={hasCompletedAttachments}
               entryMode={inSteerMode ? "steer" : composerCapabilities.planning && planningMode === "planning" ? "plan" : "ordinary"}
               onCompositionStateChange={(blocked, scope) => {
@@ -3267,13 +3278,7 @@ function V2ComposerScope({
             aria-readonly={textareaMutationLocked}
             aria-disabled={mutationLocked || undefined}
             // The name follows the visible prompt (read-only, steering, ordinary); the steering glyph is not read aloud.
-            aria-label={
-              readOnly
-                ? t("readonly_placeholder")
-                : inSteerMode
-                  ? t("steer_placeholder").replace(/^↻\s*/u, "")
-                  : (placeholder ?? t("placeholder"))
-            }
+            aria-label={inputName}
             onChange={(e) => {
               chartPrefillRef.current = null;
               const nextValue = e.target.value;
@@ -3393,17 +3398,7 @@ function V2ComposerScope({
                 submit();
               }
             }}
-            placeholder={
-              readOnly
-                // licensing §13.2 — read-only (over_grace / suspended): sending disabled.
-                ? t("readonly_placeholder")
-                : inSteerMode
-                // prod-bug-bash-038 #11: stronger affordance — user didn't know
-                // mid-turn Enter would steer. Make it discoverable + actionable.
-                // prod-bug-bash-039 P2-4: thread through t() with locale fallback.
-                ? t("steer_placeholder")
-                : (placeholder ?? t("placeholder"))
-            }
+            placeholder={inputPrompt}
           />}
           {/* Ghost text overlay shares the textarea's font and inset tokens so
               suggestions stay aligned when text size changes on touch devices. */}

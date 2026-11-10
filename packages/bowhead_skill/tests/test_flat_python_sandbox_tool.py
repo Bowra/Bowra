@@ -133,3 +133,15 @@ def test_the_tool_actually_reaches_the_model_not_just_the_registry() -> None:
     assert not profile.system_prompt.startswith("## Python sandbox runtime contract"), (
         "触发了 authoring 伪工具的 runtime prelude —— 那段话会明文告诉模型「别直接调」，与 compute.md ④ 教的直接相反"
     )
+
+
+def test_skill_process_streams_are_bounded_with_a_marker() -> None:
+    from bowhead_skill.tools import _bounded_stream
+
+    assert _bounded_stream("ok\n") == "ok\n"
+    stream = "".join(f"step {index}\n" for index in range(1_000)) + "Traceback: final error\n"
+    bounded = _bounded_stream(stream)
+    assert bounded.startswith(stream[:500]) and bounded.endswith(stream[-1500:])
+    assert "Traceback: final error" in bounded
+    assert f"{len(stream) - 2000} of {len(stream)} characters" in bounded
+    assert "The complete stream was not saved" in bounded

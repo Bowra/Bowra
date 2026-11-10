@@ -113,13 +113,15 @@ for (const vp of VIEWPORTS) {
 
       // Wait for byline + step region to render (downstream assertions key
       // off these).
+      // The byline mounts with the turn; its time appears only when the turn ends (server end time), so a
+      // running turn's byline is empty and has no size.
       const byline = page.locator(".bh-bot-byline").first();
-      await byline.waitFor({ state: "visible", timeout: 10_000 });
+      await byline.waitFor({ state: "attached", timeout: 10_000 });
       const stepRegion = page.getByRole("region", { name: "步骤列表" }).first();
       await stepRegion.waitFor({ state: "visible", timeout: 15_000 });
 
-      // ── Assertion 1 — BotByline visible.
-      await expect(byline).toBeVisible();
+      // ── Assertion 1 — BotByline mounted.
+      await expect(byline).toBeAttached();
 
       // ── Assertion 2 — BotByline precedes first StepRow in DOM order.
       const order = await page.evaluate(

@@ -90,7 +90,8 @@ def validate_shape(proof: Context, context: Context) -> None:
         raise OrdinaryContinuationUnavailable()
 
 
-async def _artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str) -> tuple[Artifact, str]:
+async def session_input_artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str) -> tuple[Artifact, str]:
+    """Reauthorize Session provenance; the caller supplies the original selection."""
     # Read through the caller so its content-authority lease protects final consumption.
     store = ctx.artifact_store
     if (
@@ -124,12 +125,24 @@ async def _artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identit
     return art, provenance
 
 
+async def prepared_input_artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str, pins: list[dict]) -> Artifact:
+    """Match the original server-prepared pin before retaining a sandbox input."""
+    identities = _context_ids({"pinned": pins}, "pinned")
+    if identities.count(identity) != 1:
+        raise OrdinaryContinuationUnavailable()
+    artifact, _ = await session_input_artifact(ctx, db, identity)
+    pin = pins[identities.index(identity)]
+    if any(pin.get(key) != getattr(artifact, key) for key in _PIN_FIELDS):
+        raise OrdinaryContinuationUnavailable()
+    return artifact
+
+
 async def capture_context(ctx: ToolExecutionContext, db: aiosqlite.Connection, source: ChatTurnUserSource, context: Context) -> Context:
     evidence = []
     identities = retained_ids(source, context)
     pins = {item["artifact_id"]: item for item in context["pinned"]}
     for identity in identities:
-        art, provenance = await _artifact(ctx, db, identity)
+        art, provenance = await session_input_artifact(ctx, db, identity)
         if any(pins[identity].get(key) != getattr(art, key) for key in _PIN_FIELDS):
             raise OrdinaryContinuationUnavailable()
         evidence.append({"artifact_id": identity, "provenance": provenance, "metadata_hash": _artifact_metadata_hash(art, contract=CONTRACT)})
@@ -152,7 +165,7 @@ async def validate_context(
     if retained_ids(source, context) != [item["artifact_id"] for item in proof["artifacts"]]:
         raise OrdinaryContinuationUnavailable()
     for item in proof["artifacts"]:
-        art, provenance = await _artifact(ctx, db, item["artifact_id"])
+        art, provenance = await session_input_artifact(ctx, db, item["artifact_id"])
         if provenance != item["provenance"] or _artifact_metadata_hash(art, contract=CONTRACT) != item["metadata_hash"]:
             raise OrdinaryContinuationUnavailable()
     snapshot = proof["attachments"]
@@ -166,7 +179,7 @@ async def validate_context(
 
             for item in snapshot["files"]:
                 if item.get("content_deferred"):
-                    art, _ = await _artifact(ctx, db, item["artifact_id"])
+                    art, _ = await session_input_artifact(ctx, db, item["artifact_id"])
                     if (
                         await confirmed_content_hash(ctx.artifact_store, art, user_id=ctx.user_id, workspace_id=ctx.workspace_id)
                         != item["content_hash"]

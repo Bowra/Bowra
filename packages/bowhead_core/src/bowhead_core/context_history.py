@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
+from bowhead_router.reasoning import message_record
 from bowhead_router.router import UserModelPref
 from bowhead_router.types import Message, ToolCall
 
@@ -158,7 +159,7 @@ async def load_conversation_context(ctx) -> ConversationContext:
         "[clarification_pending:" in message.content or any(marker in message.content for marker in INCOMPLETE_TURN_MARKERS.values())
         for message in messages
     )
-    byte_count = len(json.dumps([asdict(message) for message in messages], ensure_ascii=False).encode())
+    byte_count = len(json.dumps([message_record(message) for message in messages], ensure_ascii=False).encode())
     while through < before - 1:
         turns = await store.list_context_history_page(session_id=worker.session_id, after_seq=through, before_seq=before)
         if not turns:
@@ -194,7 +195,7 @@ async def load_conversation_context(ctx) -> ConversationContext:
         )
         messages.extend(history.messages)
         incomplete += history.incomplete_turns
-        byte_count += len(json.dumps([asdict(message) for message in history.messages], ensure_ascii=False).encode())
+        byte_count += len(json.dumps([message_record(message) for message in history.messages], ensure_ascii=False).encode())
         if byte_count > MAX_CONTEXT_BYTES:
             raise ContextStoreError("context_history_storage_limit")
         through = turns[-1].seq

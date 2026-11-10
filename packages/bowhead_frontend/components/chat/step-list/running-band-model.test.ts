@@ -135,9 +135,11 @@ describe("三行结构 — 高度恒定的前提", () => {
     expect(m.history.map((r) => r.key)).toEqual(["c", "d"]);
   });
 
-  it("★ 空窗（全部做完、下一步还没起）走 preparing，不把做完的事报成「正在…」", () => {
+  it("★ 空窗（全部做完、下一步还没起）走 gap，不把做完的事报成「正在…」", () => {
+    // 2026-11-08 dogfood F9: a gap is not the opening; only the opening is `preparing` ("正在准备").
+    // Mutation: return `phase: "preparing"` for every no-active-step state → this case fails.
     const m = buildBandModel({ steps: [step({ stepId: "a", state: "done" })] });
-    expect(m.phase).toBe("preparing");
+    expect(m.phase).toBe("gap");
     expect(m.current?.what).toBe("");
   });
 });
@@ -347,7 +349,7 @@ describe("★ peer 终态进带（运行态账本关掉后，这是它唯一的�
     });
     // Current must not remain on that failed spawn step.
     expect(m.current?.what).not.toContain("派子");
-    expect(m.phase).toBe("preparing");        // No other active step → gap copy
+    expect(m.phase).toBe("gap");              // No other active step → gap copy
     // Failure still gets its red row and normal count.
     expect(m.history.some((r) => r.kind === "peer" && r.peerOutcome === "fail")).toBe(true);
     expect(m.peerFailCount).toBe(1);
@@ -505,7 +507,7 @@ describe("★ 散文尾巴进当前行（②，运行态账本关掉后它的唯
       peerNames, peerDisplayNames,
       peerProse: { p1: "正在核对口径" },
     });
-    expect(m.phase).toBe("preparing");
+    expect(m.phase).toBe("gap");
     expect(m.current?.prose).toBe("正在核对口径");
   });
 
@@ -833,7 +835,7 @@ describe("★★ 116 dogfood 逮到的两条", () => {
     });
     expect(m.current?.what).toBe("");                 // No longer renders `正在派子 agent`
     expect(m.current?.waitingOnPeer).toBe("合规风险"); // Instead identifies the awaited peer
-    expect(m.phase).toBe("preparing");
+    expect(m.phase).toBe("gap");
   });
 
   it("★ 但 peer 的子步骤在跑时，当前行必须是那个子步骤（不是「正在等」）", () => {

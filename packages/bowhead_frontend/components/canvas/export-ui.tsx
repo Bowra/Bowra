@@ -11,9 +11,10 @@
 
 "use client";
 
+import { formatDateTime } from "@/lib/locale";
 import { isNetworkFailure } from "@/lib/transport-error";
 import { useEffect, useId, useState, type RefObject } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   exportJobDownloadUrl,
   listExportJobs,
@@ -382,6 +383,7 @@ export function ExportsDrawer({
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const t = useTranslations("export_ui");
+  const locale = useLocale();
   const [items, setItems] = useState<ExportJobDTO[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -452,7 +454,7 @@ export function ExportsDrawer({
                 </div>
                 <div className="rc-exports-item-meta">
                   {j.status === "done" &&
-                    `${fmtSize(j.size)}${j.size ? " · " : ""}${new Date(j.createdAt).toLocaleString()}`}
+                    `${fmtSize(j.size)}${j.size ? " · " : ""}${formatDateTime(j.createdAt, locale, { dateStyle: "medium" })}`}
                   {j.status === "failed" && (
                     <span className="rc-exports-item-err">
                       {t("status_failed")}

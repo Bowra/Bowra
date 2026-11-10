@@ -279,6 +279,11 @@ async def test_lead_reviews_corrected_dispatch_through_native_control(collab, mo
         harness.bus = TurnEventBus(log_sink=persist, persist_before_live=True)
     harness.register("subagent_spawn", spawn)
     harness.register("probe", probe)
+    # After a failed call, Lead's review correction may run only declared read-only checks;
+    # such a check still makes an accepted review stale.
+    from bowhead_core.terminal_effect_contract import TOOL_EFFECT_READ_ONLY
+
+    harness.registry.get("probe").effect_spec = TOOL_EFFECT_READ_ONLY
     register_subagent_return_tool(harness.registry)
     original_return = harness.registry.get("subagent_return").handler
 

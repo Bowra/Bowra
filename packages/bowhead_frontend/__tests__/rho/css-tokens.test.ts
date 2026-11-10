@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Sprint ρ Phase C/D — CSS token ↔ AgentRole key contract.
  *

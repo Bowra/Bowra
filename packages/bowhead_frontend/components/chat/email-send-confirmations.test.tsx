@@ -11,6 +11,7 @@ import {
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("next-intl", () => ({
+  useLocale: () => "en-US",
   useTranslations:
     () => (key: string, values?: Record<string, string>) =>
       values ? `${key}:${Object.values(values).join(",")}` : key,

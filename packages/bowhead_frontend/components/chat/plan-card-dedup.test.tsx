@@ -66,7 +66,7 @@ function archivedTurn(turnId: string, user: string, withPlanBeat: boolean): Arch
     traceSteps: [],
     peersDispatched: [],
     errorReason: null,
-    archivedAt: 1_700_000_000_000,
+    endedAt: 1_700_000_000_000,
     beats: withPlanBeat ? [{ kind: "plan", planId: PLAN }] : [],
   } as unknown as ArchivedTurn;
 }

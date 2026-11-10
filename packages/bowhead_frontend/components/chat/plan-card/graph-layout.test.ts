@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Batch 5 pure graph-layout logic. Pin design review P1-1: resolve supersede chains;
  * design's single-hop resolution silently loses edges after a second revision.

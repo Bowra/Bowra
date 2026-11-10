@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Internal error_kind → plain language (116 dogfood 2026-08-14).
  *

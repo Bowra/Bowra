@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * **Specificity** guard for KPI-value length tiers (feedback-triage-2026-08-24).
  *

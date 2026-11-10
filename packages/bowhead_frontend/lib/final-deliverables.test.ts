@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
 import { extractInlineArtifacts } from "./inline-artifacts";
 import { dispatchToTurnStore } from "./turn-store-dispatch";

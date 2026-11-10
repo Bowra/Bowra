@@ -667,6 +667,7 @@ async def _probe_capability(
                         role="assistant",
                         content=selection.content,
                         tool_calls=[call],
+                        provider_reasoning=selection.provider_reasoning,
                     ),
                     Message(
                         role="tool",

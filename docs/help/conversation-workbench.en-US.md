@@ -19,7 +19,7 @@ This article describes the parts of the conversation page that show progress, re
 
 ## Running progress
 
-After your new message is accepted, the conversation scrolls to the latest content, even if you were reading earlier messages. Scroll up to pause following; select **Jump to latest** to return. Typing or an unsuccessful send keeps your reading position.
+After your new message is accepted, the conversation scrolls to the latest content, even if you were reading earlier messages. Scroll up to pause following; select **Jump to latest** to return. Typing or an unsuccessful send keeps your reading position. Opening or closing a trace or another expandable section keeps your place instead of jumping to the bottom. While a task runs, the status reads "Working" between steps and "Collaborating" while another agent works.
 
 For a quick lookup, name the metrics and period, for example “last month’s revenue and foot traffic”. The answer focuses on those figures; ask explicitly for brand/store breakdowns, causes, trends, or a table/chart when you need them. If a figure or its scope cannot be verified, the answer explains that limitation.
 
@@ -36,7 +36,7 @@ In a follow-up, state the new question and which files to use. An Agent selected
 
 Expand the existing process to see business queries, reads, computations and result actions in their original order. Internal result packing and closeout corrections do not appear as separate finished steps. A batch lists its individual query outcomes once, while keeping successful results available. When these outcomes already explain the batch failure, it adds no duplicate generic error or diagnostic block; specific access/input problems and uncertain outcomes retain their original explanation. The execution-ended line does not claim every requested result was delivered: the answer explains actual missing work, uncertain results or required permissions/materials. A verified recovery needs no additional warning merely because an earlier attempt failed; an unrelated later success does not establish recovery.
 
-Step errors distinguish invalid inputs, unavailable resources, script failures, timeouts and unknown execution outcomes. When safe details are available, expand the error to see the affected field or missing script key, then follow the suggested action. An unknown outcome requires checking the original operation before repeating a write.
+Step errors distinguish invalid inputs, unavailable resources, script failures, timeouts and unknown execution outcomes. In the expanded process, select a failed step to open a short explanation: what went wrong, the rejected input or missing key when known, and whether you need to act. If a retry already succeeded, it says no action is needed. A second line shows an error reference; copy it when you contact your administrator. An unknown outcome requires checking the original operation before repeating a write.
 
 When the requested work is complete, the answer focuses on the results and anything that affects their use. Expand the execution details to see earlier attempts that were resolved along the way.
 
@@ -108,6 +108,8 @@ An operation request shown as text does not mean the operation ran. If the task 
 
 ## Cards that need your answer or approval
 
+A failed turn may still have saved report sections and files. Check **Results** before starting a new request; the failure does not mean those saved items were deleted.
+
 Cards that ask you to choose, add information, or approve a plan have a warning-colored border while they're waiting for you. After you answer or approve, the card collapses into a one-line result that stays in the conversation, including after a refresh.
 
 To answer a question card:
@@ -132,6 +134,8 @@ For supported tasks, the assistant can also ask one question after one or more d
 
 For example, you can ask the assistant to read a PPTX, calculate from its contents and then ask about the intended audience, without editing or generating a file. This is a read-only task, not template generation. If the assistant cannot determine the intended use, follow the failure message to clarify whether you want analysis or a layout-preserving edit.
 
+This can also use a template or earlier result already pinned in the same conversation. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation.
+
 This applies to supported built-in and Team Agents. A failed operation returns its diagnostic to the assistant, which can correct the request, retry or choose another available tool. Earlier results remain available. Answering a saved question continues the original task; it does not automatically repeat earlier operations or confirm an unknown result. Actions still follow their normal permissions and approval steps. If the original task could not be saved, it cannot resume.
 
 Supported continuation also keeps earlier conversation files and results that were already included when the question was asked. Pinning another file afterward does not add it to the paused task. Unpinning affects future requests; deleting a required file or losing access to it can prevent continuation.
@@ -150,7 +154,7 @@ When an Agent has read your attached Word or PowerPoint file and asks a question
 
 ## Results area
 
-You can ask to change a native chart series to an available palette color, such as green, or restore its default color. Supported directly bound bar, line, area and combination series keep the same data and chart. The assistant checks available colors first; selected palette slots follow your chart theme in light/dark mode and exports. Grouped category colors, analytical scenario colors and arbitrary custom color codes are not supported by this editing action. If source access or editing fails, keep the existing chart rather than replacing it with an image.
+You can ask to change a native chart series to an available palette color, such as green, use an exact HEX such as `#00A651`, or restore its default color. Opaque `#RGB` and `#RRGGBB` are supported; HEX stays fixed in light/dark mode and exports. Supported directly bound bar, line, area and combination series keep the same data and chart. The assistant checks available colors first; selected palette slots follow your chart theme in light/dark mode and exports. Grouped category colors, analytical scenario colors, transparent HEX and CSS color expressions are not supported by this editing action. If source access or editing fails, keep the existing chart rather than replacing it with an image.
 
 Browser Back and Forward follow the selected Agent or settings editor. Leaving an editor through history keeps its unsaved input in the current conversation; returning through history restores it. A settings link opens only in its matching Space and with your current permissions.
 

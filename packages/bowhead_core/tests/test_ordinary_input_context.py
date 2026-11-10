@@ -6,6 +6,7 @@ import pytest
 from bowhead_core.chat_reference_attachment_snapshot import MAX_LEAD_ATTACHMENT_TOTAL_BYTES
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
 from bowhead_core.ordinary_lead_input_context import retained_ids, validate_shape
+from bowhead_core.ordinary_lead_material import retained_sandbox_inputs
 
 
 @pytest.mark.parametrize("boundary", ["unscoped", "missing_current", "duplicate_parsed", "duplicate_pin", "count", "size", "negative", "boolean"])
@@ -33,6 +34,18 @@ def test_retained_context_refuses_malformed_provenance(bad_provenance):
     proof = {"artifacts": [{"artifact_id": "art_prior", "provenance": bad_provenance, "metadata_hash": "a" * 64}], "attachments": None}
     with pytest.raises(OrdinaryContinuationUnavailable):
         validate_shape(proof, {"parsed": [], "pinned": [{"artifact_id": "art_prior"}]})
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_shared_sandbox_input_requires_consistent_original_evidence(changed):
+    first = {"artifact_id": "art_input", "metadata_hash": "a" * 64, "size": 1, "sha256": "b" * 64, "output": False}
+    second = {**first, "sha256": "c" * 64 if changed else first["sha256"]}
+    helpers = [{"tools": [{"kind": "sandbox", "artifacts": [item]}]} for item in (first, second)]
+    if changed:
+        with pytest.raises(OrdinaryContinuationUnavailable):
+            retained_sandbox_inputs(helpers)
+    else:
+        assert retained_sandbox_inputs(helpers) == {"art_input": first}
 
 
 def test_reference_inventory_preserves_aliases_and_rejects_ambiguous_identity():
