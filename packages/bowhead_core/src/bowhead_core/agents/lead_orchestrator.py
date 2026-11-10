@@ -6915,6 +6915,9 @@ async def _lead_loop(
     _ordinary_state = getattr(runtime.parent_ctx, "ordinary_lead_state", None)
     _final_bounce_count = _ordinary_state.final_bounce_count if _ordinary_state is not None else {"n": 0}
     _FINAL_BOUNCE_MAX = 2
+    # A scheduled run in "only when flagged" mode that ends without routine_notify is corrected
+    # once, outside the two-bounce budget so it never displaces the report checks below.
+    _unraised_alert_corrected = {"done": False}
     _stream_reset_hook = _stream_state_reset
     _pending_protocol: tuple[frozenset[str], int] | None = None
 
@@ -7033,6 +7036,19 @@ async def _lead_loop(
             if not _protocol_corrected(invocations):
                 return _bounce("clarification_protocol_text") if _final_bounce_count["n"] < _FINAL_BOUNCE_MAX else None
             _pending_protocol = None
+        if profile_name == "lead" and not _unraised_alert_corrected["done"]:
+            from bowhead_core.routine_notify_tool import unraised_alert_note
+
+            _alert_note = unraised_alert_note(runtime.parent_ctx, invocations, (runtime.parent_ctx.tool_view or runtime.tool_registry).list_names())
+            if _alert_note is not None:
+                _unraised_alert_corrected["done"] = True
+                _reject_final_narrative()
+                with contextlib.suppress(Exception):
+                    from bowhead_core import metrics as _m_alert
+
+                    _m_alert.inc("bowhead_lead_final_answer_bounced_total", labels={"kind": "routine", "cause": "routine_alert_unraised"})
+                logger.warning("lead.final_answer_bounced turn=%s kind=routine cause=routine_alert_unraised", sctx.turn_id)
+                return FinalAnswerCorrection(instruction=_alert_note)
         if profile_name == "lead" and reference_lead_input is not None:
             if getattr(runtime.parent_bus, "_reference_continuation_unavailable", False):
                 return None

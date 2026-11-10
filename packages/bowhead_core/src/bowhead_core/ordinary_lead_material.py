@@ -22,6 +22,7 @@ from bowhead_core.agents._generated.tool_kinds import TOOL_RISKS
 from bowhead_core.agents._generated.tool_renames import canonical_tool_name
 from bowhead_core.chat_reference_scope import ReferenceRequestScope
 from bowhead_core.chat_references import SkillResourceRef
+from bowhead_core.ordinary_lead_checkpoint import uses_observed_inputs
 from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable, OrdinaryQuestionUnavailable, canonical_json, content_hash
 from bowhead_core.skill_read_material import _bundle_hash, _capture
 from bowhead_core.skill_read_resolution import SkillReadSourceProof, build_reference_skill_sources
@@ -34,7 +35,7 @@ from bowhead_skill.catalog import builtin_catalog_dir
 # when it is missing. Team, MCP and personal Tools have no manifest risk.
 _PROOF_BEARING_READS = frozenset({"attachment_read", "skill_read", "skill_list", "skill_invoke", "read_report"})
 RETAINED_READ_TOOLS = frozenset(name for name, risk in TOOL_RISKS.items() if risk == "read") - _PROOF_BEARING_READS
-_SESSION_INPUT_CONTRACTS = frozenset(f"ordinary-lead-loop.v{version}" for version in range(10, 15))
+_SESSION_INPUT_CONTRACTS = frozenset(f"ordinary-lead-loop.v{version}" for version in range(10, 16))
 
 
 def retained_read_tool(name: str, *, legacy_report: bool = False) -> bool:
@@ -99,7 +100,7 @@ async def _revalidate_attachment_read(ctx, record: dict, *, contract: str, read_
         if digest != expected["content_hash"] or _artifact_metadata_hash(artifact, contract=contract) != expected["metadata_hash"]:
             raise OrdinaryContinuationUnavailable()
     except (ValueError, OSError) as exc:
-        raise OrdinaryContinuationUnavailable() from exc
+        raise OrdinaryContinuationUnavailable(condition="retained_input" if contract == "ordinary-lead-loop.v15" else None) from exc
 
 
 def _scope(ctx) -> ReferenceRequestScope:
@@ -221,6 +222,7 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
         "ordinary-lead-loop.v14",
+        "ordinary-lead-loop.v15",
     }:
         raise OrdinaryContinuationUnavailable()
     metadata = asdict(art)
@@ -238,6 +240,7 @@ def _artifact_metadata_hash(art, *, contract: str) -> str:
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
         "ordinary-lead-loop.v14",
+        "ordinary-lead-loop.v15",
     }:
         # Classification can settle after the output observer. These labels
         # do not change content or provenance; actual deletion still invalidates
@@ -254,6 +257,7 @@ async def artifact_evidence(
     output: bool,
     contract: str = "ordinary-lead-loop.v3",
     prepared_pins: list[dict] | None = None,
+    prepared_input_ids: tuple[str, ...] | None = None,
     retained_input: dict | None = None,
 ) -> dict:
     if retained_input is not None and (
@@ -263,13 +267,14 @@ async def artifact_evidence(
         or retained_input.get("output") is not False
     ):
         raise OrdinaryContinuationUnavailable()
+    condition = "retained_input" if contract == "ordinary-lead-loop.v15" and retained_input is not None and not output else None
     store = ctx.artifact_store
     art = await store.get(artifact_id, check_created_by=ctx.user_id, reject_null_owner=True)
     if art is None or art.status != "ready" or art.workspace_id != ctx.workspace_id or not 0 <= art.size <= 50 * 1024 * 1024:
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryContinuationUnavailable(condition=condition)
     if art.created_by_turn != ctx.turn_id:
         if output:
-            raise OrdinaryContinuationUnavailable()
+            raise OrdinaryContinuationUnavailable(condition=condition)
         from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
         async with open_shared_ctx(ctx.session_store.db_path) as db:
@@ -277,24 +282,34 @@ async def artifact_evidence(
                 db, turn_id=ctx.turn_id, expected_user_id=ctx.user_id, expected_workspace_id=ctx.workspace_id
             )
             if source is None:
-                raise OrdinaryContinuationUnavailable()
+                raise OrdinaryContinuationUnavailable(condition=condition)
             if artifact_id in source.attachment_ids:
                 ready = await store.get_ready_uploads_for_chat([artifact_id], user_id=ctx.user_id, workspace_id=ctx.workspace_id, connection=db)
                 if artifact_id not in ready:
-                    raise OrdinaryContinuationUnavailable()
+                    raise OrdinaryContinuationUnavailable(condition=condition)
             elif retained_input is not None:
                 from bowhead_core.ordinary_lead_input_context import session_input_artifact
 
-                art, _ = await session_input_artifact(ctx, db, artifact_id)
-            elif prepared_pins is not None:
+                try:
+                    art, _ = await session_input_artifact(ctx, db, artifact_id)
+                except OrdinaryContinuationUnavailable as exc:
+                    if condition is not None:
+                        raise OrdinaryContinuationUnavailable(condition=condition) from exc
+                    raise
+            elif prepared_pins is not None or prepared_input_ids is not None:
                 from bowhead_core.ordinary_lead_input_context import prepared_input_artifact
 
-                art = await prepared_input_artifact(ctx, db, artifact_id, prepared_pins)
+                art = await prepared_input_artifact(ctx, db, artifact_id, prepared_pins or [], prepared_ids=prepared_input_ids)
             else:
-                raise OrdinaryContinuationUnavailable()
-    content = await store.backend.read_bounded(art.path, limit=art.size)
+                raise OrdinaryContinuationUnavailable(condition=condition)
+    try:
+        content = await store.backend.read_bounded(art.path, limit=art.size)
+    except OSError as exc:
+        if condition is not None:
+            raise OrdinaryContinuationUnavailable(condition=condition) from exc
+        raise
     if len(content) != art.size:
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryContinuationUnavailable(condition=condition)
     evidence = {
         "artifact_id": artifact_id,
         "metadata_hash": _artifact_metadata_hash(art, contract=contract),
@@ -303,12 +318,18 @@ async def artifact_evidence(
         "output": output,
     }
     if retained_input is not None and evidence != retained_input:
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryContinuationUnavailable(condition=condition)
     return evidence
 
 
 async def revalidate_tool_materials(
-    ctx, records: list[dict], *, contract: str = "ordinary-lead-loop.v3", historical_skills: bool = False, prepared_pins: list[dict] | None = None
+    ctx,
+    records: list[dict],
+    *,
+    contract: str = "ordinary-lead-loop.v3",
+    historical_skills: bool = False,
+    prepared_pins: list[dict] | None = None,
+    prepared_input_ids: tuple[str, ...] | None = None,
 ) -> None:
     for record in records:
         # Prior-Turn observations retain original content under current source
@@ -330,6 +351,7 @@ async def revalidate_tool_materials(
                         output=expected["output"],
                         contract=contract,
                         prepared_pins=prepared_pins,
+                        prepared_input_ids=prepared_input_ids,
                         retained_input=expected if not expected["output"] and contract in _SESSION_INPUT_CONTRACTS else None,
                     )
                     != expected
@@ -502,8 +524,15 @@ class OrdinarySkillObserver:
             if not isinstance(actual_inputs, dict) or len(actual_inputs) > 64:
                 return
             artifacts, expected = [], []
+            selected = tuple(dict.fromkeys(item["artifact_id"] for item in actual_inputs.values())) if uses_observed_inputs(ctx) else None
             for name, item in actual_inputs.items():
-                evidence = await artifact_evidence(ctx, item["artifact_id"], output=False, prepared_pins=getattr(ctx, "_psi_pinned_snapshot", None))
+                evidence = await artifact_evidence(
+                    ctx,
+                    item["artifact_id"],
+                    output=False,
+                    prepared_pins=[] if selected is not None else getattr(ctx, "_psi_pinned_snapshot", None),
+                    prepared_input_ids=selected if selected is not None else getattr(ctx, "_psi_pinned_input_ids", None),
+                )
                 artifacts.append(evidence)
                 expected.append({"key": name, **{field: evidence[field] for field in ("artifact_id", "size", "sha256")}})
             sanitized = {name: value for name, value in inputs.items() if name not in {"_artifact_fetch_token", "_sandbox_executor_token"}}
@@ -591,7 +620,13 @@ class OrdinarySkillObserver:
                 if sum(item["size"] for item in record["artifacts"]) > 64 * 1024 * 1024:
                     raise OrdinaryContinuationUnavailable()
                 record.update(tool=tool, arguments_hash=content_hash(arguments), result_hash=content_hash(result))
-                await revalidate_tool_materials(ctx, [record], prepared_pins=getattr(ctx, "_psi_pinned_snapshot", None))
+                await revalidate_tool_materials(
+                    ctx,
+                    [record],
+                    contract="ordinary-lead-loop.v15" if uses_observed_inputs(ctx) else "ordinary-lead-loop.v3",
+                    prepared_pins=getattr(ctx, "_psi_pinned_snapshot", None),
+                    prepared_input_ids=getattr(ctx, "_psi_pinned_input_ids", None),
+                )
             if record is not None and record["kind"] in {"skill_read", "skill_list"}:
                 # No re-resolution by name: the native observation retained IDs.
                 ctx_copy = copy.copy(ctx)
@@ -634,3 +669,14 @@ def retained_tool_materials(helper, state, *, collaboration: bool = False) -> li
             raise OrdinaryContinuationUnavailable()
         records.append({**record, "call_id": child.call_id})
     return records
+
+
+def retained_file_input_ids(tools: list[dict]) -> tuple[str, ...]:
+    """Enumerate actual native file inputs without adopting a discovery directory."""
+    identities = []
+    for record in tools:
+        if record.get("kind") in {"sandbox", "uncertain_sandbox"}:
+            identities.extend(item["artifact_id"] for item in record["artifacts"] if item["output"] is False)
+        elif record.get("kind") == "attachment_read":
+            identities.append(record["attachment"]["artifact_id"])
+    return tuple(dict.fromkeys(identities))

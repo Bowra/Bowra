@@ -9,7 +9,6 @@ import shutil
 import sqlite3
 import time
 from contextlib import closing, contextmanager
-from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -241,15 +240,6 @@ def _snapshot(source: Path, target: Path) -> None:
         os.fsync(stream.fileno())
 
 
-def _data_files(root: Path) -> list[Path]:
-    """Snapshot standard local data without recursively copying earlier backups."""
-    files: list[Path] = []
-    for path in root.iterdir():
-        if path.name not in {"sqlite", "backups"}:
-            files.append(path)
-    return files
-
-
 def backup_before_upgrade(directory: Path, migration_id: str, heads: Mapping[str, str | None]) -> Path | None:
     target_files = DOMAIN_TARGET_FILES if set(heads) == set(DOMAIN_TARGET_FILES) else ORIGINAL_TARGET_FILES
     if set(heads) != set(target_files):
@@ -261,97 +251,42 @@ def backup_before_upgrade(directory: Path, migration_id: str, heads: Mapping[str
     backups = root / "backups" / directory.name
     backups.mkdir(parents=True, exist_ok=True)
     backups.chmod(0o700)
-    with (backups.parent / ".account-deletion.lock").open("a") as privacy_lock:
-        try:
-            fcntl.flock(privacy_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise SQLiteUpgradeError("Account backup cleanup is active; wait for it to finish before restarting the migration.") from exc
-        destination = backups / migration_id
-        if destination.exists():
-            _verify_backup(destination, migration_id)
-            return destination
-        temporary = backups / f".{migration_id}.tmp"
-        if temporary.exists():
-            shutil.rmtree(temporary)
-        extras = {path: Path(path.name) for path in _data_files(root)} if directory.name == "sqlite" else {}
-        for name in ("kb_chromadb", "flag_transitions.jsonl"):
-            path = directory / name
-            if path.exists() or path.is_symlink():
-                extras[path] = Path(directory.name) / name
-        privacy = Path(os.environ.get("BOWHEAD_PRIVACY_LEDGER_DB", "/app/.privacy-ledger/deletions.db"))
-        privacy_files = [path for path in (privacy, privacy.with_name("account-deletions.db")) if path.is_file()]
-        for path in privacy_files:
-            _recover_rollback_journal(path)
-        size = sum(
-            path.stat().st_size + Path(str(path) + "-wal").stat().st_size if Path(str(path) + "-wal").exists() else path.stat().st_size
-            for path in [*sources.values(), *privacy_files]
-        )
-        for path in extras:
-            for item in chain((path,), path.rglob("*") if path.is_dir() and not path.is_symlink() else ()):
-                if item.is_symlink() or not (item.is_file() or item.is_dir()):
-                    raise SQLiteUpgradeError("Local data contains a symlink or special file; validate the backup scope before upgrading.")
-                if item.is_file():
-                    size += item.stat().st_size
-        if shutil.disk_usage(backups).free < max(size * 2, 1024 * 1024):
-            raise SQLiteUpgradeError("Insufficient disk space for the migration backup; free space before restarting.")
-        temporary.mkdir(mode=0o700)
-        manifest: dict[str, object] = {"format": 1, "migration_id": migration_id, "heads": dict(heads), "databases": {}}
-        try:
-            database_directory = temporary / "sqlite"
-            database_directory.mkdir(mode=0o700)
-            for name, path in sources.items():
-                _snapshot(path, database_directory / path.name)
-                manifest["databases"][name] = path.name
-            layout = directory / LAYOUT_FILE
-            if layout.exists():
-                layout_state = _load_state(directory)
-                if layout_state is not None and layout_state["status"] == "ready":
-                    _write_json(temporary / LAYOUT_FILE, layout_state)
-            if extras:
-                data_directory = temporary / "data"
-                data_directory.mkdir(mode=0o700)
-                for path in extras:
-                    target = data_directory / extras[path]
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    if path.is_symlink():
-                        raise SQLiteUpgradeError("Local data contains a symlink; validate the backup scope before upgrading.")
-                    if path.is_dir():
-                        shutil.copytree(path, target, symlinks=True)
-                    else:
-                        shutil.copy2(path, target)
-                chroma = data_directory / directory.name / "kb_chromadb" / "chroma.sqlite3"
-                if chroma.is_file():
-                    _assert_integrity(chroma)
-            if privacy_files:
-                privacy_directory = temporary / "privacy-ledger"
-                privacy_directory.mkdir(mode=0o700)
-                for path in privacy_files:
-                    _snapshot(path, privacy_directory / path.name)
-                manifest["privacy_ledgers"] = [path.name for path in privacy_files]
-            secrets = {name: os.environ[name] for name in ("BOWHEAD_FERNET_KEY", "BOWHEAD_JWT_SECRET") if os.environ.get(name)}
-            if secrets:
-                _write_json(temporary / "instance-secrets.json", secrets)
-            if extras:
-                for path in (temporary / "data").rglob("*"):
-                    if path.is_file() and not path.is_symlink():
-                        with path.open("rb") as stream:
-                            os.fsync(stream.fileno())
-                directories = [path for path in (temporary / "data").rglob("*") if path.is_dir() and not path.is_symlink()]
-                for path in sorted(directories, key=lambda item: len(item.parts), reverse=True):
-                    _sync_directory(path)
-                _sync_directory(temporary / "data")
-            _sync_directory(database_directory)
-            if privacy_files:
-                _sync_directory(temporary / "privacy-ledger")
-            _write_json(temporary / "backup-manifest.json", manifest)
-            _sync_directory(temporary)
-            temporary.replace(destination)
-            _sync_directory(backups)
-        except BaseException:
-            shutil.rmtree(temporary, ignore_errors=True)
-            raise
-        log.info("sqlite.migration_backup_completed", migration_id=migration_id, targets=len(sources))
+    destination = backups / migration_id
+    if destination.exists():
+        _verify_backup(destination, migration_id)
         return destination
+    temporary = backups / f".{migration_id}.tmp"
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    size = sum(
+        path.stat().st_size + wal.stat().st_size if (wal := path.with_name(path.name + "-wal")).exists() else path.stat().st_size
+        for path in sources.values()
+    )
+    if shutil.disk_usage(backups).free < max(size * 2, 1024 * 1024):
+        raise SQLiteUpgradeError("Insufficient disk space for the migration backup; free space before restarting.")
+    temporary.mkdir(mode=0o700)
+    manifest: dict[str, object] = {"format": 1, "migration_id": migration_id, "heads": dict(heads), "databases": {}}
+    try:
+        database_directory = temporary / "sqlite"
+        database_directory.mkdir(mode=0o700)
+        for name, path in sources.items():
+            _snapshot(path, database_directory / path.name)
+            manifest["databases"][name] = path.name
+        layout = directory / LAYOUT_FILE
+        if layout.exists():
+            layout_state = _load_state(directory)
+            if layout_state is not None and layout_state["status"] == "ready":
+                _write_json(temporary / LAYOUT_FILE, layout_state)
+        _sync_directory(database_directory)
+        _write_json(temporary / "backup-manifest.json", manifest)
+        _sync_directory(temporary)
+        temporary.replace(destination)
+        _sync_directory(backups)
+    except BaseException:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    log.info("sqlite.migration_backup_completed", migration_id=migration_id, targets=len(sources))
+    return destination
 
 
 def _verify_backup(path: Path, migration_id: str) -> None:
@@ -367,7 +302,6 @@ def _verify_backup(path: Path, migration_id: str) -> None:
         or not manifest["databases"]
         or not isinstance(manifest.get("heads"), dict)
         or set(manifest["heads"]) not in (set(ORIGINAL_TARGET_FILES), set(DOMAIN_TARGET_FILES))
-        or not isinstance(manifest.get("privacy_ledgers", []), list)
     ):
         raise SQLiteUpgradeError("The migration backup identity does not match the checkpoint; inspect it before restarting.")
     if any(revision is not None and name not in manifest["databases"] for name, revision in manifest["heads"].items()):
@@ -378,14 +312,6 @@ def _verify_backup(path: Path, migration_id: str) -> None:
         _assert_integrity(path / "sqlite" / filename)
         if database_head(path / "sqlite" / filename) != manifest["heads"][name]:
             raise SQLiteUpgradeError(f"The backup revision for {name} differs from its manifest; inspect the archive before restarting.")
-    for filename in manifest.get("privacy_ledgers", []):
-        if not isinstance(filename, str) or filename not in {
-            "deletions.db",
-            "account-deletions.db",
-            Path(os.environ.get("BOWHEAD_PRIVACY_LEDGER_DB", "/app/.privacy-ledger/deletions.db")).name,
-        }:
-            raise SQLiteUpgradeError("The backup contains an unknown privacy ledger; inspect the archive before restarting.")
-        _assert_integrity(path / "privacy-ledger" / filename)
 
 
 def _verify_checkpoint_backup(directory: Path, backup: str, migration_id: str) -> None:

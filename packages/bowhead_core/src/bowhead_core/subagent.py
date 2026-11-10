@@ -67,7 +67,7 @@ from bowhead_core.agents.capability_protocols import render_capability_protocols
 # (tool_context_select dispatch-gate sentinel), restoring loop break (see comment at :2246).
 from bowhead_core.agents.clarification_tool import collect_clarification_sentinels, is_clarification_sentinel, is_tool_context_selection
 from bowhead_core.agents.plan_propose_tool import is_plan_propose_sentinel
-from bowhead_core.analysis_payload import is_short_answer_payload
+from bowhead_core.analysis_payload import is_short_answer_payload, strip_internal_object_ids
 from bowhead_core.bi_workspace_continuation import (
     BiWorkspaceAttachmentContinuation,
     BiWorkspaceContinuation,
@@ -4211,6 +4211,7 @@ class SubagentRunner:
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             from bowhead_core._ref_allowlist import RefAllowlist
 
@@ -4722,7 +4723,7 @@ class SubagentRunner:
                 ordinary_state.captured = None
                 inv.result = {"ok": False, "error_kind": "clarification_capture_unavailable", "note": exc.note}
             except OrdinaryContinuationUnavailable as exc:
-                raise OrdinaryContinuationUnavailable(stage="clarification_capture") from exc
+                raise OrdinaryContinuationUnavailable(stage="clarification_capture", condition=exc.condition) from exc
 
         # Agent run limits: a subagent stopped at a limit makes one tool-free wrap-up call and
         # returns its partial work (phase 2). These are read from the latest step at call time.
@@ -9764,7 +9765,17 @@ def _extract_step_code_input(tool_name: str, arguments: Any) -> dict[str, Any] |
 _INPUT_PREVIEW_MAX_LEN = 120
 
 
-def _prettify_input_preview(tool_name: str, args: Any) -> str:  # noqa: C901
+def _prettify_input_preview(tool_name: str, args: Any) -> str:
+    """Return the step-row label without internal canvas, section, revision or artifact IDs.
+
+    Those IDs are Tool handles, not words for users (116 dogfood of 1.7.21: rows read
+    "Read Chart · sec_4a5c8d7d2b6e" and the dispatch row stopped at "（section id").
+    A label that is only an ID becomes empty, so the row shows the Tool name alone.
+    """
+    return strip_internal_object_ids(_input_preview_label(tool_name, args), artifacts=True).strip()
+
+
+def _input_preview_label(tool_name: str, args: Any) -> str:  # noqa: C901
     """Return a clean human-readable label for the step row.
 
     ⚠ 本函数产出的是**用户可见**串，必须跟界面语言走。此前它是纯中文的——
@@ -9847,7 +9858,8 @@ def _prettify_input_preview(tool_name: str, args: Any) -> str:  # noqa: C901
         #      the same text was constrained in three places, all mid-sentence. Reduce to one sentence **at the source**: take the first line,
         #      then shorten at a clause boundary if too long. The two downstream caps become safety nets (they also handle other tools).
         #      Keep the full task text: the Agent card and current-task block each have a copy.
-        return _first_clause_label(_strip_inline_markdown(task))
+        #   ④ Remove internal IDs before cutting: "（section id: sec_…）" otherwise ends the label at its colon.
+        return _first_clause_label(_strip_inline_markdown(strip_internal_object_ids(task, artifacts=True)))
 
     # Batch 5ⓑ: flat sandbox args are {code, inputs?, timeout_sec?}; without recognition, they hit the
     # first-nonempty-string-field fallback, making **the entire Python source a step label**
@@ -9903,10 +9915,12 @@ def _prettify_input_preview(tool_name: str, args: Any) -> str:  # noqa: C901
     if isinstance(top_title, str) and top_title.strip():
         return _truncate_preview(top_title)
 
-    # Generic — first non-empty string field.
+    # Generic — first non-empty string field that is more than an internal ID (`section_id` of chart Tools).
     for _k, v in args.items():
-        if isinstance(v, str) and v.strip():
+        if isinstance(v, str) and strip_internal_object_ids(v, artifacts=True).strip():
             return _truncate_preview(v)
+    if any(isinstance(v, str) and v.strip() for v in args.values()):
+        return ""  # Every text argument is an internal ID: no readable label.
 
     # Final fallback — raw JSON-ish preview. FE prettify catches this.
     return _truncate_preview(_preview(args, max_len=_INPUT_PREVIEW_MAX_LEN))

@@ -38,6 +38,7 @@ def outcome_message(ctx, kind: str) -> str:
         "en-US": {
             "review": "The draft is ready for review. Check the previews and changes, then confirm publication.",
             "failed": "The document task could not finish. No files were published.",
+            "model_no_reply": "The model did not return a reply, so the document task stopped. No files were published and this model call was not charged. Send the request again.",
             "document_authoring_script_failed": "The presentation editing script failed. No files were published. Ask in chat to correct or simplify the requested edits.",
             "document_candidate_invalid": "The presentation failed its file-structure check. No files were published. Check the original template or ask in chat for a corrected draft.",
             "history_unavailable": "Earlier clarification answers cannot be safely reused for this document. No files were published. Start a new request and state the confirmed choices explicitly.",
@@ -47,6 +48,7 @@ def outcome_message(ctx, kind: str) -> str:
         "zh-CN": {
             "review": "草稿已可审阅。请检查预览和修改内容，再确认发布。",
             "failed": "文档任务未能完成，未发布文件。",
+            "model_no_reply": "模型没有返回回复，文档任务已停止。未发布文件，这次模型调用未扣费。请重新发送请求。",
             "document_authoring_script_failed": "演示文稿编辑脚本执行失败，未发布文件。请在聊天中要求修正或简化本次修改。",
             "document_candidate_invalid": "演示文稿未通过文件结构检查，未发布文件。请检查原模板，或在聊天中要求修正草稿。",
             "history_unavailable": "无法安全复用此前的澄清回答，未发布文件。请发起新请求，并明确写出已确认的选择。",
@@ -56,6 +58,7 @@ def outcome_message(ctx, kind: str) -> str:
         "de-DE": {
             "review": "Der Entwurf ist zur Prüfung bereit. Prüfen Sie die Vorschauen und Änderungen und bestätigen Sie dann die Veröffentlichung.",
             "failed": "Die Dokumentaufgabe konnte nicht abgeschlossen werden. Es wurden keine Dateien veröffentlicht.",
+            "model_no_reply": "Das Modell hat nicht geantwortet, daher wurde die Dokumentaufgabe beendet. Es wurden keine Dateien veröffentlicht, und dieser Modellaufruf wurde nicht berechnet. Senden Sie die Anfrage erneut.",
             "document_authoring_script_failed": "Das Skript zur Bearbeitung der Präsentation ist fehlgeschlagen. Es wurden keine Dateien veröffentlicht. Bitten Sie im Chat darum, die Änderungen zu korrigieren oder zu vereinfachen.",
             "document_candidate_invalid": "Die Präsentation hat die Dateistrukturprüfung nicht bestanden. Es wurden keine Dateien veröffentlicht. Prüfen Sie die ursprüngliche Vorlage oder bitten Sie im Chat um einen korrigierten Entwurf.",
             "history_unavailable": "Frühere Klärungsantworten können für dieses Dokument nicht sicher wiederverwendet werden. Es wurden keine Dateien veröffentlicht. Starten Sie eine neue Anfrage und nennen Sie die bestätigten Entscheidungen ausdrücklich.",
@@ -65,6 +68,7 @@ def outcome_message(ctx, kind: str) -> str:
         "fr-FR": {
             "review": "Le brouillon est prêt à être examiné. Vérifiez les aperçus et les modifications, puis confirmez la publication.",
             "failed": "La tâche documentaire n’a pas pu être terminée. Aucun fichier n’a été publié.",
+            "model_no_reply": "Le modèle n’a pas répondu ; la tâche documentaire s’est donc arrêtée. Aucun fichier n’a été publié et cet appel au modèle n’a pas été facturé. Renvoyez la demande.",
             "document_authoring_script_failed": "Le script de modification de la présentation a échoué. Aucun fichier n’a été publié. Demandez dans le chat de corriger ou de simplifier les modifications.",
             "document_candidate_invalid": "La présentation n’a pas réussi la vérification de structure du fichier. Aucun fichier n’a été publié. Vérifiez le modèle d’origine ou demandez dans le chat un brouillon corrigé.",
             "history_unavailable": "Les réponses de clarification précédentes ne peuvent pas être réutilisées en toute sécurité pour ce document. Aucun fichier n’a été publié. Lancez une nouvelle demande en précisant les choix confirmés.",
@@ -78,7 +82,7 @@ def outcome_message(ctx, kind: str) -> str:
 
 def document_failure_reason(error_code: str, kind: str) -> str:
     """Project finite domain failures without exposing script or source content."""
-    if error_code in {"document_history_unavailable", "document_authoring_script_failed"}:
+    if error_code in {"document_history_unavailable", "document_authoring_script_failed", "document_model_no_reply"}:
         return error_code
     if error_code in {"pptx_slide_identity_invalid", "pptx_shape_identity_invalid", "pptx_structure_unsupported"}:
         return "document_candidate_invalid"
@@ -124,10 +128,13 @@ async def finish_document_planning(ctx, outcome: DocumentPlanningOutcome, *, bus
         message_kind = "history_unavailable" if reason == "document_history_unavailable" else reason
         if isinstance(outcome, DocumentPlanningFailure) and outcome.error_code == "document_input_unavailable":
             message_kind = "input_unavailable"
+        if reason == "document_model_no_reply":
+            message_kind = "model_no_reply"
         answer = outcome_message(
             ctx,
             message_kind
-            if message_kind in {"history_unavailable", "input_unavailable", "document_authoring_script_failed", "document_candidate_invalid"}
+            if message_kind
+            in {"history_unavailable", "input_unavailable", "document_authoring_script_failed", "document_candidate_invalid", "model_no_reply"}
             else outcome.kind,
         )
         error = None if status == TurnStatus.COMPLETED else outcome.error_code

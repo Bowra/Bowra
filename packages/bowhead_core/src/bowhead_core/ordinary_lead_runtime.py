@@ -124,7 +124,9 @@ async def initialize_ordinary_lead(ctx: ToolExecutionContext, *, request_context
     if row is None:
         logger.info("ordinary_lead.continuation_not_engaged turn=%s reason=team_unavailable", ctx.turn_id)
         return
-    ctx.ordinary_lead_state = OrdinaryLeadRunState(model_config_version=row[0], request_context=request_context)
+    ctx.ordinary_lead_state = OrdinaryLeadRunState(
+        model_config_version=row[0], request_context=request_context, observed_inputs=ordinary_multi_helper_question_enabled()
+    )
 
 
 async def _source(ctx: ToolExecutionContext, db: aiosqlite.Connection) -> ChatTurnUserSource:
@@ -136,21 +138,21 @@ async def _source(ctx: ToolExecutionContext, db: aiosqlite.Connection) -> ChatTu
     return source
 
 
-async def _uploads(ctx: ToolExecutionContext, source: ChatTurnUserSource) -> None:
+async def _uploads(ctx: ToolExecutionContext, source: ChatTurnUserSource, *, contract: str | None = None) -> None:
     """Retain the existing ready-upload fence, including exact metadata."""
     from bowhead_core.chat_reference_attachment_snapshot import supports_lead_attachment_refs
 
     if not source.attachment_ids:
         return
     if not supports_lead_attachment_refs(source.attachment_refs, source.attachment_ids):
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryContinuationUnavailable(condition="retained_input" if contract == "ordinary-lead-loop.v15" else None)
     if any(ref.get("referenceKind", ref.get("reference_kind", "upload")) != "upload" for ref in source.attachment_refs):
-        raise OrdinaryContinuationUnavailable()
+        raise OrdinaryContinuationUnavailable(condition="retained_input" if contract == "ordinary-lead-loop.v15" else None)
     ready = await ctx.artifact_store.get_ready_uploads_for_chat(list(source.attachment_ids), user_id=ctx.user_id, workspace_id=ctx.workspace_id)
     for artifact_id, ref in zip(source.attachment_ids, source.attachment_refs, strict=True):
         art = ready.get(artifact_id)
         if art is None or (art.filename, art.mime, art.size) != (ref["filename"], ref["mime"], ref["size"]):
-            raise OrdinaryContinuationUnavailable()
+            raise OrdinaryContinuationUnavailable(condition="retained_input" if contract == "ordinary-lead-loop.v15" else None)
 
 
 async def _helper(ctx: ToolExecutionContext, db: aiosqlite.Connection, material: dict) -> str:
@@ -348,7 +350,7 @@ async def capture_ordinary_lead_loop(
         if len(by_dispatch) != len(bindings) or len(set(dispatch_keys)) != len(dispatch_keys) or set(by_dispatch) != set(dispatch_keys):
             raise OrdinaryContinuationUnavailable()
         bindings = [by_dispatch[key] for key in dispatch_keys]
-    from bowhead_core.ordinary_lead_material import retained_read_tool, retained_tool_materials
+    from bowhead_core.ordinary_lead_material import _artifact_metadata_hash, retained_read_tool, retained_sandbox_inputs, retained_tool_materials
 
     # Read-only observations use the same extended envelope as attachment reads.
     has_attachment_reads = bool(lead_calls) or any(
@@ -364,14 +366,56 @@ async def capture_ordinary_lead_loop(
     async with open_shared_ctx(ctx.session_store.db_path) as db:
         source = await _source(ctx, db)
     parsed = list(getattr(ctx, "_psi_parsed_results", []) or [])
-    pinned = getattr(ctx, "_psi_pinned_snapshot", []) or []
-    input_context = {"parsed": [{**asdict(item), "local_path": None} for item in parsed], "pinned": pinned}
-    from bowhead_core.ordinary_lead_input_context import retained_ids
+    pinned = list(getattr(ctx, "_psi_pinned_snapshot", []) or [])
+    from bowhead_core.ordinary_lead_input_context import _PIN_FIELDS, prepared_input_artifact
 
-    has_retained_context = bool(retained_ids(source, input_context))
+    native_inputs = retained_sandbox_inputs(
+        [{"tools": retained_tool_materials(helper, state, collaboration=collaboration is not None)} for helper in helpers]
+    )
+    observed_ids = None
+    if state.observed_inputs:
+        from bowhead_core.ordinary_lead_input_context import observed_session_inputs
+
+        tools = [record for helper in helpers for record in retained_tool_materials(helper, state, collaboration=collaboration is not None)]
+        async with open_shared_ctx(ctx.session_store.db_path) as db:
+            await db.execute("BEGIN")
+            observed_ids = await observed_session_inputs(ctx, db, tools)
+    else:
+        known_inputs = {item["artifact_id"] for item in pinned} | set(source.attachment_ids)
+        projected_count = len(pinned)
+        async with open_shared_ctx(ctx.session_store.db_path) as db:
+            await db.execute("BEGIN")
+            for identity, expected in native_inputs.items():
+                if identity in known_inputs:
+                    continue
+                artifact = await ctx.artifact_store.get(identity, check_created_by=ctx.user_id, reject_null_owner=True, connection=db)
+                if artifact is not None and artifact.created_by_turn == ctx.turn_id:
+                    continue
+                artifact = await prepared_input_artifact(ctx, db, identity, pinned, prepared_ids=getattr(ctx, "_psi_pinned_input_ids", None))
+                if _artifact_metadata_hash(artifact, contract="ordinary-lead-loop.v10") != expected["metadata_hash"]:
+                    raise OrdinaryContinuationUnavailable()
+                pinned.append({"artifact_id": identity, **{field: getattr(artifact, field) for field in _PIN_FIELDS}})
+                known_inputs.add(identity)
+        if len(pinned) > projected_count and len(known_inputs) > 32:
+            raise OrdinaryQuestionUnavailable(
+                "No question was created because retaining the checked inputs would exceed the 32-input continuation limit. "
+                "The completed results remain available. Narrow the remaining work before asking another question."
+            )
+    input_context = {"parsed": [{**asdict(item), "local_path": None} for item in parsed], "pinned": pinned}
+    from bowhead_core.ordinary_lead_input_context import RetainedInputCapacityExceeded, retained_ids
+
+    try:
+        has_retained_context = bool(retained_ids(source, input_context, observed_ids=observed_ids))
+    except RetainedInputCapacityExceeded as exc:
+        raise OrdinaryQuestionUnavailable(
+            "No question was created because the checked inputs exceed the 32-input continuation limit or retained-content size limit. "
+            "The completed results remain available. Narrow the remaining work before asking another question."
+        ) from exc
     if has_retained_context and not ordinary_multi_helper_question_enabled():
         raise OrdinaryContinuationUnavailable()
-    shared_outcomes = retained_knowledge or collaboration is not None or extended_outcomes or has_retained_context or parallel
+    shared_outcomes = (
+        state.observed_inputs or retained_knowledge or collaboration is not None or extended_outcomes or has_retained_context or parallel
+    )
     helper_materials = []
     for helper, binding in zip(helpers, bindings, strict=True):
         if (
@@ -431,20 +475,26 @@ async def capture_ordinary_lead_loop(
                 raise OrdinaryContinuationUnavailable()
             report_reads.append({**observed, "call_id": invocation.call_id})
     material = {"helpers": helper_materials} if len(helpers) > 1 or shared_outcomes else helper_materials[0]
-    await _uploads(ctx, source)
+    await _uploads(ctx, source, contract="ordinary-lead-loop.v15" if state.observed_inputs else None)
     from bowhead_core.ordinary_lead_material import revalidate_tool_materials
 
     await revalidate_tool_materials(ctx, report_reads)
     for entry in helper_materials:
-        await revalidate_tool_materials(ctx, entry["tools"], prepared_pins=pinned)
-    if parallel or retained_knowledge:
+        await revalidate_tool_materials(
+            ctx,
+            entry["tools"],
+            contract="ordinary-lead-loop.v15" if state.observed_inputs else "ordinary-lead-loop.v3",
+            prepared_pins=pinned,
+            prepared_input_ids=getattr(ctx, "_psi_pinned_input_ids", None),
+        )
+    if parallel or retained_knowledge or state.observed_inputs:
         material["input_context"] = None
     if has_retained_context:
         from bowhead_core.ordinary_lead_input_context import capture_context
 
         async with open_shared_ctx(ctx.session_store.db_path) as db:
             await db.execute("BEGIN")
-            material["input_context"] = await capture_context(ctx, db, source, input_context)
+            material["input_context"] = await capture_context(ctx, db, source, input_context, observed_ids=observed_ids)
     from bowhead_core.chat_reference_attachment_snapshot import seal_source_attachment_snapshot
     from bowhead_core.language_context import language_context_snapshot
 
@@ -466,7 +516,7 @@ async def capture_ordinary_lead_loop(
         "pinned": pinned,
         "pinned_total": getattr(ctx, "_psi_pinned_total", 0),
     }
-    if has_retained_context or parallel or retained_knowledge:
+    if has_retained_context or parallel or retained_knowledge or state.observed_inputs:
         context["reference_inventory"] = reference_allowlist.snapshot() if reference_allowlist is not None else None
     if (len(helpers) > 1 or shared_outcomes) and context["spawn_count"] != len(helpers) + sum(
         inv.tool_name == "subagent_spawn" and inv.call_id in state.blocked_calls for inv in prefix
@@ -490,7 +540,9 @@ async def capture_ordinary_lead_loop(
         knowledge_read=knowledge_read,
         knowledge_sources=dict(state.knowledge_sources) if state.knowledge_sources or navigation_used else None,
         knowledge_navigation=dict(ctx.knowledge_navigation_uses) if navigation_used else None,
-        contract="ordinary-lead-loop.v14"
+        contract="ordinary-lead-loop.v15"
+        if state.observed_inputs
+        else "ordinary-lead-loop.v14"
         if navigation_used
         else "ordinary-lead-loop.v13"
         if state.knowledge_sources
@@ -580,8 +632,33 @@ async def _validate_input_context(
 
     material = json.loads(checkpoint.material_json)
     context = json.loads(checkpoint.context_json)
+    if checkpoint.contract == "ordinary-lead-loop.v15":
+        from bowhead_core.ordinary_lead_input_context import observed_session_inputs, session_input_artifact
+
+        tools = [record for helper in checkpoint.helper_materials() for record in helper["tools"]]
+        try:
+            observed_ids = await observed_session_inputs(ctx, db, tools)
+        except OrdinaryContinuationUnavailable as exc:
+            raise OrdinaryContinuationUnavailable(condition="retained_input") from exc
+        expected = retained_ids(source, context, observed_ids=observed_ids)
+        for item in context["pinned"]:
+            if item["artifact_id"] not in expected and item["artifact_id"] not in source.attachment_ids:
+                try:
+                    await session_input_artifact(ctx, db, item["artifact_id"])
+                except OrdinaryContinuationUnavailable as exc:
+                    raise OrdinaryContinuationUnavailable(condition="directory_access") from exc
+        if material["input_context"] is None:
+            if expected:
+                raise OrdinaryContinuationUnavailable(condition="retained_input")
+        else:
+            try:
+                await validate_context(ctx, db, source, material["input_context"], context, read_bytes=read_bytes, observed_ids=observed_ids)
+            except (OrdinaryContinuationUnavailable, ValueError, OSError) as exc:
+                raise OrdinaryContinuationUnavailable(condition="retained_input") from exc
+        return
     if (
-        checkpoint.contract in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+        checkpoint.contract
+        in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
         and material["input_context"] is None
     ):
         if retained_ids(source, context):
@@ -605,7 +682,7 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
             await _helper(ctx, db, entry)
         async with db.execute("SELECT llm_config_version FROM teams WHERE id=?", (ctx.team_id,)) as cursor:
             row = await cursor.fetchone()
-            if row is None or row[0] != checkpoint.model_config_version:
+            if row is None or (checkpoint.contract != "ordinary-lead-loop.v15" and row[0] != checkpoint.model_config_version):
                 raise OrdinaryContinuationUnavailable()
     if checkpoint.contract in {
         "ordinary-lead-loop.v10",
@@ -613,11 +690,12 @@ async def validate_ordinary_retained_materials(ctx: ToolExecutionContext, checkp
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
         "ordinary-lead-loop.v14",
+        "ordinary-lead-loop.v15",
     }:
         async with open_shared_ctx(ctx.session_store.db_path) as db:
             await db.execute("BEGIN")
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=True)
-    await _uploads(ctx, source)
+    await _uploads(ctx, source, contract=checkpoint.contract)
     from bowhead_core.ordinary_lead_material import revalidate_tool_materials
 
     for entry in checkpoint.helper_materials():
@@ -687,13 +765,14 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             await revalidate_material_authority_in_connection(ctx, db, entry, contract=checkpoint.contract)
         await revalidate_material_authority_in_connection(ctx, db, {"tools": checkpoint.report_reads or []}, contract=checkpoint.contract)
         source = await _source(ctx, db)
-        await _uploads(ctx, source)
+        await _uploads(ctx, source, contract=checkpoint.contract)
         if checkpoint.contract in {
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             await _validate_input_context(ctx, db, source, checkpoint, read_bytes=False)
         if checkpoint.contract in {
@@ -707,6 +786,7 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             await revalidate_material_authority_in_connection(ctx, db, material, contract=checkpoint.contract)
         record = await consume_ordinary_resume_in_tx(db, worker=worker_identity(ctx), card_id=state.card_id)
@@ -717,6 +797,12 @@ async def restore_ordinary_lead(ctx: ToolExecutionContext, bus: TurnEventBus) ->
     state.final_bounce_count["n"] = checkpoint.final_bounce_count
     ctx._psi_parsed_results = parsed
     ctx._psi_pinned_snapshot = context["pinned"]
+    # Discard any fresh pin inventory prepared before this checkpoint was restored.
+    ctx._psi_pinned_input_ids = (
+        (tuple(item["artifact_id"] for item in material["input_context"]["artifacts"]) if material.get("input_context") else ())
+        if state.observed_inputs
+        else tuple(item["artifact_id"] for item in context["pinned"])
+    )
     ctx._psi_pinned_total = context["pinned_total"]
     ctx._m137_subagent_payloads = context["payloads"]
     ctx._chat_direct_spawn_count = context["spawn_count"]

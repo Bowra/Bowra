@@ -412,8 +412,16 @@ def effective_outbound_params(provider: Any, *, model_id: str, capability: str, 
     return OutboundParams(rules=rules)
 
 
-def apply_runtime_parameters(body: dict[str, Any], provider: Any, *, model_id: str, capability: str, family: ProtocolFamily) -> dict[str, Any]:
-    """Apply this layer after the legacy baseline, before bounded adaptations."""
+def apply_runtime_parameters(
+    body: dict[str, Any], provider: Any, *, model_id: str, capability: str, family: ProtocolFamily, bounded_output: bool = False
+) -> dict[str, Any]:
+    """Apply this layer after the legacy baseline, before bounded adaptations.
+
+    ``bounded_output`` marks a caller-fixed output limit sized for an answer
+    (titles, classifiers, short JSON). Providers count reasoning against that
+    limit and some ignore the thinking budget, so Team-enabled thinking could
+    consume it entirely; such a request runs with thinking off.
+    """
     model = model_spec(provider, model_id)
     policy = effective_policy(model, capability)
     if not policy:
@@ -442,6 +450,8 @@ def apply_runtime_parameters(body: dict[str, Any], provider: Any, *, model_id: s
     profile = PROFILES.get((model.get("runtime_parameters") or {}).get("profile"))
     mode = policy.get("thinking_mode")
     budget = policy.get("thinking_budget")
+    if bounded_output and mode in {"on", "adaptive"}:
+        mode, budget = "off", None
     if profile and profile["family"] == "openai":
         if mode == "omit":
             body.pop("enable_thinking", None)

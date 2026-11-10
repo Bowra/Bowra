@@ -196,8 +196,11 @@ async def test_unretained_primary_refuses_the_question_without_failing_the_turn(
     assert "dispatched Agent result cannot be retained" in refusal["note"]
 
 
-async def test_a_scheduled_run_pauses_for_a_question_after_a_helper(http_start, monkeypatch):
-    """A scheduled run has no chat source; its question after a helper pauses instead of failing the run."""
+@pytest.mark.parametrize("helper_first", [True, False])
+async def test_a_scheduled_run_pauses_for_a_question_and_resumes_after_the_answer(http_start, monkeypatch, helper_first):
+    """A scheduled run has no chat source. Its question, after a helper or before any tool, pauses the run,
+    and the owner's answer resumes it: the bounded first-question round, which resumes from the chat
+    source, is not used for it."""
     from types import SimpleNamespace
 
     from bowhead_gateway._scheduled_runner import run_scheduled_turn
@@ -212,10 +215,10 @@ async def test_a_scheduled_run_pauses_for_a_question_after_a_helper(http_start, 
         names = {item["function"]["name"] for item in body.get("tools", [])}
         if "subagent_spawn" in names:
             lead_calls.append(body)
-            if len(lead_calls) == 1:
+            if helper_first and len(lead_calls) == 1:
                 spawn = {"profile": helper_profile, "task": "Compute sales.", "delegation_role": "helper"}
                 return response(body, call("helper-native", "subagent_spawn", spawn), "tool_calls")
-            if len(lead_calls) == 2:
+            if len(lead_calls) == (2 if helper_first else 1):
                 return response(body, call("question-native", "clarification_ask", {"questions": [QUESTION]}), "tool_calls")
             return response(body, {"role": "assistant", "content": "Net sales were selected."}, "stop")
         if "subagent_return" in names:
@@ -239,7 +242,8 @@ async def test_a_scheduled_run_pauses_for_a_question_after_a_helper(http_start, 
         mock.post(url__regex=r"https://api\..*").mock(side_effect=respond)
         outcome = await run_scheduled_turn(case.app, job)
 
-        # Before the fix the run failed with scheduled_turn_failed and created no question.
+        # Before the fixes the run failed with scheduled_turn_failed after a helper; asked first,
+        # it paused but the answer was refused with clarification_resume_unavailable.
         assert outcome.error is None and outcome.awaiting is True, outcome
         turn = next(row for row in rows(case, "turns") if row["id"] == outcome.turn_id)
         assert turn["status"] == "clarification_pending", turn["error"]

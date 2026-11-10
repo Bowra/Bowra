@@ -2304,6 +2304,7 @@ async def _restore_ordinary_question_inputs(orchestrator: Any, turn_req: Any) ->
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }
         else None
     )

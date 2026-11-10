@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +18,8 @@ class AccountExternalCleanup:
     def __init__(self, app: Any) -> None:
         self.app = app
         self.root = Path(app.state.user_store.db_path).parent
-        self.backup_root = self.root.parent / "backups"
 
     async def check_ready(self) -> None:
-        ready, _ = await self.app.state.memory_destructive_operation_store.readiness()
-        if not ready:
-            raise AccountDeletionError("account_memory_cleanup_unavailable")
         for filename, tables in _POLICY["secondary"].items():
             path = self.root / filename
             if not path.is_file():
@@ -40,22 +34,6 @@ class AccountExternalCleanup:
                     async with db.execute(f"PRAGMA table_info({_q(table)})") as cur:
                         if [row[1] for row in await cur.fetchall()] != columns:
                             raise AccountDeletionError("account_erasure_unreviewed_secondary_schema")
-
-    @asynccontextmanager
-    async def guard(self) -> AsyncIterator[None]:
-        """Share the supported snapshot writer's lock across the whole erasure."""
-        import fcntl
-
-        self.backup_root.mkdir(parents=True, exist_ok=True)
-        with (self.backup_root / ".account-deletion.lock").open("a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise AccountDeletionError("account_backup_in_progress") from exc
-            try:
-                yield
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
 
     async def quarantine(self, user_id: str, operation_id: str) -> None:
         # Scope, not uploader identity, owns shared knowledge. Keep its backing
@@ -90,13 +68,6 @@ class AccountExternalCleanup:
 
     async def __call__(self, user_id: str, operation_id: str) -> None:
         await self.check_ready()
-        await anyio.to_thread.run_sync(self._backups, user_id)
-        # The memory service supplies its own external deletion receipt and
-        # physical-erasure barrier; do not bypass it with ad-hoc memory SQL.
-        memory = self.app.state.memory_destructive_operation_store
-        operation = await memory.permanent_delete_all(user_id=user_id, idempotency_key=f"account-erasure:{operation_id}")
-        if operation["status"] != "completed":
-            raise AccountDeletionError("account_memory_cleanup_pending")
         async with (
             diagnostic_connect(self.app.state.user_store.db_path) as db,
             db.execute(
@@ -253,39 +224,3 @@ class AccountExternalCleanup:
         ):
             if await cur.fetchone():
                 raise AccountDeletionError("account_package_cleanup_pending")
-
-    def _backups(self, user_id: str) -> None:
-        """Expire registered whole recovery units and legacy flat snapshots."""
-        from bowhead_gateway.account_backup_cleanup import (
-            expire_backup_bundle,
-            resume_backup_expirations,
-            snapshot_contains_account,
-            validate_backup_tree,
-            verify_backup_bundle,
-        )
-
-        if not self.backup_root.exists():
-            return
-        validate_backup_tree(self.backup_root)
-        resume_backup_expirations(self.backup_root)
-        bundles = []
-        manifests = (path for path in validate_backup_tree(self.backup_root) if path.name == "backup-manifest.json")
-        for path in sorted(manifests, key=lambda path: len(path.parts)):
-            if any(path.is_relative_to(bundle) for bundle in bundles):
-                continue
-            bundle = path.parent
-            if bundle == self.backup_root:
-                raise AccountDeletionError("account_backup_format_unregistered")
-            identity, databases = verify_backup_bundle(bundle)
-            bundles.append(bundle)
-            if any(snapshot_contains_account(database, user_id, thorough=True) for database in databases):
-                expire_backup_bundle(bundle, identity)
-        for path in validate_backup_tree(self.backup_root):
-            if any(path.is_relative_to(bundle) for bundle in bundles):
-                continue
-            if not path.is_file() or path.name == ".account-deletion.lock" or path.suffix == ".sha256":
-                continue
-            if path.suffix not in {".db", ".sqlite", ".sqlite3"}:
-                raise AccountDeletionError("account_backup_format_unregistered")
-            if snapshot_contains_account(path, user_id):
-                path.unlink()

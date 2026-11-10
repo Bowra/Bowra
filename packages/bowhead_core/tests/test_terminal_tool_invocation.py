@@ -1068,6 +1068,13 @@ def test_production_tool_effect_specs_and_ticketed_catch_boundaries_are_exact() 
             "schema",
             "TOOL_EFFECT_NONE",
         ),
+        # Delivery review records run-local evidence without executing external writes.
+        (
+            "tool_delivery_review.py",
+            "tool_spec",
+            "schema",
+            "ToolEffectSpec(EffectClass.NONE, ToolEffectIdempotency.NONE)",
+        ),
         # 5c6052ead (Tavily web_extract / web_map, FEATURE_TAVILY_TOOLS off by default): read-only web pages.
         (
             "web_tavily_tools.py",

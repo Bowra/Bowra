@@ -8439,6 +8439,10 @@ textarea {
   border-bottom: none;
   background: transparent;
 }
+/* Keep screen titles and controls inset in both production charts and settings previews. */
+.v2-chart-figure[data-chart-output="screen"][data-chart-chrome="report"] > .v2-chart-header {
+  padding: 12px 16px 8px;
+}
 /* Peer alignment belongs to the interactive host; exports retain their fixed intrinsic spacing. */
 [data-chart-composition="screen"] .v2-chart-header {
   align-content: flex-start;

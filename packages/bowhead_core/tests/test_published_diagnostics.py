@@ -38,6 +38,7 @@ from bowhead_core import published_diagnostics as diagnostics
         ("document_information_incomplete", "content", False),
         ("document_planning_failed", "runtime", False),
         ("document_authoring_script_failed", "runtime", False),
+        ("document_model_no_reply", "runtime", True),
         ("document_candidate_invalid", "content", False),
         ("document_history_unavailable", "configuration", False),
         ("document_request_rejected", "content", False),
@@ -837,12 +838,14 @@ def test_runtime_policy_and_documented_policy_have_identical_code_sets() -> None
         assert callable(publisher)
         parameters = tuple(inspect.signature(publisher).parameters)
         if publisher in {diagnostics.publish_chat_turn_failure, diagnostics.publish_rule_clarification_failure}:
-            expected_parameters = ("reason_code", "clarification_stage")
+            expected_parameters = ("reason_code", "clarification_stage", "clarification_condition")
             if publisher is diagnostics.publish_chat_turn_failure:
                 expected_parameters += ("outcome_unknown",)
             assert parameters == expected_parameters
             stage = inspect.signature(publisher).parameters["clarification_stage"]
             assert stage.kind is inspect.Parameter.KEYWORD_ONLY and stage.default is None
+            condition = inspect.signature(publisher).parameters["clarification_condition"]
+            assert condition.kind is inspect.Parameter.KEYWORD_ONLY and condition.default is None
             if publisher is diagnostics.publish_chat_turn_failure:
                 outcome = inspect.signature(publisher).parameters["outcome_unknown"]
                 assert outcome.kind is inspect.Parameter.KEYWORD_ONLY and outcome.default is False
@@ -1125,3 +1128,43 @@ def test_runtime_stop_preserves_bounded_usage_in_the_terminal_projection(reason)
     assert diagnostics.chat_recovery_action(reason) == "edit_and_resend"
     invalid = diagnostics.build_chat_turn_failure(reason_code=reason, turn_id="t_runtime", step_usage={"used": True, "limit": 14})
     assert "step_usage" not in invalid.diagnostics
+
+
+@pytest.mark.parametrize("condition", ["retained_input", "directory_access"])
+@pytest.mark.parametrize("stage", ["chat", "clarification_capture", "clarification_resume_preflight"])
+def test_native_continuation_conditions_preserve_parent_stage_and_copy(condition, stage):
+    publisher = diagnostics.publish_rule_clarification_failure if stage == "clarification_resume_preflight" else diagnostics.publish_chat_turn_failure
+    published = publisher(
+        "clarification_resume_unavailable", clarification_condition=condition, **({"clarification_stage": stage} if stage != "chat" else {})
+    )
+    assert published is not None
+    wire = published.to_wire()
+    assert f"phase={stage};" in wire["safe_detail"]
+    assert wire["safe_detail"].endswith("; condition=" + condition)
+    assert diagnostics.clarification_failure_copy_code("clarification_resume_unavailable", wire) == f"clarification_{condition}_unavailable"
+    assert (
+        diagnostics.clarification_failure_copy_code(
+            "clarification_resume_unavailable", {**wire, "safe_detail": wire["safe_detail"] + "; extra=untrusted"}
+        )
+        == "clarification_resume_unavailable"
+    )
+    assert publisher("clarification_resume_unavailable", clarification_condition="model-provided-prose") is None
+
+
+def test_native_input_reason_is_shared_by_live_persistence_and_replay_carrier():
+    from types import SimpleNamespace
+
+    from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
+
+    carrier = SimpleNamespace()
+    first = diagnostics.get_or_build_chat_turn_failure(
+        carrier=carrier,
+        reason_code="clarification_resume_unavailable",
+        turn_id="t_original",
+        cause=OrdinaryContinuationUnavailable(condition="directory_access"),
+    )
+    repeated = diagnostics.get_or_build_chat_turn_failure(
+        carrier=carrier, reason_code="clarification_resume_unavailable", turn_id="t_original", cause=ValueError("retained_input")
+    )
+    assert repeated is first
+    assert first.diagnostics["safe_detail"] == "phase=chat; failure_class=configuration; condition=directory_access"

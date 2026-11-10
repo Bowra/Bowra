@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 @pytest.mark.parametrize("profile", ["compute", "kb-analyst", "configuration-agent"])
 @pytest.mark.parametrize("status", ["completed", "failed"])
-@pytest.mark.parametrize("boundary", ["read", "disabled", "override", "definition", "grants", "scope", "outcome", "dispatch", "legacy"])
+@pytest.mark.parametrize("boundary", ["read", "release_text", "disabled", "override", "tools", "grants", "scope", "outcome", "dispatch", "legacy"])
 async def test_exact_system_output_uses_current_authority(tmp_path, monkeypatch, profile, status, boundary):
     from bowhead_core.agents.agent_runner_adapter import manifest_to_profile
     from bowhead_core.agents.registry import AgentRegistry
@@ -44,8 +44,18 @@ async def test_exact_system_output_uses_current_authority(tmp_path, monkeypatch,
             actor_user_id=fixture.owner_id,
             audit_action="update",
         )
-    elif boundary in {"definition", "grants"}:
-        changes = {"system_prompt": "Changed definition"} if boundary == "definition" else {"skill_invoke_allowlist": ("changed-grant",)}
+    elif boundary == "release_text":
+        # A deploy that only rewords a built-in Agent or changes its run budget
+        # grants nothing; the settled output stays usable (116, 1.7.26 -> 1.7.27).
+        current = PROFILES[profile]
+        changes = {"system_prompt": "Reworded by a release", "description": "Reworded", "max_iterations": current.max_iterations + 1}
+        monkeypatch.setitem(PROFILES, profile, replace(current, **changes))
+    elif boundary in {"tools", "grants"}:
+        changes = (
+            {"tool_whitelist": (*PROFILES[profile].tool_whitelist, "added_tool")}
+            if boundary == "tools"
+            else {"skill_invoke_allowlist": ("changed-grant",)}
+        )
         monkeypatch.setitem(PROFILES, profile, replace(PROFILES[profile], **changes))
     kwargs = {
         "scope": scope.model_copy(update={"user_id": fixture.owner_id}) if boundary == "scope" else scope,
@@ -66,7 +76,7 @@ async def test_exact_system_output_uses_current_authority(tmp_path, monkeypatch,
         await db.execute("BEGIN")
         await db.execute("PRAGMA query_only=1")
         factory, changes_before = db.row_factory, db.total_changes
-        if boundary == "read":
+        if boundary in {"read", "release_text"}:
             assert await reader(db, **kwargs) == replace(binding, status=status)
         else:
             with pytest.raises(AgentExecutionBindingError):

@@ -41,6 +41,12 @@ pytestmark = [
             for kind, edge in (
                 ("upload", "resume"),
                 ("output", "resume"),
+                ("upload", "projection_overflow"),
+                ("output", "projection_overflow"),
+                ("upload", "empty_projection"),
+                ("upload", "projection_reuse"),
+                ("upload", "projection_later"),
+                ("upload", "projection_capacity"),
                 ("canvas_only", "canvas_only"),
                 ("upload", "unpin_after"),
                 ("upload", "recreated"),
@@ -78,7 +84,21 @@ pytestmark = [
         ],
     ],
 )
-async def test_existing_session_retains_original_context_through_question(http_start, monkeypatch, pin_policy, answer_mode, boundary):
+async def test_existing_session_retains_original_context_through_question(
+    http_start, monkeypatch, pin_policy, answer_mode, boundary, observed_inputs=False
+):
+    if not observed_inputs:
+        # Exercise historical card semantics through the original native paths.
+        from bowhead_core import ordinary_lead_runtime
+
+        initialize = ordinary_lead_runtime.initialize_ordinary_lead
+
+        async def initialize_legacy(ctx, **kwargs):
+            await initialize(ctx, **kwargs)
+            if ctx.ordinary_lead_state is not None:
+                ctx.ordinary_lead_state.observed_inputs = False
+
+        monkeypatch.setattr(ordinary_lead_runtime, "initialize_ordinary_lead", initialize_legacy)
     case, scope = http_start, http_start.fixture.scope
     sandbox_input = None
     if boundary.startswith("sandbox:"):
@@ -112,9 +132,104 @@ async def test_existing_session_retains_original_context_through_question(http_s
     attachment = uploaded.json()
     case.client.headers["Content-Type"] = "application/json"
     artifacts = case.app.state.artifact_store
+    if observed_inputs:
+        from bowhead_core.team_llm_config import build_catalog, is_allowed_preferred_model
+
+        case.app.state.artifact_fetch_secret = b"synthetic-viewer-projection-key"
+        case.app.state.canvas_store = case.app.state.orchestrator.canvas_store
+        config = {
+            "schema_version": 2,
+            "providers": {
+                "primary": {
+                    "type": "openai_compatible",
+                    "base_url": "https://api.synthetic.test/v1",
+                    "api_key": "synthetic-test-key",
+                    "models": [{"id": "large", "capabilities": ["chat", "tool"]}],
+                }
+            },
+            "tiers": {"primary": {"provider": "primary", "model": "large"}, "fast": {"follow": "primary"}, "judge": {"auto": True}},
+            "kb": {"models": {}, "active": {}},
+            "media": {"models": {}, "active": {}},
+            "search": {"models": {}, "active": {}},
+        }
+        assert is_allowed_preferred_model(build_catalog(config=config), "primary", "large")
+        await case.app.state.user_store.update_team_llm_config(scope.team_id, config)
     old_upload_id = visible_ids[0]
     old_output_id = next(identity for identity in original_pins if identity != old_upload_id)
     sandbox_artifact_id = old_output_id if sandbox_input == "output" else old_upload_id
+    if boundary == "empty_projection":
+        monkeypatch.setenv("FEATURE_KNOWLEDGE_PLUGIN_DIRECT_USE", "0")
+    resumed_read = boundary in {"projection_reuse", "projection_later"}
+    later_id = None
+    extra_input_id = None
+    capacity_ids = []
+    resumed_observations = []
+    resumed_input_facts = []
+    projected_pin_ids = []
+    if boundary in {
+        "projection_overflow",
+        "empty_projection",
+        "projection_reuse",
+        "projection_later",
+        "projection_capacity",
+        "actual_capacity",
+        "directory_metadata",
+        "directory_deleted",
+        "directory_race",
+    }:
+        from bowhead_core import turn_runner
+
+        if boundary in {"projection_capacity", "actual_capacity"}:
+            extra_input = await artifacts.put_bytes(
+                content=b"Additional original input.\n",
+                filename="additional-input.txt",
+                mime="text/plain",
+                source="python_sandbox",
+                created_by=scope.user_id,
+                created_by_turn=original_turn["id"],
+                workspace_id=scope.workspace_id,
+                session_id=session_id,
+            )
+            extra_input_id = extra_input.id
+        if boundary != "empty_projection":
+            for index in range(32):
+                prior = await artifacts.put_bytes(
+                    content=b"Earlier synthetic calculation.\n",
+                    filename=f"earlier-result-{index}.txt",
+                    mime="text/plain",
+                    source="python_sandbox",
+                    created_by=scope.user_id,
+                    created_by_turn=original_turn["id"],
+                    workspace_id=scope.workspace_id,
+                    session_id=session_id,
+                )
+                if boundary == "actual_capacity" and index < 30:
+                    capacity_ids.append(prior.id)
+            assert sandbox_artifact_id not in (await store.list_pinned_attachments(session_id=session_id))[-30:]
+        build_snapshot = turn_runner.build_pinned_snapshot
+
+        async def observe_bounded_projection(artifact_store, identities):
+            snapshot = [] if boundary == "empty_projection" else await build_snapshot(artifact_store, identities)
+            projected_pin_ids[:] = [item["artifact_id"] for item in snapshot]
+            assert sandbox_artifact_id not in projected_pin_ids
+            return snapshot
+
+        monkeypatch.setattr(turn_runner, "build_pinned_snapshot", observe_bounded_projection)
+    if resumed_read:
+        from bowhead_core.ordinary_lead_material import OrdinarySkillObserver, material_observations
+
+        finish = OrdinarySkillObserver.finished
+
+        async def observe_resumed_native_input(observer, tool, arguments, result, ctx):
+            await finish(observer, tool, arguments, result, ctx)
+            state = getattr(ctx, "ordinary_lead_state", None)
+            if tool == "skill_invoke" and state is not None and state.checkpoint is not None:
+                observation = material_observations(ctx).tool_materials.get(ctx.ordinary_call_identity)
+                inventory = ctx._psi_pinned_input_ids
+                resumed_observations.append(observation)
+                resumed_input_facts.append((result["ok"], inventory))
+
+        monkeypatch.setattr(OrdinarySkillObserver, "finished", observe_resumed_native_input)
     if boundary == "no_collaboration":
 
         async def no_collaboration(*_args, **_kwargs):
@@ -154,6 +269,19 @@ async def test_existing_session_retains_original_context_through_question(http_s
     calls = {"lead": 0, "office": 0, "compute": 0}
     expected_pins = set(await store.list_pinned_attachments(session_id=session_id))
     expected_pins -= {attachment["file_id"]} if has_current_attachment else set()
+    if boundary in {
+        "projection_overflow",
+        "projection_reuse",
+        "projection_later",
+        "projection_capacity",
+        "actual_capacity",
+        "directory_metadata",
+        "directory_deleted",
+        "directory_race",
+    }:
+        expected_pins = set((await store.list_pinned_attachments(session_id=session_id))[-30:]) | {sandbox_artifact_id}
+    elif boundary == "empty_projection":
+        expected_pins = {sandbox_artifact_id}
 
     def respond(request):
         body = json.loads(request.content)
@@ -161,6 +289,23 @@ async def test_existing_session_retains_original_context_through_question(http_s
         if "subagent_spawn" in names:
             calls["lead"] += 1
             index = calls["lead"]
+            if resumed_read and index == 4:
+                return response(
+                    body,
+                    call(
+                        "helper-after-answer",
+                        "subagent_spawn",
+                        {
+                            "profile": "compute",
+                            "task": "Read the input after the audience answer.",
+                            "delegation_role": "helper",
+                            "required_source_urls": [],
+                        },
+                    ),
+                    "tool_calls",
+                )
+            if resumed_read and index > 4:
+                index -= 1
             if parallel:
                 if index > 1:
                     index += 1
@@ -207,7 +352,7 @@ async def test_existing_session_retains_original_context_through_question(http_s
             elif index == 4:
                 return response(body, {"role": "assistant", "content": "The second synthetic profit is 42."}, "stop")
             elif index == 5:
-                message = review_retained_scope(body, allow_unavailable_question=sandbox_input is not None)
+                message = review_retained_scope(body, allow_unavailable_question=sandbox_input is not None, expected_helpers=3 if resumed_read else 2)
             else:
                 review = next(message for message in reversed(body["messages"]) if message.get("tool_call_id") == "review-retained-scope")
                 assert json.loads(review["content"]).get("ok") is True
@@ -225,7 +370,7 @@ async def test_existing_session_retains_original_context_through_question(http_s
             calls["compute"] += 1
             message = (
                 call(
-                    "calculate",
+                    "calculate-after-answer" if calls["compute"] == 3 else "calculate",
                     "skill_invoke",
                     {
                         "name": "python_sandbox",
@@ -236,12 +381,34 @@ async def test_existing_session_retains_original_context_through_question(http_s
                             else "from pathlib import Path\ncontent = Path(INPUTS['source']['path']).read_bytes()\nprint(42 if content else 0)"
                             if sandbox_input is not None
                             else "print(40 + 2)",
-                            **({"inputs": {"source": {"artifact_id": sandbox_artifact_id}}} if sandbox_input not in {None, "canvas_only"} else {}),
+                            **(
+                                {
+                                    "inputs": {
+                                        "source": {
+                                            "artifact_id": later_id
+                                            if boundary == "projection_later" and calls["compute"] == 3
+                                            else sandbox_artifact_id
+                                        },
+                                        **(
+                                            {"second": {"artifact_id": old_output_id}, "third": {"artifact_id": extra_input_id}}
+                                            if boundary in {"projection_capacity", "actual_capacity"}
+                                            else {}
+                                        ),
+                                        **{f"extra_{index}": {"artifact_id": identity} for index, identity in enumerate(capacity_ids)},
+                                    }
+                                }
+                                if sandbox_input not in {None, "canvas_only"}
+                                else {}
+                            ),
                         },
                     },
                 )
-                if calls["compute"] == 1
-                else call("return-compute", "subagent_return", {"payload": {"delivery_surface": "chat", "exec_summary": "Calculated 42."}})
+                if calls["compute"] == 1 or resumed_read and calls["compute"] == 3
+                else call(
+                    "return-compute-after-answer" if calls["compute"] == 4 else "return-compute",
+                    "subagent_return",
+                    {"payload": {"delivery_surface": "chat", "exec_summary": "Calculated 42."}},
+                )
             )
         else:
             return response(body, {"role": "assistant", "content": "Synthetic inspection"}, "stop")
@@ -254,6 +421,7 @@ async def test_existing_session_retains_original_context_through_question(http_s
             json={
                 "session_id": session_id,
                 "workspace_id": scope.workspace_id,
+                **({"preferred_provider": "primary", "preferred_model": "large"} if observed_inputs else {}),
                 "message": "Inspect the original pinned file, then ask for an audience."
                 if sandbox_input is not None
                 else "Read the second Office file, calculate its profit, then ask for an audience.",
@@ -287,12 +455,19 @@ async def test_existing_session_retains_original_context_through_question(http_s
         if boundary == "canvas_only":
             assert turn["status"] == "failed" and turn["error_kind"] == "clarification_resume_unavailable"
             assert not cards
-            return
+            return None
         if boundary == "not_prepared":
             assert turn["status"] == "completed" and not cards
             assert len(question_receipts) == 1
             assert question_receipts[0]["result_inline"]["error_kind"] == "clarification_capture_unavailable"
-            return
+            return None
+        if boundary == "actual_capacity" or boundary == "projection_capacity" and not observed_inputs:
+            assert turn["status"] == "completed" and not cards
+            assert len(question_receipts) == 1
+            assert "32-input continuation limit" in question_receipts[0]["result_inline"]["note"]
+            assert calls["compute"] == 2
+            assert len([row for row in rows(case, "artifacts") if row["created_by_turn"] == turn_id]) == 1
+            return None
         assert turn["status"] == "clarification_pending" and len(cards) == 1, (turn["status"], question_receipts)
         visible = await case.client.get(f"/api/v1/clarifications/{cards[0]['request_id']}")
         assert visible.status_code == 200 and visible.json()["questions"][0]["question"] == "Which audience?"
@@ -309,11 +484,18 @@ async def test_existing_session_retains_original_context_through_question(http_s
         async with open_shared_ctx(case.path) as db:
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=cards[0]["request_id"]))
-        assert checkpoint.contract == "ordinary-lead-loop.v12" and checkpoint.knowledge_read is not None
+        if not observed_inputs:
+            assert checkpoint.contract == ("ordinary-lead-loop.v10" if boundary == "empty_projection" else "ordinary-lead-loop.v12")
+        if observed_inputs:
+            expected_pins = {sandbox_artifact_id}
+            if boundary == "projection_capacity":
+                expected_pins |= {old_output_id, extra_input_id}
+
+        assert (checkpoint.knowledge_read is None) == (boundary == "empty_projection")
         input_proof = json.loads(checkpoint.material_json)["input_context"]
         if boundary == "missing_proof":
             assert input_proof is None
-        else:
+        elif not observed_inputs:
             assert ({item["artifact_id"] for item in input_proof["artifacts"]} if input_proof else set()) == expected_pins
         if sandbox_input is not None:
             evidence = [
@@ -324,7 +506,13 @@ async def test_existing_session_retains_original_context_through_question(http_s
                 for item in record["artifacts"]
                 if item["output"] is False
             ]
-            assert [item["artifact_id"] for item in evidence] == [sandbox_artifact_id]
+            assert [item["artifact_id"] for item in evidence] == (
+                [sandbox_artifact_id, old_output_id, extra_input_id] if boundary == "projection_capacity" else [sandbox_artifact_id]
+            )
+        if boundary in {"projection_overflow", "empty_projection", "projection_reuse", "projection_later"}:
+            assert len(projected_pin_ids) == (0 if boundary == "empty_projection" else 30)
+            sealed_pin_ids = [item["artifact_id"] for item in json.loads(checkpoint.context_json)["pinned"]]
+            assert sealed_pin_ids == (projected_pin_ids if observed_inputs else [*projected_pin_ids, sandbox_artifact_id])
         if sandbox_input == "upload" and boundary == "resume":
             from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
             from bowhead_core.ordinary_lead_material import artifact_evidence
@@ -407,8 +595,44 @@ async def test_existing_session_retains_original_context_through_question(http_s
                         }[boundary]
                         db.execute(f"UPDATE artifacts SET {column}=? WHERE id=?", (value, old_upload_id))
 
-        success = boundary in {"resume", "unpin_after", "text", "recreated", "no_current", "overlap", "no_collaboration", "later_pin"}
-        if boundary in {"confirmation_race", "membership_race"}:
+        success = boundary in {
+            "resume",
+            "unpin_after",
+            "text",
+            "recreated",
+            "no_current",
+            "overlap",
+            "no_collaboration",
+            "later_pin",
+            "projection_overflow",
+            "empty_projection",
+            "projection_reuse",
+            "projection_later",
+        }
+        if observed_inputs and boundary in {"projection_capacity", "directory_metadata", "model_config"}:
+            success = True
+        if boundary == "model_config":
+            with sqlite3.connect(case.path) as db:
+                db.execute("UPDATE teams SET llm_config_version=llm_config_version+1 WHERE id=?", (scope.team_id,))
+        elif boundary == "directory_deleted":
+            assert projected_pin_ids and sandbox_artifact_id not in projected_pin_ids
+            await artifacts.soft_delete(projected_pin_ids[0], user_id=scope.user_id)
+        elif boundary == "directory_race":
+            from bowhead_core import ordinary_lead_runtime
+
+            validate = ordinary_lead_runtime.validate_ordinary_retained_materials
+
+            async def revoke_directory_after_preflight(ctx, retained):
+                await validate(ctx, retained)
+                if getattr(ctx, "ordinary_lead_state", None) is not None:
+                    await artifacts.soft_delete(projected_pin_ids[0], user_id=scope.user_id)
+
+            monkeypatch.setattr(ordinary_lead_runtime, "validate_ordinary_retained_materials", revoke_directory_after_preflight)
+        elif boundary == "directory_metadata":
+            assert projected_pin_ids and sandbox_artifact_id not in projected_pin_ids
+            with sqlite3.connect(case.path) as db:
+                db.execute("UPDATE artifacts SET filename=? WHERE id=?", ("renamed-unread-output.txt", projected_pin_ids[0]))
+        elif boundary in {"confirmation_race", "membership_race"}:
             from bowhead_core import ordinary_lead_runtime
 
             validate = ordinary_lead_runtime.validate_ordinary_retained_materials
@@ -423,7 +647,7 @@ async def test_existing_session_retains_original_context_through_question(http_s
             for identity in original_pins:
                 unpinned = await case.client.delete(f"/api/v1/sessions/{session_id}/attachments/{identity}")
                 assert unpinned.status_code == 204, unpinned.text
-        elif boundary == "later_pin":
+        elif boundary in {"later_pin", "projection_later"}:
             # A new pin after pause must not become part of the old checkpoint.
             case.client.headers.pop("Content-Type", None)
             upload_later = await case.client.post(
@@ -475,31 +699,78 @@ async def test_existing_session_retains_original_context_through_question(http_s
         monkeypatch.setenv("FEATURE_CHAT_MULTI_HELPER_QUESTION", "0")
         resolved = await case.client.post(f"/api/v1/clarifications/{cards[0]['request_id']}/resolve", json=answer)
         if not success:
-            assert resolved.status_code == (200 if boundary in {"confirmation_race", "membership_race"} else 409), resolved.text
+            assert resolved.status_code == (200 if boundary in {"confirmation_race", "membership_race", "directory_race"} else 409), resolved.text
             if resolved.status_code == 200:
                 await settled(turn_id)
             refused = next(row for row in rows(case, "turns") if row["id"] == turn_id)
-            assert refused["status"] == ("failed" if boundary in {"confirmation_race", "membership_race"} else "clarification_pending")
-            if boundary in {"confirmation_race", "membership_race"}:
+            assert refused["status"] == (
+                "failed" if boundary in {"confirmation_race", "membership_race", "directory_race"} else "clarification_pending"
+            )
+            if boundary in {"confirmation_race", "membership_race", "directory_race"}:
                 assert next(row for row in rows(case, "turn_agent_execution") if row["id"] == lead["id"])["status"] == "failed"
             assert calls == {"lead": 2 if parallel else 3, "office": 2 if has_current_attachment else 1, "compute": 2}
-            return
+            if observed_inputs and boundary in {"deleted", "directory_deleted", "directory_race", "bytes", "missing_proof"}:
+                condition = "directory_access" if boundary.startswith("directory_") else "retained_input"
+                saved = next(row for row in rows(case, "clarification_requests") if row["request_id"] == cards[0]["request_id"])
+                assert saved["status"] == "resolved" and saved["injected_at"] is None
+                if boundary == "directory_race":
+                    terminal = [
+                        json.loads(row["payload_json"])
+                        for row in rows(case, "turn_events")
+                        if row["turn_id"] == turn_id
+                        and row["event_type"] in {"turn_failed", "done"}
+                        and json.loads(row["payload_json"]).get("diagnostics")
+                    ]
+                    assert len(terminal) == 2 and terminal[0]["diagnostics"] == terminal[1]["diagnostics"]
+                    assert terminal[0]["diagnostics"]["safe_detail"] == "phase=chat; failure_class=configuration; condition=" + condition
+                    replay = await case.client.get(sent.json()["stream_url"])
+                    assert replay.status_code == 200 and "condition=" + condition in replay.text
+                else:
+                    detail = resolved.json()["detail"]["error"]["diagnostics"]
+                    assert detail["safe_detail"] == "phase=clarification_resume_preflight; failure_class=state; condition=" + condition
+                    history = await case.client.get(f"/api/v1/clarifications/turn/{turn_id}")
+                    assert history.status_code == 200, history.text
+                    notice = history.json()["resume_failure"]
+                    assert notice["request_id"] == cards[0]["request_id"]
+                    assert notice["diagnostics"]["safe_detail"] == detail["safe_detail"]
+            return None
         assert resolved.status_code == 200, resolved.text
         await settled(turn_id)
         completed = next(row for row in rows(case, "turns") if row["id"] == turn_id)
         assert completed["status"] == "completed"
+        if observed_inputs:
+            assert checkpoint.contract == "ordinary-lead-loop.v15"
+            assert (checkpoint.preferred_provider, checkpoint.preferred_model) == ("primary", "large")
+            assert ({item["artifact_id"] for item in input_proof["artifacts"]} if input_proof else set()) == expected_pins
         if lead is not None:
             completed_lead = next(row for row in rows(case, "turn_agent_execution") if row["id"] == lead["id"])
             assert completed_lead["status"] == "completed"
         assert completed["execution_generation"] == 2 and calls == {
-            "lead": 5 if parallel else 6,
+            "lead": 7 if resumed_read else 5 if parallel else 6,
             "office": 2 if has_current_attachment else 1,
-            "compute": 2,
+            "compute": 4 if resumed_read else 2,
         }
-        assert [
+        completed_helpers = [
             row for row in rows(case, "turn_agent_execution") if row["turn_id"] == turn_id and (lead is None or row["id"] != lead["id"])
-        ] == helpers
-        assert {row["id"] for row in rows(case, "artifacts")} == artifact_ids
+        ]
+        if resumed_read:
+            assert len(completed_helpers) == len(helpers) + 1
+            assert [row for row in completed_helpers if row["id"] in {item["id"] for item in helpers}] == helpers
+            assert len(resumed_observations) == 1
+            assert len(resumed_input_facts) == 1 and resumed_input_facts[0][0] is True
+            inventory = resumed_input_facts[0][1]
+            assert isinstance(inventory, tuple) and sandbox_artifact_id in inventory
+            assert later_id is None or later_id not in inventory
+            if boundary == "projection_reuse":
+                assert resumed_observations[0]["kind"] == "sandbox"
+                assert any(item["artifact_id"] == sandbox_artifact_id and item["output"] is False for item in resumed_observations[0]["artifacts"])
+            else:
+                assert resumed_observations == [None]
+            completed_artifacts = {row["id"] for row in rows(case, "artifacts")}
+            assert artifact_ids < completed_artifacts and len(completed_artifacts - artifact_ids) == 1
+        else:
+            assert completed_helpers == helpers
+            assert {row["id"] for row in rows(case, "artifacts")} == artifact_ids
         assert await store.get_chat_turn_user_source(turn_id=turn_id, user_id=scope.user_id, workspace_id=scope.workspace_id) == source
         assert next(row for row in rows(case, "turns") if row["id"] == original_turn["id"]) == original_turn
         if sandbox_input == "upload" and boundary == "resume":
@@ -531,3 +802,7 @@ async def test_existing_session_retains_original_context_through_question(http_s
             assert await store.mark_completed(
                 turn_id=later.turn_id, intent="chat", final_answer="Inspected retained authority.", tokens_input=0, tokens_output=0, cost_usd=0
             )
+
+    if observed_inputs:
+        return checkpoint
+    return None

@@ -1,0 +1,690 @@
+{
+  "schemaVersion": 1,
+  "description": "Chart types a declared-axis chart offers in place. bowhead_core/chart/authoring_tools.py and packages/bowhead_frontend/lib/chart/explicit-switch-kinds.ts must both return `expected`; an empty list keeps the current type. `generatedRows` expands to `count` rows of {x: \"b<i>\", y: i}.",
+  "fixtures": [
+    {
+      "name": "ungrouped bar offers line, bar, horizontal bar and area",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": [
+        "line",
+        "bar",
+        "hbar",
+        "area_stacked"
+      ]
+    },
+    {
+      "name": "area switches back among the same types",
+      "spec": {
+        "kind": "area_stacked",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": [
+        "line",
+        "bar",
+        "hbar",
+        "area_stacked"
+      ]
+    },
+    {
+      "name": "grouped line also offers stacked bar",
+      "spec": {
+        "kind": "line",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "month",
+            "header": "Month",
+            "type": "categorical"
+          },
+          {
+            "key": "region",
+            "header": "Region",
+            "type": "categorical"
+          },
+          {
+            "key": "sales",
+            "header": "Sales",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "month": "Jan",
+            "region": "North",
+            "sales": 10
+          },
+          {
+            "month": "Jan",
+            "region": "South",
+            "sales": 7
+          },
+          {
+            "month": "Feb",
+            "region": "North",
+            "sales": 12
+          },
+          {
+            "month": "Feb",
+            "region": "South",
+            "sales": 9
+          }
+        ],
+        "row_count": 4,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "month",
+            "y": [
+              "sales"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": [
+            "region"
+          ]
+        }
+      },
+      "expected": [
+        "line",
+        "bar",
+        "hbar",
+        "area_stacked",
+        "stacked_bar"
+      ]
+    },
+    {
+      "name": "two measures also offer stacked bar",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "store",
+            "header": "Store",
+            "type": "categorical"
+          },
+          {
+            "key": "revenue",
+            "header": "Revenue",
+            "type": "numeric",
+            "unit": "元"
+          },
+          {
+            "key": "cost",
+            "header": "Cost",
+            "type": "numeric",
+            "unit": "元"
+          }
+        ],
+        "rows": [
+          {
+            "store": "A",
+            "revenue": 10,
+            "cost": 6
+          },
+          {
+            "store": "B",
+            "revenue": 8,
+            "cost": 5
+          }
+        ],
+        "row_count": 2,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "store",
+            "y": [
+              "revenue",
+              "cost"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": [
+        "line",
+        "bar",
+        "hbar",
+        "area_stacked",
+        "stacked_bar"
+      ]
+    },
+    {
+      "name": "a single row offers no line or area",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          }
+        ],
+        "row_count": 1,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": [
+        "bar",
+        "hbar"
+      ]
+    },
+    {
+      "name": "more than 1000 categories cannot become vertical bars",
+      "spec": {
+        "kind": "line",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [],
+        "row_count": 0,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "generatedRows": {
+        "count": 1001,
+        "x": "bin",
+        "y": "count"
+      },
+      "expected": [
+        "line",
+        "hbar",
+        "area_stacked"
+      ]
+    },
+    {
+      "name": "truncated rows keep the current type",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 10,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "a top-N result keeps the current type",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        },
+        "top_n": 3
+      },
+      "expected": []
+    },
+    {
+      "name": "sampled points keep the current type",
+      "spec": {
+        "kind": "line",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        },
+        "points_shown": 3,
+        "points_total": 40
+      },
+      "expected": []
+    },
+    {
+      "name": "a pie keeps its type",
+      "spec": {
+        "kind": "pie",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "a combination chart keeps its type",
+      "spec": {
+        "kind": "combo",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "store",
+            "header": "Store",
+            "type": "categorical"
+          },
+          {
+            "key": "revenue",
+            "header": "Revenue",
+            "type": "numeric",
+            "unit": "元"
+          },
+          {
+            "key": "cost",
+            "header": "Cost",
+            "type": "numeric",
+            "unit": "元"
+          }
+        ],
+        "rows": [
+          {
+            "store": "A",
+            "revenue": 10,
+            "cost": 6
+          },
+          {
+            "store": "B",
+            "revenue": 8,
+            "cost": 5
+          }
+        ],
+        "row_count": 2,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "store",
+            "y": [
+              "revenue",
+              "cost"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "a KPI keeps its type",
+      "spec": {
+        "kind": "kpi",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "count": 303
+          }
+        ],
+        "row_count": 1,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "y": [
+              "count"
+            ]
+          },
+          "group_by": []
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "an explicit table keeps its type",
+      "spec": {
+        "kind": "table",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "table",
+          "columns": [
+            "bin",
+            "count"
+          ]
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "a presentation plan keeps the current type",
+      "spec": {
+        "kind": "bar",
+        "title": "Fixture",
+        "columns": [
+          {
+            "key": "bin",
+            "header": "Bin",
+            "type": "categorical"
+          },
+          {
+            "key": "count",
+            "header": "Primes",
+            "type": "numeric"
+          }
+        ],
+        "rows": [
+          {
+            "bin": "1-200",
+            "count": 46
+          },
+          {
+            "bin": "201-400",
+            "count": 32
+          },
+          {
+            "bin": "401-600",
+            "count": 31
+          }
+        ],
+        "row_count": 3,
+        "explicit_presentation": {
+          "version": 1,
+          "mode": "plot",
+          "axes": {
+            "x": "bin",
+            "y": [
+              "count"
+            ],
+            "x_scale": "category"
+          },
+          "group_by": []
+        },
+        "presentation_plan": {
+          "availability": "unavailable"
+        }
+      },
+      "expected": []
+    }
+  ]
+}

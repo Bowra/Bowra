@@ -24,7 +24,9 @@ def synthetic_request(model_id: str, capability: str, *, max_output_tokens: int 
     )
     if tools:
         message.content = "Call the bowhead_connection_probe tool now."
-    return LLMRequest(model=model_id, messages=[message], tools=tools, max_output_tokens=max_output_tokens)
+    # Previews and verification probes size their limit for the configured
+    # reasoning, so they compile the Team thinking policy as configured.
+    return LLMRequest(model=model_id, messages=[message], tools=tools, max_output_tokens=max_output_tokens, output_limit_covers_reasoning=True)
 
 
 def compile_request_body(provider: dict[str, Any], request: LLMRequest, *, stream: bool = True) -> dict[str, Any]:

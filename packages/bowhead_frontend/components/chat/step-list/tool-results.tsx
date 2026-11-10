@@ -15,6 +15,7 @@
  */
 import { type ReactNode, useId, useState } from "react";
 import { useTranslations } from "next-intl";
+import { HighlightedCode } from "@/components/highlighted-code";
 import { Chevron, StatusGlyph, type StepStatus } from "./block-primitives";
 
 /* ── code (SQL / Python / stdout) ─────────────────────────────────────── */
@@ -43,7 +44,7 @@ export function Code({ code, lang, caret }: CodeProps) {
     <div className={`codewrap${clipped ? " is-clipped" : ""}`}>
       <pre className="code">
         {lang ? <span className="lang">{lang}</span> : null}
-        {code}
+        <HighlightedCode code={code} lang={lang} />
         {/* dogfood-0708 #3: streaming cursor gets its own `stream-cursor` class (not generic `.caret`, which collided with the chevron). */}
         {caret ? <span className="stream-cursor" aria-hidden /> : null}
       </pre>

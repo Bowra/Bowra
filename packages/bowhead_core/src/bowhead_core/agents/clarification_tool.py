@@ -524,15 +524,16 @@ async def _clarification_ask(
     # The reference Lead must wait for the orchestrator to prove this was its
     # only tool action, then insert card and checkpoint in one transaction.
     reference_lead = getattr(ctx, "_reference_lead_runtime", None) is not None
+    from bowhead_core.clarification_rounds import admits_bounded_rounds
     from bowhead_core.clarification_rounds import available as bounded_questions_available
-    from bowhead_core.clarification_rounds import worker_identity
 
     bounded_questions = await bounded_questions_available(ctx)
     # Existing cards retain their one-round policy. New bounded cards must pass
     # durable scope, worker, answer and budget checks before emitting a sentinel.
-    # Only the tracked legacy writer supports bounded checkpoints. Other
-    # channels and Terminal retain their existing first-card contract.
-    bounded_admission = bool(worker_identity(ctx)["owner_id"])
+    # Only the tracked legacy writer with a chat source supports bounded
+    # checkpoints. Other channels (scheduled runs, IM) and Terminal retain their
+    # existing first-card contract.
+    bounded_admission = bounded_questions or await admits_bounded_rounds(ctx)
     if not bounded_questions and (getattr(ctx, "_resume_turn_id", None) or bounded_admission):
         _inc_clarification_metric(
             type="single_select",

@@ -39,14 +39,14 @@ pytestmark = [
 ]
 
 
-def review_retained_scope(body, *, allow_unavailable_question=False):
+def review_retained_scope(body, *, allow_unavailable_question=False, expected_helpers=2):
     marker = "review_context (JSON data): "
     note = next(message["content"] for message in reversed(body["messages"]) if marker in str(message.get("content", "")))
     context, _ = json.JSONDecoder().raw_decode(note.split(marker, 1)[1])
     failures = context["failed_calls"]
     assert not failures or (allow_unavailable_question and all(item["tool"] == "clarification_ask" for item in failures))
     identities = [item["call_id"] for item in context["successful_calls"] if item["tool"] == "subagent_spawn"]
-    assert len(identities) == 2
+    assert len(identities) == expected_helpers
     return call(
         "review-retained-scope",
         "review_delivery",
@@ -351,7 +351,7 @@ async def test_office_and_system_calculation_resume_without_repeating_effects(ht
             await db.execute("BEGIN")
             checkpoint = reopen_ordinary_checkpoint(await read_ordinary_card_in_tx(db, card_id=card_id))
         assert len(checkpoint.helper_materials()) == 2
-        assert checkpoint.contract == "ordinary-lead-loop.v12" and checkpoint.knowledge_read is not None
+        assert checkpoint.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v15"} and checkpoint.knowledge_read is not None
         if completion_order:
             assert completion_ids == (["helper-1", "helper-2"] if completion_order == "office_first" else ["helper-2", "helper-1"])
             assert [helper["dispatch_key"] for helper in checkpoint.helper_materials()] == ["call:helper-1", "call:helper-2"]

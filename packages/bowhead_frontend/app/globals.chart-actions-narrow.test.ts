@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * chart-table-ux C4 — narrow-screen chart actions must not overflow out of reach.
  *

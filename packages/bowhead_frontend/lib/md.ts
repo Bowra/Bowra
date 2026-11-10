@@ -28,6 +28,7 @@ import { unified } from "unified";
 import { visit } from "unist-util-visit";
 
 import { stripLegacy, stripProvenanceTags } from "./citation-marks";
+import { rehypeCodeHighlight } from "./code-highlight";
 
 /**
  * Raw HTML in model Markdown (`<br>` in a table cell, a `<h1>` heading line) is never rendered as HTML.
@@ -703,6 +704,8 @@ export function Markdown({
     ...(enableCardCitations ? [rehypeCardCitations] : []),
     ...(renderArtifactChip ? [rehypeArtifactChips] : []),
     ...(renderFigureSlot ? [rehypeFigureSlots] : []),
+    // Fenced code with a language label; runs after the citation/figure plugins, which skip code anyway.
+    rehypeCodeHighlight,
     // Typeset last, avoiding citation/figure plugins above misreading text nodes inside formulas.
     rehypeKatex,
   ];
@@ -819,7 +822,7 @@ export function MarkdownWithCharts({ markdown, className }: Props): React.ReactE
       return React.createElement(ReactMarkdown, {
         key: `t${i}`,
         remarkPlugins: [[remarkGfm, { singleTilde: false }]],
-        rehypePlugins: [rehypeSafeRawHtml],
+        rehypePlugins: [rehypeSafeRawHtml, rehypeCodeHighlight],
         components: {
           a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) =>
             React.createElement("a", { ...props, target: "_blank", rel: "noreferrer" }),

@@ -35,6 +35,11 @@ ROUTINE_ALERT_DAILY_LIMIT = 5
 # An urgent alert's email waits this long when the owner also receives the run's result email, so
 # that one email carries both; a run that does not deliver by then lets the alert email go alone.
 ROUTINE_ALERT_EMAIL_HOLD_S = 600
+# Fixed alert copy naming the task; model-written text never enters a notification (PRD FR12).
+ROUTINE_ALERT_TITLE = "定时任务提醒"
+ROUTINE_ALERT_BODY = "「{name}」在这次运行中标记了一条需要你留意的结果。"
+# Dedupe key prefix of a run's alert that the daily limit refused (`routine_alert_raised`).
+ROUTINE_ALERT_WITHHELD_PREFIX = "routine.alert_withheld:"
 
 # Canonical personal Memory page. The standalone `/memory` page was folded into Settings; the
 # frontend still maps legacy persisted `/memory` action URLs to this path.
@@ -1185,6 +1190,8 @@ class NotificationService:
 
         Returns ``(status, item)``, status one of ``queued``, ``duplicate`` (this run already
         alerted), ``rate_limited`` (5 alerts for the task in the last 24 hours) or ``disabled``.
+        A rate-limited alert reaches nobody but is recorded for the run, so a task delivering only
+        flagged runs still delivers this run's result, without the alert (`routine_alert_raised`).
 
         ``hold_email``: the owner also receives this run's result email, so an urgent email waits
         ``ROUTINE_ALERT_EMAIL_HOLD_S`` for the result email to carry it (`settle_routine_alert_email`).
@@ -1206,6 +1213,7 @@ class NotificationService:
             if existing is not None:
                 return "duplicate", existing
             _emit_metric("routine.alert", "rate_limited")
+            await self._record_withheld_routine_alert(job, run_id=run_id, session_id=session_id, level=level, priority=priority)
             return "rate_limited", None
         action_url = f"/?session={session_id}" if session_id else "/team/settings/scheduled/"
         result = await self.emit(
@@ -1213,8 +1221,8 @@ class NotificationService:
                 type="routine.alert",
                 subject=self._job_subject(job),
                 recipients=[(job.user_id, "owner")],
-                title="定时任务提醒",
-                body=f"「{job.name}」在这次运行中标记了一条需要你留意的结果。",
+                title=ROUTINE_ALERT_TITLE,
+                body=ROUTINE_ALERT_BODY.format(name=job.name),
                 dedupe_key=dedupe_key,
                 action_url=action_url,
                 actions=[{"id": "view", "label": "查看", "kind": "link", "url": action_url}],
@@ -1236,9 +1244,43 @@ class NotificationService:
                 return item
         return None
 
+    async def _record_withheld_routine_alert(self, job: Any, *, run_id: str, session_id: str | None, level: str, priority: str) -> None:
+        """Keep, for this run only, the alert the daily limit refused (`NotificationStore.record_withheld`)."""
+        try:
+            spec = validate("routine.alert", priority)
+            resolved = await self.teams.resolve(self._job_subject(job), personal=spec.scope == "personal")
+            if resolved is None:
+                return
+            await self.store.record_withheld(
+                team_id=resolved.team_id,
+                category=spec.category,
+                type="routine.alert",
+                priority=priority,
+                title=ROUTINE_ALERT_TITLE,
+                body=ROUTINE_ALERT_BODY.format(name=job.name),
+                subject_type="scheduled_job",
+                subject_id=job.id,
+                metadata={"level": level, "jobId": job.id, "jobName": job.name, "runId": run_id, "sessionId": session_id},
+                dedupe_key=f"{ROUTINE_ALERT_WITHHELD_PREFIX}{job.id}:{run_id}",
+                reason="rate_limited",
+            )
+        except Exception:
+            # The result of a task delivering only flagged runs is then withheld, as before.
+            logger.warning("notification.routine_alert_withheld_record_failed job=%s run=%s", job.id, run_id, exc_info=True)
+
     async def routine_alert_raised(self, job: Any, *, run_id: str) -> bool:
-        """Whether this run flagged something for its owner (delivery mode "only when flagged")."""
-        return await self._open_routine_alert(job, run_id) is not None
+        """Whether this run flagged something for its owner (delivery mode "only when flagged").
+
+        An alert the daily limit refused counts: the limit caps interruptions, and withholding the
+        result too would read as the watched condition having cleared (116 dogfood N8).
+        """
+        if await self._open_routine_alert(job, run_id) is not None:
+            return True
+        key = f"{ROUTINE_ALERT_WITHHELD_PREFIX}{job.id}:{run_id}"
+        for team_id in await self.teams.closing_teams(await self._resolve_team_from_job(job), job.user_id):
+            if await self.store.has_dedupe(team_id=team_id, dedupe_key=key):
+                return True
+        return False
 
     async def routine_alert_level(self, job: Any, *, run_id: str) -> str | None:
         """The level of this run's open alert, or None when it raised none."""

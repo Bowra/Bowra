@@ -178,6 +178,16 @@ describe("source values and readable display magnitudes", () => {
     expect((cfg.options.scales!.y as any).ticks.callback(10000)).toBe("1");
   });
 
+  test("an area fills from zero while a line keeps its data range", () => {
+    // 116 1.7.25: a bar switched to an area drew 25–46 on a 20–50 axis, so the fill overstated every difference.
+    const bins: ChartSpec = { kind: "area_stacked", title: "Primes per bin", row_count: 3,
+      columns: [{ key: "bin", header: "Bin", type: "categorical" }, { key: "count", header: "Primes", type: "numeric" }],
+      rows: [{ bin: "1-200", count: 46 }, { bin: "201-400", count: 32 }, { bin: "1801-2000", count: 25 }],
+    };
+    expect((buildChartJSConfig(bins, STUB_THEME as any).options.scales!.y as any).beginAtZero).toBe(true);
+    expect((buildChartJSConfig({ ...bins, kind: "line" }, STUB_THEME as any).options.scales!.y as any).beginAtZero).toBeUndefined();
+  });
+
   test("a domain for another encoding cannot override the current axis magnitude", () => {
     const cfg = buildChartJSConfig(losses, STUB_THEME as any, { axisDomains: { encoding: "scatter", domains: { x: [0, 3] } } });
     expect((cfg.options.scales!.x as any).title.text).toBe("万元");

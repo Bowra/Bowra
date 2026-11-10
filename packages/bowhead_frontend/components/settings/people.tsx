@@ -422,6 +422,7 @@ export function SettingsPeople() {
       if (e.code === "owner_immutable") return t("err_owner_immutable");
       if (e.code === "last_team_admin") return t("err_last_team_admin");
       if (e.code === "already_inactive") return t("err_already_inactive");
+      if (e.code === "account_deletion_not_ready") return t("err_account_deletion_not_ready");
       if (e.code === "deactivate_failed") return t("err_deactivate_failed");
       if (e.code === "invite_not_found") return t("err_invite_not_found");
       if (e.code === "invite_status_revoked") return t("err_invite_revoked");

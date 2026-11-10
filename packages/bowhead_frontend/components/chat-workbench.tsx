@@ -158,6 +158,7 @@ import {
 } from "lucide-react";
 import { LucideGlyph } from "@/components/icon-refresh";
 import { CharIcon } from "@/components/char-icon";
+import { HighlightedCode } from "@/components/highlighted-code";
 
 /** Three-state split gate (P2 batch 4: from 1024). */
 const DESKTOP_SPLIT_QUERY = "(min-width: 1024px)";
@@ -4199,7 +4200,7 @@ export function CodeRunCard({
         </div>
       </div>
       {run.code ? (
-        <pre className="code-run-source"><code>{run.code}</code></pre>
+        <pre className="code-run-source"><code className="hljs"><HighlightedCode code={run.code} lang={run.language} /></code></pre>
       ) : (
         <div className="code-run-pending">{t("code_running_no_source")}</div>
       )}

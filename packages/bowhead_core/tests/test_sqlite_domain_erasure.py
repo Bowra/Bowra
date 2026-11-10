@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 from bowhead_core.account_deletion_service import AccountDeletionService
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
@@ -45,14 +44,11 @@ async def test_account_erasure_removes_cross_domain_rows_and_keeps_other_owners(
     artifact = await artifacts.put_bytes(
         content=b"private content", filename="private.txt", mime="text/plain", created_by=user_id, session_id=session.id
     )
-    ledger = AccountDeletionLedger(domain_directory / "privacy-ledger" / "account-deletions.db", secret="synthetic-instance-secret")
-    await ledger.initialize()
     now = datetime.now(UTC)
     service = AccountDeletionService(
         users,
         lifecycle=SessionLifecycleCoordinator(sessions, terminal),
         artifacts=artifacts,
-        ledger=ledger,
         secret="synthetic-instance-secret",
         external_cleanup=AsyncMock(),
         clock=lambda: now - timedelta(days=31),

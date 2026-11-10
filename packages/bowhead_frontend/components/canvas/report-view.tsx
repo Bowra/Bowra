@@ -21,6 +21,8 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@/lib/canvas-pm-adapter/starter-kit";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { codeLowlight } from "@/lib/code-highlight";
 import Link from "@tiptap/extension-link";
 import { Table } from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
@@ -588,8 +590,13 @@ export const ReportView = forwardRef<ReportViewHandle, ReportViewProps>(function
       // design r2 (report-edit-affordance): drag insertion line = 2px terracotta (follows brand color)
       StarterKit.configure({
         document: false,
+        // Replaced below by the schema-identical highlighted code block.
+        codeBlock: false,
         dropcursor: { color: "var(--c-accent)", width: 2 },
       }),
+      // Same `codeBlock` node and `language` attribute; adds syntax-color decorations only.
+      // Unlabeled blocks stay plain (no auto-detection), matching the chat Markdown renderer.
+      CodeBlockLowlight.configure({ lowlight: codeLowlight, defaultLanguage: "plaintext" }),
       TextStyle,
       FontFamily,
       FontSize,

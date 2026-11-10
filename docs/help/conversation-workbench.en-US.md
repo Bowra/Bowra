@@ -134,7 +134,9 @@ For supported tasks, the assistant can also ask one question after one or more d
 
 For example, you can ask the assistant to read a PPTX, calculate from its contents and then ask about the intended audience, without editing or generating a file. This is a read-only task, not template generation. If the assistant cannot determine the intended use, follow the failure message to clarify whether you want analysis or a layout-preserving edit.
 
-This can also use a template or earlier result already pinned in the same conversation. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation.
+This can also use a template or earlier result already pinned in the same conversation, including after other calculations have produced newer results. You do not need to upload it again just to answer a follow-up question. Answer the original question card to continue with the checked file and completed calculation; deleting that file or losing access can prevent continuation.
+
+In supported new tasks, files merely listed for discovery do not count as files the assistant used. Renaming an unused listed file does not by itself invalidate the saved work. If access to listed metadata or a required original input is lost, the message identifies which kind of access needs restoring. Your answer and completed results remain saved. Older questions may retain stricter compatibility checks; follow the action offered on the original card.
 
 This applies to supported built-in and Team Agents. A failed operation returns its diagnostic to the assistant, which can correct the request, retry or choose another available tool. Earlier results remain available. Answering a saved question continues the original task; it does not automatically repeat earlier operations or confirm an unknown result. Actions still follow their normal permissions and approval steps. If the original task could not be saved, it cannot resume.
 
@@ -155,6 +157,8 @@ When an Agent has read your attached Word or PowerPoint file and asks a question
 ## Results area
 
 You can ask to change a native chart series to an available palette color, such as green, use an exact HEX such as `#00A651`, or restore its default color. Opaque `#RGB` and `#RRGGBB` are supported; HEX stays fixed in light/dark mode and exports. Supported directly bound bar, line, area and combination series keep the same data and chart. The assistant checks available colors first; selected palette slots follow your chart theme in light/dark mode and exports. Grouped category colors, analytical scenario colors, transparent HEX and CSS color expressions are not supported by this editing action. If source access or editing fails, keep the existing chart rather than replacing it with an image.
+
+You can also ask to show a line, bar, horizontal bar, area or stacked bar chart as another of these types. The chart changes in place and keeps its data, series colors and position; a chart with several series can also become a stacked bar chart. Area and stacked bar charts add their series on top of each other. Only types that can draw all of the chart's data are offered. Pie, scatter, combination, dual-axis and KPI charts and composed figures keep their type; the assistant names the changes the chart does offer and asks before drawing a new chart. When you edit a report, the chart's type button and chart settings offer the same types.
 
 Browser Back and Forward follow the selected Agent or settings editor. Leaving an editor through history keeps its unsaved input in the current conversation; returning through history restores it. A settings link opens only in its matching Space and with your current permissions.
 

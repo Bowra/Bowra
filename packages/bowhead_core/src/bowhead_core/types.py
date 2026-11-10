@@ -124,7 +124,8 @@ class ScheduledRunRef:
     """The scheduled task run a Turn executes, as the server started it.
 
     ``run_id`` is the run's Turn id, the identity scheduled notifications already use
-    (``routine.delivered``, ``routine.needs_input``).
+    (``routine.delivered``, ``routine.needs_input``). ``delivers_only_when_flagged`` is true when
+    the task delivers this run's result only if the run raises a ``routine_notify`` alert.
     """
 
     job_id: str
@@ -133,6 +134,7 @@ class ScheduledRunRef:
     workspace_id: str
     job_name: str
     session_id: str
+    delivers_only_when_flagged: bool = False
 
 
 @dataclass

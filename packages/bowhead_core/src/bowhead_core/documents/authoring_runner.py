@@ -49,7 +49,7 @@ from bowhead_core.documents.planning_instruction import document_instruction_in_
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _json
 from bowhead_core.documents.turn_runner import _read_inputs, fail_document_turn
-from bowhead_core.documents.usage import DocumentModelHook
+from bowhead_core.documents.usage import DocumentModelHook, unanswered_call_code
 from bowhead_core.pptx_reading import inspect_pptx_read_info
 from bowhead_core.read_receipts import ReadInfo, ReadRecovery, read_info
 
@@ -170,6 +170,7 @@ async def run_authoring_turn(
 ):
     """Successful execution goes straight to existing review; no judging model."""
     scope = DocumentScope(team_id=worker.team_id, workspace_id=worker.workspace_id, user_id=worker.user_id)
+    call_no = 0
     try:
         if authorize_inputs is not None:
             await authorize_inputs()
@@ -568,7 +569,7 @@ async def run_authoring_turn(
         )
         code = "document_context_limit"
     except InvocationOutcomeUnknownError:
-        code = "document_usage_unresolved"
+        code = (await unanswered_call_code(delivery.path, job_id, attempt_no, call_no) if call_no else None) or "document_usage_unresolved"
     except (DocumentRequestError, OfficePackageError) as error:
         code = error.code
     except Exception:

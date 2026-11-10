@@ -17,6 +17,7 @@ import { ChartBlock } from "@/components/canvas/sections/chart-block";
 import type { ChartSpec } from "@/lib/chart/types";
 import { formatDateTime } from "@/lib/locale";
 import { Markdown } from "@/lib/md";
+import { HighlightedCode } from "@/components/highlighted-code";
 import { parseNumberCell, type CodeRunSection, type SourceBlock, type SourceTable } from "@/lib/source-content";
 
 /** Text excerpts stay bounded like before; tables carry their own row cap. */
@@ -149,7 +150,7 @@ export function SourceRunCode({ run }: { run: CodeRunSection }) {
   return (
     <details className="source-panel-block source-panel-run-code" data-testid="source-panel-run-code">
       <summary>{t("run_code")}</summary>
-      <pre className="legacy-source-panel-preview"><code>{code}</code></pre>
+      <pre className="legacy-source-panel-preview"><code className="hljs"><HighlightedCode code={code} lang={run.code ? run.lang : "sql"} /></code></pre>
     </details>
   );
 }

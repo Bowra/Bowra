@@ -260,6 +260,7 @@ describe("FinalFailBanner", () => {
     ["zh-CN", "document_information_incomplete", "文档没有完成", "回答后仍未生成可审阅草稿"],
     ["en-US", "document_planning_failed", "The document didn't finish", "The document task could not finish and no files were published"],
     ["en-US", "document_authoring_script_failed", "The document didn't finish", "editing script failed"],
+    ["en-US", "document_model_no_reply", "The document didn't finish", "This model call was not charged"],
     ["zh-CN", "document_candidate_invalid", "文档没有完成", "未通过文件结构检查"],
   ] as const)("shows the document outcome without a system-error claim (%s/%s)", (locale, kind, eyebrow, message) => {
     renderIntl(<FinalFailBanner kind={kind} />, { locale });
@@ -517,4 +518,43 @@ describe("FinalFailBanner", () => {
       expect(screen.queryByTestId("final-fail-resume-plan")).toBeNull();
     });
   });
+});
+
+it.each([
+  ["en-US", "retained_input", "Original input cannot be verified"],
+  ["en-US", "directory_access", "Saved file context is inaccessible"],
+  ["zh-CN", "retained_input", "无法核对原输入文件"],
+  ["zh-CN", "directory_access", "历史文件目录不可访问"],
+] as const)("shows native input cause without inventing saved-answer state (%s/%s)", (locale, condition, title) => {
+  const rendered = renderIntl(<FinalFailBanner kind="clarification_resume_unavailable" diagnostics={{
+    schemaVersion: 1, disclosure: "authenticated", code: "clarification_resume_unavailable", diagnosticCode: "chat_turn_failed",
+    safeDetail: `phase=chat; failure_class=configuration; condition=${condition}`, retryable: false,
+  }} recoveryAction="copy_diagnostics" />, { locale });
+  expect(card()).toHaveTextContent(title);
+  expect(card()).not.toHaveTextContent(locale === "zh-CN" ? "你的回答已保存" : "Your answer was saved");
+  expect(screen.queryByRole("button", { name: /^(Retry|重试)$/ })).toBeNull();
+  rendered.unmount();
+  renderIntl(<FinalFailBanner kind="clarification_resume_unavailable" clarificationAnswerState="saved" diagnostics={{
+    schemaVersion: 1, disclosure: "authenticated", code: "clarification_resume_unavailable", diagnosticCode: "rule_clarification_failure",
+    safeDetail: `phase=clarification_resume_preflight; failure_class=state; condition=${condition}`, retryable: false,
+  }} recoveryAction="copy_diagnostics" />, { locale });
+  expect(card()).toHaveTextContent(title);
+  expect(card()).toHaveTextContent(locale === "zh-CN" ? "你的回答已保存" : "Your answer was saved");
+});
+
+it.each([
+  ["retained_input", "saved"],
+  ["retained_input", "unconfirmed"],
+  ["directory_access", "saved"],
+  ["directory_access", "unconfirmed"],
+] as const)("preserves authoritative answer state on worker input failure (%s/%s)", (condition, answerState) => {
+  renderIntl(<FinalFailBanner kind="clarification_resume_unavailable" clarificationAnswerState={answerState} diagnostics={{
+    schemaVersion: 1, disclosure: "authenticated", code: "clarification_resume_unavailable", diagnosticCode: "chat_turn_failed",
+    safeDetail: `phase=chat; failure_class=configuration; condition=${condition}`, retryable: false,
+  }} recoveryAction="copy_diagnostics" />, { locale: "en-US" });
+  const expected = answerState === "saved" ? "Your answer was saved" : "Refresh";
+  expect(card()).toHaveTextContent(expected);
+  expect(card()).not.toHaveTextContent(answerState === "saved" ? "Refresh" : "Your answer was saved");
+  expect(card().textContent?.split(expected)).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });

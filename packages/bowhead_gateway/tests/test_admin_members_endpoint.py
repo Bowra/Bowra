@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
@@ -36,15 +37,11 @@ def member_schema(tmp_path_factory, initialize_migrated_core_database):
 
 @pytest.fixture
 async def store(tmp_path, member_schema):
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 
     path = tmp_path / "g5.db"
     with sqlite3.connect(member_schema) as source, sqlite3.connect(path) as target:
         source.backup(target)
     s = UserStore(path)
-    ledger = AccountDeletionLedger(tmp_path / "retirements.db", secret="synthetic-member-test-root")
-    await ledger.initialize()
-    s.account_deletion_recorder = ledger.record
     await s.initialize()
     await TeamSubagentStore(s.db_path).initialize()
     await AccessControlStore(s.db_path).initialize()
@@ -156,6 +153,8 @@ def app(store, monkeypatch):
     auth_routes._RATE_BUCKET.clear()
     a = FastAPI()
     a.state.user_store = store
+    a.state.account_deletion_service = object()
+    a.state.account_deletion_task = SimpleNamespace(done=lambda: False)
 
     class _S:
         dev_default_user = "dev_user"
@@ -1453,6 +1452,37 @@ async def test_workspace_grant_upsert_rejects_invalid_fields_without_mutation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("worker_state", ["unstarted", "stopped"])
+async def test_local_deactivate_requires_running_account_cleanup(client, app, store, worker_state):
+    if worker_state == "unstarted":
+        app.state.account_deletion_service = None
+        app.state.account_deletion_task = None
+    else:
+        app.state.account_deletion_task = SimpleNamespace(done=lambda: True)
+
+    await _seed_team(store)
+    await _seed_user(store, "u_creator", "c@t.com", is_creator=True)
+    await _seed_user(store, "u_member", "m@t.com")
+    await _seed_workspace(store, "ws_people")
+    await store.add_member(workspace_id="ws_people", user_id="u_member", role="viewer")
+
+    response = client.post("/api/v1/admin/team/members/u_member/deactivate", cookies={"bowhead_jwt": _jwt("u_creator", SECRET)})
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["code"] == "account_deletion_not_ready"
+    assert "instance administrator" in response.json()["detail"]["message"]
+    member = await store.get_user_by_email("m@t.com")
+    assert member is not None and member.status == "active"
+    assert await store.get_team_role("u_member", "team_g5") == "member"
+    assert await store.get_member_role("ws_people", "u_member") == "viewer"
+    async with (
+        aiosqlite.connect(store.db_path) as db,
+        db.execute("SELECT 1 FROM account_deletions WHERE user_id='u_member'") as cursor,
+    ):
+        assert await cursor.fetchone() is None
+
+
+@pytest.mark.asyncio
 async def test_deactivate_member_removes_from_people_list(client, store):
     await _seed_team(store)
     await _seed_user(store, "u_creator", "c@t.com", is_creator=True)
@@ -1772,16 +1802,3 @@ async def test_community_invites_ignore_legacy_seat_column(client, app, store, m
         reset_public_access_context(context)
     assert response.status_code == 200, response.text
     assert response.json()["invite_url"].startswith(entry.base_url)
-
-
-async def test_local_deactivation_missing_privacy_ledger_returns_actionable_failure(client, store):
-    await _seed_team(store)
-    await _seed_user(store, "u_creator", "c@t.com", is_creator=True)
-    await _seed_user(store, "u_member", "m@t.com")
-    store.account_deletion_recorder = None
-    response = client.post("/api/v1/admin/team/members/u_member/deactivate", cookies={"bowhead_jwt": _jwt("u_creator", SECRET)})
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "account_deletion_not_ready"
-    assert "privacy ledger" in response.json()["detail"]["message"]
-    assert (await store.get_user_by_email("m@t.com")).status == "active"
-    assert await store.get_team_role("u_member", "team_g5") == "member"

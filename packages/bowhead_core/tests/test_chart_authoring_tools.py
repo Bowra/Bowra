@@ -2,6 +2,8 @@
 
 import asyncio
 import copy
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -422,7 +424,7 @@ async def test_historical_kind_edits_preserve_existing_chart_and_source(chart):
     await store.patch_section(section_id=section.id, patch={"spec": historical}, by_turn_id=ctx.turn_id)
     before = (await store.list_sections(result["canvas_id"]))[0]
     read = await read_chart({"section_id": before.id}, ctx)
-    assert read["supported_kinds"] == ["line", "bar", "hbar", "table"]
+    assert read["supported_kinds"] == ["line", "bar", "hbar", "area_stacked", "table"]
     edited = await edit_chart({"section_id": before.id, "expected_rev": before.rev, "changes": {"kind": "bar"}}, ctx)
     assert "error" not in edited
     after = (await store.list_sections(result["canvas_id"]))[0]
@@ -431,6 +433,88 @@ async def test_historical_kind_edits_preserve_existing_chart_and_source(chart):
         assert after.payload["spec"][key] == before.payload["spec"][key]
     table = await edit_chart({"section_id": before.id, "expected_rev": after.rev, "changes": {"kind": "table"}}, ctx)
     assert "error" not in table
+
+
+async def test_chart_drawn_with_declared_axes_switches_kind_in_place(chart):
+    store, ctx, result = chart
+    before = (await store.list_sections(result["canvas_id"]))[0]
+    read = await read_chart({"section_id": before.id}, ctx)
+    assert "kind" in read["allowed_changes"]
+    assert read["supported_kinds"] == ["line", "bar", "hbar", "area_stacked"]
+    edited = await edit_chart({"section_id": before.id, "expected_rev": before.rev, "changes": {"kind": "area_stacked"}}, ctx)
+    assert "error" not in edited
+    after = (await store.list_sections(result["canvas_id"]))[0]
+    assert after.id == before.id and after.payload["spec"]["kind"] == "area_stacked"
+    for key in ("rows", "columns", "row_count", "data_artifact_id", "source_meta", "explicit_presentation"):
+        assert after.payload["spec"][key] == before.payload["spec"][key]
+    assert (await read_chart({"section_id": before.id}, ctx))["supported_kinds"] == ["line", "bar", "hbar", "area_stacked"]
+    refused = await edit_chart({"section_id": before.id, "expected_rev": after.rev, "changes": {"kind": "pie"}}, ctx)
+    assert refused["error"] == "invalid_chart_change" and refused["path"] == "/changes/kind"
+    assert (await store.list_sections(result["canvas_id"]))[0].payload == after.payload
+
+
+def _explicit_spec(kind, axes, group_by, rows):
+    keys = [axes["x"], *group_by, *axes["y"]] if "x" in axes else axes["y"]
+    return {
+        "kind": kind,
+        "title": "Values",
+        "columns": [{"key": key, "header": key, "type": "numeric" if key in axes["y"] else "categorical"} for key in keys],
+        "rows": rows,
+        "row_count": len(rows),
+        "explicit_presentation": {"version": 1, "mode": "plot", "axes": axes, "group_by": group_by},
+    }
+
+
+_CATEGORY = {"x": "region", "y": ["sales"], "x_scale": "category"}
+_TWO_ROWS = [{"region": "East", "sales": 3}, {"region": "West", "sales": 5}]
+_GROUPED = [{"region": r, "channel": c, "sales": 1} for r in ("East", "West") for c in ("Online", "Store")]
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        (_explicit_spec("bar", _CATEGORY, [], _TWO_ROWS), ["line", "bar", "hbar", "area_stacked"]),
+        # A group stacks distinct series, so stacked bars become a real choice.
+        (_explicit_spec("line", _CATEGORY, ["channel"], _GROUPED), ["line", "bar", "hbar", "area_stacked", "stacked_bar"]),
+        (
+            _explicit_spec("bar", {**_CATEGORY, "y": ["sales", "cost"]}, [], [{"region": "East", "sales": 3, "cost": 1}]),
+            ["bar", "hbar", "stacked_bar"],
+        ),
+        # A line needs two observations; one prepared row still switches between bar directions.
+        (_explicit_spec("bar", _CATEGORY, [], _TWO_ROWS[:1]), ["bar", "hbar"]),
+        # Vertical bars have a slot limit that lines and horizontal bars do not share.
+        (
+            _explicit_spec("line", _CATEGORY, [], [{"region": f"R{index}", "sales": index} for index in range(1001)]),
+            ["line", "hbar", "area_stacked"],
+        ),
+        # Kinds that bind fields differently keep their encoding.
+        (_explicit_spec("pie", _CATEGORY, [], _TWO_ROWS), []),
+        (_explicit_spec("combo", {**_CATEGORY, "y": ["sales", "cost"]}, [], [{"region": "East", "sales": 3, "cost": 1}]), []),
+        (_explicit_spec("scatter", {"x": "cost", "y": ["sales"], "x_scale": "linear"}, [], [{"cost": 1, "sales": 3}]), []),
+        (_explicit_spec("kpi", {"y": ["sales"]}, [], [{"sales": 3}]), []),
+        ({**_explicit_spec("bar", _CATEGORY, [], _TWO_ROWS), "explicit_presentation": {"version": 1, "mode": "table", "columns": ["region"]}}, []),
+        ({**_explicit_spec("bar", _CATEGORY, [], _TWO_ROWS), "row_count": 3}, []),
+    ],
+)
+def test_declared_axis_charts_offer_only_kinds_their_binding_supports(spec, expected):
+    assert _simple_chart_kinds(spec) == expected
+
+
+def _switch_fixtures() -> list[dict]:
+    path = Path(__file__).resolve().parents[3] / "config/chart_style/explicit_switch_kinds_fixtures.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schemaVersion"] == 1
+    return payload["fixtures"]
+
+
+@pytest.mark.parametrize("fixture", _switch_fixtures(), ids=lambda fixture: fixture["name"])
+def test_chat_and_report_switcher_offer_the_same_declared_axis_kinds(fixture):
+    # The report switcher (`lib/chart/explicit-switch-kinds.ts`) runs the same fixture.
+    spec = copy.deepcopy(fixture["spec"])
+    if generated := fixture.get("generatedRows"):
+        spec["rows"] = [{generated["x"]: f"b{index}", generated["y"]: index} for index in range(generated["count"])]
+        spec["row_count"] = generated["count"]
+    assert _simple_chart_kinds(spec) == fixture["expected"]
 
 
 @pytest.mark.parametrize(

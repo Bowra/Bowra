@@ -394,3 +394,29 @@ def test_tool_creator_input_preview_never_echoes_spec_url() -> None:
     out = _prettify_input_preview("tool_creator", {"spec_url": "https://api.x.com/openapi.json?api_key=SECRET"})
     assert "SECRET" not in out and "api.x.com" not in out
     assert out == "打开「新建工具」卡片"
+
+
+# ─── Internal object IDs never become step-row words (116 dogfood of 1.7.21) ─────
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("tool_name", "args", "expected"),
+    [
+        ("read_chart", {"section_id": "sec_4a5c8d7d2b6e"}, ""),
+        ("edit_chart", {"section_id": "sec_4a5c8d7d2b6e", "expected_rev": 1, "changes": {"series_colors": {"质数个数": 3}}}, ""),
+        (
+            "subagent_spawn",
+            {
+                "profile": "compute",
+                "task": "把已有柱状图「1-2000 各区间质数个数」（section id: sec_4a5c8d7d2b6e）的柱子颜色改成橙色，其他一切保持不变：数据、区间划分都不改。",
+            },
+            "把已有柱状图「1-2000 各区间质数个数」的柱子颜色改成橙色，其他一切保持不变：数据、区间划分都不改。",
+        ),
+        ("subagent_spawn", {"task": "Recolor the chart sec_4a5c8d7d2b6e orange"}, "Recolor the chart orange"),
+        # A readable argument after the ID still labels the row.
+        ("any_tool", {"section_id": "sec_4a5c8d7d2b6e", "reason": "duplicate chart"}, "duplicate chart"),
+    ],
+)
+def test_step_label_drops_internal_object_ids(tool_name, args, expected) -> None:
+    assert _prettify_input_preview(tool_name, args) == expected

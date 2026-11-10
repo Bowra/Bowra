@@ -341,7 +341,10 @@ describe("ArtifactPreview", () => {
       />,
     );
 
-    expect(screen.getByText(/"city": "Paris"/)).toBeInTheDocument();
+    const body = document.querySelector(".artifact-text-preview pre");
+    expect(body?.textContent).toContain('"city": "Paris"');
+    // Syntax colors while not searching; find marks replace them during a search.
+    expect(body?.querySelector(".hljs-attr")?.textContent).toBe('"city"');
     fireEvent.change(screen.getByRole("searchbox", { name: "Find in content" }), {
       target: { value: "Paris" },
     });

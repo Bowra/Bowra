@@ -357,7 +357,10 @@ def apply_event_to_state(  # noqa: PLR0911, PLR0912
         step = state.steps.get(step_id) or FeishuStepView(step_id=step_id, title=title)
         step.title = title
         step.state = "running"
-        step.detail = str(payload.get("input_preview") or payload.get("arguments_preview") or "")
+        # An empty `input_preview` means the step has no readable label (model-only arguments, a bare
+        # internal ID); the browser then shows the Tool name alone, so raw arguments never stand in for it.
+        preview = payload.get("input_preview")
+        step.detail = str(preview if preview is not None else payload.get("arguments_preview") or "")
         step.step_type = str(payload.get("step_type") or "")
         step.tool_name = payload.get("tool_name")
         step.parent_step_id = payload.get("parent_step_id")

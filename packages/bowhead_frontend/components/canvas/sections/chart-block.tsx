@@ -62,6 +62,7 @@ import { normalizeChartForRenderingV1 } from "@/lib/chart/normalize-chart-for-re
 import { isDrawnChartKind, useCompleteChartRows } from "@/lib/chart/complete-chart-rows";
 import type { ResolvedChartPresentationV2 } from "@/lib/chart/chart-style-presentation";
 import { checkKindShape, checkKindUnits, type ShapeGap } from "@/lib/chart/kind-shape";
+import { explicitSwitchKinds } from "@/lib/chart/explicit-switch-kinds";
 import { notAFlowReason } from "@/lib/chart/flow-shape";
 import { fitHbarRowsForExport } from "@/lib/chart/export-fit";
 import { toggleSeriesKey, type SeriesKey } from "@/lib/chart/series-visibility";
@@ -357,6 +358,7 @@ function ComposedChartBlock(props: Parameters<typeof ChartBlock>[0]) {
             presentationIdentity={epoch}
             detailReturnRef={detailReturnRef}
             onKindChange={props.onViewKindChange ? (kind) => props.onViewKindChange!(node.view, kind) : undefined}
+            composedView
             headerSlot={undefined}
             refLines={undefined}
             frozenPresentation={undefined}
@@ -481,6 +483,7 @@ function SingleChartBlock({
   presentationIdentity,
   detailReturnRef,
   onKindChange,
+  composedView,
   surface,
   captionText,
   refLines,
@@ -505,6 +508,8 @@ function SingleChartBlock({
   presentationIdentity?: string;
   detailReturnRef?: React.RefObject<HTMLElement | null>;
   onKindChange?: (kind: ChartSpec["kind"]) => void;
+  /** A child view of a composed figure; a declared binding keeps its type there, as in chat edits. */
+  composedView?: boolean;
   /** Batch 1 2.2: default numeric-label policy follows surface (export=always on). Omitted chat surface behaves like canvas. */
   surface?: BuildOpts["surface"];
   /** Batch 1 2.1b: attached caption text (from figure-ref) feeds protagonist parsing. */
@@ -590,7 +595,7 @@ function SingleChartBlock({
     [effectiveSpec, exportFrameHeight, hiddenSeries, surface],
   );
   const unitGaps = useMemo(() => drawSpec._export_analytical ? [] : checkKindUnits(drawSpec, kind), [drawSpec, kind]);
-  const compatibles = useMemo(() => spec._export_analytical ? [spec.kind] : _compatibleKinds(spec).filter((kind) => !focus || observationViewEligible({ ...(focus.scopeSource ?? spec), kind }, focus.binding)), [spec, focus]);
+  const compatibles = useMemo(() => spec._export_analytical ? [spec.kind] : _compatibleKinds(spec, composedView).filter((kind) => !focus || observationViewEligible({ ...(focus.scopeSource ?? spec), kind }, focus.binding)), [spec, focus, composedView]);
   // Batch 3 4.3: user-readable tooltip. Previously printed raw inferer `_infer_reason`
   // (e.g. "1 cat + 1 num, n=6 → bar"), same issue as 0-C internal field paths
   // entering user-facing text. Keep raw only in dev to debug infer selection.
@@ -1245,8 +1250,12 @@ function _shapeKinds(spec: ChartSpec): ChartSpec["kind"][] {
   return kinds;
 }
 
-function _compatibleKinds(spec: ChartSpec): ChartSpec["kind"][] {
-  if (spec.explicit_presentation) return [spec.kind];
+function _compatibleKinds(spec: ChartSpec, composedView = false): ChartSpec["kind"][] {
+  // A declared binding is never re-inferred: offer only the types chat edits offer for a standalone chart.
+  if (spec.explicit_presentation) {
+    const kinds = composedView ? [] : explicitSwitchKinds(spec);
+    return kinds.length ? kinds : [spec.kind];
+  }
   const kinds = _shapeKinds(spec);
   // Batch 3 4.3 (P1-6) fallback: current kind always in switcher, otherwise cannot return after switching.
   if (!kinds.includes(spec.kind) && _SUPPORTED_KINDS.has(spec.kind)) kinds.unshift(spec.kind);

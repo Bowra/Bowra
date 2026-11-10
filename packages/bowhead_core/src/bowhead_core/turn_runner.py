@@ -2784,10 +2784,13 @@ class TurnRunner:
         try:
             from bowhead_core import psi_flags as _psi_flags
 
+            _peer_ctx._psi_pinned_input_ids = ()
             if _psi_flags.get("PSI_PIN_INJECT") and orch.session_store is not None and request.session_id:
                 _aids = await orch.session_store.list_pinned_attachments(
                     session_id=request.session_id,
                 )
+                # Freeze the original selection before bounding its model metadata.
+                _peer_ctx._psi_pinned_input_ids = tuple(_aids)
                 _pinned_total = len(_aids)
                 _astore = getattr(orch, "artifact_store", None)
                 # Cap top 30 (most recent — list_pinned_attachments returns ASC,

@@ -101,6 +101,8 @@
   "clarification_resume_not_ready": "Diese Rückfrage wurde noch nicht abgeschlossen. Treffen Sie eine Auswahl, bevor Sie fortfahren.",
   "clarification_capture_unavailable": "Die Rückfrage konnte nicht vorbereitet werden. Die Frage wurde nicht erstellt, weil der Aufgabenfortschritt nicht für die Fortsetzung vorbereitet werden konnte. Prüfen Sie die bereits angezeigten Ergebnisse.",
   "clarification_resume_preflight_unavailable": "Die ursprüngliche Aufgabe konnte nicht fortgesetzt werden. Die ursprüngliche Aufgabe hat die Prüfungen vor der Fortsetzung nicht bestanden. Prüfen Sie die bereits angezeigten Ergebnisse und kopieren Sie die Diagnoseinformationen für die Administration.",
+  "clarification_retained_input_unavailable": "Ursprüngliche Eingabe nicht überprüfbar. Die ursprüngliche Datei dieser Aufgabe wurde geändert oder lässt sich nicht prüfen. Stellen Sie die Originaldatei und den Zugriff wieder her oder verwenden Sie verfügbare Ergebnisse ausdrücklich im Chat weiter.",
+  "clarification_directory_access_unavailable": "Gespeicherter Dateikontext nicht zugänglich. Eine im gespeicherten Kontext genannte Datei ist nicht mehr zugänglich. Stellen Sie den Zugriff wieder her oder verwenden Sie verfügbare Ergebnisse ausdrücklich im Chat weiter.",
   "clarification_resume_unavailable": "Diese Aufgabe konnte nicht fortgesetzt werden. Die genaue Fehlerphase wurde nicht aufgezeichnet. Prüfen Sie die bereits angezeigte Arbeit.",
   "clarification_store_unavailable": "Der Rückfragedienst ist nicht korrekt konfiguriert. Wenden Sie sich an die Systemadministration.",
   "chat_action_not_found": "Das Ergebnis dieses Sendevorgangs kann noch nicht bestätigt werden. Behalten Sie den aktuellen Entwurf und prüfen Sie es später erneut.",

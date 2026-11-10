@@ -204,8 +204,32 @@ it("keeps multi-series touch reading focused on series identity, while retaining
   } finally { vi.unstubAllGlobals(); }
 });
 
-it("keeps explicit field bindings instead of offering inferred chart kinds", () => {
-  render(<ChartBlock spec={{ ...spec, explicit_presentation: { version: 1, mode: "plot", axes: { x: "domain", y: ["entries"], x_scale: "category" }, group_by: [] } }} chrome="report" />);
+const declared: ChartSpec = { ...spec, explicit_presentation: { version: 1, mode: "plot", axes: { x: "domain", y: ["entries"], x_scale: "category" }, group_by: [] } };
+
+it("offers explicit field bindings only the chart types chat edits offer", () => {
+  const onKindChange = vi.fn();
+  render(<ChartBlock spec={declared} sectionId="sec_chart" chrome="report" onKindChange={onKindChange} />);
+  expect(screen.getByTestId("chart-stub")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Horizontal Bar" }));
+  // Inferred kinds (pie, waterfall, table) would re-bind the declared fields.
+  expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["kind.line", "Bar", "Horizontal Bar", "kind.area_stacked"]);
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Bar" }));
+  expect(onKindChange).toHaveBeenCalledWith("bar");
+});
+
+it("keeps an explicit view of a composed figure in its type, as chat edits do", () => {
+  const composed: ChartSpec = {
+    ...declared, title: "Coverage comparison",
+    views: [{ id: "rank", kind: "chart", spec: declared }, { id: "copy", kind: "chart", spec: { ...declared, title: "Copy" } }],
+    layout: { type: "stack", children: [{ view: "rank" }, { view: "copy" }] },
+  };
+  render(<ChartBlock spec={composed} sectionId="sec_chart" chrome="report" onViewKindChange={vi.fn()} />);
+  expect(screen.getAllByTestId("chart-stub")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Horizontal Bar" })).not.toBeInTheDocument();
+});
+
+it("keeps explicit field bindings with incomplete rows in their type", () => {
+  render(<ChartBlock spec={{ ...declared, row_count: 10 }} chrome="report" />);
   expect(screen.getByTestId("chart-stub")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Horizontal Bar" })).not.toBeInTheDocument();
 });

@@ -571,7 +571,7 @@ async def _ordinary_resume_failure(request: Request, store: ClarificationStore, 
     from types import SimpleNamespace
 
     from bowhead_core._db import open_shared_ctx
-    from bowhead_core.ordinary_lead_continuation import ordinary_card_id_in_tx, ordinary_resume_request_material
+    from bowhead_core.ordinary_lead_continuation import ordinary_card_id_in_tx, ordinary_failure_condition, ordinary_resume_request_material
 
     from bowhead_gateway.rule_clarification_errors import is_resume_probe_unavailable, rule_clarification_error_payload
     from bowhead_gateway.turn_service import _restore_ordinary_question_inputs
@@ -619,7 +619,11 @@ async def _ordinary_resume_failure(request: Request, store: ClarificationStore, 
             "request_id": card.request_id,
             "turn_id": turn_id,
             "execution_generation": turn.execution_generation,
-            **rule_clarification_error_payload("clarification_resume_unavailable", clarification_stage="clarification_resume_preflight"),
+            **rule_clarification_error_payload(
+                "clarification_resume_unavailable",
+                clarification_stage="clarification_resume_preflight",
+                clarification_condition=ordinary_failure_condition(exc),
+            ),
         }
     return None
 
@@ -2860,6 +2864,8 @@ async def resume_turn(
                 nested_error=True,
             ) from exc
         except (ValueError, AgentExecutionBindingError) as exc:
+            from bowhead_core.ordinary_lead_continuation import ordinary_failure_condition
+
             if (
                 turn_req.reference_clarification_id is None
                 and turn_req.resume_clarification_id is None
@@ -2867,7 +2873,11 @@ async def resume_turn(
             ):
                 raise
             raise rule_clarification_http_error(
-                409, "clarification_resume_unavailable", nested_error=True, clarification_stage="clarification_resume_preflight"
+                409,
+                "clarification_resume_unavailable",
+                nested_error=True,
+                clarification_stage="clarification_resume_preflight",
+                clarification_condition=ordinary_failure_condition(exc),
             ) from exc
         execution_generation = spawned.execution_generation
     else:

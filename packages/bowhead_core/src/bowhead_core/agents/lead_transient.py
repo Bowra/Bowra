@@ -149,7 +149,9 @@ def init_lead_transient(
             checkpoint = request.ordinary_lead_checkpoint
             if checkpoint is None:
                 raise ValueError("clarification_resume_unavailable")
-            ctx.ordinary_lead_state = OrdinaryLeadRunState(card_id=request.ordinary_clarification_id, checkpoint=checkpoint)
+            ctx.ordinary_lead_state = OrdinaryLeadRunState(
+                card_id=request.ordinary_clarification_id, checkpoint=checkpoint, observed_inputs=checkpoint.contract == "ordinary-lead-loop.v15"
+            )
 
     # V4 streaming surface — only the lead.final.payload idempotence flag
     # survives. Sprint phase-plan-removal: removed phase-plan tracking init.

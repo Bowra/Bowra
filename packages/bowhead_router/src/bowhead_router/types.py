@@ -117,6 +117,10 @@ class LLMRequest:
     summary_only: bool = field(default=False, repr=False, compare=False)
     output_reservation: int | None = field(default=None, repr=False, compare=False)
     configuration_version: int | None = field(default=None, repr=False, compare=False)
+    # True only when the caller sized max_output_tokens to hold provider reasoning
+    # (verification probes). Otherwise an explicit caller limit runs without
+    # Team-enabled thinking: reasoning counts against that limit and could leave no answer.
+    output_limit_covers_reasoning: bool = field(default=False, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

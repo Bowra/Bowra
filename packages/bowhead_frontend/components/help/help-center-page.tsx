@@ -39,6 +39,7 @@ import { useOptionalAuthSession } from "@/lib/auth/auth-session-context";
 import type { MeUser } from "@/lib/auth-api";
 import { appPath } from "@/lib/base-path";
 import { copyTextWithFallback } from "@/lib/clipboard";
+import { rehypeCodeHighlight } from "@/lib/code-highlight";
 import type { HelpArticle, HelpArticleGroup } from "@/lib/help-content";
 import { shouldHandleAppLinkClick } from "@/lib/navigation-click";
 import { useAppRouter } from "@/lib/use-app-router";
@@ -265,7 +266,7 @@ export function HelpCenterPage({ articles: allArticles }: HelpCenterPageProps) {
     },
   };
   const renderMarkdown = (content: string) => (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeCodeHighlight]} components={markdownComponents}>
       {content}
     </ReactMarkdown>
   );

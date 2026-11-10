@@ -19,6 +19,7 @@
  *   - number / boolean           → String(value)
  */
 
+import { stripInternalObjectIds } from "./internal-object-ids";
 import { staticTranslator } from "./locale-messages";
 
 const STRING_MAX = 60;
@@ -63,7 +64,8 @@ export function prettifyStepLabel(
   if (input_preview === null || input_preview === undefined) return "";
 
   if (typeof input_preview === "string") {
-    const t = input_preview.trim();
+    // Labels recorded before the backend dropped internal IDs still carry them on replay.
+    const t = stripInternalObjectIds(input_preview).trim();
     // Defensive (chat-solidify follow-up 2026-07): a backend preview that is
     // itself raw JSON must NEVER render as a step label — backstops any future
     // tool whose `_prettify_input_preview` falls through to a json.dumps blob

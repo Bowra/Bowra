@@ -97,6 +97,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
         "ordinary-lead-loop.v12",
         "ordinary-lead-loop.v13",
         "ordinary-lead-loop.v14",
+        "ordinary-lead-loop.v15",
     ] = "ordinary-lead-loop.v1"
     storage_format: Literal["segmented.v1"] | None = Field(default=None, exclude_if=lambda value: value is None)
     context_projection_enabled: bool = Field(default=False, exclude_if=lambda value: not value)
@@ -156,17 +157,21 @@ class OrdinaryLeadCheckpoint(BaseModel):
         return self
 
     def encode(self) -> bytes:
-        if (self.contract == "ordinary-lead-loop.v14") != (self.knowledge_navigation is not None):
+        if self.contract != "ordinary-lead-loop.v15" and (self.contract == "ordinary-lead-loop.v14") != (self.knowledge_navigation is not None):
             raise OrdinaryContinuationUnavailable()
         if self.knowledge_navigation is not None:
             from bowhead_core.kb.source_navigation import NavigationDependency
 
             for proof in self.knowledge_navigation.values():
                 NavigationDependency.model_validate(proof)
-        if (self.contract in {"ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}) != (self.knowledge_sources is not None):
+        if self.contract == "ordinary-lead-loop.v15" and self.knowledge_navigation is not None and self.knowledge_sources is None:
             raise OrdinaryContinuationUnavailable()
-        if self.contract not in {"ordinary-lead-loop.v13", "ordinary-lead-loop.v14"} and (
-            self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+        if self.contract != "ordinary-lead-loop.v15" and (self.contract in {"ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}) != (
+            self.knowledge_sources is not None
+        ):
+            raise OrdinaryContinuationUnavailable()
+        if self.contract not in {"ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"} and (
+            self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
         ) != (self.knowledge_read is not None):
             raise OrdinaryContinuationUnavailable()
         if self.contract not in {
@@ -180,6 +185,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         } and (self.contract == "ordinary-lead-loop.v4") != (self.document_routing is not None):
             raise OrdinaryContinuationUnavailable()
         if self.contract not in {
@@ -188,6 +194,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         } and (self.contract == "ordinary-lead-loop.v9") != (self.collaboration is not None):
             raise OrdinaryContinuationUnavailable()
         if self.collaboration is not None:
@@ -248,6 +255,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             self.helper_materials()
         elif "helpers" in material:
@@ -281,6 +289,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 "ordinary-lead-loop.v12",
                 "ordinary-lead-loop.v13",
                 "ordinary-lead-loop.v14",
+                "ordinary-lead-loop.v15",
             }
             and "document_routing" in value
         ):
@@ -294,7 +303,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
         raw = decode_reference_json(self.messages_json, max_bytes=self.payload_limit, max_depth=20)
         if (
             not isinstance(raw, list)
-            or len(raw) < (2 if self.contract == "ordinary-lead-loop.v14" else 3)
+            or len(raw) < (2 if self.contract in {"ordinary-lead-loop.v14", "ordinary-lead-loop.v15"} else 3)
             or (self.storage_format is None and len(raw) > 128)
         ):
             raise OrdinaryContinuationUnavailable()
@@ -446,6 +455,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             if "helpers" in material:
                 raise OrdinaryContinuationUnavailable()
@@ -457,13 +467,20 @@ class OrdinaryLeadCheckpoint(BaseModel):
             | (
                 {"input_context"}
                 if self.contract
-                in {"ordinary-lead-loop.v10", "ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+                in {
+                    "ordinary-lead-loop.v10",
+                    "ordinary-lead-loop.v11",
+                    "ordinary-lead-loop.v12",
+                    "ordinary-lead-loop.v13",
+                    "ordinary-lead-loop.v14",
+                    "ordinary-lead-loop.v15",
+                }
                 else set()
             )
             or not isinstance(helpers, list)
             or not (
                 0
-                if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+                if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
                 else 1
                 if self.contract
                 in {
@@ -476,6 +493,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                     "ordinary-lead-loop.v12",
                     "ordinary-lead-loop.v13",
                     "ordinary-lead-loop.v14",
+                    "ordinary-lead-loop.v15",
                 }
                 else 2
             )
@@ -484,19 +502,29 @@ class OrdinaryLeadCheckpoint(BaseModel):
             or any(not isinstance(helper, dict) for helper in helpers)
         ):
             raise OrdinaryContinuationUnavailable()
+        if self.contract == "ordinary-lead-loop.v15" and not helpers and self.knowledge_read is None and self.knowledge_navigation is None:
+            raise OrdinaryContinuationUnavailable()
         if self.contract in {
             "ordinary-lead-loop.v10",
             "ordinary-lead-loop.v11",
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             from bowhead_core._ref_allowlist import RefAllowlist
             from bowhead_core.ordinary_lead_input_context import validate_shape
 
             context = decode_reference_json(self.context_json, max_bytes=self.payload_limit, max_depth=20)
             if (
-                self.contract not in {"ordinary-lead-loop.v11", "ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+                self.contract
+                not in {
+                    "ordinary-lead-loop.v11",
+                    "ordinary-lead-loop.v12",
+                    "ordinary-lead-loop.v13",
+                    "ordinary-lead-loop.v14",
+                    "ordinary-lead-loop.v15",
+                }
                 or material["input_context"] is not None
             ):
                 validate_shape(material["input_context"], context)
@@ -516,7 +544,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
         if (
             len(calls) != len(invocations) + 1
             or (
-                self.contract not in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+                self.contract not in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
                 and (self.contract == "ordinary-lead-loop.v11") != bool(parallel_calls)
             )
             or any(
@@ -524,8 +552,12 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 not in (
                     {"subagent_spawn"}
                     | (
-                        (KNOWLEDGE_READ_TOOLS | {"kb_list_sources"} if self.contract == "ordinary-lead-loop.v14" else KNOWLEDGE_READ_TOOLS)
-                        if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14"}
+                        (
+                            KNOWLEDGE_READ_TOOLS | {"kb_list_sources"}
+                            if self.contract in {"ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
+                            else KNOWLEDGE_READ_TOOLS
+                        )
+                        if self.contract in {"ordinary-lead-loop.v12", "ordinary-lead-loop.v13", "ordinary-lead-loop.v14", "ordinary-lead-loop.v15"}
                         else set()
                     )
                 )
@@ -565,6 +597,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }:
             filtered = []
             uncertain_seen = False
@@ -614,6 +647,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "ordinary-lead-loop.v12",
                         "ordinary-lead-loop.v13",
                         "ordinary-lead-loop.v14",
+                        "ordinary-lead-loop.v15",
                     }
                     else set()
                 ),
@@ -643,6 +677,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                         "ordinary-lead-loop.v12",
                         "ordinary-lead-loop.v13",
                         "ordinary-lead-loop.v14",
+                        "ordinary-lead-loop.v15",
                     }
                     and invocation.result.get("ok") is not True
                 )
@@ -660,6 +695,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                 "ordinary-lead-loop.v12",
                 "ordinary-lead-loop.v13",
                 "ordinary-lead-loop.v14",
+                "ordinary-lead-loop.v15",
             }:
                 outcome = OrdinaryHelperOutcome.read(helper["outcome"])
                 outcome.require_result(invocation.result.get("ok"))
@@ -672,6 +708,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                     "ordinary-lead-loop.v12",
                     "ordinary-lead-loop.v13",
                     "ordinary-lead-loop.v14",
+                    "ordinary-lead-loop.v15",
                 } and outcome.reason in {
                     "model_failure",
                     "model_unknown",
@@ -711,6 +748,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                                 "ordinary-lead-loop.v12",
                                 "ordinary-lead-loop.v13",
                                 "ordinary-lead-loop.v14",
+                                "ordinary-lead-loop.v15",
                             }
                             else set()
                         ),
@@ -726,6 +764,7 @@ class OrdinaryLeadCheckpoint(BaseModel):
                                 "ordinary-lead-loop.v12",
                                 "ordinary-lead-loop.v13",
                                 "ordinary-lead-loop.v14",
+                                "ordinary-lead-loop.v15",
                             }
                             else set()
                         ),
@@ -843,6 +882,7 @@ class OrdinaryLeadRunState:
     captured: OrdinaryLeadCheckpoint | None = None
     consumed: bool = False
     model_config_version: int = 0
+    observed_inputs: bool = False
     request_context: dict = field(default_factory=dict)
 
 
@@ -851,3 +891,8 @@ def capture_message_prefix(messages: list[Message], *, question_call_id: str) ->
     if not messages or messages[-1].role != "tool" or messages[-1].tool_call_id != question_call_id:
         raise OrdinaryContinuationUnavailable()
     return canonical_json([message_record(message) for message in messages[:-1]])
+
+
+def uses_observed_inputs(ctx: object) -> bool:
+    """Select new input semantics only from the admitted ordinary run state."""
+    return getattr(getattr(ctx, "ordinary_lead_state", None), "observed_inputs", False) is True

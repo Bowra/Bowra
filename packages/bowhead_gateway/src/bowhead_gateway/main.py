@@ -978,14 +978,13 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 60s cooldown + daily cap 40. Pause routes' app.state.dreaming_light always exists, unaffected by this flag.
     dreaming_enabled = os.environ.get("BOWHEAD_DREAMING_ENABLED", "1") in ("1", "true")
 
-    # Privacy ledger and memory-operation fingerprints share the instance's
-    # Fernet root key, so private deployments require no second ledger secret.
-    _privacy_ledger_key = os.environ.get("BOWHEAD_FERNET_KEY", "").strip()
+    # Memory privacy and account erasure receipts share the instance Fernet root.
+    fernet_key = os.environ.get("BOWHEAD_FERNET_KEY", "").strip()
 
     # ─── Memory candidates + Dreaming Light ──────────────────
     memory_candidate_store = MemoryCandidateStore(
         db_path=db_path,
-        fingerprint_key=(_privacy_ledger_key or _artifact_fetch_secret),
+        fingerprint_key=(fernet_key or _artifact_fetch_secret),
         connect_factory=diagnostic_connect,
     )
     await memory_candidate_store.initialize()
@@ -1014,13 +1013,13 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     privacy_deletion_ledger = (
         PrivacyDeletionLedger(
             _privacy_ledger_path,
-            hmac_key=_privacy_ledger_key,
+            hmac_key=fernet_key,
             key_version=os.environ.get(
                 "BOWHEAD_PRIVACY_LEDGER_KEY_VERSION",
                 "v1",
             ),
         )
-        if _privacy_ledger_path and _privacy_ledger_key
+        if _privacy_ledger_path and fernet_key
         else None
     )
     if privacy_deletion_ledger is not None:
@@ -1028,7 +1027,7 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     memory_destructive_operation_store = MemoryDestructiveOperationStore(
         db_path,
         ledger=privacy_deletion_ledger,
-        fingerprint_key=(_privacy_ledger_key or _artifact_fetch_secret),
+        fingerprint_key=(fernet_key or _artifact_fetch_secret),
     )
     await memory_destructive_operation_store.initialize()
     if privacy_deletion_ledger is not None:
@@ -2126,29 +2125,9 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     await user_store.initialize()
     from bowhead_core.account_deletion import adopt_deleted_accounts
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 
-    account_deletion_ledger = None
-    if _privacy_ledger_path and _privacy_ledger_key:
-        account_deletion_ledger = AccountDeletionLedger(
-            Path(_privacy_ledger_path).with_name("account-deletions.db"),
-            secret=_privacy_ledger_key,
-        )
-        await account_deletion_ledger.initialize()
-        user_store.account_deletion_recorder = account_deletion_ledger.record
-        # Apply retirement intents before starting authenticated services or
-        # scheduling work against a restored business database.
-        await account_deletion_ledger.replay(user_store)
-        while await adopt_deleted_accounts(user_store):
-            pass
-    else:
-        async with diagnostic_connect(db_path) as account_db:
-            async with account_db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_deletions'") as cursor:
-                has_account_deletions = await cursor.fetchone() is not None
-            if has_account_deletions:
-                async with account_db.execute("SELECT 1 FROM account_deletions LIMIT 1") as cursor:
-                    if await cursor.fetchone() is not None:
-                        raise RuntimeError("Enrolled account deletions require the latest external privacy ledger and BOWHEAD_FERNET_KEY")
+    while await adopt_deleted_accounts(user_store):
+        pass
     app.state.user_store = user_store
     from bowhead_core._db import open_shared_ctx
     from bowhead_core.agent_automation_context import require_protocol_schema_conn
@@ -2753,17 +2732,15 @@ async def _application_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.account_deletion_service = None
     app.state.account_deletion_task = None
-    if account_deletion_ledger is not None and app.state.session_lifecycle_coordinator is not None:
+    if fernet_key and app.state.session_lifecycle_coordinator is not None:
         account_external_cleanup = AccountExternalCleanup(app)
         app.state.account_deletion_service = AccountDeletionService(
             user_store,
             lifecycle=app.state.session_lifecycle_coordinator,
             artifacts=artifact_store,
-            ledger=account_deletion_ledger,
-            secret=_privacy_ledger_key,
+            secret=fernet_key,
             external_cleanup=account_external_cleanup,
             external_quarantine=account_external_cleanup.quarantine,
-            erasure_guard=account_external_cleanup.guard,
         )
         app.state.account_deletion_task = asyncio.create_task(app.state.account_deletion_service.run(), name="account-deletion")
     app.state.schema_cache = schema_cache

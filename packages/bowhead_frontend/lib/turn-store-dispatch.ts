@@ -34,6 +34,7 @@ import type {
 } from "@/components/chat/step-list/types";
 
 import { normalizePeerFailureReasonCode } from "./error-messages";
+import { stripInternalObjectIds } from "./internal-object-ids";
 import {
   normalizeErrorDiagnostics,
   readAgentStepUsage,
@@ -649,7 +650,8 @@ export function dispatchToTurnStore(
       if (!cardId) return false;
       const sid = typeof payload.subagent_id === "string" ? payload.subagent_id : "";
       const profile = typeof payload.profile === "string" ? payload.profile : "";
-      const task = typeof payload.task === "string" ? payload.task : undefined;
+      // The trace shows the task when a peer has no dispatch row; internal IDs are Tool handles, not words.
+      const task = typeof payload.task === "string" ? stripInternalObjectIds(payload.task) : undefined;
       const displayName =
         typeof payload.display_name === "string"
           ? payload.display_name

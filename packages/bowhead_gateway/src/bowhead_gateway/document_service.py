@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import asdict
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from bowhead_core.model_clock import turn_time_zone_name
 from bowhead_core.team_llm_config import build_catalog, is_allowed_preferred_model
 from bowhead_router.errors import RetryPolicy
 from bowhead_router.router import UserModelPref
-from bowhead_router.types import LLMRequest, Message
+from bowhead_router.types import LLMChunk, LLMRequest, LLMResponse, Message
 
 from bowhead_gateway.document_canvas_inputs import DocumentCanvasInputs
 from bowhead_gateway.turn_service import resolve_team_model_runtime
@@ -60,6 +61,30 @@ def _worker(ctx) -> DocumentTurnOwner:
         generation=ctx.execution_generation,
         owner_id=ctx.execution_owner_id,
     )
+
+
+async def _collect_stream(chunks: AsyncIterator[LLMChunk]) -> LLMResponse:
+    """Assemble one complete streamed reply; tool calls arrive whole, one per chunk."""
+    text: list[str] = []
+    thinking: list[str] = []
+    reply = LLMResponse(content="")
+    async for chunk in chunks:
+        text.append(chunk.delta)
+        thinking.append(chunk.thinking_delta)
+        if chunk.tool_call_delta is not None:
+            reply.tool_calls.append(chunk.tool_call_delta)
+        if chunk.finish_reason is not None:
+            # OpenAI-compatible streams pass tool-call finishes through unnormalized.
+            reply.finish_reason = "tool_use" if chunk.finish_reason in {"tool_calls", "function_call"} else chunk.finish_reason
+        if chunk.usage is not None:
+            reply.usage = chunk.usage
+        if chunk.diagnostics is not None:
+            reply.diagnostics = chunk.diagnostics
+        if chunk.provider_reasoning is not None:
+            reply.provider_reasoning = chunk.provider_reasoning
+    reply.content = "".join(text)
+    reply.thinking = "".join(thinking)
+    return reply
 
 
 def _with_space_block(system: str, block: str) -> str:
@@ -385,17 +410,22 @@ class DocumentService:
             build_catalog(config=config, version=current_version), selection.provider, selection.model
         ):
             raise DocumentRequestError("document_model_unavailable")
-        reply = await router.invoke(
-            "lead" if selection is not None else "echo",
-            LLMRequest(
-                model="",
-                system=system,
-                messages=messages if messages is not None else [Message(role="user", content=prompt)],
-                tools=list(tools),
-                temperature=0,
-            ),
-            user_pref=UserModelPref(selection.provider, selection.model) if selection is not None else None,
-            retry_policy=RetryPolicy(max_attempts_per_target=1),
+        # Streamed so reasoning and long answers keep bytes flowing. A non-streamed call
+        # receives nothing until it completes; DeepSeek sends a keep-alive byte only every
+        # 60 s, which races the connection's default 60 s read timeout on long calls.
+        reply = await _collect_stream(
+            router.stream(
+                "lead" if selection is not None else "echo",
+                LLMRequest(
+                    model="",
+                    system=system,
+                    messages=messages if messages is not None else [Message(role="user", content=prompt)],
+                    tools=list(tools),
+                    temperature=0,
+                ),
+                user_pref=UserModelPref(selection.provider, selection.model) if selection is not None else None,
+                retry_policy=RetryPolicy(max_attempts_per_target=1),
+            )
         )
         # The Router owns automatic allowances and explicit administrator overrides.
         # Retain observed limits, not prompt/response text or a guessed truncation cause.

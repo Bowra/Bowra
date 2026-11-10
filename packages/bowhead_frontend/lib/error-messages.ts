@@ -44,6 +44,7 @@ export const REASON_CODE_LIST = [
   "document_information_incomplete",
   "document_planning_failed",
   "document_authoring_script_failed",
+  "document_model_no_reply",
   "document_candidate_invalid",
   "document_history_unavailable",
   "document_request_rejected",

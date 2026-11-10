@@ -11,6 +11,7 @@ import {
   type ArtifactViewerProfile,
 } from "@/lib/artifact-viewer-profile";
 import { appPath } from "@/lib/base-path";
+import { codeLanguageForFile } from "@/lib/code-highlight";
 import { formatByteSize } from "@/lib/format";
 import type { ResultsWorkspaceErrorClass } from "@/lib/results-workspace-errors";
 import type { ResultsViewerMode } from "@/lib/results-workspace-route";
@@ -185,6 +186,7 @@ export function ArtifactPreview({
     : null;
   const bodyProps = {
     profile,
+    codeLanguage: codeLanguageForFile(filename, mime),
     mode,
     preview,
     loading,
@@ -401,6 +403,7 @@ function ArtifactPreviewHeader({
 
 function ArtifactPreviewBody({
   profile,
+  codeLanguage,
   mode,
   preview,
   loading,
@@ -422,6 +425,8 @@ function ArtifactPreviewBody({
   documentPreviewCacheRef,
 }: {
   profile: ArtifactViewerProfile;
+  /** Syntax grammar derived from the file name/MIME for text previews. */
+  codeLanguage: string | null;
   mode: ResultsViewerMode;
   preview: PreviewLike | null;
   loading: boolean;
@@ -531,6 +536,7 @@ function ArtifactPreviewBody({
         <ArtifactTextPreview
           text={preview.text}
           profile={profile}
+          language={codeLanguage}
           raw={mode === "raw"}
           truncated={preview.truncated}
           view={textView}

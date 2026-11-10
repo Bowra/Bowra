@@ -6,7 +6,6 @@ re-registering the released address cannot join or revive the retired account.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -237,7 +236,6 @@ async def request_account_deletion(
     user_id: str,
     *,
     now: datetime | None = None,
-    record_intent: Callable[[AccountDeletion], Awaitable[None]] | None = None,
     expected_pwd_version: int | None = None,
 ) -> AccountDeletion:
     async with diagnostic_connect(store.db_path) as db:
@@ -254,8 +252,6 @@ async def request_account_deletion(
                 "SELECT ?,id,team_id,'user_delete_request','{}',? FROM users WHERE id=?",
                 (result.operation_id, result.requested_at, user_id),
             )
-            if record_intent is not None:
-                await record_intent(result)
             await db.commit()
         except BaseException:
             await db.rollback()
@@ -296,9 +292,7 @@ async def adopt_deleted_accounts(store: UserStore, *, now: datetime | None = Non
                         observed = None
                     if observed is not None and observed <= adoption_time:
                         requested_at, source = observed, "audit"
-                deletion = await retire_account_conn(db, store, user_id, requested_at=requested_at, time_source=source)
-                if store.account_deletion_recorder is not None:
-                    await store.account_deletion_recorder(deletion)
+                await retire_account_conn(db, store, user_id, requested_at=requested_at, time_source=source)
                 adopted += 1
             await db.commit()
         except BaseException:

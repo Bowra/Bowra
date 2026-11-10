@@ -14,7 +14,7 @@ import { Copy, Play, Plus, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { clarificationFailureStage } from "@/lib/clarification-failure-stage";
+import { clarificationFailureCondition, clarificationFailureStage } from "@/lib/clarification-failure-stage";
 import { copyDiagnostics } from "@/components/error-notice";
 import { ChatCard, type ChatCardAction } from "@/components/ui/card";
 import { normalizeReasonCode, type ReasonCode } from "@/lib/error-messages";
@@ -101,7 +101,7 @@ const LIMIT_REASONS = new Set<ReasonCode>([
   "hop_cap_exceeded", "peer_depth_exceeded", "cost_cap_exceeded",
 ]);
 
-const DOCUMENT_REASONS = new Set<ReasonCode>(["document_information_incomplete", "document_planning_failed", "document_authoring_script_failed", "document_candidate_invalid"]);
+const DOCUMENT_REASONS = new Set<ReasonCode>(["document_information_incomplete", "document_planning_failed", "document_authoring_script_failed", "document_model_no_reply", "document_candidate_invalid"]);
 
 /** Narrower copy is used only for facts published for this same model failure. */
 function modelFailureGroup(
@@ -207,6 +207,7 @@ export function FinalFailBanner({
     : t("failure_card.location_chat");
   const copyBundle = bannerDiagnostics(safeDiagnostics, normalizedKind, turnId);
   const clarificationStage = clarificationFailureStage(normalizedKind, copyBundle);
+  const clarificationCondition = clarificationFailureCondition(normalizedKind, copyBundle);
   const action = recoveryAction
     ? chooseFailureCardAction(recoveryAction, {
         retry: Boolean(onRetry),
@@ -279,12 +280,12 @@ export function FinalFailBanner({
   else if (primary === editAction && retryAction && !retryRestoresDraft && LIMIT_REASONS.has(normalizedKind)) secondary.push(retryAction);
 
   const copyGroup = specificModelGroup ?? group;
-  const title = clarificationStage ? t(`failure_card.${clarificationStage}_title`)
+  const title = clarificationCondition ? t(`failure_card.clarification_${clarificationCondition}_title`) : clarificationStage ? t(`failure_card.${clarificationStage}_title`)
     : copyGroup ? t(`failure_card.${copyGroup}_title`) : tReasons(normalizedKind);
   const answerBody = normalizedKind === "clarification_resume_unavailable" && clarificationAnswerState
     && clarificationStage !== "clarification_capture"
       ? t(clarificationAnswerState === "saved" ? "failure_card.clarification_answer_saved_body" : "failure_card.clarification_answer_unconfirmed_body") : null;
-  const body = clarificationStage ? t(`failure_card.${clarificationStage}_body`)
+  const body = clarificationCondition ? t(`failure_card.clarification_${clarificationCondition}_body`) : clarificationStage ? t(`failure_card.${clarificationStage}_body`)
     : answerBody ?? (copyGroup ? t(`failure_card.${copyGroup}_body`) : null);
   const stageLabel = clarificationStage ?? (phase === "stream" ? "stream" : phase === "invoke" ? "invoke" : undefined);
 
@@ -317,7 +318,7 @@ export function FinalFailBanner({
       {safeDiagnostics?.stepUsage ? <p className="ui-card__text">{t("failure_card.step_usage", { ...safeDiagnostics.stepUsage })}</p> : null}
       {responsesRejected ? <p className="ui-card__text">{t("failure_card.responses_rejected_hint")}</p> : null}
       {outcomeUnknown ? <p className="ui-card__text">{t("failure_card.model_outcome_unknown")}</p> : null}
-      {clarificationStage && answerBody ? <p className="ui-card__text">{answerBody}</p> : null}
+      {(clarificationStage || clarificationCondition) && answerBody ? <p className="ui-card__text">{answerBody}</p> : null}
       {normalizedKind === "clarification_resume_unavailable" && primary === editAction
         ? <p className="ui-card__text">{t("failure_card.new_request_notice")}</p>
         : null}

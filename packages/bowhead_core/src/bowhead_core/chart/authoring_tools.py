@@ -169,24 +169,82 @@ def _views(spec: dict[str, Any]) -> list[tuple[str | None, dict[str, Any]]]:
     return result
 
 
-def _simple_chart_kinds(spec: dict[str, Any]) -> list[str]:
-    """Admit only complete, single-measure shapes shared by the existing native controls."""
-    if "views" in spec or "presentation_plan" in spec or spec.get("explicit_presentation"):
-        return []
-    columns = [column for column in spec.get("columns") or [] if isinstance(column, dict)]
-    numeric = [column for column in columns if column.get("type") == "numeric"]
-    dimensions = [column for column in columns if column.get("type") in ("date", "categorical", "geo")]
+# Category-axis kinds that read one explicit binding and its prepared rows the same way, so switching among
+# them never re-binds a field or changes a column type (`explicit.compile_view`).
+_EXPLICIT_SWITCH_KINDS = ("line", "bar", "hbar", "area_stacked", "stacked_bar")
+
+
+def _complete_rows(spec: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return every plotted row, or None when the saved chart holds a truncated or sampled result."""
     rows = spec.get("rows")
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-        return []
+        return None
     row_count = spec.get("row_count")
     if type(row_count) is not int or row_count != len(rows) or spec.get("top_n"):
-        return []
+        return None
     for shown_key, total_key in (("series_shown", "series_total"), ("points_shown", "points_total")):
         if shown_key in spec or total_key in spec:
             shown, total = spec.get(shown_key), spec.get(total_key)
             if type(shown) is not int or type(total) is not int or shown < 0 or shown != total:
-                return []
+                return None
+    return rows
+
+
+def _drawable(spec: dict[str, Any], kind: str, keys: set[str] | None = None) -> bool:
+    """Check the complete saved rows against the native capacity limits of `kind`."""
+    from bowhead_core.chart.types import ChartColumn, ChartSpec
+    from bowhead_core.chart.validation import _undrawable_reason
+
+    try:
+        columns = [
+            ChartColumn(**{name: value for name, value in column.items() if name in ChartColumn.__dataclass_fields__})
+            for column in spec.get("columns") or []
+            if isinstance(column, dict) and (keys is None or column.get("key") in keys)
+        ]
+        fields = {name: value for name, value in spec.items() if name in ChartSpec.__dataclass_fields__ and name not in ("kind", "columns")}
+        return _undrawable_reason(ChartSpec(**fields, kind=kind, columns=columns)) is None  # type: ignore[arg-type]
+    except Exception as exc:
+        logger.warning("chart_kind_drawability_unavailable kind=%s error_type=%s", kind, type(exc).__name__)
+        return False
+
+
+def _explicit_plot_kinds(spec: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Offer the category-axis kinds the saved binding would also pass at creation (`explicit.validate_request`)."""
+    from bowhead_core.chart.explicit import ExplicitPresentationError, validate_request
+
+    binding, current = spec["explicit_presentation"], spec.get("kind")
+    if not isinstance(binding, dict) or binding.get("mode") != "plot" or current not in _EXPLICIT_SWITCH_KINDS:
+        return []
+    axes, groups = binding.get("axes"), binding.get("group_by")
+    if not isinstance(axes, dict) or not isinstance(groups, list):
+        return []
+    offered: list[str] = []
+    for kind in _EXPLICIT_SWITCH_KINDS:
+        try:
+            validate_request({"force_kind": kind, "axes": copy.deepcopy(axes), "group_by": copy.deepcopy(groups)})
+        except ExplicitPresentationError:
+            continue
+        if kind in ("line", "area_stacked") and len(rows) < 2:
+            continue
+        if kind == "stacked_bar" and not groups and len(axes["y"]) < 2:
+            continue  # One unstacked series draws the same chart as bar.
+        if kind == current or _drawable(spec, kind, {axes["x"], *groups, *axes["y"]}):
+            offered.append(kind)
+    return offered if current in offered and len(offered) > 1 else []
+
+
+def _simple_chart_kinds(spec: dict[str, Any]) -> list[str]:
+    """Admit only complete standalone shapes whose other kinds need no new field binding."""
+    if "views" in spec or "presentation_plan" in spec:
+        return []
+    rows = _complete_rows(spec)
+    if rows is None:
+        return []
+    if spec.get("explicit_presentation"):
+        return _explicit_plot_kinds(spec, rows)
+    columns = [column for column in spec.get("columns") or [] if isinstance(column, dict)]
+    numeric = [column for column in columns if column.get("type") == "numeric"]
+    dimensions = [column for column in columns if column.get("type") in ("date", "categorical", "geo")]
     if len(numeric) != 1 or not dimensions or not rows or not isinstance(numeric[0].get("key"), str):
         return ["table"]
     values = [row.get(numeric[0]["key"]) for row in rows]
@@ -199,7 +257,7 @@ def _simple_chart_kinds(spec: dict[str, Any]) -> list[str]:
         return ["table"]
     if not any(row.get(column.get("key")) not in (None, "") for row in rows for column in dimensions if isinstance(column.get("key"), str)):
         return ["table"]
-    return ["line", "bar", "hbar", "table"]
+    return [kind for kind in ("line", "bar", "hbar", "area_stacked") if kind == spec.get("kind") or _drawable(spec, kind)] + ["table"]
 
 
 async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -208,6 +266,7 @@ async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         return target
     _, section, spec = target
     palette = await _palette(ctx)
+    supported_kinds = _simple_chart_kinds(spec)
     views = []
     for view_id, view in _views(spec):
         columns = [
@@ -265,9 +324,9 @@ async def _read_chart(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
             "formats",
             *(["series_colors"] if not spec.get("presentation_plan") and any(editable_color_columns(view) for _, view in _views(spec)) else []),
             *(["layout"] if spec.get("views") else []),
-            *(["kind"] if _simple_chart_kinds(spec) else []),
+            *(["kind"] if supported_kinds else []),
         ],
-        "supported_kinds": _simple_chart_kinds(spec),
+        "supported_kinds": supported_kinds,
         "layout": spec.get("layout"),
         "defaults": {"show_legend": True, "show_data_labels": "automatic"},
         "date_presets": ["auto", *DATE_PRESETS],

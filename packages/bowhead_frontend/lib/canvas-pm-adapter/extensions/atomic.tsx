@@ -32,6 +32,7 @@ import { applyChartEdit, chartLayoutPreset, validChartComposition, type ChartEdi
 import { Field } from "@/components/ui/field";
 import { evidencePlanForViewer } from "@/lib/chart/presentation-plan";
 import { checkKindShape, checkKindUnits } from "@/lib/chart/kind-shape";
+import { explicitSwitchKinds } from "@/lib/chart/explicit-switch-kinds";
 import { normalizeChartForRenderingV1 } from "@/lib/chart/normalize-chart-for-rendering";
 
 // ─── A. Fully read-only (10) ─────────────────────────────────────────
@@ -618,6 +619,9 @@ export function ChartSettingsModal({
   onCancel: () => void;
 }) {
   const t = useTranslations("chart_settings");
+  // Same chart type names as the chart type switcher; an unrecognized stored kind keeps its raw value.
+  const tChart = useTranslations("chart_block");
+  const kindLabel = (k: string) => (tChart.has(`kind.${k}`) ? tChart(`kind.${k}` as never) : k);
   const views: NonNullable<ChartSpec["views"]> = validChartComposition(spec) ? spec.views : [];
   const fieldId = useId();
   const [viewId, setViewId] = useState<string | null>(views[0]?.id ?? null);
@@ -643,7 +647,9 @@ export function ChartSettingsModal({
     setInvalidEdit(false);
   };
 
-  const KIND_OPTIONS = [
+  // A declared binding offers only the types the chart switcher and chat edits offer for it; a composed view keeps its type.
+  const explicitKinds = selectedSpec.explicit_presentation ? (viewId ? [] : explicitSwitchKinds(selectedSpec)) : null;
+  const KIND_OPTIONS: ChartSpec["kind"][] = explicitKinds ? (explicitKinds.length ? explicitKinds : [selectedSpec.kind]) : [
     "line", "bar", "hbar", "pie", "stacked_bar", "dual_axis", "combo",
     "area_stacked", "scatter", "waterfall", "sankey", "heatmap", "kpi", "table",
   ];
@@ -737,7 +743,7 @@ export function ChartSettingsModal({
           }}
         >
           {KIND_OPTIONS.map((k) => (
-            <option key={k} value={k}>{k}</option>
+            <option key={k} value={k}>{kindLabel(k)}</option>
           ))}
         </select>
       </label>

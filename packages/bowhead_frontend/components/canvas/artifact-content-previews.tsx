@@ -19,6 +19,7 @@ import { Markdown } from "@/lib/md";
 import type { ArtifactViewerProfile } from "@/lib/artifact-viewer-profile";
 import { copyTextWithFallback } from "@/lib/clipboard";
 import { CharIcon } from "@/components/char-icon";
+import { HighlightedCode } from "@/components/highlighted-code";
 
 export type PreviewLike = {
   family: string;
@@ -155,9 +156,12 @@ export function ArtifactTextPreview({
   truncated,
   view,
   onViewChange,
+  language,
 }: {
   text: string;
   profile: ArtifactViewerProfile;
+  /** Syntax grammar for the stored file (from its name/MIME); null keeps the text plain. */
+  language?: string | null;
   raw: boolean;
   truncated?: boolean;
   view: TextViewState;
@@ -175,6 +179,7 @@ export function ArtifactTextPreview({
     }
     return text;
   }, [profile, raw, text]);
+  const codeLanguage = profile === "json" ? "json" : language ?? null;
   const matchCount = view.query
     ? readableText.toLocaleLowerCase().split(view.query.toLocaleLowerCase()).length - 1
     : 0;
@@ -226,7 +231,12 @@ export function ArtifactTextPreview({
         </article>
       ) : (
         <pre className={view.wrap ? "wrap" : "nowrap"}>
-          <HighlightedText text={readableText} query={view.query} />
+          {/* Find marks take over while searching; syntax colors return when the query is cleared. */}
+          {view.query || !codeLanguage ? (
+            <HighlightedText text={readableText} query={view.query} />
+          ) : (
+            <HighlightedCode code={readableText} lang={codeLanguage} />
+          )}
         </pre>
       )}
       {truncated ? <div className="artifact-viewer-footnote">{t("truncated")}</div> : null}

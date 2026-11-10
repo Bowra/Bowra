@@ -61,6 +61,23 @@ describe("ChartSettingsModal", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ kind: "kpi", show_legend: false }), { scope: "view", viewId: "cost" });
   });
 
+  it("lists only the chart types a declared binding offers", async () => {
+    const onSave = vi.fn();
+    renderIntl(<ChartSettingsModal spec={{
+      kind: "bar", title: "Primes", row_count: 2,
+      columns: [{ key: "bin", header: "Bin", type: "categorical" }, { key: "count", header: "Primes", type: "numeric" }],
+      rows: [{ bin: "1-200", count: 46 }, { bin: "201-400", count: 32 }],
+      explicit_presentation: { version: 1, mode: "plot", axes: { x: "bin", y: ["count"], x_scale: "category" }, group_by: [] },
+    }} onSave={onSave} onCancel={vi.fn()} />);
+    const kinds = await screen.findByLabelText("类型");
+    expect([...kinds.querySelectorAll("option")].map((option) => option.value)).toEqual(["line", "bar", "hbar", "area_stacked"]);
+    // Options read with the chart type switcher's names, not the stored kind values.
+    expect([...kinds.querySelectorAll("option")].map((option) => option.textContent)).toEqual(["折线", "柱状", "横向柱状", "堆叠面积"]);
+    fireEvent.change(kinds, { target: { value: "area_stacked" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ kind: "area_stacked" }));
+  });
+
   it("keeps an incompatible kind draft in the dialog without saving", async () => {
     const onSave = vi.fn();
     renderIntl(<ChartSettingsModal spec={{ kind: "table", columns: [

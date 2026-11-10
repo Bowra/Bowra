@@ -18,12 +18,11 @@ import hmac
 import json
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 import aiosqlite
@@ -43,9 +42,6 @@ from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
 from bowhead_core.sqlite_domains import domain_database_path, domain_layout_active, require_domain_schema
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from bowhead_core.account_deletion import AccountDeletion
 
 # cca P3 (review fix): a distinct "argument omitted" sentinel so update_team_subagent_meta can
 # tell an OMITTED nullable field (skip — keep current value) from an EXPLICIT None (clear → SQL
@@ -1790,7 +1786,6 @@ class UserStore:
         # Licensing §4.2 two-phase wiring: the resolver needs UserStore, the funnel needs the resolver.
         # Injected via set_seat_guard() in lifespan AFTER initialize(). None ⇒ create_user skips the seat check.
         self._seat_guard: SeatGuard | None = None
-        self.account_deletion_recorder: Callable[[AccountDeletion], Awaitable[None]] | None = None
 
     def set_terminal_auth_fence_enabled(self, enabled: bool) -> None:
         """Enable only after Terminal Protocol schema/readiness validation."""
@@ -8421,11 +8416,9 @@ class UserStore:
 
     async def soft_delete_user(self, user_id: str) -> bool:
         """Retire the identity; enrolled deletion jobs always keep their deadline."""
-        from bowhead_core.account_deletion import AccountDeletionError, request_account_deletion
+        from bowhead_core.account_deletion import request_account_deletion
 
-        if self.account_deletion_recorder is None:
-            raise AccountDeletionError("account_deletion_not_ready")
-        await request_account_deletion(self, user_id, record_intent=self.account_deletion_recorder)
+        await request_account_deletion(self, user_id)
         return True
 
     async def admin_soft_delete_member(
@@ -8606,11 +8599,7 @@ class UserStore:
                 if delete_identity:
                     from bowhead_core.account_deletion import retire_account_conn
 
-                    if self.account_deletion_recorder is None:
-                        await db.rollback()
-                        return MemberDeactivationResult(False, "account_deletion_not_ready")
                     retirement = await retire_account_conn(db, self, target_user_id, requested_at=datetime.fromisoformat(now))
-                    await self.account_deletion_recorder(retirement)
                 await self.write_admin_audit_log(
                     actor_user_id=actor_user_id,
                     team_id=team_id,

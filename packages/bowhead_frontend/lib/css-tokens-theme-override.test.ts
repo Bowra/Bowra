@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Guard against theme-independent `:root` color overrides.
  *

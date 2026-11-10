@@ -44,7 +44,7 @@ from bowhead_core.documents.pptx_plan import PlanningContext, planning_repair_in
 from bowhead_core.documents.pptx_planning import REPAIRABLE_ERRORS
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _digest, _json
-from bowhead_core.documents.usage import DocumentModelHook
+from bowhead_core.documents.usage import DocumentModelHook, unanswered_call_code
 from bowhead_core.rate_card import RATE_CARD_VERSION
 from bowhead_core.sqlite_domains import domain_database_path
 
@@ -143,6 +143,7 @@ async def run_document_turn(
 ) -> DocumentPlanningOutcome:
     """Reuse shared pause preparation; never publish or create a background claim."""
     scope = DocumentScope(team_id=worker.team_id, workspace_id=worker.workspace_id, user_id=worker.user_id)
+    call_no = 0
     try:
         if type(attempt_no) is not int or attempt_no not in (1, 2):
             raise DocumentRequestError("document_execution_fenced")
@@ -330,7 +331,7 @@ async def run_document_turn(
                 }
             )
     except InvocationOutcomeUnknownError:
-        code = "document_usage_unresolved"
+        code = (await unanswered_call_code(delivery.path, job_id, attempt_no, call_no) if call_no else None) or "document_usage_unresolved"
     except (OfficePackageError, DocumentRequestError) as exc:
         code = exc.code
     except Exception:

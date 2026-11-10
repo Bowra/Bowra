@@ -1,0 +1,113 @@
+/*
+ * Syntax colors for code rendered through lib/code-highlight.ts (lowlight / highlight.js `hljs-*` classes).
+ * Only token colors live here: every surface keeps its own code container (background, border, font, size).
+ * Each color keeps at least WCAG AA 4.5:1 against --c-bg, --c-surface, --c-surface-2 and --c-surface-3 in its theme.
+ * Tokens are fixed across accent profiles so code reads the same under every team color scheme.
+ */
+:root {
+  --c-code-keyword: #8b2fa8;
+  --c-code-string: #17693a;
+  --c-code-number: #a34a00;
+  --c-code-comment: #5b6779;
+  --c-code-function: #1a55c4;
+  --c-code-type: #0b6b78;
+  --c-code-attribute: #b0285a;
+  --c-code-meta: #6a5a00;
+  --c-code-deletion: #b42318;
+  --c-code-addition: #17693a;
+}
+
+[data-theme="dark"] {
+  --c-code-keyword: #d29cf5;
+  --c-code-string: #9dd49a;
+  --c-code-number: #f2a66b;
+  --c-code-comment: #8a99ae;
+  --c-code-function: #86b2ff;
+  --c-code-type: #5fcfc6;
+  --c-code-attribute: #f592ab;
+  --c-code-meta: #e2c46b;
+  --c-code-deletion: #f58b82;
+  --c-code-addition: #9dd49a;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-variable.language_ {
+  color: var(--c-code-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_ {
+  color: var(--c-code-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--c-code-number);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--c-code-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name {
+  color: var(--c-code-function);
+}
+
+.hljs-built_in,
+.hljs-type,
+.hljs-title.class_,
+.hljs-title.class_.inherited__ {
+  color: var(--c-code-type);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--c-code-attribute);
+}
+
+.hljs-meta,
+.hljs-doctag {
+  color: var(--c-code-meta);
+}
+
+/* A string inside a directive (e.g. `#include "x.h"`) still reads as a string. */
+.hljs-meta .hljs-string {
+  color: var(--c-code-string);
+}
+
+.hljs-deletion {
+  color: var(--c-code-deletion);
+  background: color-mix(in srgb, var(--c-code-deletion) 10%, transparent);
+}
+
+.hljs-addition {
+  color: var(--c-code-addition);
+  background: color-mix(in srgb, var(--c-code-addition) 10%, transparent);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
+}
+
+.hljs-link {
+  text-decoration: underline;
+}

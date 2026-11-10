@@ -76,6 +76,7 @@ const errors: Record<string, string> = {
   document_execution_fenced: "error_access",
   document_execution_interrupted: "error_interrupted",
   document_usage_unresolved: "usage_pending",
+  document_model_no_reply: "error_model_no_reply",
   document_usage_settlement_pending: "settlement_pending",
   document_question_unavailable: "error_stale",
   document_revision_conflict: "error_stale",

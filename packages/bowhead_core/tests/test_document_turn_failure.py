@@ -227,3 +227,35 @@ async def test_known_document_failure_survives_original_terminal_persistence(ctx
     saved = await native.service.delivery.get(scope=SCOPE, job_id=receipt.job_id)
     assert saved["state"] == "failed" and saved["error_code"] == error_code
     assert not native.calls and not native.worker.runs
+
+
+async def test_model_call_without_reply_offers_a_resend_not_an_administrator_check(ctx, native):
+    # The call was settled as not applied, so nothing was charged and resending is safe;
+    # the old unresolved-usage path told users to have an administrator check first.
+    from dataclasses import replace
+
+    from bowhead_core.document_chat_runtime import finish_document_planning
+    from bowhead_core.events import TurnEventBus
+    from bowhead_core.published_diagnostics import chat_recovery_action
+    from bowhead_core.turn_runner import TurnRunner
+
+    native.context.language_context = replace(native.context.language_context, output_language="en-US")
+    receipt = await native.service.submit(native.context, ctx.proposal)
+    outcome = await fail_document_turn(native.service.delivery, worker_for(native), receipt.job_id, "document_model_no_reply")
+    logs = TurnLogStore(str(ctx.path))
+
+    async def sink(event):
+        return await logs.record(turn_id=event.turn_id, event_type=event.event_type, payload=event.payload)
+
+    bus = TurnEventBus(log_sink=sink, persist_before_live=True)
+    runner = TurnRunner(SimpleNamespace(session_store=ctx.sessions))
+    bus._pi_persist_turn_state = runner._persist_turn_state
+    bus._pi_turn_state = {}
+    result = await finish_document_planning(native.context, outcome, bus=bus)
+    turn = await ctx.sessions.get_turn("t_doc")
+    assert turn.status == "failed" and turn.error_kind == "document_model_no_reply"
+    assert "was not charged. Send the request again." in result.final_answer == turn.final_answer
+    done = next(event for event in await logs.list_events("t_doc") if event.event_type == "done")
+    assert done.payload["reason_code"] == "document_model_no_reply"
+    assert done.payload["diagnostics"]["retryable"] is True
+    assert chat_recovery_action("document_model_no_reply") == "retry"

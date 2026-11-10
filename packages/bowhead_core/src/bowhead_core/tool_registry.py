@@ -3013,10 +3013,8 @@ def build_default_registry() -> ToolRegistry:
             from bowhead_core.bi_cut_tokens import describe_token
             from bowhead_core.bi_unknown_words import (
                 denoise_unknown_words,
-                engine_applied_no_filter,
                 fallback_measure_columns,
-                unfiltered_fact_note,
-                unknown_words_note,
+                parse_gap_notes,
                 withhold_fallback_measures,
             )
 
@@ -3032,14 +3030,14 @@ def build_default_registry() -> ToolRegistry:
             }
             result["_debug_cut_props"] = [{"word": t.word, "prop": t.prop} for t in cut_result.tokens]
             # Step 2: deterministic naming, without relying on the model to inspect `_parse`. Skip failed retrievals: without data there is no filtering claim.
-            if unknown_words and not _bi_result_is_error(result):
-                _notes = [unknown_words_note(unknown_words)]
-                # Report key presence without interpreting localized text or unknown-word semantics.
-                if engine_applied_no_filter(result.get("query_explain")):
-                    _notes.append(unfiltered_fact_note(unknown_words))
-                _unknown_note = "\n".join(_notes)
+            # Report key presence without interpreting localized text or unknown-word semantics. A cleanly parsed filter value
+            # that the engine report does not list is named too, so this runs whether or not unknown words exist.
+            _gap_notes = [] if _bi_result_is_error(result) else parse_gap_notes(result["_parse"], result.get("query_explain"))
+            if _gap_notes:
+                _gap_note = "\n".join(_gap_notes)
                 _prev_hint = result.get("_preflight_hint")
-                result["_preflight_hint"] = f"{_prev_hint}\n{_unknown_note}" if _prev_hint else _unknown_note
+                result["_preflight_hint"] = f"{_prev_hint}\n{_gap_note}" if _prev_hint else _gap_note
+            if unknown_words and not _bi_result_is_error(result):
                 # No measures recognized and engine supplies its default ⇒ that column is a fallback; withhold it (criteria in bi_unknown_words)
                 _fallback_cols = fallback_measure_columns(cut_result.tokens, unknown_words, result.get("query_explain"), result.get("columns"))
                 if _fallback_cols:

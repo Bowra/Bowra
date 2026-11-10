@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 from bowhead_core.chat_turn_source import ChatTurnUserSource
 from bowhead_core.language_context import LanguageContext
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.session_store import SessionProtocolManagedError, SessionStore
 from bowhead_core.terminal_protocol import (
     ActorScope,
@@ -51,19 +50,14 @@ from bowhead_core.terminal_protocol_store import (
     _typed_execution_context_matches,
     open_terminal_protocol_connection,
 )
-from core_legacy_database import upgrade
+from test_agent_revision_store import _db
 
 _NOW = datetime(2026, 8, 3, 4, 5, 6, tzinfo=UTC)
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
-    path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
-    return str(path)
+    return str(_db(tmp_path))
 
 
 def _context(*, session_id: str = "s_1", turn_id: str = "t_1") -> TerminalReadContext:

@@ -118,24 +118,26 @@ async def make_native(ctx, monkeypatch, tmp_path, *, scope=SCOPE, turn_id="t_doc
             assert request.url.path == "/document-runs/capabilities"
             return httpx2.Response(200, json={"profile": PROFILE, "image_id": IMAGE, "planner_profiles": result.planner_profiles})
         assert request.url.path == "/v1/chat/completions"
-        result.calls.append(json.loads(request.content))
+        payload = json.loads(request.content)
+        result.calls.append(payload)
         answer = result.responses.pop(0)
         if isinstance(answer, BaseException):
             raise answer
-        return httpx2.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": answer if isinstance(answer, dict) else {"role": "assistant", "content": answer},
-                        "finish_reason": "tool_calls"
-                        if isinstance(answer, dict) and answer.get("tool_calls")
-                        else getattr(result, "finish_reason", "stop"),
-                    }
-                ],
-                "usage": {"prompt_tokens": 600, "completion_tokens": 100},
-            },
-        )
+        message = answer if isinstance(answer, dict) else {"role": "assistant", "content": answer}
+        finish = "tool_calls" if message.get("tool_calls") else getattr(result, "finish_reason", "stop")
+        usage = {"prompt_tokens": 600, "completion_tokens": 100}
+        if payload.get("stream"):
+            delta = {"role": "assistant", "content": message.get("content") or ""}
+            if message.get("tool_calls"):
+                delta["tool_calls"] = [{"index": index, **tool_call} for index, tool_call in enumerate(message["tool_calls"])]
+            frames = [
+                {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+                {"choices": [], "usage": usage},
+            ]
+            events = "".join(f"data: {json.dumps(frame)}\n\n" for frame in frames) + "data: [DONE]\n\n"
+            return httpx2.Response(200, content=events.encode(), headers={"content-type": "text/event-stream"})
+        return httpx2.Response(200, json={"choices": [{"message": message, "finish_reason": finish}], "usage": usage})
 
     original_client = httpx2.AsyncClient
     monkeypatch.setattr(httpx2, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": httpx2.MockTransport(respond)}))

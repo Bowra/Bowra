@@ -1028,14 +1028,20 @@ describe("unified manual draft", () => {
     const onClose = vi.fn();
     renderIntl(<CreateSubagentCard unifiedDraftEnabled manualDraft={initial} onClose={onClose} />);
 
-    fireEvent.change(screen.getByPlaceholderText("sales-analysis"), { target: { value: "not-saved" } });
-    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    expect(screen.getByRole("group", { name: "离开前处理未保存的修改" })).toBeTruthy();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1200)); });
-    expect(saveManualDraftMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "放弃未保存修改" }));
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(saveManualDraftMock).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(screen.getByPlaceholderText("sales-analysis"), { target: { value: "not-saved" } });
+      fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+      expect(screen.getByRole("group", { name: "离开前处理未保存的修改" })).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+      expect(saveManualDraftMock).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "放弃未保存修改" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(saveManualDraftMock).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 
   it("guards both app routes and session changes until an unsaved draft reaches the server", async () => {

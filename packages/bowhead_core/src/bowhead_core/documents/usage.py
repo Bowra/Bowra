@@ -20,6 +20,23 @@ from bowhead_core.sqlite_domains import domain_database_path, domain_layout_acti
 from bowhead_core.user_store import _deduct_credit_with_stable_id_in_tx
 
 
+async def unanswered_call_code(path, job_id: str, attempt_no: int, call_no: int) -> str | None:
+    """``document_model_no_reply`` for a call confirmed not applied (nothing charged), else None.
+
+    The hook refuses a second transport for one document call, so the Router reports
+    that refusal as an unknown outcome. The settled row tells a reply-less call apart
+    from usage that is genuinely unresolved.
+    """
+    async with (
+        open_shared_ctx(domain_database_path(str(path), "execution")) as db,
+        db.execute(
+            "SELECT state,error_code FROM document_model_calls WHERE job_id=? AND attempt_no=? AND call_no=?", (job_id, attempt_no, call_no)
+        ) as cursor,
+    ):
+        row = await cursor.fetchone()
+    return "document_model_no_reply" if row is not None and row[0] == "not_applied" else None
+
+
 @dataclass
 class DocumentModelHook:
     path: str

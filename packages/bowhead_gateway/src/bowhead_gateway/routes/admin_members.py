@@ -934,7 +934,6 @@ _DEACTIVATE_ERROR_RESPONSE: dict[str, tuple[int, str]] = {
     "last_workspace_admin": (422, "last_workspace_admin"),
     "already_inactive": (409, "already_inactive"),
     "local_team_invariant_failed": (409, "local_team_invariant_failed"),
-    "account_deletion_not_ready": (503, "account_deletion_not_ready"),
     "subagent_lifecycle_action_required": (
         409,
         "subagent_lifecycle_action_required",
@@ -972,6 +971,18 @@ async def deactivate_member(
     if target_user_id == caller.id:
         raise HTTPException(422, {"code": "cannot_self_deactivate"})
 
+    delete_identity = getattr(request.app.state, "deployment_mode", "local") == "local"
+    if delete_identity:
+        cleanup_task = getattr(request.app.state, "account_deletion_task", None)
+        if getattr(request.app.state, "account_deletion_service", None) is None or cleanup_task is None or cleanup_task.done():
+            raise HTTPException(
+                503,
+                {
+                    "code": "account_deletion_not_ready",
+                    "message": "Account cleanup is unavailable. Ask the instance administrator to restore it before trying again.",
+                },
+            )
+
     # 3. Atomic team membership removal + audit (data-layer guards: owner/last-admin)
     result = await store.admin_soft_delete_member_detailed(
         target_user_id=target_user_id,
@@ -979,7 +990,7 @@ async def deactivate_member(
         actor_user_id=caller.id,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
-        delete_identity=getattr(request.app.state, "deployment_mode", "local") == "local",
+        delete_identity=delete_identity,
     )
     if not result.changed:
         status, code = _DEACTIVATE_ERROR_RESPONSE.get(
@@ -987,10 +998,6 @@ async def deactivate_member(
             (400, "deactivate_failed"),
         )
         detail: dict[str, object] = {"code": code}
-        if code == "account_deletion_not_ready":
-            detail["message"] = (
-                "Account retirement is unavailable. Ask the instance administrator to restore the privacy ledger configuration before retrying."
-            )
         if code == "subagent_lifecycle_action_required" and result.error_details is not None:
             detail["enabled_shared"] = int(
                 result.error_details.get("enabled_shared", 0),

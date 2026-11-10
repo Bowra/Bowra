@@ -1232,8 +1232,16 @@ class OpenAICompatibleAdapter:
 
         params = self._outbound_params(req.model, self._request_capability(req))
         apply_outbound_params(body, resolve_outbound_params(self._provider_definition(), model_id=req.model, family=family), family=family)
+        bounded_output = req.max_output_tokens is not None and not req.output_limit_covers_reasoning
         if self.adapter_type != "custom_http":
-            apply_runtime_parameters(body, self._provider_definition(), model_id=req.model, capability=self._request_capability(req), family=family)
+            apply_runtime_parameters(
+                body,
+                self._provider_definition(),
+                model_id=req.model,
+                capability=self._request_capability(req),
+                family=family,
+                bounded_output=bounded_output,
+            )
         apply_learned_constraints(
             body,
             adapter_type=self.adapter_type,
@@ -1279,7 +1287,12 @@ class OpenAICompatibleAdapter:
                 },
             )
             rendered = apply_runtime_parameters(
-                rendered, self._provider_definition(), model_id=req.model, capability=self._request_capability(req), family=family
+                rendered,
+                self._provider_definition(),
+                model_id=req.model,
+                capability=self._request_capability(req),
+                family=family,
+                bounded_output=bounded_output,
             )
             if durable_stream_usage:
                 rendered["stream_options"] = {"include_usage": True}

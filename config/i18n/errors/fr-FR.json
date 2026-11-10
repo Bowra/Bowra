@@ -101,6 +101,8 @@
   "clarification_resume_not_ready": "Cette demande de précision n’est pas encore terminée. Envoyez un choix avant de continuer.",
   "clarification_capture_unavailable": "La question de suivi n’a pas pu être préparée. La question n’a pas été créée, car l’avancement de la tâche n’a pas pu être préparé pour la reprise. Vérifiez le travail déjà affiché.",
   "clarification_resume_preflight_unavailable": "La tâche initiale n’a pas pu reprendre. La tâche initiale n’a pas passé les vérifications avant la reprise. Vérifiez le travail déjà affiché et copiez les informations de diagnostic pour votre administrateur.",
+  "clarification_retained_input_unavailable": "Impossible de vérifier le fichier initial. Le fichier initial utilisé par cette tâche a changé ou ne peut pas être vérifié. Rétablissez le fichier et son accès, ou réutilisez explicitement les résultats disponibles dans la conversation.",
+  "clarification_directory_access_unavailable": "Contexte de fichiers enregistré inaccessible. Un fichier nommé dans le contexte enregistré n’est plus accessible. Rétablissez son accès ou réutilisez explicitement les résultats disponibles dans la conversation.",
   "clarification_resume_unavailable": "Cette tâche n’a pas pu continuer. L’étape précise de l’échec n’a pas été enregistrée. Consultez le travail déjà affiché.",
   "clarification_store_unavailable": "Le service de demandes de précision n’est pas correctement configuré. Contactez votre administrateur système.",
   "chat_action_not_found": "Le résultat de cet envoi ne peut pas encore être confirmé. Conservez le brouillon actuel et vérifiez de nouveau plus tard.",

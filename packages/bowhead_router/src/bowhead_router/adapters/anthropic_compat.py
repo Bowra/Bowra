@@ -786,7 +786,14 @@ class AnthropicCompatibleAdapter:
         capability = OpenAICompatibleAdapter._request_capability(req)
         params = self._outbound_params(req.model, capability)
         apply_outbound_params(body, resolve_outbound_params(self.provider_options, model_id=req.model, family="anthropic"), family="anthropic")
-        apply_runtime_parameters(body, self.provider_options, model_id=req.model, capability=capability, family="anthropic")
+        apply_runtime_parameters(
+            body,
+            self.provider_options,
+            model_id=req.model,
+            capability=capability,
+            family="anthropic",
+            bounded_output=req.max_output_tokens is not None and not req.output_limit_covers_reasoning,
+        )
         apply_learned_constraints(
             body,
             adapter_type="anthropic_compatible",

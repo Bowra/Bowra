@@ -1564,6 +1564,13 @@ describe("SettingsPeople", () => {
       "Remove failed: This member has already been removed from the current team. Refresh the member list.",
     ],
     [
+      "account_deletion_not_ready",
+      "zh-CN",
+      "移出团队",
+      "从团队移除",
+      "移除失败：账号清理服务不可用。请联系实例管理员恢复服务后再试。",
+    ],
+    [
       "deactivate_failed",
       "zh-CN",
       "移出团队",

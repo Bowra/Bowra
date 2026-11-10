@@ -407,6 +407,62 @@ class NotificationStore:
                 raise
         return tuple(added)
 
+    async def record_withheld(
+        self,
+        *,
+        team_id: str,
+        category: str,
+        type: str,  # noqa: A002
+        priority: str,
+        title: str,
+        body: str | None,
+        subject_type: str | None,
+        subject_id: str | None,
+        metadata: dict[str, Any] | None,
+        dedupe_key: str,
+        reason: str,
+    ) -> None:
+        """Record an event a limit kept from reaching anyone: an item already resolved, with no recipients.
+
+        It appears in no list or count and is pruned with the rest of the history; its producer
+        reads it back by ``dedupe_key`` (a scheduled run whose alert the daily limit refused). A
+        repeat changes nothing.
+        """
+        now = _now()
+        async with open_shared_ctx(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO notification_items("
+                "id,team_id,category,type,priority,title,body,subject_type,subject_id,"
+                "metadata_json,dedupe_key,state,resolved_at,resolved_reason,created_at,updated_at"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,'resolved',?,?,?,?) ON CONFLICT(team_id, dedupe_key) DO NOTHING",
+                (
+                    f"ntf_{uuid4().hex[:12]}",
+                    team_id,
+                    category,
+                    type,
+                    priority,
+                    title,
+                    body,
+                    subject_type,
+                    subject_id,
+                    _json_dumps(metadata or {}),
+                    dedupe_key,
+                    now,
+                    reason,
+                    now,
+                    now,
+                ),
+            )
+            await db.commit()
+
+    async def has_dedupe(self, *, team_id: str, dedupe_key: str) -> bool:
+        """Whether an item with ``(team_id, dedupe_key)`` exists, in any state."""
+        async with (
+            open_shared_ctx(self.db_path) as db,
+            db.execute("SELECT 1 FROM notification_items WHERE team_id=? AND dedupe_key=?", (team_id, dedupe_key)) as cur,
+        ):
+            return await cur.fetchone() is not None
+
     async def resolve_by_dedupe(
         self,
         *,
@@ -604,11 +660,14 @@ class NotificationStore:
         return where, params
 
     async def count_recent(self, *, type: str, subject_type: str, subject_id: str, since: str) -> int:  # noqa: A002
-        """Items of one type about one subject created since ``since``, in any Team or state (rate limits)."""
+        """Items of one type about one subject created since ``since`` that reached someone, in any Team
+        or state (rate limits). An event the limit withheld (`record_withheld`) reached nobody and does
+        not count."""
         async with (
             open_shared_ctx(self.db_path) as db,
             db.execute(
-                "SELECT COUNT(*) FROM notification_items WHERE type=? AND subject_type=? AND subject_id=? AND created_at >= ?",
+                "SELECT COUNT(*) FROM notification_items i WHERE i.type=? AND i.subject_type=? AND i.subject_id=? "
+                "AND i.created_at >= ? AND EXISTS (SELECT 1 FROM notification_recipients r WHERE r.notification_id = i.id)",
                 (type, subject_type, subject_id, since),
             ) as cur,
         ):

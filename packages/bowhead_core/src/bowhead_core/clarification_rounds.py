@@ -157,6 +157,8 @@ async def next_round(
         turn = await cursor.fetchone()
     if turn is None:
         raise ValueError("clarification_round_owner_unavailable")
+    if not await _has_chat_source(db, turn_id=turn_id, user_id=user_id, workspace_id=workspace_id, session_id=session_id):
+        raise ValueError("clarification_round_source_unavailable")
     rows = await read_history(db, turn_id=turn_id, user_id=user_id, workspace_id=workspace_id, session_id=session_id)
     contexts = history_contexts(rows)
     if len(rows) >= MAX_ROUNDS:
@@ -175,6 +177,32 @@ async def next_round(
         "prior_request_id": rows[-1]["request_id"] if rows else None,
         "question_hashes": hashes,
     }
+
+
+async def _has_chat_source(db, *, turn_id: str, user_id: str, workspace_id: str, session_id: str) -> bool:
+    """Whether the Turn has the chat source that /chat/send writes in this Session.
+
+    Resuming a bounded round restores the original message from that source. Turns started
+    elsewhere (scheduled runs, IM channels) have none, so an answer could never resume their
+    bounded card; they keep the existing first-card contract instead.
+    """
+    from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
+
+    source = await _read_chat_turn_user_source_in_tx(db, turn_id=turn_id, expected_user_id=user_id, expected_workspace_id=workspace_id)
+    return source is not None and source.session_id == session_id
+
+
+async def admits_bounded_rounds(ctx) -> bool:
+    """Whether this Turn's writer supports bounded checkpoints: a tracked worker with a chat source."""
+    store = getattr(ctx, "clarification_store", None)
+    if store is None or not worker_identity(ctx)["owner_id"]:
+        return False
+    try:
+        async with open_pooled_read_ctx(store.db_path) as db:
+            return await _has_chat_source(db, turn_id=ctx.turn_id, user_id=ctx.user_id, workspace_id=ctx.workspace_id, session_id=ctx.session_id)
+    except (AttributeError, ValueError, aiosqlite.Error, SQLiteCapacityError):
+        # Unknown: keep the bounded contract, whose admission check then refuses safely.
+        return True
 
 
 async def available(ctx, *, questions=None, fallback=None) -> bool:

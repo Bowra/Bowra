@@ -31,11 +31,11 @@ This is a **source preview**. You can build and initialize the reviewed Communit
 
 ChromaDB has unresolved upstream dependency advisories. See the [current assessment and deployment boundaries](SECURITY.md#chromadb-dependency-advisories).
 
-## Source snapshot 1.7.24
+## Source snapshot 1.7.31
 
-This update adds in-place chart edits and exact HEX colors, clearer tool confirmations, more reliable conversation continuation, model connection deletion review, and shared dependency security fixes. See the [Community release notes](docs/help/release-notes/releases/v1.7.24.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
+This update adds report chart-type switching, shared code syntax highlighting, and more reliable continuation of tasks and scheduled questions. It also improves query-filter notices and account-cleanup readiness. See the [Community release notes](docs/help/release-notes/releases/v1.7.31.en-US.md) and [upgrade precautions](deploy/README.md#upgrade-an-existing-installation).
 
-SQLite upgrades now coordinate twelve database files and complete recovery archives. Stop every writer and preserve instance keys and the current deletion ledger before upgrading. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
+SQLite upgrades coordinate twelve database files. Stop every writer and preserve instance keys, databases and objects before upgrading. Automatic migration backups cover registered SQLite files and layout metadata; keep complete recovery snapshots separately. Restoring a snapshot from before account deletion can restore that account. Community retains its reviewed sandbox source and basic document Skills; native template-authoring helpers require separately qualified runtimes.
 
 ## Verified Intelligence
 

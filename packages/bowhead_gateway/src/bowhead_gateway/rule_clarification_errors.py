@@ -35,12 +35,19 @@ def normalize_rule_clarification_access_code(code: str) -> str:
     return "clarification_access_denied"
 
 
-def rule_clarification_error_payload(code: str, *, clarification_stage: Literal["clarification_resume_preflight"] | None = None) -> dict[str, Any]:
+def rule_clarification_error_payload(
+    code: str,
+    *,
+    clarification_stage: Literal["clarification_resume_preflight"] | None = None,
+    clarification_condition: Literal["retained_input", "directory_access"] | None = None,
+) -> dict[str, Any]:
     """Build a code-only, catalog-backed payload with typed diagnostics."""
 
     safe_code = code if code in RULE_CLARIFICATION_FAILURE_CODES else _FALLBACK_CODE
     payload: dict[str, Any] = {"code": safe_code}
-    published = publish_rule_clarification_failure(safe_code, clarification_stage=clarification_stage)
+    published = publish_rule_clarification_failure(
+        safe_code, clarification_stage=clarification_stage, clarification_condition=clarification_condition
+    )
     if published is not None:
         payload["diagnostics"] = published.to_wire()
     return payload
@@ -53,10 +60,11 @@ def rule_clarification_http_error(
     nested_error: bool = False,
     clarification_stage: Literal["clarification_resume_preflight"] | None = None,
     headers: Mapping[str, str] | None = None,
+    clarification_condition: Literal["retained_input", "directory_access"] | None = None,
 ) -> HTTPException:
     """Build a localized HTTPException without accepting free-form detail."""
 
-    payload = rule_clarification_error_payload(code, clarification_stage=clarification_stage)
+    payload = rule_clarification_error_payload(code, clarification_stage=clarification_stage, clarification_condition=clarification_condition)
     detail = {"error": payload} if nested_error else payload
     return HTTPException(
         status_code=status_code,

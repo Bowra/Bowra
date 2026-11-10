@@ -261,7 +261,6 @@ async def test_account_erasure_includes_context_projections(collab, tmp_path):
     from datetime import UTC, datetime, timedelta
     from unittest.mock import AsyncMock
 
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
     from bowhead_core.account_deletion_service import AccountDeletionService
     from bowhead_core.artifact_store import ArtifactStore, LocalBackend
     from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
@@ -273,13 +272,10 @@ async def test_account_erasure_includes_context_projections(collab, tmp_path):
     users = UserStore(collab.path)
     replacement = await users.get_user_by_email("owner@example.com")
     await users.add_member(workspace_id=collab.worker.workspace_id, user_id=replacement.id, role="admin")
-    ledger = AccountDeletionLedger(tmp_path / "deletions.db", secret="synthetic-instance-secret")
-    await ledger.initialize()
     service = AccountDeletionService(
         UserStore(collab.path),
         lifecycle=SessionLifecycleCoordinator(SessionStore(collab.path), TerminalProtocolStore(collab.path)),
         artifacts=ArtifactStore(db_path=collab.path, backend=LocalBackend(tmp_path / "blobs")),
-        ledger=ledger,
         secret="synthetic-instance-secret",
         external_cleanup=AsyncMock(),
         clock=lambda: datetime.now(UTC) - timedelta(days=31),

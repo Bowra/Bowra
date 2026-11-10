@@ -510,16 +510,21 @@ async def _release_held_alert_email(app: FastAPI, job: ScheduledJob, run_id: str
         await _settle_alert_email(notif, job, run_id, merged=False)
 
 
-async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict[str, Any], *, run_id: str) -> bool:
-    """Delivery mode "only when flagged" (``notify_channels.deliver == "on_alert"``, FEATURE_ROUTINE_NOTIFY).
+def _delivers_only_when_flagged(channels: dict[str, Any]) -> bool:
+    """Delivery mode "only when flagged" (``notify_channels.deliver == "on_alert"``) is in effect.
 
-    The run's result is delivered only when the task's Agent flagged this run with
-    ``routine_notify``. With the switch off the mode is ignored and every run is delivered as
-    before, so turning the switch off never silences a task.
+    With FEATURE_ROUTINE_NOTIFY off the mode is ignored and every run is delivered as before,
+    so turning the switch off never silences a task.
     """
     from bowhead_core.routine_notify_tool import routine_notify_enabled
 
-    if channels.get("deliver") != "on_alert" or not routine_notify_enabled():
+    return channels.get("deliver") == "on_alert" and routine_notify_enabled()
+
+
+async def _skipped_without_alert(app: FastAPI, job: ScheduledJob, channels: dict[str, Any], *, run_id: str) -> bool:
+    """Delivery mode "only when flagged": the run's result is delivered only when the task's
+    Agent flagged this run with ``routine_notify`` (see ``_delivers_only_when_flagged``)."""
+    if not _delivers_only_when_flagged(channels):
         return False
     notif = getattr(app.state, "notification_service", None)
     try:
@@ -1076,6 +1081,7 @@ async def run_scheduled_turn(app: FastAPI, job: ScheduledJob) -> RunOutcome:
                 workspace_id=job.workspace_id,
                 job_name=job.name,
                 session_id=session_id,
+                delivers_only_when_flagged=_delivers_only_when_flagged(getattr(job, "notify_channels", None) or {}),
             ),
             workspace_id=job.workspace_id,
             datarc_binding=datarc_ctx.connection_binding,

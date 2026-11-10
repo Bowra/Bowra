@@ -132,9 +132,10 @@ describe("表格虚拟滚动 · 真开起来（假布局）", () => {
     [...document.querySelectorAll(".v2-chart-table-el tbody tr")].filter((t) => !t.hasAttribute("aria-hidden"));
   const spacers = () => [...document.querySelectorAll(".v2-chart-table-el tbody tr[aria-hidden]")];
 
-  it("★ 5000 行只渲一屏 + 一条底部占位撑出全长", () => {
+  it("virtualizes 5,000 rows with correct positions, accessibility and column widths", () => {
     installFakeLayout();
-    render(<ChartTable spec={bigSpec(5000)} chromeless />);
+    const spec = bigSpec(5000);
+    render(<ChartTable spec={spec} chromeless />);
     const rendered = realRows();
     // 400px viewport / 36px row ≈ 11 rows, plus overscan 12 — far fewer than 5000 is the entire criterion;
     // exact counts vary with virtualizer implementation; fixing them creates brittle assertions.
@@ -144,21 +145,18 @@ describe("表格虚拟滚动 · 真开起来（假布局）", () => {
     const pads = spacers();
     expect(pads).toHaveLength(1);
     expect(parseInt((pads[0] as HTMLElement).style.height, 10)).toBeGreaterThan(4000 * ROW_H);
-  });
-
-  it("★★ 渲的是**开头**那一屏，不是随便一段——首行必须是第 1 行", () => {
-    installFakeLayout();
-    render(<ChartTable spec={bigSpec(5000)} chromeless />);
     expect(realRows()[0]!.querySelector("td")!.textContent).toBe("S0");
-  });
-
-  it("★ 虚拟化时必须标 aria-rowcount/rowindex——DOM 里只有一屏，读屏软件否则数出来的行数是错的", () => {
-    installFakeLayout();
-    render(<ChartTable spec={bigSpec(5000)} chromeless />);
-    const table = document.querySelector(".v2-chart-table-el")!;
+    const table = document.querySelector<HTMLElement>(".v2-chart-table-el")!;
     expect(table.getAttribute("aria-rowcount")).toBe("5001"); // 5000 data rows + header
     expect(table.querySelector("thead tr")!.getAttribute("aria-rowindex")).toBe("1");
     expect(realRows()[0]!.getAttribute("aria-rowindex")).toBe("2");
+    for (const pad of spacers()) {
+      expect(pad.getAttribute("aria-hidden")).not.toBeNull();
+      expect(pad.querySelector("td")!.getAttribute("colspan")).toBe("4");
+    }
+    const scroll = document.querySelector(".v2-chart-table-scroll")!;
+    expect(scroll).toHaveClass("is-virtual");
+    expect(table.style.getPropertyValue("--chart-table-columns")).toBe(String(spec.columns.length));
   });
 
   it("★ 不虚拟化时不标 aria-rowcount——DOM 本来就是全的，多一份口径就多一处会漂", () => {
@@ -166,15 +164,6 @@ describe("表格虚拟滚动 · 真开起来（假布局）", () => {
     render(<ChartTable spec={bigSpec(30)} chromeless />);
     expect(document.querySelector(".v2-chart-table-el")!.hasAttribute("aria-rowcount")).toBe(false);
     expect(realRows()).toHaveLength(30);
-  });
-
-  it("★ 占位行不进无障碍树，也不许影响列宽（colSpan 跟着列数走）", () => {
-    installFakeLayout();
-    render(<ChartTable spec={bigSpec(5000)} chromeless />);
-    for (const pad of spacers()) {
-      expect(pad.getAttribute("aria-hidden")).not.toBeNull();
-      expect(pad.querySelector("td")!.getAttribute("colspan")).toBe("4");
-    }
   });
 
   it("★ 导出面：有假布局也只出 25 行整表，没有占位行", () => {
@@ -189,16 +178,6 @@ describe("表格虚拟滚动 · 真开起来（假布局）", () => {
 });
 
 describe("virtualized tables keep stable column widths", () => {
-  it("marks a virtualized table so the report keeps it on fixed layout with a per-column minimum width", () => {
-    installFakeLayout();
-    const spec = bigSpec(5000);
-    render(<ChartTable spec={spec} chromeless />);
-    const scroll = document.querySelector(".v2-chart-table-scroll")!;
-    expect(scroll).toHaveClass("is-virtual");
-    const table = scroll.querySelector<HTMLElement>("table.v2-chart-table-el")!;
-    expect(table.style.getPropertyValue("--chart-table-columns")).toBe(String(spec.columns.length));
-  });
-
   it("leaves a fully rendered table unmarked so its columns size by content", () => {
     installFakeLayout();
     render(<ChartTable spec={bigSpec(30)} chromeless />);

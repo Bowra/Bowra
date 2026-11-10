@@ -73,6 +73,7 @@ CHAT_TURN_FAILURE_CODES = frozenset(
         "document_routing_source_unavailable",
         "document_planning_failed",
         "document_authoring_script_failed",
+        "document_model_no_reply",
         "document_candidate_invalid",
         "entitlement_denied",
         "hop_cap_exceeded",
@@ -459,6 +460,7 @@ _CHAT_FAILURE_CLASS_BY_PARENT = types.MappingProxyType(
         "document_information_incomplete": "content",
         "document_planning_failed": "runtime",
         "document_authoring_script_failed": "runtime",
+        "document_model_no_reply": "runtime",
         "document_candidate_invalid": "content",
         "document_history_unavailable": "configuration",
         "document_request_rejected": "content",
@@ -505,6 +507,7 @@ _CHAT_RETRYABLE_BY_PARENT = types.MappingProxyType(
         "document_information_incomplete": False,
         "document_planning_failed": False,
         "document_authoring_script_failed": False,
+        "document_model_no_reply": True,
         "document_candidate_invalid": False,
         "document_history_unavailable": False,
         "document_request_rejected": False,
@@ -589,6 +592,7 @@ _CHAT_RECOVERY_ACTION_BY_PARENT: Mapping[str, RecoveryAction] = types.MappingPro
         "no_safe_fields_changed": "edit_and_resend",
         "document_information_incomplete": "edit_and_resend",
         "document_authoring_script_failed": "edit_and_resend",
+        "document_model_no_reply": "retry",
         "document_candidate_invalid": "edit_and_resend",
         "document_request_rejected": "edit_and_resend",
         "document_routing_uncertain": "edit_and_resend",
@@ -1052,6 +1056,7 @@ DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
                 "phase=<finite>",
                 "failure_class=<finite>",
                 "retryable=<finite>",
+                "condition=<finite?>",
                 "outcome=unknown?",
             ),
         ),
@@ -1112,6 +1117,7 @@ DIAGNOSTIC_POLICIES: Mapping[str, DiagnosticPolicy] = types.MappingProxyType(
                 "phase=<finite>",
                 "failure_class=<finite>",
                 "retryable=<finite>",
+                "condition=<finite?>",
             ),
         ),
         "datarc_connection_failure": DiagnosticPolicy(
@@ -1237,6 +1243,7 @@ def publish_chat_turn_failure(
     reason_code: str,
     *,
     clarification_stage: Literal["clarification_capture"] | None = None,
+    clarification_condition: Literal["retained_input", "directory_access"] | None = None,
     outcome_unknown: bool = False,
 ) -> PublishedDiagnostic | None:
     """Publish only finite Chat failure facts; exception text is not accepted."""
@@ -1250,12 +1257,18 @@ def publish_chat_turn_failure(
     if clarification_stage is not None and (reason_code != "clarification_resume_unavailable" or clarification_stage != "clarification_capture"):
         _drop("chat_turn_failed", "clarification_stage")
         return None
+    if clarification_condition is not None and (
+        reason_code != "clarification_resume_unavailable" or clarification_condition not in {"retained_input", "directory_access"}
+    ):
+        return None
     failure_class = _CHAT_FAILURE_CLASS_BY_PARENT[reason_code]
     phase = clarification_stage or "chat"
     return _render_registered_diagnostic(
         diagnostic_code="chat_turn_failed",
         parent_code=reason_code,
-        safe_detail=f"phase={phase}; failure_class={failure_class}" + ("; outcome=unknown" if outcome_unknown else ""),
+        safe_detail=f"phase={phase}; failure_class={failure_class}"
+        + (f"; condition={clarification_condition}" if clarification_condition else "")
+        + ("; outcome=unknown" if outcome_unknown else ""),
         retryable=False if outcome_unknown else _CHAT_RETRYABLE_BY_PARENT[reason_code],
     )
 
@@ -1271,6 +1284,14 @@ def clarification_failure_copy_code(reason_code: str, diagnostics: object) -> st
     if diagnostics.get("schema_version") != 1 or diagnostics.get("disclosure") != "authenticated":
         return reason_code
     facts = (diagnostics.get("diagnostic_code"), diagnostics.get("safe_detail"))
+    for condition in ("retained_input", "directory_access"):
+        for publisher, detail in (
+            ("chat_turn_failed", "phase=chat; failure_class=configuration"),
+            ("chat_turn_failed", "phase=clarification_capture; failure_class=configuration"),
+            ("rule_clarification_failure", "phase=clarification_resume_preflight; failure_class=state"),
+        ):
+            if facts == (publisher, detail + f"; condition={condition}"):
+                return f"clarification_{condition}_unavailable"
     if facts == ("chat_turn_failed", "phase=clarification_capture; failure_class=configuration"):
         return "clarification_capture_unavailable"
     if facts == ("rule_clarification_failure", "phase=clarification_resume_preflight; failure_class=state"):
@@ -1473,6 +1494,7 @@ def publish_rule_clarification_failure(
     reason_code: str,
     *,
     clarification_stage: Literal["clarification_resume_preflight"] | None = None,
+    clarification_condition: Literal["retained_input", "directory_access"] | None = None,
 ) -> PublishedDiagnostic | None:
     """Publish finite Business Rules/Clarification facts without store prose."""
 
@@ -1484,12 +1506,16 @@ def publish_rule_clarification_failure(
     ):
         _drop("rule_clarification_failure", "clarification_stage")
         return None
+    if clarification_condition is not None and (
+        reason_code != "clarification_resume_unavailable" or clarification_condition not in {"retained_input", "directory_access"}
+    ):
+        return None
     phase, failure_class, retryable = _RULE_CLARIFICATION_FAILURE_FACTS_BY_PARENT[reason_code]
     phase = clarification_stage or phase
     return _render_registered_diagnostic(
         diagnostic_code="rule_clarification_failure",
         parent_code=reason_code,
-        safe_detail=f"phase={phase}; failure_class={failure_class}",
+        safe_detail=f"phase={phase}; failure_class={failure_class}" + (f"; condition={clarification_condition}" if clarification_condition else ""),
         retryable=retryable,
     )
 
@@ -1621,6 +1647,7 @@ def build_chat_turn_failure(
     reason_code: str,
     turn_id: str,
     clarification_stage: Literal["clarification_capture"] | None = None,
+    clarification_condition: Literal["retained_input", "directory_access"] | None = None,
     step_usage: dict[str, int] | None = None,
     outcome_unknown: bool = False,
 ) -> ChatTurnFailure:
@@ -1628,7 +1655,9 @@ def build_chat_turn_failure(
 
     safe_reason = reason_code if reason_code in CHAT_TURN_FAILURE_CODES else "lead_internal_error"
     occurrence_id = uuid.uuid4().hex
-    published = publish_chat_turn_failure(safe_reason, clarification_stage=clarification_stage, outcome_unknown=outcome_unknown)
+    published = publish_chat_turn_failure(
+        safe_reason, clarification_stage=clarification_stage, clarification_condition=clarification_condition, outcome_unknown=outcome_unknown
+    )
     safe_turn_id = turn_id if _OTHER_ID_RE.fullmatch(turn_id) else None
     diagnostics = (
         published.to_wire(
@@ -1758,6 +1787,7 @@ def get_or_build_chat_turn_failure(
         reason_code=reason_code,
         turn_id=turn_id,
         clarification_stage=native_cause.stage if isinstance(native_cause, OrdinaryContinuationUnavailable) else None,
+        clarification_condition=native_cause.condition if isinstance(native_cause, OrdinaryContinuationUnavailable) else None,
         step_usage=step_usage,
     )
     with contextlib.suppress(Exception):

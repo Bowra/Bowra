@@ -12,7 +12,7 @@ When a run finds something worth your attention, such as a number crossing the l
 - **Flagged**: also pops up in an open Bowhead tab, and as a browser notification while the tab is in the background (see [Notifications](notification-center.en-US.md)).
 - **Urgent**: also sends one email to your account address. If the task already emails its result to you, you get that result email marked urgent instead of a second email.
 
-Only the task's owner receives its alerts. The alert names the task; open it to see the run, where the Agent explains what it found. A task sends at most one alert per run and at most five a day.
+Only the task's owner receives its alerts. The alert names the task; open it to see the run, where the Agent explains what it found. A task sends at most one alert per run and at most five a day. After the fifth, a run that would alert you sends no alert, but with **Only when flagged** you still receive its result as usual.
 
 ## Choose when results are delivered
 

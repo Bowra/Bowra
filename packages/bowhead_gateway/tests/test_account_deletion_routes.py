@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import hmac
+import json
+import os
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,8 +17,6 @@ import httpx2
 import pytest
 from alembic import command
 from alembic.config import Config
-from bowhead_core.account_deletion import AccountDeletionError
-from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 from bowhead_core.account_deletion_service import AccountDeletionService
 from bowhead_core.artifact_store import ArtifactStore, LocalBackend
 from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
@@ -55,13 +58,10 @@ async def context(tmp_path, account_gateway_schema, monkeypatch, complete_commun
     team = await users.create_team(name="Team", domain=None)
     user = await users.create_user(team_id=team.id, email="member@example.com", password="Current-password-123!", email_verified=True)
     artifacts = ArtifactStore(db_path=path, backend=LocalBackend(tmp_path / "blobs"))
-    ledger = AccountDeletionLedger(tmp_path / "outside" / "accounts.db", secret="synthetic-fernet-root")
-    await ledger.initialize()
     service = AccountDeletionService(
         users,
         lifecycle=SessionLifecycleCoordinator(SessionStore(path), TerminalProtocolStore(str(path))),
         artifacts=artifacts,
-        ledger=ledger,
         secret="synthetic-fernet-root",
         external_cleanup=AsyncMock(),
     )
@@ -123,39 +123,103 @@ async def test_passwordless_refresh_is_not_reauthentication(context):
             assert response.status_code == 200, response.text
 
 
-async def test_supported_backup_is_destroyed_but_signed_ledger_remains(context, tmp_path):
-    cleanup = AccountExternalCleanup(context.app)
-    cleanup.backup_root = tmp_path / "backups"
-    cleanup.backup_root.mkdir()
-    backup = cleanup.backup_root / "bowhead-pre-release.db"
-    with sqlite3.connect(context.users.db_path) as source, sqlite3.connect(backup) as target:
-        source.backup(target)
-    async with cleanup.guard():
-        cleanup._backups(context.user.id)
-    assert not backup.exists()
-    assert context.service.ledger.path.exists()
+async def test_instance_restore_uses_snapshot_account_state_and_preserves_history(tmp_path, monkeypatch):
+    from bowhead_core.sqlite_domains import DOMAIN_TARGET_FILES
+    from community_http_fixture import prepare_gateway_fixture
+    from gateway_legacy_database import upgrade
 
+    monkeypatch.chdir(tmp_path)
+    data = tmp_path / "data"
+    database_directory = data / "sqlite"
+    db_path = database_directory / "bowhead.db"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    monkeypatch.setenv("BOWHEAD_DB_URL", db_url)
+    monkeypatch.setenv("BOWHEAD_JWT_SECRET", SECRET)
+    monkeypatch.setenv("BOWHEAD_EMAIL_VERIFY_REQUIRED", "0")
+    monkeypatch.setenv("BOWHEAD_DEPLOYMENT_MODE", "saas")
+    monkeypatch.setenv("BOWHEAD_SANDBOX_BACKEND", "subprocess")
+    monkeypatch.setenv("BOWHEAD_ASSEMBLY_ROUTER", "mock")
+    upgrade(db_url)
+    await prepare_gateway_fixture(db_path, monkeypatch)
 
-async def test_snapshot_lock_prevents_erasure_racing_a_backup(context, tmp_path):
-    import fcntl
+    def copy_databases(source, destination):
+        destination.mkdir(parents=True, exist_ok=True)
+        for name in DOMAIN_TARGET_FILES.values():
+            with closing(sqlite3.connect(source / name)) as reader, closing(sqlite3.connect(destination / name)) as writer:
+                reader.backup(writer)
 
-    cleanup = AccountExternalCleanup(context.app)
-    cleanup.backup_root = tmp_path / "backups"
-    cleanup.backup_root.mkdir()
-    with (cleanup.backup_root / ".account-deletion.lock").open("a") as writer:
-        fcntl.flock(writer, fcntl.LOCK_SH)
-        with pytest.raises(AccountDeletionError, match="account_backup_in_progress"):
-            async with cleanup.guard():
-                pytest.fail("Erasure must not cross the active snapshot writer")
+    def personal_memory():
+        with closing(sqlite3.connect(db_path)) as db:
+            return db.execute("SELECT value FROM memory_entries WHERE subject_type='user' AND subject_id=?", (user.id,)).fetchall()
 
+    login = {"email": "restored@example.test", "password": "Restore-password-123!"}
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        users = app.state.user_store
+        team = await users.create_team(name="Restore Test")
+        user = await users.create_user(team_id=team.id, email_verified=True, **login)
+        with closing(sqlite3.connect(db_path)) as db, db:
+            db.execute(
+                "INSERT INTO memory_entries(id,subject_type,subject_id,kind,key,value,locked,source,created_at,updated_at,version,"
+                "memory_role,value_schema,memory_policy_version) VALUES "
+                "('mem_restore','user',?,'preference','fixture','\"saved\"',0,'user_explicit','2026-01-01','2026-01-01',1,'product_memory','text',1)",
+                (user.id,),
+            )
 
-async def test_unregistered_backup_format_blocks_completion(context, tmp_path):
-    cleanup = AccountExternalCleanup(context.app)
-    cleanup.backup_root = tmp_path / "backups"
-    cleanup.backup_root.mkdir()
-    (cleanup.backup_root / "unknown.tar.gz").write_bytes(b"synthetic archive")
-    with pytest.raises(AccountDeletionError, match="account_backup_format_unregistered"):
-        cleanup._backups(context.user.id)
+    backups = data / "backups"
+    before = backups / "before"
+    after = backups / "after"
+    copy_databases(database_directory, before)
+    (backups / "operator-archive.tar").write_bytes(b"operator-managed archive")
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        service = app.state.account_deletion_service
+        deletion = await service.request(user.id)
+    copy_databases(database_directory, after)
+    original_backups = {path.relative_to(backups): path.read_bytes() for path in backups.rglob("*") if path.is_file()}
+
+    # A valid pre-upgrade receipt would retire the restored account under the old startup path.
+    legacy = Path(os.environ["BOWHEAD_PRIVACY_LEDGER_DB"]).with_name("account-deletions.db")
+    key = hmac.digest(os.environ["BOWHEAD_FERNET_KEY"].encode(), b"bowhead-account-deletion-v1", "sha256")
+    subject = hmac.digest(key, user.id.encode(), "sha256").hex()
+    signature = hmac.digest(key, json.dumps([subject, deletion.requested_at, deletion.purge_after]).encode(), "sha256").hex()
+    with closing(sqlite3.connect(legacy)) as db, db:
+        db.execute("CREATE TABLE account_retirements (subject TEXT PRIMARY KEY, requested_at TEXT, purge_after TEXT, signature TEXT)")
+        db.execute("INSERT INTO account_retirements VALUES (?, ?, ?, ?)", (subject, deletion.requested_at, deletion.purge_after, signature))
+    legacy_content = legacy.read_bytes()
+
+    copy_databases(after, database_directory)
+    app = create_app()
+    async with (
+        app.router.lifespan_context(app),
+        httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client,
+    ):
+        response = await client.post("/api/v1/auth/login", json=login)
+        assert response.status_code == 401, response.text
+        service = app.state.account_deletion_service
+        service.clock = lambda: datetime.fromisoformat(deletion.purge_after) + timedelta(days=1)
+        async with asyncio.timeout(15):
+            while True:
+                with closing(sqlite3.connect(db_path)) as db:
+                    state = db.execute("SELECT state FROM account_deletions WHERE operation_id=?", (deletion.operation_id,)).fetchone()
+                if state == ("completed",):
+                    break
+                service.wake()
+                await asyncio.sleep(0.1)
+        assert personal_memory() == []
+    assert {path.relative_to(backups): path.read_bytes() for path in backups.rglob("*") if path.is_file()} == original_backups
+
+    copy_databases(before, database_directory)
+    app = create_app()
+    async with (
+        app.router.lifespan_context(app),
+        httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://gw") as client,
+    ):
+        response = await client.post("/api/v1/auth/login", json=login)
+        assert response.status_code == 200, response.text
+        assert response.json()["user"]["id"] == user.id
+        assert personal_memory() == [('"saved"',)]
+    assert legacy.read_bytes() == legacy_content
 
 
 async def test_personal_kb_bytes_extractions_and_all_index_versions_are_erased(context, tmp_path, monkeypatch):
@@ -164,17 +228,11 @@ async def test_personal_kb_bytes_extractions_and_all_index_versions_are_erased(c
 
     monkeypatch.chdir(tmp_path)
     upgrade(f"sqlite+aiosqlite:///{Path(context.users.db_path).with_name('bowhead.db')}")
-    context.app.state.memory_destructive_operation_store = SimpleNamespace(
-        permanent_delete_all=AsyncMock(return_value={"status": "completed"}),
-        readiness=AsyncMock(return_value=(True, None)),
-    )
     kb = KbStore(str(tmp_path / "chroma"))
     context.app.state.kb_store = kb
     cleanup = AccountExternalCleanup(context.app)
-    cleanup.backup_root = tmp_path / "backups"
     context.service.external_cleanup = cleanup
     context.service.external_quarantine = cleanup.quarantine
-    context.service.erasure_guard = cleanup.guard
     private = await context.service.artifacts.put_bytes(
         content=b"private", filename="private.txt", mime="text/plain", created_by=context.user.id, scope="user"
     )

@@ -96,3 +96,23 @@ async def test_resumed_reference_inventory_keeps_aliases_and_allows_new_same_tur
     assert retained.real_ids_of_kinds(("data",)) == {"art_original", "art_result"}
     assert retained.resolve("1") == "art_original" and retained.resolve("2") == "art_result"
     assert "later.txt" not in retained.to_prompt_xml() and "other.txt" not in retained.to_prompt_xml()
+
+
+@pytest.mark.parametrize("injected", [False, True])
+def test_observed_inputs_are_independent_of_unused_directory_size(injected):
+    source = SimpleNamespace(attachment_ids=())
+    context = {
+        "pinned": [{"artifact_id": f"directory_{index}"} for index in range(30)],
+        "parsed": [{"artifact_id": "injected", "size": 1, "extracted_text": "Original evidence" if injected else None}],
+    }
+    actual = ("template", "data", "reference")
+    assert retained_ids(source, context, observed_ids=actual) == (["injected"] if injected else []) + list(actual)
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        retained_ids(source, context)
+
+
+def test_actual_input_capacity_still_applies_without_counting_discovery():
+    source = SimpleNamespace(attachment_ids=())
+    context = {"pinned": [], "parsed": []}
+    with pytest.raises(OrdinaryContinuationUnavailable):
+        retained_ids(source, context, observed_ids=tuple(f"actual_{index}" for index in range(33)))

@@ -53,20 +53,16 @@ def store(tmp_path: Path, account_schema: Path) -> UserStore:
 async def service(store: UserStore, tmp_path: Path):
     from unittest.mock import AsyncMock
 
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
     from bowhead_core.account_deletion_service import AccountDeletionService
     from bowhead_core.artifact_store import ArtifactStore, LocalBackend
     from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
     from bowhead_core.session_store import SessionStore
     from bowhead_core.terminal_protocol_store import TerminalProtocolStore
 
-    ledger = AccountDeletionLedger(tmp_path / "outside-backup" / "deletions.db", secret="synthetic-instance-secret")
-    await ledger.initialize()
     return AccountDeletionService(
         store,
         lifecycle=SessionLifecycleCoordinator(SessionStore(store.db_path), TerminalProtocolStore(store.db_path)),
         artifacts=ArtifactStore(db_path=store.db_path, backend=LocalBackend(tmp_path / "blobs")),
-        ledger=ledger,
         secret="synthetic-instance-secret",
         external_cleanup=AsyncMock(),
     )
@@ -155,24 +151,10 @@ async def test_due_erasure_removes_content_and_preserves_same_email_new_identity
         assert (await (await db.execute("SELECT state FROM account_deletions")).fetchone())[0] == "completed"
 
 
-async def test_restore_replays_retirement_without_touching_new_identity(store: UserStore, service, tmp_path: Path) -> None:
-    backup = tmp_path / "before.db"
-    with sqlite3.connect(store.db_path) as source, sqlite3.connect(backup) as target:
-        source.backup(target)
-    await service.request("usr_old")
-    with sqlite3.connect(backup) as source, sqlite3.connect(store.db_path) as target:
-        source.backup(target)
-    assert (await store.get_user("usr_old")).status == "active"
-    await service.ledger.replay(store)
-    assert (await store.get_user("usr_old")).status == "deleted"
-    assert await store.get_user_by_email("member@example.com") is None
-
-
 @pytest.mark.parametrize("closed", [False, True], ids=["running-protocol", "committed-protocol"])
 async def test_protocol_accounts_are_erased_without_inventing_outcomes(tmp_path: Path, closed: bool) -> None:
     from unittest.mock import AsyncMock
 
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
     from bowhead_core.account_deletion_service import AccountDeletionService
     from bowhead_core.artifact_store import ArtifactStore, LocalBackend
     from bowhead_core.events import OrchestratorEvent
@@ -200,14 +182,11 @@ async def test_protocol_accounts_are_erased_without_inventing_outcomes(tmp_path:
         attempt = await runtime.store.mark_effect_dispatched(runtime.execution, attempt)
         await runtime.store.mark_effect_unknown(attempt)
     users = UserStore(path, terminal_auth_fence_enabled=True)
-    ledger = AccountDeletionLedger(tmp_path / "external.db", secret="synthetic-secret")
-    await ledger.initialize()
     now = datetime.now(UTC)
     service = AccountDeletionService(
         users,
         lifecycle=SessionLifecycleCoordinator(SessionStore(path), runtime.store),
         artifacts=ArtifactStore(db_path=path, backend=LocalBackend(tmp_path / "blobs")),
-        ledger=ledger,
         secret="synthetic-secret",
         external_cleanup=AsyncMock(),
         clock=lambda: now - timedelta(days=31),
@@ -267,7 +246,6 @@ async def test_unreviewed_schema_blocks_erasure_before_blob_deletion(store: User
 async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(document_ctx, tmp_path: Path, with_canvas: bool) -> None:
     from unittest.mock import AsyncMock
 
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
     from bowhead_core.account_deletion_service import AccountDeletionService
     from bowhead_core.documents.inputs import DocumentInputStore
     from bowhead_core.session_lifecycle import SessionLifecycleCoordinator
@@ -288,15 +266,12 @@ async def test_document_journals_and_frozen_inputs_follow_due_account_erasure(do
     input_paths += [row[0] for row in await _sql(ctx, "SELECT path FROM document_canvas_inputs")]
     with pytest.raises(aiosqlite.IntegrityError, match="retained"):
         await _sql(ctx, "DELETE FROM document_jobs WHERE id=?", (receipt.job_id,))
-    ledger = AccountDeletionLedger(tmp_path / "outside.db", secret="synthetic-secret")
-    await ledger.initialize()
     users = UserStore(ctx.path)
     now = datetime.now(UTC)
     service = AccountDeletionService(
         users,
         lifecycle=SessionLifecycleCoordinator(ctx.sessions, TerminalProtocolStore(str(ctx.path))),
         artifacts=ctx.artifacts,
-        ledger=ledger,
         secret="synthetic-secret",
         external_cleanup=AsyncMock(),
         clock=lambda: now - timedelta(days=31),
@@ -684,11 +659,6 @@ async def test_account_retirement_fences_known_and_unseen_chat_sessions_atomical
     now = datetime.now(UTC).timestamp()
     assert await sessions.register_chat_auth_session_generation(user_id="usr_old", auth_session_generation_hash="a" * 64, issued_at_epoch=now - 60)
 
-    async def failed_receipt(_deletion):
-        raise OSError("Synthetic ledger unavailable")
-
-    with pytest.raises(OSError, match="Synthetic ledger"):
-        await request_account_deletion(store, "usr_old", record_intent=failed_receipt)
     assert (await store.get_user_by_email("member@example.com")).status == "active"
     assert await sessions.is_chat_auth_session_generation_active(user_id="usr_old", auth_session_generation_hash="a" * 64)
     await service.request("usr_old")

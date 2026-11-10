@@ -266,8 +266,8 @@ def _routine(env, monkeypatch, emails: list[str]):
     return job, run
 
 
-def _urgent_alert(env, monkeypatch, run, probe=None):
-    """The run's Agent calls routine_notify at the urgent level."""
+def _notify(env, monkeypatch, run, probe=None):
+    """The run's Agent calls routine_notify at the urgent level; returns the tool result."""
     from bowhead_core.tool_registry import ToolRegistry
     from bowhead_gateway._scheduled_runner import routine_result_email_reaches_owner
 
@@ -279,8 +279,17 @@ def _urgent_alert(env, monkeypatch, run, probe=None):
         service_provider=lambda: env.service,
         result_email_reaches_owner=probe or (lambda r: routine_result_email_reaches_owner(env.app, r)),
     )
-    out = _run(routine_notify_tool._handler({"level": "urgent", "reason": "r"}, SimpleNamespace(scheduled_run=run)))
-    assert out["status"] == "queued"
+    return _run(routine_notify_tool._handler({"level": "urgent", "reason": "r"}, SimpleNamespace(scheduled_run=run)))
+
+
+def _urgent_alert(env, monkeypatch, run, probe=None):
+    """The run's Agent calls routine_notify at the urgent level."""
+    assert _notify(env, monkeypatch, run, probe)["status"] == "queued"
+
+
+def _five_earlier_alerts(env, job):
+    for i in range(5):
+        _run(env.service.emit_routine_alert(job, run_id=f"t_earlier_{i}", session_id="s_0", level="info"))
 
 
 def _deliver(env, job, summary="Revenue down 30%"):
@@ -346,6 +355,47 @@ def test_a_held_alert_email_goes_alone_when_no_result_email_carries_it(env, monk
     _tick(env, now=now)
 
     assert [subject for _to, subject, _ in env.sent] == [f"[{product_name()} routine alert] Daily"]
+
+
+@pytest.mark.parametrize("called", [True, False])
+def test_a_run_whose_alert_the_daily_limit_refused_still_delivers_its_plain_result(env, monkeypatch, called):
+    # 116 dogfood N8: in "only when flagged" mode a refused alert also withheld the result, so a
+    # condition that stayed true went silent for the rest of the day.
+    monkeypatch.setenv("FEATURE_ROUTINE_NOTIFY", "1")
+    job, run = _routine(env, monkeypatch, ["owner@example.com"])
+    job.notify_channels["deliver"] = "on_alert"
+    _five_earlier_alerts(env, job)
+    if called:
+        out = _notify(env, monkeypatch, run)
+        assert out["status"] == "rate_limited" and "do not say the owner was alerted" in out["message"]
+
+    _deliver(env, job)
+    _tick(env)
+
+    rows, _ = _run(env.store.list_for_user(user_id="u_owner"))
+    if not called:
+        assert env.sent == [] and "routine.delivered" not in {r.type for r in rows}, "a run without an alert still delivers nothing"
+        return
+    # The plain result: no sixth alert in the notifications, no urgent email, no urgent mark.
+    assert [(to, subject) for to, subject, _ in env.sent] == [("owner@example.com", f"[{product_name()} routine] Daily")]
+    assert "flagged urgent" not in env.sent[0][2]
+    assert sorted(r.type for r in rows) == ["routine.alert"] * 5 + ["routine.delivered"]
+
+
+def test_a_refused_alert_does_not_count_toward_the_daily_limit(env, monkeypatch):
+    from bowhead_core.types import ScheduledRunRef
+
+    job, run = _routine(env, monkeypatch, ["owner@example.com"])
+    _five_earlier_alerts(env, job)
+    assert _notify(env, monkeypatch, run)["status"] == "rate_limited"
+    # The oldest alert leaves the 24-hour window: four alerts reached the owner in it.
+    stale = (datetime.now(UTC) - timedelta(hours=25)).isoformat(timespec="seconds")
+    with closing(sqlite3.connect(env.store.db_path)) as db:
+        db.execute("UPDATE notification_items SET created_at=? WHERE dedupe_key='routine.alert:sj_1:t_earlier_0'", (stale,))
+        db.commit()
+
+    later = ScheduledRunRef(job_id="sj_1", run_id="t_2", owner_id="u_owner", workspace_id="ws_b", job_name="Daily", session_id="s_2")
+    assert _notify(env, monkeypatch, later)["status"] == "queued"
 
 
 def test_run_history_shows_each_runs_delivery_outcome_without_addresses(env):

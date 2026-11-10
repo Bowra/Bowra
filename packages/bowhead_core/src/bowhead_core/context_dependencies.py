@@ -75,7 +75,10 @@ async def capture_execution_dependencies(ctx) -> list[Message]:
             return result
         retained = await capture_attachment_dependencies(ctx, db, source)
     if retained is not None:
-        result.append(Message(role="user", name="context_attachment_dependencies_v1", content=retained.model_dump_json()))
+        from bowhead_core.context_attachments import AttachmentContextDependenciesV2
+
+        name = "context_attachment_dependencies_v2" if isinstance(retained, AttachmentContextDependenciesV2) else "context_attachment_dependencies_v1"
+        result.append(Message(role="user", name=name, content=retained.model_dump_json()))
     return result
 
 
@@ -130,8 +133,12 @@ async def validate_context_dependencies(
     from bowhead_core.knowledge_source_runtime import record_source_uses, validate_retained_sources
 
     for message in messages:
-        if message.name == "context_attachment_dependencies_v1":
-            from bowhead_core.context_attachments import AttachmentContextDependencies, validate_attachment_dependencies
+        if message.name in {"context_attachment_dependencies_v1", "context_attachment_dependencies_v2"}:
+            from bowhead_core.context_attachments import (
+                AttachmentContextDependencies,
+                AttachmentContextDependenciesV2,
+                validate_attachment_dependencies,
+            )
             from bowhead_core.ordinary_lead_continuation import OrdinaryContinuationUnavailable
             from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
@@ -139,8 +146,9 @@ async def validate_context_dependencies(
                 if message.role != "user" or message.tool_call_id or message.tool_calls or message.images:
                     raise ValueError("Invalid context dependency shape")
                 attachment = (prepared_dependencies or {}).get((message.name, message.content))
-                if not isinstance(attachment, AttachmentContextDependencies):
-                    attachment = AttachmentContextDependencies.model_validate(json.loads(message.content))
+                model = AttachmentContextDependenciesV2 if message.name == "context_attachment_dependencies_v2" else AttachmentContextDependencies
+                if type(attachment) is not model:
+                    attachment = model.model_validate(json.loads(message.content))
                 source_ctx = copy(ctx)
                 source_ctx.turn_id = attachment.turn_id
                 async with _source_connection(ctx, connection) as db:
@@ -149,6 +157,8 @@ async def validate_context_dependencies(
                     )
                     await validate_attachment_dependencies(source_ctx, db, source, attachment, read_bytes=read_bytes)
             except (ValueError, KeyError, TypeError, OSError) as exc:
+                if isinstance(exc, OrdinaryContinuationUnavailable):
+                    raise
                 raise OrdinaryContinuationUnavailable() from exc
             continue
         if message.name == "context_material_dependencies_v1":
@@ -226,7 +236,13 @@ async def validate_context_dependencies(
 
 
 _CONTEXT_DEPENDENCY_NAMES = frozenset(
-    {"context_attachment_dependencies_v1", "context_material_dependencies_v1", "context_source_dependencies_v1", "context_navigation_dependencies_v1"}
+    {
+        "context_attachment_dependencies_v1",
+        "context_attachment_dependencies_v2",
+        "context_material_dependencies_v1",
+        "context_source_dependencies_v1",
+        "context_navigation_dependencies_v1",
+    }
 )
 
 
@@ -386,11 +402,17 @@ class PreparedContextSourceValidator:
         # original context's source/navigation maps. Retain only the other
         # authority proofs, never full historical Tool-result bodies.
         for message in messages:
-            if message.name in {"context_attachment_dependencies_v1", "context_material_dependencies_v1"}:
+            if message.name in {"context_attachment_dependencies_v1", "context_attachment_dependencies_v2", "context_material_dependencies_v1"}:
                 self.authority_dependencies[message_digest([message])] = deepcopy(message)
-                from bowhead_core.context_attachments import AttachmentContextDependencies
+                from bowhead_core.context_attachments import AttachmentContextDependencies, AttachmentContextDependenciesV2
 
-                model = AttachmentContextDependencies if message.name == "context_attachment_dependencies_v1" else MaterialContextDependencies
+                model = (
+                    AttachmentContextDependencies
+                    if message.name == "context_attachment_dependencies_v1"
+                    else AttachmentContextDependenciesV2
+                    if message.name == "context_attachment_dependencies_v2"
+                    else MaterialContextDependencies
+                )
                 self.prepared_dependencies[message.name, message.content] = model.model_validate_json(message.content)
 
     async def __call__(self, messages: list[Message]) -> None:

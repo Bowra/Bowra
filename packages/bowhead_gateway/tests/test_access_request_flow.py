@@ -602,6 +602,7 @@ def test_removed_member_pending_requests_are_voided_through_deactivate_route(tmp
     assert env.action_required(env.alice) == 2
     app = FastAPI()
     app.include_router(admin_members.router)
+    app.state.deployment_mode = "saas"
     app.state.user_store = env.users
     app.state.access_request_store = env.acr
     app.state.notification_service = env.nsvc

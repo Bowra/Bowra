@@ -18,14 +18,15 @@ Boundaries:
 - **No model text in the notification.** Title, body and email copy are fixed product text naming
   the task. The ``reason`` is returned in the tool result, so it appears only in the run's own
   conversation, where Agent output is already shown as such.
-- **Bounded.** One alert per run and at most five per task in 24 hours.
+- **Bounded.** One alert per run and at most five per task in 24 hours. Past the limit nothing
+  reaches the owner, but a task delivering only flagged runs still delivers the run's result.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any, Final
 
 from bowhead_router.types import ToolSchema
@@ -72,6 +73,8 @@ def _schema() -> ToolSchema:
             "and this tool is available now. Call it to flag this run's result for the task owner when they should look now: "
             "a condition the task's instructions ask to be alerted about holds, a metric crossed the threshold the task watches, "
             "expected data is missing, or the result looks wrong. "
+            "Only this call raises an alert: a helper judging that the result needs attention, or your answer saying "
+            "the owner was alerted, sends nothing. "
             "Do not call it just to report that the run finished; results are delivered by the task's own settings. "
             "Choose the level: info (in-app only), attention (also a pop-up and browser notification), "
             "urgent (also an email to the owner; when it cannot wait or the instructions ask for it). "
@@ -125,10 +128,38 @@ async def _handler(args: dict[str, Any], ctx: ToolExecutionContext) -> dict[str,
     messages = {
         "queued": "The owner was notified.",
         "duplicate": "This run already notified the owner; nothing new was sent.",
-        "rate_limited": "This task already sent 5 alerts in the last 24 hours; nothing was sent.",
+        "rate_limited": (
+            "This task already sent 5 alerts in the last 24 hours, so no alert was sent. "
+            "The run's result is still delivered under the task's settings; do not say the owner was alerted."
+        ),
         "disabled": "Notifications are switched off; nothing was sent.",
     }
     return {"ok": status == "queued", "status": status, "level": level, "reason": reason, "message": messages.get(status, "")}
+
+
+UNRAISED_ALERT_NOTE: Final = (
+    "This scheduled task delivers its result only when this run raises an alert, and this run has raised none, "
+    "so the owner will receive nothing from it. Only a routine_notify call raises an alert: a helper judging that "
+    "the result needs attention, or an answer saying the owner was alerted, sends nothing. If the task's instructions "
+    "ask to be alerted and their condition holds, call routine_notify now with the level they ask for, then answer. "
+    "Otherwise answer again without saying that anyone was alerted. Keep completed work; do not repeat it."
+)
+
+
+def unraised_alert_note(ctx: Any, invocations: Sequence[Any], tool_names: Iterable[str]) -> str | None:
+    """The one-time correction for a Lead answer that ends an "only when flagged" run without an alert.
+
+    In that mode a run without an alert delivers nothing, and on 116 (2026-11-10) the Lead
+    twice wrote that it had alerted the owner after a helper judged the result urgent, without
+    calling the tool. The final-answer gate returns this note once; the Lead then alerts or
+    answers without the claim. Runs in "every run" mode are delivered anyway and are not checked.
+    """
+    run = getattr(ctx, "scheduled_run", None)
+    if run is None or not getattr(run, "delivers_only_when_flagged", False) or TOOL_NAME not in set(tool_names):
+        return None
+    if any(getattr(inv, "tool_name", None) == TOOL_NAME for inv in invocations):
+        return None
+    return UNRAISED_ALERT_NOTE
 
 
 async def _owner_gets_result_email(run: Any) -> bool:

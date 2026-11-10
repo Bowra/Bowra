@@ -5,6 +5,7 @@ import type { ReportSection } from "@/lib/types";
 import { toolLabel } from "@/lib/tool-labels";
 import { requestCanvasDataFocus } from "@/lib/canvas-workspace-focus";
 import { CharIcon } from "@/components/char-icon";
+import { HighlightedCode } from "@/components/highlighted-code";
 
 // 2026-09-05: renamed from sql-block.tsx; it has **always** rendered code_block,
 // while sql_block was a historical alias of the same component (writers emit only code_block since Sprint ι).
@@ -95,7 +96,7 @@ export function CodeBlockSection({ data }: Props) {
         </div>
       ) : null}
       <pre>
-        <code className={`language-${lang}`}>{codeText}</code>
+        <code className={`language-${lang} hljs`}><HighlightedCode code={codeText} lang={lang} /></code>
       </pre>
       {stdoutPreview ? (
         <details className="v2-code-block-stdout">

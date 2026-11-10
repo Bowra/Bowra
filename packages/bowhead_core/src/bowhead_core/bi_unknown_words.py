@@ -58,6 +58,66 @@ def unknown_words_note(words: Iterable[str]) -> str:
     )
 
 
+# ── Recognized filter value + no reported condition ⇒ name the values ───────────────────────────────
+#
+# Customer session, 2026-11-10: "中文通用名=菲诺利单抗 每月 销售金额" parsed cleanly (dimension, `$eq`, value, measure;
+# no unknown words), yet the structured report listed only models/measures/dimensions/date_filters and the rows were
+# the unfiltered monthly totals. The same words with a measure of another model reported `filters` and returned the
+# filtered rows. The missing-`filters` check used to run only when unknown words existed, so nothing was said.
+#
+# Criteria use key presence only: a parsed value token and a structured report carrying neither `filters` nor `having`
+# (`having` is excluded so a threshold value of a measure condition is not reported as a dropped filter).
+
+_FILTER_VALUE_KINDS = ("value", "dimension_value")
+
+
+def recognized_filter_values(tokens: object) -> list[str]:
+    """Return the filter values in model-facing `_parse.tokens`, de-duplicated in order."""
+    out: list[str] = []
+    for token in tokens if isinstance(tokens, list) else []:
+        if not isinstance(token, dict) or token.get("kind") not in _FILTER_VALUE_KINDS:
+            continue
+        value = str(token.get("value") or token.get("word") or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def engine_reported_no_condition(query_explain: object) -> bool:
+    """Return whether the structured report carries neither a business filter nor a measure condition."""
+    return isinstance(query_explain, dict) and bool(query_explain) and "filters" not in query_explain and "having" not in query_explain
+
+
+def dropped_filter_note(values: Iterable[str]) -> str:
+    """Name parsed filter values that the engine-reported query does not list as a condition."""
+    quoted = ", ".join(f"「{value}」" for value in values)
+    return (
+        f"Datarc's parser recognized these filter values: {quoted}. "
+        "Datarc's structured query report lists no `filters` or `having` condition, so the returned rows are not reported as restricted to them. "
+        "Do not present these rows as the result for those values: compare the returned values with the request, "
+        "then requery with fields that support the condition or state that it was not applied."
+    )
+
+
+def parse_gap_notes(parse: object, query_explain: object) -> list[str]:
+    """Build the `_preflight_hint` sentences about parsed words the engine report does not account for.
+
+    Shared by the bi_query handler and the result-budget trimmer so both produce the same sentences from fields.
+    """
+    if not isinstance(parse, dict):
+        return []
+    words = [str(word) for word in parse.get("unknown_words") or []]
+    values = recognized_filter_values(parse.get("tokens"))
+    notes: list[str] = []
+    if words:
+        notes.append(unknown_words_note(words))
+    if values and engine_reported_no_condition(query_explain):
+        notes.append(dropped_filter_note(values))
+    elif words and engine_applied_no_filter(query_explain):
+        notes.append(unfiltered_fact_note(words))
+    return notes
+
+
 # ── No recognized metrics + engine-inserted default ⇒ fallback column, withheld from delivery ───────────
 #
 # 116 1.3.47 dogfood (2026-09-25): "2025 年的 IPT 是多少" yielded wrong numbers in 2 of 3 turns. datarc did not recognize IPT,

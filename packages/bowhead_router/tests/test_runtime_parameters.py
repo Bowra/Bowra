@@ -10,6 +10,7 @@ from bowhead_router.parameter_preview import compile_request_body, parameter_pre
 from bowhead_router.probe import CompatibleProbeRegistry, NotTestable, ProbeRequestPlan
 from bowhead_router.runtime_parameters import RuntimeParametersError, validate_runtime_parameters
 from bowhead_router.transport import model_request_shape
+from bowhead_router.types import LLMRequest, Message
 
 pytestmark = pytest.mark.unit
 
@@ -218,6 +219,34 @@ def test_manual_thinking_validation_uses_automatic_model_output(capacity_scope):
     model["runtime_parameters"]["defaults"]["outbound_params"]["max_tokens"] = {"mode": "cap", "value": 4000}
     with pytest.raises(RuntimeParametersError, match="headroom"):
         validate_runtime_parameters(definition, model)
+
+
+@pytest.mark.parametrize(
+    ("profile", "defaults"),
+    [
+        ("anthropic-manual-v1", {"thinking_mode": "on", "thinking_budget": 2048, "outbound_params": {"temperature": {"mode": "omit"}}}),
+        ("dashscope-mixed-chat-v1", {"thinking_mode": "on", "thinking_budget": 2048}),
+    ],
+)
+def test_caller_fixed_output_limit_runs_without_team_thinking(profile, defaults):
+    # Reasoning counts against a caller's answer-sized limit (and DeepSeek ignores the
+    # budget), so a title call with Team thinking on failed locally or returned no answer.
+    definition = provider(profile, defaults=defaults)
+    validate_runtime_parameters(definition, definition["models"][0])
+    anthropic = profile.startswith("anthropic")
+    title = LLMRequest(model="arbitrary-model-id", messages=[Message(role="user", content="Title?")], temperature=0.3, max_output_tokens=80)
+    body = compile_request_body(definition, title)
+    assert body["max_tokens"] == 80
+    assert (body["thinking"] == {"type": "disabled"}) if anthropic else (body["enable_thinking"] is False)
+    assert "thinking_budget" not in body
+
+    agent_step = LLMRequest(model="arbitrary-model-id", messages=[Message(role="user", content="Plan the analysis.")])
+    body = compile_request_body(definition, agent_step)
+    if anthropic:
+        assert body["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+    else:
+        assert body["enable_thinking"] is True
+        assert body["thinking_budget"] == 2048
 
 
 def test_legacy_scope_and_precedence_survive_without_new_policy():

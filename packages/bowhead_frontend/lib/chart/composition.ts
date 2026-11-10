@@ -1,5 +1,6 @@
 import type { ChartLayout, ChartSpec } from "./types";
 import { checkKindShape, checkKindUnits } from "./kind-shape";
+import { explicitSwitchKinds } from "./explicit-switch-kinds";
 import { normalizeChartForRenderingV1 } from "./normalize-chart-for-rendering";
 import { evidencePlanForViewer } from "./presentation-plan";
 import { observationViewEligible } from "./linked-focus";
@@ -60,6 +61,9 @@ export function applyChartEdit(spec: ChartSpec, target: ChartEditTarget, patch: 
   if (target.scope === "view" && binding?.availability === "available" && binding.kind !== "frame" && !observationViewEligible(changed, binding))
     throw new Error("The linked view requires a supported observation-preserving chart type");
   if (patch.kind && patch.kind !== child.kind) {
+    // A declared binding switches only among the types chat edits offer for it, on a standalone chart.
+    if (child.explicit_presentation && (target.scope === "view" || !explicitSwitchKinds(child).includes(patch.kind)))
+      throw new Error("This chart keeps its declared chart type");
     const normalized = normalizeChartForRenderingV1(changed).spec;
     if (checkKindShape(normalized, patch.kind) || checkKindUnits(changed, patch.kind).length)
       throw new Error("These measures cannot use the chosen chart type");

@@ -28,6 +28,10 @@ CONTRACT = "ordinary-lead-loop.v10"
 _PIN_FIELDS = ("filename", "mime", "size", "kind", "inject", "origin_query", "source")
 
 
+class RetainedInputCapacityExceeded(OrdinaryContinuationUnavailable):
+    """The real inputs exceed the existing optional-pause representation."""
+
+
 def _context_ids(context: Context, key: str) -> list[str]:
     items = context.get(key)
     if not isinstance(items, list) or any(
@@ -37,10 +41,27 @@ def _context_ids(context: Context, key: str) -> list[str]:
     return [item["artifact_id"] for item in items]
 
 
-def retained_ids(source: ChatTurnUserSource, context: Context) -> list[str]:
+def retained_ids(source: ChatTurnUserSource, context: Context, *, observed_ids: tuple[str, ...] | None = None) -> list[str]:
     """Require every parsed item to belong to the original selection or snapshot."""
     parsed = _context_ids(context, "parsed")
     pins = _context_ids(context, "pinned")
+    if observed_ids is not None:
+        supplied = [
+            item["artifact_id"]
+            for item in context["parsed"]
+            if item["artifact_id"] in source.attachment_ids or item.get("extracted_text") or item.get("image_base64") or item.get("inventory")
+        ]
+        actual = list(dict.fromkeys([*supplied, *observed_ids]))
+        if len(parsed) != len(set(parsed)) or len(pins) != len(set(pins)) or not set(source.attachment_ids) <= set(parsed):
+            raise OrdinaryContinuationUnavailable()
+        if len(set(actual) | set(source.attachment_ids)) > 32:
+            raise RetainedInputCapacityExceeded()
+        sizes = [item.get("size") for item in context["parsed"] if item["artifact_id"] in actual]
+        if any(type(size) is not int or size < 0 for size in sizes):
+            raise OrdinaryContinuationUnavailable()
+        if sum(sizes) > MAX_LEAD_ATTACHMENT_TOTAL_BYTES:
+            raise RetainedInputCapacityExceeded()
+        return [identity for identity in actual if identity not in source.attachment_ids]
     if (
         len(parsed) != len(set(parsed))
         or len(pins) != len(set(pins))
@@ -125,25 +146,35 @@ async def session_input_artifact(ctx: ToolExecutionContext, db: aiosqlite.Connec
     return art, provenance
 
 
-async def prepared_input_artifact(ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str, pins: list[dict]) -> Artifact:
-    """Match the original server-prepared pin before retaining a sandbox input."""
+async def prepared_input_artifact(
+    ctx: ToolExecutionContext, db: aiosqlite.Connection, identity: str, pins: list[dict], *, prepared_ids: tuple[str, ...] | None = None
+) -> Artifact:
+    """Match the original selection independently of bounded model metadata."""
     identities = _context_ids({"pinned": pins}, "pinned")
-    if identities.count(identity) != 1:
+    if identities.count(identity) > 1:
+        raise OrdinaryContinuationUnavailable()
+    if prepared_ids is not None:
+        if not isinstance(prepared_ids, tuple) or prepared_ids.count(identity) != 1:
+            raise OrdinaryContinuationUnavailable()
+    elif identities.count(identity) != 1:
         raise OrdinaryContinuationUnavailable()
     artifact, _ = await session_input_artifact(ctx, db, identity)
-    pin = pins[identities.index(identity)]
-    if any(pin.get(key) != getattr(artifact, key) for key in _PIN_FIELDS):
-        raise OrdinaryContinuationUnavailable()
+    if identity in identities:
+        pin = pins[identities.index(identity)]
+        if any(pin.get(key) != getattr(artifact, key) for key in _PIN_FIELDS):
+            raise OrdinaryContinuationUnavailable()
     return artifact
 
 
-async def capture_context(ctx: ToolExecutionContext, db: aiosqlite.Connection, source: ChatTurnUserSource, context: Context) -> Context:
+async def capture_context(
+    ctx: ToolExecutionContext, db: aiosqlite.Connection, source: ChatTurnUserSource, context: Context, *, observed_ids: tuple[str, ...] | None = None
+) -> Context:
     evidence = []
-    identities = retained_ids(source, context)
+    identities = retained_ids(source, context, observed_ids=observed_ids)
     pins = {item["artifact_id"]: item for item in context["pinned"]}
     for identity in identities:
         art, provenance = await session_input_artifact(ctx, db, identity)
-        if any(pins[identity].get(key) != getattr(art, key) for key in _PIN_FIELDS):
+        if observed_ids is None and any(pins[identity].get(key) != getattr(art, key) for key in _PIN_FIELDS):
             raise OrdinaryContinuationUnavailable()
         evidence.append({"artifact_id": identity, "provenance": provenance, "metadata_hash": _artifact_metadata_hash(art, contract=CONTRACT)})
     parsed_ids = [item["artifact_id"] for item in context["parsed"] if item["artifact_id"] in identities]
@@ -160,9 +191,10 @@ async def validate_context(
     context: Context,
     *,
     read_bytes: bool,
+    observed_ids: tuple[str, ...] | None = None,
 ) -> None:
     validate_shape(proof, context)
-    if retained_ids(source, context) != [item["artifact_id"] for item in proof["artifacts"]]:
+    if retained_ids(source, context, observed_ids=observed_ids) != [item["artifact_id"] for item in proof["artifacts"]]:
         raise OrdinaryContinuationUnavailable()
     for item in proof["artifacts"]:
         art, provenance = await session_input_artifact(ctx, db, item["artifact_id"])
@@ -185,3 +217,17 @@ async def validate_context(
                         != item["content_hash"]
                     ):
                         raise OrdinaryContinuationUnavailable()
+
+
+async def observed_session_inputs(ctx: ToolExecutionContext, db: aiosqlite.Connection, tools: list[dict]) -> tuple[str, ...]:
+    """Keep earlier native inputs; current-Turn outputs retain their producer proof."""
+    from bowhead_core.ordinary_lead_material import retained_file_input_ids
+
+    identities = []
+    for identity in retained_file_input_ids(tools):
+        art = await ctx.artifact_store.get(identity, check_created_by=ctx.user_id, reject_null_owner=True, connection=db)
+        if art is None:
+            raise OrdinaryContinuationUnavailable()
+        if art.created_by_turn != ctx.turn_id:
+            identities.append(identity)
+    return tuple(identities)

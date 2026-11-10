@@ -2,6 +2,7 @@
 
 Les instantanés Community ont leur propre historique. Une version de l’application ne signifie pas que des images ou un service hébergé ont été publiés.
 
+- [v1.7.31](releases/v1.7.31.fr-FR.md) — Améliorer les graphiques, les confirmations d’outils, la continuité des conversations et la sécurité des dépendances.
 - [v1.7.24](releases/v1.7.24.fr-FR.md) — Améliorer les graphiques, les confirmations d’outils, la continuité des conversations et la sécurité des dépendances.
 - [v1.7.17](releases/v1.7.17.fr-FR.md) — Reprendre le travail à partir des documents enregistrés, régler les couleurs des graphiques et mieux gérer les notifications.
 - [v1.6.95](releases/v1.6.95.fr-FR.md) — Reprise des conversations plus claire, cartes d’indicateurs facultatives et accès plus fiable pendant les tâches simultanées.

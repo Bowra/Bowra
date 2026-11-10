@@ -29,9 +29,12 @@ if TYPE_CHECKING:
 
 
 class OrdinaryContinuationUnavailable(ValueError):
-    def __init__(self, *, stage: Literal["clarification_capture"] | None = None) -> None:
+    def __init__(
+        self, *, stage: Literal["clarification_capture"] | None = None, condition: Literal["retained_input", "directory_access"] | None = None
+    ) -> None:
         super().__init__("clarification_resume_unavailable")
         self.stage = stage
+        self.condition = condition
 
 
 class OrdinaryQuestionUnavailable(OrdinaryContinuationUnavailable):
@@ -258,6 +261,7 @@ async def bind_ordinary_capture_in_tx(db: aiosqlite.Connection, *, card: Clarifi
             "ordinary-lead-loop.v12",
             "ordinary-lead-loop.v13",
             "ordinary-lead-loop.v14",
+            "ordinary-lead-loop.v15",
         }
         if checkpoint.contract == "ordinary-lead-loop.v9":
             helpers = checkpoint.helper_materials()
@@ -615,3 +619,10 @@ async def read_ordinary_document_answer_in_tx(
     ):
         raise OrdinaryContinuationUnavailable()
     return typed_answer(record)
+
+
+def ordinary_failure_condition(error: BaseException) -> Literal["retained_input", "directory_access"] | None:
+    """Expose only the native finite reason, never exception or model prose."""
+    if isinstance(error, OrdinaryContinuationUnavailable) and error.condition in {"retained_input", "directory_access"}:
+        return error.condition
+    return None

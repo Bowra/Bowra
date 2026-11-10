@@ -18,7 +18,6 @@ from bowhead_core.canvas_store import CanvasStore
 from bowhead_core.chat_turn_source import ChatTurnUserSource
 from bowhead_core.events import OrchestratorEvent
 from bowhead_core.language_context import LanguageContext
-from bowhead_core.migrations.baseline_schema import initial_schema
 from bowhead_core.plan_store import PlanStatus, PlanStore
 from bowhead_core.session_lifecycle import (
     SESSION_LIFECYCLE_ERROR_CODES,
@@ -92,7 +91,7 @@ from bowhead_core.types import TurnRequest
 from bowhead_core.user_store import UserStore
 from bowhead_router.invocation import PhysicalInvocationSpec
 from bowhead_router.types import TokenUsage
-from core_legacy_database import upgrade
+from test_agent_revision_store import _db
 
 from bowhead_core import session_lifecycle as session_lifecycle_module
 
@@ -137,11 +136,7 @@ def test_terminal_batch_live_ticket_retains_receipt_identity() -> None:
 
 
 def _create_db(tmp_path: Path) -> str:
-    path = tmp_path / "bowhead.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(initial_schema("core"))
-        connection.commit()
-    upgrade(f"sqlite+aiosqlite:///{(path).with_name('bowhead.db')}", target="core")
+    path = _db(tmp_path)
     with sqlite3.connect(path) as connection:
         connection.execute("INSERT INTO teams(id,name,status,created_at) VALUES ('team_1','Team','active','t')")
         connection.execute(
@@ -4475,11 +4470,7 @@ async def test_auth_mutations_bump_terminal_epochs_in_same_store_transaction(
     await access.initialize()
     await access.bump_policy_epoch("team_1")
     users = UserStore(db_path, terminal_auth_fence_enabled=True)
-    from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 
-    ledger = AccountDeletionLedger(tmp_path / "account-retirements.db", secret="synthetic-test-root")
-    await ledger.initialize()
-    users.account_deletion_recorder = ledger.record
     await users.soft_delete_user("u_1")
 
     with sqlite3.connect(db_path) as connection:

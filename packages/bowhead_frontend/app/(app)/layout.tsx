@@ -24,6 +24,8 @@ import "../../styles/agent-marketplace.css";
 import "../../styles/agent-charts.css";
 import "../../styles/agent-dashboard.css";
 import "../../styles/personal-mcp.css";
+// Syntax token colors for highlighted code (lib/code-highlight.ts); colors only, containers keep their own styles.
+import "../../styles/code-highlight.css";
 import "../../styles/access-request.css";
 // Built-in Agent settings: scoped list and form layout; its :root:root overrides win by specificity,
 // so it stays ahead of the refresh sheets that must be imported last.

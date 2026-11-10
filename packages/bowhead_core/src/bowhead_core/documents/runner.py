@@ -21,7 +21,7 @@ from bowhead_core.documents.pptx_plan import SYSTEM_PROMPT
 from bowhead_core.documents.pptx_planning import REPAIRABLE_ERRORS
 from bowhead_core.documents.request import DocumentRequestError, DocumentScope
 from bowhead_core.documents.store import _json
-from bowhead_core.documents.usage import DocumentModelHook
+from bowhead_core.documents.usage import DocumentModelHook, unanswered_call_code
 from bowhead_core.session_store import _read_chat_turn_user_source_in_tx
 
 
@@ -43,6 +43,7 @@ async def run_document(
     owner = await delivery.claim(scope=scope, job_id=job_id)
     if owner is None:
         return
+    call_no = 0
     try:
         inputs_store = DocumentInputStore(delivery.artifacts)
         frozen = await inputs_store.freeze(scope=scope, job_id=job_id)
@@ -143,7 +144,8 @@ async def run_document(
             db.execute("SELECT 1 FROM document_usage_receipts WHERE job_id=? AND settled_at IS NULL", (job_id,)) as cursor,
         ):
             pending = await cursor.fetchone() is not None
-        code = "document_usage_settlement_pending" if pending else "document_usage_unresolved"
+        unanswered = await unanswered_call_code(delivery.path, job_id, 1, call_no) if call_no and not pending else None
+        code = "document_usage_settlement_pending" if pending else unanswered or "document_usage_unresolved"
         await delivery.fail(job_id=job_id, owner=owner, code=code)
     except (OfficePackageError, DocumentRequestError) as exc:
         await delivery.fail(job_id=job_id, owner=owner, code=exc.code)

@@ -1188,6 +1188,8 @@ function buildLine(
     },
     y: {
       stacked,
+      // A filled area encodes magnitude from zero, as shared scales already assume; a line keeps its data range.
+      ...(stacked ? { beginAtZero: true } : {}),
       title: unitAxisTitle(yCols, theme, display),
       ticks: {
         color: theme.inkSoft,

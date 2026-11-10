@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 import traceback
 from collections.abc import Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -21,7 +20,6 @@ from bowhead_core.account_deletion import (
     adopt_deleted_accounts,
     request_account_deletion,
 )
-from bowhead_core.account_deletion_ledger import AccountDeletionLedger
 from bowhead_core.account_erasure import erase_rows, freeze_rows, key_sql, protocol_receipts, reviewed_schema
 from bowhead_core.session_lifecycle import SessionLifecycleError
 from bowhead_core.sqlite_domain_runtime import connect as diagnostic_connect
@@ -42,25 +40,20 @@ class AccountDeletionService:
         *,
         lifecycle: SessionLifecycleCoordinator,
         artifacts: ArtifactStore,
-        ledger: AccountDeletionLedger,
         secret: str,
         external_cleanup: Callable[[str, str], Awaitable[None]],
         external_quarantine: Callable[[str, str], Awaitable[None]] | None = None,
-        erasure_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.users = users
         self.lifecycle = lifecycle
         self.artifacts = artifacts
-        self.ledger = ledger
         self.secret = secret
         self.external_cleanup = external_cleanup
         self.external_quarantine = external_quarantine
-        self.erasure_guard = erasure_guard
         self.clock = clock
         self.owner = uuid4().hex
         self._wake = anyio.Event()
-        self.users.account_deletion_recorder = ledger.record
 
     def wake(self) -> None:
         self._wake.set()
@@ -73,9 +66,7 @@ class AccountDeletionService:
         check_ready = getattr(self.external_cleanup, "check_ready", None)
         if check_ready is not None:
             await check_ready()
-        result = await request_account_deletion(
-            self.users, user_id, now=self.clock(), record_intent=self.ledger.record, expected_pwd_version=expected_pwd_version
-        )
+        result = await request_account_deletion(self.users, user_id, now=self.clock(), expected_pwd_version=expected_pwd_version)
         self.wake()
         return result
 
@@ -115,7 +106,6 @@ class AccountDeletionService:
                 async with anyio.create_task_group() as tasks:
                     tasks.start_soon(self._heartbeat, deletion, epoch)
                     try:
-                        await self.ledger.record(deletion)
                         await self._quarantine(deletion)
                         if self.clock() >= datetime.fromisoformat(deletion.purge_after):
                             await self._erase(deletion, epoch)
@@ -226,10 +216,7 @@ class AccountDeletionService:
             await db.commit()
 
     async def _erase(self, deletion: AccountDeletion, epoch: int) -> None:
-        async with (
-            account_artifact_lock(self.users.db_path, deletion.user_id, erasing=True),
-            self.erasure_guard() if self.erasure_guard is not None else nullcontext(),
-        ):
+        async with account_artifact_lock(self.users.db_path, deletion.user_id, erasing=True):
             await self._erase_guarded(deletion, epoch)
 
     async def _erase_guarded(self, deletion: AccountDeletion, epoch: int) -> None:

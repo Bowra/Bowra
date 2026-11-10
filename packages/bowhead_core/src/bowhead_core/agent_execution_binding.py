@@ -1911,9 +1911,31 @@ async def _authorized_system_execution_snapshot(
         )
         if not known or current is None:
             raise AgentExecutionBindingError("agent_not_runnable")
-        if _system_profile_snapshot(current) != definition:
+        if _system_authority(_system_profile_snapshot(current)) != _system_authority(definition):
             raise AgentExecutionBindingError("agent_completed_helper_changed")
     return snapshot
+
+
+# Release-shipped wording and per-run budgets of a built-in Agent. They grant
+# nothing, and the settled helper already ran under its recorded definition, so
+# a deploy that edits them must not strand a pending continuation. Team
+# overrides (including appended prompts) still refuse through the policy
+# fingerprint above; every other field must match exactly.
+_SYSTEM_RELEASE_TEXT_FIELDS = frozenset(
+    {
+        "system_prompt",
+        "description",
+        "display_name",
+        "max_iterations",
+        "max_output_tokens",
+        "behavior_catalog_fingerprint",
+        "capability_protocol_block",
+    }
+)
+
+
+def _system_authority(definition: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in definition.items() if key not in _SYSTEM_RELEASE_TEXT_FIELDS}
 
 
 async def _require_current_system_override(

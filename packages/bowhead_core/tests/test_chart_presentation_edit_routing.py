@@ -63,6 +63,8 @@ def test_compute_prompt_edits_existing_charts_instead_of_drawing_copies() -> Non
     assert "read_chart" in block and "edit_chart" in block
     # 116 1.7.21: the helper retried a refused type change three times.
     assert "allowed_changes" in block and "supported_kinds" in block and "do not retry" in block
+    # 116 1.7.25: offered `area_stacked`, the helper told the user no plain area chart existed.
+    assert "`area_stacked` is the area chart" in block
     assert "read_report" in block, "a task that names only a title needs a reader that lists chat-delivered charts"
     assert "add_chart" in block, "data or scope changes keep the new-chart path"
 

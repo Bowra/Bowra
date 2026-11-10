@@ -101,6 +101,8 @@
   "clarification_resume_not_ready": "这项澄清尚未完成，请先提交选择后再继续。",
   "clarification_capture_unavailable": "未能准备好需要你回答的问题。这次问题没有创建：系统未能准备好继续任务所需的进度。请先核对已经展示的工作。",
   "clarification_resume_preflight_unavailable": "原任务未能恢复执行。原任务未通过继续前的检查。请先核对已经展示的工作，并复制诊断信息交给管理员。",
+  "clarification_retained_input_unavailable": "无法核对原输入文件。本任务使用过的原文件发生变化或当前无法核对。请恢复原文件及访问权限，或在对话中明确引用仍可用的结果继续。",
+  "clarification_directory_access_unavailable": "历史文件目录不可访问。保存的上下文目录中有文件当前已不可访问。请恢复访问权限，或在对话中明确引用仍可用的结果继续。",
   "clarification_resume_unavailable": "本轮任务无法继续。具体失败环节未记录。请先核对已经展示的工作。",
   "clarification_store_unavailable": "澄清服务尚未正确配置，请联系系统管理员。",
   "chat_action_not_found": "暂时无法确认这次发送的结果。请保留当前草稿并稍后查看。",

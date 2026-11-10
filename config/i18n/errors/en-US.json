@@ -101,6 +101,8 @@
   "clarification_resume_not_ready": "This clarification has not been completed yet. Submit a choice before continuing.",
   "clarification_capture_unavailable": "The follow-up question could not be prepared. The question was not created because the task's progress could not be prepared for continuation. Review the work already shown.",
   "clarification_resume_preflight_unavailable": "The original task could not resume. The original task did not pass the checks before continuing. Review the work already shown and copy the diagnostics for your administrator.",
+  "clarification_retained_input_unavailable": "Original input cannot be verified. The original file used by this task changed or cannot be verified. Restore the original file and access, or explicitly reuse available results in chat.",
+  "clarification_directory_access_unavailable": "Saved file context is inaccessible. A file named in the saved context is no longer accessible. Restore access, or explicitly reuse available results in chat.",
   "clarification_resume_unavailable": "This task could not continue. The specific failure stage was not recorded. Review the work already shown.",
   "clarification_store_unavailable": "The clarification service is not configured correctly. Contact your system administrator.",
   "chat_action_not_found": "The result of this send cannot be confirmed yet. Keep the current draft and check again later.",

@@ -49,6 +49,15 @@ def test_filtered_result_keeps_no_unfiltered_claim_after_the_cap() -> None:
 
 
 @pytest.mark.unit
+def test_dropped_filter_note_survives_the_cap() -> None:
+    parse = {"tokens": [{"word": "菲诺利单抗", "kind": "value", "value": "菲诺利单抗"}], "unknown_words": []}
+    out, _ = cap_result("bi_query", _over_budget(_parse=parse, query_explain={"models": ["TMS_Latest"], "measures": ["销售金额"]}))
+    hint = out["_preflight_hint"]
+    assert "recognized these filter values: 「菲诺利单抗」" in hint
+    assert "其他说明" not in hint
+
+
+@pytest.mark.unit
 def test_query_limit_note_survives_the_cap() -> None:
     out, _ = cap_result("bi_query", _over_budget(_rows_limited_by_query=True))
     assert "条数限制" in out["_preflight_hint"]

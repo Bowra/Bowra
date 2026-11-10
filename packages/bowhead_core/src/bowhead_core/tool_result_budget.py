@@ -213,19 +213,14 @@ def _notes_to_keep(r: dict, shown: int, full: Any) -> str:
     按字段重新生成，不解析提示字符串。这几句不是「数据越大越需要」就是「漏了就是数字错」
     （bi-answer-correctness C / A / G），恰恰不能在裁剪时丢。
     """
-    from bowhead_core.bi_unknown_words import engine_applied_no_filter, unfiltered_fact_note, unknown_words_note
+    from bowhead_core.bi_unknown_words import parse_gap_notes
 
     notes: list[str] = []
     if r.get("_rows_truncated"):
         notes.append(rows_truncation_note(shown, full))
     if r.get("_rows_limited_by_query"):
         notes.append(query_limit_note())
-    parse = r.get("_parse")
-    words = parse.get("unknown_words") if isinstance(parse, dict) else None
-    if words:
-        notes.append(unknown_words_note(words))
-        if engine_applied_no_filter(r.get("query_explain")):
-            notes.append(unfiltered_fact_note(words))
+    notes.extend(parse_gap_notes(r.get("_parse"), r.get("query_explain")))
     return "\n".join(notes)
 
 
